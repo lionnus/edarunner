@@ -34,7 +34,7 @@ from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, Ssh
 from .ledger import Ledger
-from .model import Batch, Project
+from .model import Batch, Job, Batch, Project
 from .notify import make_notifiers
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -522,10 +522,18 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         raise Refuse("run needs --stage or --collect")
     if a.stage not in project.stages:
         raise Refuse(f"unknown stage {a.stage}")
-    batch = config.load_batch(project, str(row["batch"]))
-    job = next((j for j in batch.jobs if j.label == row["label"]), None)
+    try:
+        batch = config.load_batch(project, str(row["batch"]))
+        job = next((j for j in batch.jobs if j.label == row["label"]), None)
+    except (ConfigError, OSError):
+        # An imported tree has no jobs file; the ledger row is the job.
+        batch, job = None, None
     if job is None:
-        raise Refuse(f"{run_id}: no job {row['label']} in {batch.path}")
+        if not row.get("config"):
+            raise Refuse(f"{run_id}: no job {row['label']} in jobs/{row['batch']}.toml and no config in the ledger")
+        job = Job(label=str(row["label"]), config=str(row["config"]))
+        batch = Batch(batch=str(row["batch"]), source=str(row["src"] or ""), jobs=[job],
+                      path=project.root / "jobs" / f"{row['batch']}.toml")
     job.reuse, job.stages, job.host = {"run_id": run_id}, [a.stage], a.on or "auto"
     if a.tasks:
         job.tasks = a.tasks

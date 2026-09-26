@@ -437,3 +437,14 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
     assert code == 0 and "INCOMPLETE:1f0s" in out
     with Ledger(demo / "data" / "edr.db") as led:
         assert led.run(b)["phase"] == "INCOMPLETE:1f0s" and led.run(b)["exit"] == 8
+
+
+def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
+    root = tmp_path / "scratch" / "lkesting" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
+    root.mkdir(parents=True)
+    assert edr(capsys, "import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
+               "--host", "local", "--root", str(root))[0] == 0
+    code, out, err = edr(capsys, "run", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local",
+                         "--dry-run")
+    assert code == 0, (out, err)
+    assert "(dry)" in out and "ref.power" in out
