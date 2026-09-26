@@ -31,7 +31,7 @@ from typing import Any
 
 from . import __version__, board, collect, config, export, launch, metrics, runid, stagectl, sync, watch
 from .config import ConfigError
-from .guards import Refuse, assert_safe_target
+from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, Ssh
 from .ledger import Ledger
 from .model import Batch, Project
@@ -554,6 +554,29 @@ def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
+    """Record a run tree that edr did not make, so `reuse` and `run` can continue it."""
+    assert_run_id(a.run_id)
+    root = a.root.rstrip("/")
+    if not root.startswith("/"):
+        raise Refuse(f"'{root}' is not absolute")
+    rc, _, _ = c.ssh.run(a.host, ["test", "-d", root])
+    if rc != 0:
+        raise Refuse(f"{a.host}:{root} is not a directory")
+    now = int(time.time())
+    row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
+               src=a.src, dirty=0, host=a.host, root=root, created=now, phase=a.phase, state="imported",
+               stage="", step=-1, exit=0 if a.phase == "done" else None, started=now, updated=now,
+               counts=json.dumps({}))
+    text = f"{a.host}:{root} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
+    if not a.dry_run:
+        c.ledger.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.src, created=now))
+        c.ledger.upsert_run(row)
+        c.ledger.add_event("user", a.run_id, "import", text)
+    c.emit(f"imported {text}" + (" (dry)" if a.dry_run else ""), row)
+    return 0
+
+
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     """Write a frozen snapshot of one design."""
     labels = a.labels.split(",") if a.labels else None
@@ -743,6 +766,17 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handle")
     s.add_argument("--hours", type=int, metavar="N", help="default 12")
     s.add_argument("--ack", action="store_true")
+    s = verb("import", "record a run tree that edr did not make, for reuse", write=True)
+    s.add_argument("--run-id", required=True, dest="run_id")
+    s.add_argument("--label", required=True)
+    s.add_argument("--config", required=True)
+    s.add_argument("--src", required=True, metavar="HASH")
+    s.add_argument("--host", required=True)
+    s.add_argument("--root", required=True, metavar="PATH", help="the tree on the host")
+    s.add_argument("--batch", default="imported")
+    s.add_argument("--phase", default="done")
+    s.add_argument("--build-tag", dest="build_tag", metavar="TAG")
+    s.add_argument("--why", default="")
     s = verb("export", "a frozen snapshot of one design", write=True)
     s.add_argument("--design", required=True, metavar="SRC")
     s.add_argument("--out", required=True, metavar="DIR")

@@ -453,7 +453,7 @@ directory is written under a temporary name and renamed at the end.
 
 ## 10. CLI
 
-Sixteen verbs. Every verb takes `--json`. Every verb that writes takes
+Seventeen verbs. Every verb takes `--json`. Every verb that writes takes
 `--dry-run`. `stop` and `retire` take `--why`. `--batch` defaults to
 `EDR_BATCH` or the newest batch. Exit codes: 0 done, 1 refused by a
 guard or bad input, 2 nothing to do, 3 some hosts failed. A handle is
@@ -467,7 +467,10 @@ guard or bad input, 2 nothing to do, 3 some hosts failed. A handle is
 [--on HOST] [--parallel N] [--collect NAME]`, `keep HANDLE [--hours N]
 [--ack]`, `export ...`, `stop HANDLE [--after-task] [--now] --why`,
 `retire HANDLE|--batch B [--prune T] [--uncollected] --why`, `watch
-[--once] [--check] [--serve PORT]`.
+[--once] [--check] [--serve PORT]`, `import --run-id R --label L --config C
+--src H --host HOST --root PATH [--batch B] [--phase P] [--build-tag T]`
+(records a tree that edr did not make, so `reuse` can continue it; it is
+never a delete target unless its path carries the marker).
 
 The narrow board fits 48 columns: two lines per live run, dead first.
 
