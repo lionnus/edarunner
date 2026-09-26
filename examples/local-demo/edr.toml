@@ -1,0 +1,112 @@
+# The local demo: a fake flow with three stages and a task group, on the
+# head node. `bash setup.sh` makes the source repository; then
+# `edr stage HEAD`, `edr plan demo`, `edr launch demo`, `edr watch --once`.
+schema = 1
+project = "demo"
+site = "site.toml"
+state = "~/.edr/{project}"
+data = "data"
+run_prefix = "{user}/edr/{project}"
+
+[source]
+repo = "repo"
+worktrees = "wt"
+ref = "HEAD"
+nested = []
+run_id = "{date}_{label}_{build_tag}_g{src}"
+
+[sync]
+exclude = [".git"]
+
+[safety]
+marker = "/edr/"
+min_depth = 3
+
+[limits]
+stagger_s = 0
+stale_s = 30
+dead_s = 90
+hung_s = 120
+grace_s = 10
+host_free_min_gb = 1
+streak = 2
+heartbeat_s = 5
+gate_max_s = 30
+
+[placement]
+max_per_host = 4
+min_free_cores = 1
+min_free_ram_gb = 1
+
+[stages.synth]
+cmd = "bash {root}/flow/flow.sh synth {run_id} {config} LAST_STAGE=synth {overrides}"
+resume = "bash {root}/flow/flow.sh synth {run_id} {config} FIRST_STAGE={checkpoint} LAST_STAGE=synth {overrides}"
+steps = ["setup", "analyze", "elaborate", "synth"]
+progress = "ls reports 2>/dev/null | grep -cE '^[0-9]+$'"
+needs = { cores = 1, disk_gb = 0.1, licence = "demo" }
+budget = { hours = 1, disk_gb = 1 }
+retry = { match = "licen[cs]e", wait_s = 1, max = 2 }
+collect = ["reports/"]
+
+[stages.pnr]
+after = "synth"
+cmd = "bash {root}/flow/flow.sh pnr {run_id} {config} {overrides}"
+resume = "bash {root}/flow/flow.sh pnr {run_id} {config} FIRST_STAGE={checkpoint} {overrides}"
+steps = ["setup", "analyze", "elaborate", "synth", "cts", "route"]
+progress = "ls reports 2>/dev/null | grep -cE '^[0-9]+$'"
+needs = { cores = 1, disk_gb = 0.1 }
+budget = { hours = 1 }
+collect = ["reports/"]
+
+[stages.export]
+after = "pnr"
+cmd = "bash {root}/flow/flow.sh export {run_id} {config}"
+needs = { cores = 1, disk_gb = 0.1 }
+collect = []
+collect_on_request = { netlist = ["out/11/"] }
+prune = { netlist = ["out"] }
+
+[stages.power]
+after = "export"
+foreach = "tasks"
+parallel = 2
+task_dir = "simulation/tests/{config}/{task.test}"
+cmd = "DEMO_CONFIG={config} bash {root}/flow/kernel.sh {task.kernel} {task.test} {task.args}"
+after_each = "rm -f {task_dir}/wave.vcd"
+needs = { cores = 1, disk_gb = 0.05, licence = { demo = 1 } }
+budget = { hours = 1, per = "task" }
+collect = ["{task_dir}/power/"]
+
+[metrics.area_cell_um2]
+stage = ["synth", "pnr"]
+step = "*"
+file = "reports/{step}/area.rpt"
+regex = '^i_top\s+(\S+)'
+unit = "um2"
+canonical = "area.cell"
+
+[metrics.wns_ns]
+stage = ["synth", "pnr"]
+step = "*"
+file = "reports/{step}/qor.rpt"
+regex = 'Critical Path Slack:\s+(-?[0-9.]+)'
+unit = "ns"
+canonical = "timing.wns"
+
+[metrics.power_w]
+stage = "power"
+file = "{task_dir}/power/reports/power.csv"
+csv = { where = { phase = "WHOLE" }, column = "total_w" }
+unit = "W"
+canonical = "power.total"
+
+[metrics.window_ns]
+stage = "power"
+file = "{task_dir}/power/phases.json"
+json = "window_ns"
+unit = "ns"
+
+[metrics.energy_nj]
+expr = "power_w * window_ns"
+unit = "nJ"
+canonical = "energy"
