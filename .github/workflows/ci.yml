@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      # The demo flow computes its fake area with bc.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq bc rsync
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+
+  driver:
+    # The driver runs on the compute hosts with their own python3; 3.6 is the floor.
+    runs-on: ubuntu-latest
+    container: python:3.6
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update -qq && apt-get install -y -qq tmux rsync bc
+      # tests/helpers_driver.py starts the driver with /usr/bin/python3; the image keeps 3.6 in /usr/local/bin.
+      - run: ln -sf /usr/local/bin/python3 /usr/bin/python3 && /usr/bin/python3 --version
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv run --no-project --with pytest pytest tests/test_driver.py -q
