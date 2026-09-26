@@ -411,3 +411,29 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
                "--host", "local", "--root", str(root))[0] == 1
     assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--src", "a",
                "--host", "local", "--root", str(root / "missing"))[0] == 1
+
+
+def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys) -> None:
+    now = int(time.time())
+    b = seed(demo, "b_nodw", "setup", state=None, updated=now - 5000)
+    hb_path = bdir(demo) / f"{b}.json"
+    hb = json.loads(hb_path.read_text())
+    hb.update(phase="stage:synth", stage="synth", updated=now, counts={"done": 0, "failed": 0})
+    hb_path.write_text(json.dumps(hb))
+    code, out, _ = edr(capsys, "--json", "status")
+    row = {r["run_id"]: r for r in json.loads(out)["data"]["runs"]}[b]
+    assert code == 0 and row["state"] == "running" and now - row["updated"] < 60 and row["phase"] == "stage:synth"
+    hb.update(updated=now - 100000)
+    hb_path.write_text(json.dumps(hb))
+    row = {r["run_id"]: r for r in json.loads(edr(capsys, "--json", "status")[1])["data"]["runs"]}[b]
+    assert row["state"] == "dead"
+    hb.update(phase="INCOMPLETE:1f0s", exit=8, updated=now, counts={"done": 0, "failed": 1})
+    hb_path.write_text(json.dumps(hb))
+    code, out, _ = edr(capsys, "status")
+    assert code == 0 and "INCOMPLETE:1f0s" in out
+    code, out, _ = edr(capsys, "status", "--triage")
+    assert code == 0 and "incomplete" in out and "b_nodw@demo" in out
+    code, out, _ = edr(capsys, "status", "b_nodw@demo")
+    assert code == 0 and "INCOMPLETE:1f0s" in out
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert led.run(b)["phase"] == "INCOMPLETE:1f0s" and led.run(b)["exit"] == 8

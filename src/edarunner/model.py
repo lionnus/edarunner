@@ -194,6 +194,7 @@ class Project:
     placement: Placement
     stages: dict[str, Stage]  # in file order
     metrics: dict[str, Metric]
+    env: dict[str, str] = field(default_factory=dict)  # the flow's own additions, rendered per run
     tasks: dict[str, Task] = field(default_factory=dict)
     task_resolver: str = ""  # "python:file.py:function" or ""
 
