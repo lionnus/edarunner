@@ -1,0 +1,136 @@
+"""A frozen snapshot of one design for a paper. See docs/design.md section 9."""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import io
+import json
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from . import __version__
+from .board import is_live
+from .guards import Refuse
+from .ledger import Ledger
+from .model import Project
+
+Row = dict[str, Any]
+
+RUN_COLUMNS = ["run_id", "label", "config", "design", "host", "phase", "started", "ended"]
+METRIC_COLUMNS = ["run_id", "label", "config", "design", "stage", "step", "task", "metric", "canonical", "value", "unit", "source"]
+
+
+def reduce_power_csv(path: str | os.PathLike, depth: int = 1) -> list[dict[str, str]]:
+    """Rows of a per-instance power table whose `instance` has at most `depth` separators '/'."""
+    with open(path, newline="") as fh:
+        return [r for r in csv.DictReader(fh) if (r.get("instance") or "").count("/") <= depth]
+
+
+def export(
+    project: Project,
+    ledger: Ledger,
+    design: str,
+    out: Path,
+    labels: list[str] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Write manifest.json, runs.csv, metrics.csv and the collected files of `design` to `out`."""
+    if not design:
+        raise Refuse("empty design")
+    out = Path(out)
+    if out.exists() and any(out.iterdir()):
+        raise Refuse(f"'{out}' exists and is not empty")
+    runs = _select(ledger, design, labels)
+    if not runs:
+        raise Refuse(f"no run has a source that starts with '{design}'" + (f" and a label in {labels}" if labels else ""))
+    ids = [r["run_id"] for r in runs]
+    metrics = ledger.metrics(run_ids=ids)
+
+    plan: list[tuple[str, Path | bytes]] = [
+        ("runs.csv", _csv(RUN_COLUMNS, [_run_row(r) for r in runs])),
+        ("metrics.csv", _csv(METRIC_COLUMNS, [_metric_row(m) for m in metrics])),
+    ]
+    for r in runs:
+        results = Path(project.data) / "results" / r["run_id"]
+        for src in sorted(p for p in results.rglob("*") if p.is_file()):
+            rel = src.relative_to(results)
+            plan.append((f"{r['label']}/{rel}", _reduced(src) if src.name == "power.csv" else src))
+
+    manifest: dict[str, Any] = {
+        "producer": f"edarunner {__version__}",
+        "created": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "schema": 1,
+        "sources": {r["src"]: design for r in runs},
+        "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "host", "phase")} for r in runs],
+        "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
+        "files": [],
+        "incomplete": [r["run_id"] for r in runs if is_live(r) or (r.get("counts") or {}).get("failed")],
+    }
+    if dry_run:
+        for rel, item in plan:
+            print(rel)
+            manifest["files"].append(_entry(rel, item))
+        return manifest
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f".{out.name}.tmp-{os.getpid()}")
+    tmp.mkdir()
+    for rel, item in plan:
+        dst = tmp / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(item, bytes):
+            dst.write_bytes(item)
+        else:
+            shutil.copy2(item, dst)
+        manifest["files"].append(_entry(rel, dst))
+    (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
+    os.replace(tmp, out)
+    return manifest
+
+
+def _select(ledger: Ledger, design: str, labels: list[str] | None) -> list[Row]:
+    """The newest run per label whose src starts with `design`, in label order."""
+    newest: dict[str, Row] = {}
+    for r in ledger.runs():
+        if (r.get("src") or "").startswith(design) and (labels is None or r["label"] in labels):
+            newest[r["label"]] = r
+    return [newest[k] for k in sorted(newest)]
+
+
+def _run_row(r: Row) -> list[Any]:
+    ended = "" if is_live(r) else r.get("updated")
+    return [r["run_id"], r.get("label"), r.get("config"), r.get("src"), r.get("host"), r.get("phase"), r.get("started"), ended]
+
+
+def _metric_row(m: Row) -> list[Any]:
+    return [m["run_id"], m.get("label"), m.get("config"), m.get("src"), m.get("stage"), m.get("step"), m.get("task"),
+            m.get("name"), m.get("canonical"), m.get("value"), m.get("unit"), m.get("source_file")]
+
+
+def _csv(head: list[str], rows: list[list[Any]]) -> bytes:
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(head)
+    w.writerows([["" if v is None else v for v in row] for row in rows])
+    return buf.getvalue().encode()
+
+
+def _reduced(path: Path) -> bytes:
+    with open(path, newline="") as fh:
+        head = next(csv.reader(fh), [])
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, head, lineterminator="\n")
+    w.writeheader()
+    w.writerows(reduce_power_csv(path))
+    return buf.getvalue().encode()
+
+
+def _entry(rel: str, item: Path | bytes) -> dict[str, Any]:
+    if isinstance(item, bytes):
+        return {"path": rel, "bytes": len(item), "sha256": hashlib.sha256(item).hexdigest()}
+    with open(item, "rb") as fh:
+        return {"path": rel, "bytes": item.stat().st_size, "sha256": hashlib.file_digest(fh, "sha256").hexdigest()}
