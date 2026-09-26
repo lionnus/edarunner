@@ -1,0 +1,49 @@
+"""The two guards every delete and every `rsync --delete` call first.
+
+A wrong variable then stops the command instead of removing the wrong tree.
+See docs/design.md section 12.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+RUN_ID_RE = re.compile(r"^\d{8}_\d{4}_\S+$")
+
+_ROOTS = {"/", "/home", "/usr", "/tmp", "/scratch", "/scratch2", "/var", "/opt"}
+
+
+class Refuse(Exception):
+    """A guard refused. The message says why. Exit code 1."""
+
+
+def assert_safe_target(path: str | os.PathLike, marker: str, min_depth: int = 4) -> Path:
+    """Refuse an empty, relative, root, home, scratch or marker-less path.
+
+    Returns the path as a `Path` when it passes.
+    """
+    text = os.fspath(path) if path is not None else ""
+    if not text:
+        raise Refuse("empty path")
+    if not text.startswith("/"):
+        raise Refuse(f"'{text}' is not absolute")
+    norm = text.rstrip("/") or "/"
+    if norm in _ROOTS or norm == os.path.expanduser("~"):
+        raise Refuse(f"'{text}' is a root, not a target")
+    if not marker:
+        raise Refuse("empty safety marker")
+    if marker not in text:
+        raise Refuse(f"'{text}' does not contain the marker '{marker}'")
+    depth = norm.count("/")
+    if depth < min_depth:
+        raise Refuse(f"'{text}' is too shallow (depth {depth}, need {min_depth})")
+    return Path(text)
+
+
+def assert_run_id(run_id: str) -> str:
+    """Refuse an id that does not start with YYYYMMDD_HHMM_."""
+    if not run_id or not RUN_ID_RE.match(run_id):
+        raise Refuse(f"'{run_id}' is not a run id")
+    return run_id

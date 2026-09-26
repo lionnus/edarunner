@@ -1,0 +1,16 @@
+batch = "demo"
+source = "HEAD"
+
+[[job]]
+label = "a"
+config = "demo"
+host = "local"
+stages = ["synth", "pnr", "export", "power"]
+tasks = ["k_small", "k_big"]
+
+[[job]]
+label = "b_nodw"
+config = "demo"
+host = "local"
+stages = ["synth", "pnr"]
+overrides = { DW = "0" }

@@ -1,0 +1,15 @@
+[tasks.k_small]
+kernel = "gemm"
+test = "GEMM_M64_N64"
+args = "M=64 N=64"
+
+[tasks.k_big]
+kernel = "softmax"
+test = "SOFTMAX_R197"
+args = "ROWS=197"
+budget = { hours = 2 }
+
+[tasks.k_bad]
+kernel = "bad"
+test = "BAD"
+args = ""
