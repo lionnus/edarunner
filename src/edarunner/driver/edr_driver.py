@@ -104,7 +104,7 @@ class Driver(object):
             "label": spec.get("label"), "config": spec.get("config"),
             "host": spec.get("host"), "root": self.root, "driver_pid": os.getpid(),
             "pgids": [], "phase": "setup", "stage": None, "step": None, "step_name": None,
-            "tasks": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0},
+            "tasks": {}, "stages": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0},
             "started": now, "updated": now, "elapsed_s": 0, "disk_free_gb": None,
             "tree_gb": None, "exit": None, "killed_by": None, "last_cmd": None,
             "last_log": None, "log": None}
@@ -150,6 +150,14 @@ class Driver(object):
         with self.lock:
             self.hb["phase"] = phase
             self.hb.update(fields)
+        self.beat()
+
+    def record_stage(self, name, status, **fields):
+        with self.lock:
+            e = self.hb["stages"].setdefault(name, {
+                "status": status, "attempt": 1, "started": None, "ended": None, "exit": None, "log": None})
+            e["status"] = status
+            e.update(fields)
         self.beat()
 
     def record_task(self, tid, phase, **fields):
@@ -374,6 +382,7 @@ class Driver(object):
             phase = "stage:" + name if not attempt else "retry:%s:%d" % (name, attempt)
             self.set_phase(phase, stage=name, log=log, step=None, step_name=None)
             started = int(time.time())
+            self.record_stage(name, "running", attempt=attempt + 1, started=started, ended=None, exit=None, log=log)
             p = self.spawn(cmd, cwd, log)
             next_probe = 0.0
             while p.poll() is None:
@@ -387,10 +396,14 @@ class Driver(object):
             self.forget(p)
             self.check_stop()
             self.progress(st, cwd)
+            ended = {"ended": int(time.time()), "exit": p.returncode}
             if self.over_budget:
+                self.record_stage(name, "over_budget", **ended)
                 raise Fail(9, "OVER_BUDGET:" + name)
             if p.returncode == 0:
+                self.record_stage(name, "done", **ended)
                 return
+            self.record_stage(name, "failed", **ended)
             attempt += 1
             if (retry.get("match") and attempt <= int(retry.get("max") or 0)
                     and re.search(retry["match"], tail(log, TAIL_LINES))):
@@ -529,7 +542,9 @@ class Driver(object):
                 self.wait(POLL_S)
             self.gate(st)
             if "tasks" in st:
+                self.record_stage(st["name"], "running", attempt=1, started=int(time.time()), ended=None, exit=None)
                 self.run_group(st)
+                self.record_stage(st["name"], "done", ended=int(time.time()), exit=0)
             else:
                 self.run_stage(st, start_at.get("checkpoint") if i == 0 else None)
             if self.over_budget:

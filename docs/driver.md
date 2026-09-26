@@ -47,6 +47,7 @@ torn file.
 |---|---|
 | `phase`, `stage`, `step`, `step_name` | where the run is; `step` comes from the `progress` command every 5 s |
 | `driver_pid`, `pgids` | what `edr stop` signals |
+| `stages` | per stage the driver started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
 | `tasks` | per task: `phase`, `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
 | `counts` | `done`, `failed`, `skipped`, `running`, `queued`, across every group of the run |
 | `started`, `updated`, `elapsed_s` | unix times; the watcher reads the age of `updated` |
