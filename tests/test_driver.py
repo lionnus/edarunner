@@ -147,3 +147,11 @@ def test_bad_spec_exits_2(tmp_path: Path) -> None:
     bad.write_text("{}")
     assert subprocess.run([PY36, str(DRIVER), str(bad)], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 2
     assert heartbeat({"state_file": str(tmp_path / "none.json")}) is None
+
+
+def test_spec_env_expands_host_variables(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",), env={"PATH": "/edr-nowhere:$PATH", "EDR_HOME_COPY": "${HOME}/x"})
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"]) == (0, "done"), hb
+    log = (Path(spec["root"]) / "log" / "synth.log").read_text()
+    assert "command not found" not in log
