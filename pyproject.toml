@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edarunner"
+version = "0.1.0.dev0"
+description = "Run EDA flows on a pool of hosts, keep a ledger of every run, watch them, and export the results."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [{ name = "Lionnus Kesting" }]
+keywords = ["eda", "orchestration", "experiment-tracking", "ssh", "synthesis", "place-and-route"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = []
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.7"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+edr = "edarunner.cli:main"
+
+[project.urls]
+Repository = "https://github.com/lionnus/edarunner"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edarunner"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
