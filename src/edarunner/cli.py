@@ -554,7 +554,8 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
     c.ledger.upsert_batch({"batch": batch.batch, "project": project.project, "source": p.src, "run_date": date})
     c.ledger.upsert_run({"run_id": p.run_id, "batch": batch.batch, "label": job.label, "config": job.config,
                          "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
-                         "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now})
+                         "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
+                         "tree_id": p.values.get("tree_id") or p.run_id})
     c.ledger.add_event("user", p.run_id, "run", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
     launch.start_driver(c.ssh, str(p.host), driver, spec_path, spec_path.with_name(f"{p.run_id}.driver.log"),
                         project.site.env)
@@ -585,7 +586,7 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
                src=a.src, dirty=0, host=a.host, root=root, created=now, phase=a.phase, state="imported",
                stage="", step=-1, exit=0 if a.phase == "done" else None, started=now, updated=now,
-               counts=json.dumps({}))
+               counts=json.dumps({}), tree_id=a.run_id)
     text = f"{a.host}:{root} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
     if not a.dry_run:
         c.ledger.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.src, created=now))

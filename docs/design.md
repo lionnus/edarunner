@@ -254,8 +254,9 @@ label with `latest`; a label glob is an error.
 `{project} {project_root} {site_dir} {user} {date} {batch} {label}
 {config} {build_tag} {src} {run_id} {tree_id} {root} {host} {mount} {cores}
 {overrides} {checkpoint} {step} {task_dir} {task.<key>} {netlist_stage}`.
-`{tree_id}` is the run id of the tree the flow writes in: the reused run's
-id for a job with `reuse`, else `{run_id}`. A flow that names its run
+`{tree_id}` is the run id of the tree the flow writes in: the `tree_id` of the
+reused run for a job with `reuse` (so a chain of reuse keeps the first tree's
+id), else `{run_id}`. The ledger stores it per run. A flow that names its run
 directory after the run uses `{tree_id}` there. `{overrides}` renders as
 `KEY=VALUE` tokens separated by spaces. A placeholder without a value
 is an error at `plan`.
@@ -438,7 +439,7 @@ SQLite, `data/edr.db`, opened by the head node only. WAL mode.
 CREATE TABLE batches(batch TEXT PRIMARY KEY, project TEXT, source TEXT, created INTEGER, retired INTEGER, run_date TEXT);
 CREATE TABLE runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT, config TEXT, build_tag TEXT, src TEXT, dirty INTEGER,
   host TEXT, root TEXT, created INTEGER, phase TEXT, state TEXT, stage TEXT, step INTEGER, exit INTEGER, killed_by TEXT,
-  started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT);
+  started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT, tree_id TEXT);
 CREATE TABLE stage_runs(run_id TEXT, stage TEXT, task TEXT, attempt INTEGER, started INTEGER, ended INTEGER,
   status TEXT, exit INTEGER, signature TEXT, log TEXT, PRIMARY KEY(run_id, stage, task, attempt));
 CREATE TABLE params(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));

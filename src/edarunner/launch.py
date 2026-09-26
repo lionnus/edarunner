@@ -199,13 +199,14 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
               probes: dict[str, hosts.HostProbe], errors: dict[str, str], placed: dict[str, str | None]) -> RunPlan:
     names = job.stages or list(project.stages)
     problems = _check_overrides(project, job, names)
-    src, host, mount, root, reused, tag = batch.source, None, "", "", "", ""
+    src, host, mount, root, reused, tag, tree = batch.source, None, "", "", "", "", ""
     if job.reuse:
         try:
             row = _reuse_row(ledger, job.reuse)
             host, root, src, reused = row["host"], row["root"], row["src"], row["run_id"]
-            # The tag belongs to the tree; an imported tree carries it without a worktree to compute it.
+            # The tag and the tree id belong to the tree, through any chain of reuse.
             tag = row.get("build_tag") or ""
+            tree = row.get("tree_id") or reused
             if job.host not in ("auto", host):
                 problems.append(f"reuse of {reused} needs host {host}, the job says {job.host}")
         except KeyError as e:
@@ -232,7 +233,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
                 problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
     # {tree_id} names the tree the flow writes in: the reused run's id, else this run's.
-    v.update(run_id=run_id, tree_id=reused or run_id, host=host, mount=mount, root=root)
+    v.update(run_id=run_id, tree_id=tree or run_id, host=host, mount=mount, root=root)
     spec: dict[str, Any] = {}
     if host and not problems:
         try:
@@ -371,7 +372,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
 def _run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
     return {"run_id": p.run_id, "batch": batch.batch, "label": p.label, "config": p.spec.get("config") or p.values.get("config"),
             "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host, "root": p.root or None,
-            "created": int(time.time())}
+            "tree_id": p.values.get("tree_id") or p.run_id, "created": int(time.time())}
 
 
 # --- stop
