@@ -177,20 +177,23 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
               probes: dict[str, hosts.HostProbe], errors: dict[str, str], placed: dict[str, str | None]) -> RunPlan:
     names = job.stages or list(project.stages)
     problems = _check_overrides(project, job, names)
-    src, host, mount, root, reused = batch.source, None, "", "", ""
-    try:
-        tag = build_tag(project, job)
-    except ConfigError as e:
-        problems.append(str(e))
-        tag = job.config
+    src, host, mount, root, reused, tag = batch.source, None, "", "", "", ""
     if job.reuse:
         try:
             row = _reuse_row(ledger, job.reuse)
             host, root, src, reused = row["host"], row["root"], row["src"], row["run_id"]
+            # The tag belongs to the tree; an imported tree carries it without a worktree to compute it.
+            tag = row.get("build_tag") or ""
             if job.host not in ("auto", host):
                 problems.append(f"reuse of {reused} needs host {host}, the job says {job.host}")
         except KeyError as e:
             problems.append(str(e))
+    if not tag:
+        try:
+            tag = build_tag(project, job)
+        except ConfigError as e:
+            problems.append(str(e))
+            tag = job.config
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
                             build_tag=tag, src=src, overrides=job.overrides,
                             netlist_stage=11 if job.netlist_stage is None else job.netlist_stage)
@@ -202,6 +205,9 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
             host = None
         if host:
             mount = probes[host].mount
+            # An empty mount once gave a root of /<user>/... and a delete target outside every tree.
+            if not mount:
+                problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
     v.update(run_id=run_id, host=host, mount=mount, root=root)
     spec: dict[str, Any] = {}

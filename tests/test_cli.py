@@ -392,3 +392,22 @@ def test_bad_input_exits_1(capsys) -> None:
     assert cli.main([]) == 1 and cli.main(["nope"]) == 1 and cli.main(["stop", "x"]) == 1
     assert cli.main(["metrics"]) == 1 and cli.main(["--help"]) == 0
     capsys.readouterr()
+
+
+def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> None:
+    root = tmp_path / "scratch" / "lkesting" / "edr" / "old" / "20260904_0411_ref_x_gabc1234"
+    root.mkdir(parents=True)
+    argv = ["import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
+            "--host", "local", "--root", str(root), "--why", "reference"]
+    code, out, _ = edr(capsys, *argv, "--dry-run")
+    assert code == 0 and "(dry)" in out and not (demo / "data" / "edr.db").exists()
+    assert edr(capsys, *argv)[0] == 0
+    with Ledger(demo / "data" / "edr.db") as led:
+        row = led.run(root.name)
+        assert row["phase"] == "done" and row["state"] == "imported" and row["root"] == str(root)
+        assert [b["batch"] for b in led.batches()] == ["imported"]
+        assert led.events()[-1]["kind"] == "import"
+    assert edr(capsys, "import", "--run-id", "bad", "--label", "r", "--config", "demo", "--src", "a",
+               "--host", "local", "--root", str(root))[0] == 1
+    assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--src", "a",
+               "--host", "local", "--root", str(root / "missing"))[0] == 1
