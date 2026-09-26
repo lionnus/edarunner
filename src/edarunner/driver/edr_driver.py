@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import signal
+import string
 import subprocess
 import sys
 import threading
@@ -85,7 +86,10 @@ class Driver(object):
         self.shell = spec.get("shell") or "/bin/bash"
         self.limits = spec.get("limits") or {}
         self.env = dict(os.environ)
-        self.env.update(spec.get("env") or {})
+        # A value such as "/usr/sepp/bin:$PATH" names the host's own variables, so it
+        # expands here, on the host, against the environment the driver started with.
+        for k, v in (spec.get("env") or {}).items():
+            self.env[k] = string.Template(str(v)).safe_substitute(self.env)
         if not os.path.isdir(self.root):
             raise ValueError("root is not a directory: " + self.root)
         spec_dir = os.path.dirname(os.path.abspath(spec_path))
