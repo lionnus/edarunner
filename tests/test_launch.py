@@ -253,3 +253,16 @@ def test_publish_driver_copies_by_rename(tmp_path: Path) -> None:
     assert sorted(p.name for p in dest.parent.iterdir()) == ["edr_driver.py"]
     assert sync.publish_driver(tmp_path, "b2", launch.DRIVER_SRC, dry_run=True) == tmp_path / "bin" / "b2" / "edr_driver.py"
     assert not (tmp_path / "bin" / "b2").exists()
+
+
+def test_reuse_renders_tree_id_of_the_old_run(env) -> None:
+    project, batch, ssh, ledger = env
+    ledger.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
+                       "root": "/x/edr/old", "src": "OLD"})
+    batch.jobs[0].reuse = {"label": "a", "latest": True}
+    batch.jobs[0].stages = ["pnr"]
+    plans = launch.plan(project, batch, ssh, ledger, date=DATE)
+    a = next(p for p in plans if p.label == "a")
+    assert a.values["tree_id"] == "20260101_0000_a_demo_gOLD" and a.values["run_id"] != a.values["tree_id"]
+    b = next(p for p in plans if p.label != "a")
+    assert b.values["tree_id"] == b.values["run_id"]

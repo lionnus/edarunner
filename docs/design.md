@@ -249,8 +249,11 @@ label with `latest`; a label glob is an error.
 ### 3.5 Placeholders
 
 `{project} {project_root} {site_dir} {user} {date} {batch} {label}
-{config} {build_tag} {src} {run_id} {root} {host} {mount} {cores}
-{overrides} {checkpoint} {step} {task_dir} {task.<key>} {netlist_stage}`. `{overrides}` renders as
+{config} {build_tag} {src} {run_id} {tree_id} {root} {host} {mount} {cores}
+{overrides} {checkpoint} {step} {task_dir} {task.<key>} {netlist_stage}`.
+`{tree_id}` is the run id of the tree the flow writes in: the reused run's
+id for a job with `reuse`, else `{run_id}`. A flow that names its run
+directory after the run uses `{tree_id}` there. `{overrides}` renders as
 `KEY=VALUE` tokens separated by spaces. A placeholder without a value
 is an error at `plan`.
 
@@ -289,6 +292,7 @@ rename every `heartbeat_s` and at every phase change:
 {"schema": 1, "run_id": "...", "batch": "...", "label": "...", "config": "...", "host": "larain9", "root": "...",
  "driver_pid": 4242, "pgids": [4300],
  "phase": "stage:synth", "stage": "synth", "step": 9, "step_name": "synth-final-opto",
+ "stages": {"synth": {"status": "done", "attempt": 1, "started": 1790000000, "ended": 1790003600, "exit": 0, "log": "/scratch2/.../log/synth.log"}},
  "tasks": {"softmax_197x197": {"phase": "running", "pid": 4300, "pgid": 4300, "started": 1790000000, "ended": null, "exit": null, "signature": null}},
  "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 1, "queued": 3},
  "started": 1790000000, "updated": 1790000060, "elapsed_s": 60,
@@ -299,7 +303,10 @@ rename every `heartbeat_s` and at every phase change:
 Phases: `setup`, `gate:<stage>`, `stage:<stage>`, `retry:<stage>:<n>`,
 `group:<stage>`, and the terminal ones `done`, `INCOMPLETE:<n>f<m>s`,
 `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED`, `KILLED:<signal>`.
-A terminal phase sets `exit` to a number. `counts.failed` and
+`stages` holds one entry per stage the driver started: `status`
+(`running`, `done`, `failed`, `over_budget`), `attempt`, `started`,
+`ended`, `exit`, `log`; a retry adds an attempt. A terminal phase sets
+`exit` to a number. `counts.failed` and
 `counts.skipped` count across every task group of the run.
 
 ## 5. The driver

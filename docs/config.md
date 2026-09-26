@@ -215,3 +215,5 @@ dotted keys, so `task=task.fields` gives `{task.kernel}`. The dict
 `load_project` renders `site`, `state`, `data`, `source.repo` and
 `source.worktrees` at load time with `project`, `project_root`, `user`
 and `site_dir`. Every other string keeps its placeholders for `plan`.
+
+`{tree_id}`: the run id of the tree the flow writes in (the reused run's id under `reuse`, else `{run_id}`).
