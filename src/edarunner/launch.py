@@ -289,8 +289,10 @@ def start_driver(ssh: hosts.Ssh, host: str, driver_path: Path, spec_path: Path, 
                                  stdout=log, stderr=subprocess.STDOUT, env=full, start_new_session=True)
         return p.pid
     exports = "".join(f"export {k}={_dq(v)}; " for k, v in env.items())
-    cmd = (f"{exports}setsid nohup python3 {shlex.quote(str(driver_path))} {shlex.quote(str(spec_path))} "
-           f"> {shlex.quote(str(log_path))} 2>&1 < /dev/null & echo $!")
+    # The interpreter is the host's own python3, resolved before the site env: a tool PATH
+    # once put a Python 3.4 first, and the driver died at its first subprocess.run.
+    cmd = (f"py=$(command -v python3); {exports}setsid nohup \"$py\" {shlex.quote(str(driver_path))} "
+           f"{shlex.quote(str(spec_path))} > {shlex.quote(str(log_path))} 2>&1 < /dev/null & echo $!")
     rc, out, err = ssh.run(host, cmd)
     if rc != 0:
         raise hosts.HostError(f"{host}: rc {rc}: {err.strip()}")

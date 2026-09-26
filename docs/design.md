@@ -372,8 +372,9 @@ The heartbeat thread also computes `tree_gb` (a `du -s` of `root` every
 
 ## 6. Executors
 
-`edr launch` starts the driver on a host with the host's own `python3`
-from `PATH` after the site `env` is applied:
+`edr launch` starts the driver on a host with the host's own `python3`,
+resolved from the login `PATH` before the site `env` is applied; the site
+`env` reaches the driver's children through the spec:
 
 - `local`: `Popen([python3, driver, spec], start_new_session=True,
   stdin=DEVNULL, stdout/stderr to <state>/<batch>/<run_id>.driver.log)`.
