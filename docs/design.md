@@ -248,9 +248,9 @@ label with `latest`; a label glob is an error.
 
 ### 3.5 Placeholders
 
-`{project} {user} {date} {batch} {label} {config} {build_tag} {src}
-{run_id} {root} {host} {mount} {cores} {overrides} {checkpoint} {step}
-{task_dir} {task.<key>} {netlist_stage}`. `{overrides}` renders as
+`{project} {project_root} {site_dir} {user} {date} {batch} {label}
+{config} {build_tag} {src} {run_id} {root} {host} {mount} {cores}
+{overrides} {checkpoint} {step} {task_dir} {task.<key>} {netlist_stage}`. `{overrides}` renders as
 `KEY=VALUE` tokens separated by spaces. A placeholder without a value
 is an error at `plan`.
 
@@ -348,6 +348,11 @@ Behaviour, in order:
 4. End: `done` when every stage ran and `counts.failed` and
    `counts.skipped` are zero; else `INCOMPLETE:<n>f<m>s`.
 
+`edr keep` writes `<run_id>.keep.json` next to the spec, `{"hours": N,
+"ack": true}`. The driver reads it at every heartbeat and adds the hours
+to the budget of the current stage or task. The watcher reads `ack` and
+cancels a pending kill.
+
 Signals: `SIGTERM`, `SIGHUP` and `SIGINT` set `killed_by`, kill every
 recorded pgid with the same signal, write a final heartbeat with phase
 `KILLED:<signal>` (or `STOPPED` when a `stop` file exists next to the
@@ -359,7 +364,8 @@ The heartbeat thread also computes `tree_gb` (a `du -s` of `root` every
 
 ## 6. Executors
 
-`edr launch` starts the driver on a host:
+`edr launch` starts the driver on a host with the host's own `python3`
+from `PATH` after the site `env` is applied:
 
 - `local`: `Popen([python3, driver, spec], start_new_session=True,
   stdin=DEVNULL, stdout/stderr to <state>/<batch>/<run_id>.driver.log)`.
