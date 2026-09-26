@@ -1,0 +1,793 @@
+"""The `edr` command: the sixteen verbs of docs/design.md section 10.
+
+Every verb wires the modules; nothing here knows a file format. Exit
+codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
+failed. `--json` prints {"code", "data", "output"} with the captured text.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import csv
+import functools
+import getpass
+import http.server
+import io
+import json
+import logging
+import os
+import posixpath
+import shlex
+import shutil
+import sqlite3
+import sys
+import threading
+import time
+from dataclasses import asdict
+from pathlib import Path
+from string import Template
+from typing import Any
+
+from . import __version__, board, collect, config, export, launch, metrics, runid, stagectl, sync, watch
+from .config import ConfigError
+from .guards import Refuse, assert_safe_target
+from .hosts import HostError, Ssh
+from .ledger import Ledger
+from .model import Batch, Project
+from .notify import make_notifiers
+
+TEMPLATES = Path(__file__).resolve().parent / "templates"
+Row = dict[str, Any]
+_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+_STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "--why over-budget",
+               "host_full": "--now --why host-full", "superseded": "--after-task --why superseded"}
+
+
+# --- helpers
+
+def _load_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, indent=1) + "\n")
+    os.replace(tmp, path)
+
+
+def _table(head: list[str], body: list[list[Any]]) -> str:
+    rows = [head, *[["-" if c is None else str(c) for c in r] + [""] * (len(head) - len(r)) for r in body]]
+    w = [max(len(r[i]) for r in rows) for i in range(len(head))]
+    return "\n".join(" ".join(f"{c:<{w[i]}}" for i, c in enumerate(r)).rstrip() for r in rows)
+
+
+def _since(text: str) -> int:
+    """'30m', '2h', '1d' or seconds, as the unix time that long ago."""
+    try:
+        unit = _UNIT.get(text[-1])
+        secs = float(text[:-1]) * unit if unit else float(text)
+    except (ValueError, IndexError):
+        raise Refuse(f"--since {text!r}: use 30m, 2h, 1d or seconds") from None
+    return int(time.time() - secs)
+
+
+class Ctx:
+    """Lazy project, ledger and ssh of one invocation, plus the payload of --json."""
+
+    def __init__(self, a: argparse.Namespace) -> None:
+        self.a = a
+        self.data: Any = None
+        self._project: Project | None = None
+        self._ledger: Ledger | None = None
+
+    @property
+    def project(self) -> Project:
+        if self._project is None:
+            self._project = config.load_project(os.getcwd())
+        return self._project
+
+    @property
+    def ledger(self) -> Ledger:
+        if self._ledger is None:
+            path = self.project.data / "edr.db"
+            # A dry run writes nothing, not even an empty database.
+            self._ledger = Ledger(":memory:") if self.a.dry_run and not path.exists() else Ledger(path)
+        return self._ledger
+
+    @functools.cached_property
+    def ssh(self) -> Ssh:
+        return Ssh(self.project.site)
+
+    def close(self) -> None:
+        """Close the ledger when a verb opened it."""
+        if self._ledger is not None:
+            self._ledger.close()
+
+    def emit(self, text: str, data: Any = None) -> None:
+        """Print `text`; keep `data` (default: the text) for --json."""
+        self.data = text if data is None else data
+        if not self.a.json:
+            print(text)
+
+    def batch_name(self, name: str | None) -> str:
+        """`name`, else EDR_BATCH, else the newest batch directory of the state."""
+        name = name or os.environ.get("EDR_BATCH")
+        if name:
+            return name
+        dirs = [p for p in self.project.state.glob("*") if p.is_dir() and p.name != "bin"]
+        if not dirs:
+            raise Refuse(f"no batch given and no batch directory in {self.project.state}")
+        return max(dirs, key=lambda p: p.stat().st_mtime).name
+
+    def batch(self, name: str | None) -> Batch:
+        """Load a batch; a ref as source becomes the src tag of its staged tree."""
+        b = config.load_batch(self.project, self.batch_name(name))
+        if not stagectl.SRC_RE.match(b.source):
+            b.source = runid.src_tag(stagectl.find(self.project, b.source))
+        return b
+
+    def rows(self, batch: str | None = None) -> list[Row]:
+        """The runs of the batches that are not retired."""
+        retired = {b["batch"] for b in self.ledger.batches() if b.get("retired")}
+        return [r for r in self.ledger.runs(batch=batch) if r["batch"] not in retired]
+
+    def resolve(self, handle: str) -> Row:
+        """The ledger row of label@batch, a run id prefix, or #n from the last board."""
+        last = _load_json(self.project.data / "board" / "last_board.json")
+        try:
+            run_id = self.ledger.resolve(handle, last if isinstance(last, list) else None)
+        except KeyError as e:
+            raise Refuse(str(e.args[0])) from None
+        row = self.ledger.run(run_id)
+        if row is None:
+            raise Refuse(f"{handle}: no run {run_id}")
+        return row
+
+    def heartbeat(self, row: Row) -> dict:
+        """The heartbeat of a run, or {} when the driver wrote none."""
+        return _load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
+
+    def save_board(self, rows: list[Row]) -> None:
+        """Keep the board order in last_board.json, so #n resolves next time."""
+        if rows:
+            _save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
+
+
+# --- texts shared by the verbs and the bot
+
+def _events_text(c: Ctx, events: list[Row]) -> str:
+    names = {r["run_id"]: f"{r['label']}@{r['batch']}" for r in c.ledger.runs()}
+    return "\n".join(
+        f"{time.strftime('%m-%d %H:%M', time.localtime(e['ts']))} {e['actor']:<8} "
+        f"{names.get(e['run_id'], e['run_id'] or '-')} {e['kind']}: {e['text']}" for e in events) or "no events"
+
+
+def _probe_rows(c: Ctx) -> list[Row]:
+    out: list[Row] = []
+    for host in c.project.site.hosts:
+        try:
+            out.append(asdict(c.ssh.probe(host)))
+        except HostError as e:
+            out.append({"host": host, "error": str(e)})
+    return out
+
+
+def _hosts_text(rows: list[Row], narrow: bool) -> str:
+    head = ["host", "cores", "ram_gb", "free_gb"] + ([] if narrow else ["mount", "tools", "runs"])
+    body = []
+    for r in rows:
+        if "error" in r:
+            body.append([r["host"], "error: " + r["error"]])
+            continue
+        body.append([r["host"], r["free_cores"], r["free_ram_gb"], r["free_gb"]] + ([] if narrow else [
+            r["mount"], f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]]))
+    return _table(head, body)
+
+
+def _lic_rows(c: Ctx) -> list[Row]:
+    project, me = c.project, getpass.getuser()
+    # A probe says {root}; from the head node the project directory stands in for it.
+    values = config.placeholders(project, root=str(project.root), host="local")
+    out: list[Row] = []
+    for name, lic in project.site.licences.items():
+        row: Row = {"licence": name, "feature": lic.feature, "floor": lic.floor}
+        try:
+            rc, text, err = c.ssh.run("local", config.render(lic.probe, values))
+        except ConfigError as e:
+            rc, text, err = 1, "", str(e)
+        parsed = metrics.parse_flexlm(text, lic.feature) if rc == 0 else None
+        if parsed is None:
+            row["note"] = "unknown: " + (err.strip() or "no feature line").splitlines()[0]
+        else:
+            issued, used = parsed
+            block = text.split(f"Users of {lic.feature}:", 1)[1].split("Users of ", 1)[0]
+            ours = sum(1 for ln in block.splitlines() if ln.split()[:1] == [me])
+            row.update(pool=issued, used=used, free=issued - used, ours=ours, others=used - ours)
+        out.append(row)
+    return out
+
+
+def _lic_text(rows: list[Row]) -> str:
+    keys = ["licence", "feature", "pool", "used", "free", "ours", "others", "floor", "note"]
+    return _table(keys, [[r.get(k, "") for k in keys] for r in rows]) if rows else "no licences"
+
+
+def _metric_key(m: Row) -> str:
+    return (m.get("canonical") or m["name"]) + (f"[{m['task']}]" if m.get("task") else "")
+
+
+def _compare_text(c: Ctx, handles: list[str]) -> str:
+    rows = [c.resolve(h) for h in handles]
+    final: dict[str, dict[str, tuple[int, Any]]] = {}
+    for m in c.ledger.metrics(run_ids=[r["run_id"] for r in rows]):
+        cur, step = final.setdefault(_metric_key(m), {}), -1 if m.get("step") is None else int(m["step"])
+        if step >= cur.get(m["run_id"], (-2, None))[0]:
+            cur[m["run_id"]] = (step, m["value"])
+    body = [[k, *[cur.get(r["run_id"], (0, None))[1] for r in rows]] for k, cur in sorted(final.items())]
+    return _table(["metric", *[str(r["label"]) for r in rows]], body) if body else "no metrics"
+
+
+def _metrics_text(rows: list[Row]) -> str:
+    body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
+             m.get("unit")] for m in rows]
+    return _table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body) if rows else "no metrics"
+
+
+def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
+    """Write the keep file next to the spec; a field not given keeps its current value."""
+    run_id = row["run_id"]
+    path = c.project.state / str(row["batch"]) / f"{run_id}.keep.json"
+    cur = _load_json(path)
+    data = {"hours": cur.get("hours", 0) if hours is None else hours,
+            "ack": bool(cur.get("ack")) if ack is None else ack}
+    note = f"keep {data['hours']} h" + (", ack" if data["ack"] else "")
+    if not c.a.dry_run:
+        _save_json(path, data)
+        c.ledger.add_event(actor, run_id, "keep", note)
+    return f"{run_id}: {note}"
+
+
+class Actions:
+    """The verbs the Telegram bot may call; each one is a CLI verb without the printing."""
+
+    def __init__(self, c: Ctx) -> None:
+        self.c = c
+
+    def keep(self, handle: str, hours: int, actor: str) -> str:
+        return _keep(self.c, self.c.resolve(handle), hours, None, actor)
+
+    def ack(self, handle: str, actor: str) -> str:
+        return _keep(self.c, self.c.resolve(handle), None, True, actor)
+
+    def stop_after_task(self, handle: str, actor: str, why: str) -> str:
+        c, row = self.c, self.c.resolve(handle)
+        if not board.is_live(row):
+            return f"{row['run_id']} already {row['phase']}"
+        launch.stop(c.ssh, c.ledger, row, {}, after_task=True, why=why, state=c.project.state, actor=actor)
+        return f"{row['run_id']} stops after its task"
+
+    def status_text(self, narrow: bool = True) -> str:
+        rows = self.c.rows()
+        self.c.save_board(rows)
+        return board.narrow(rows) if narrow else board.wide(rows)
+
+    def events_text(self, n: int) -> str:
+        return _events_text(self.c, self.c.ledger.events(n=n))
+
+    def hosts_text(self) -> str:
+        return _hosts_text(_probe_rows(self.c), narrow=True)
+
+    def lic_text(self) -> str:
+        return _lic_text(_lic_rows(self.c))
+
+    def compare_text(self, handles: list[str]) -> str:
+        return _compare_text(self.c, handles)
+
+    def metric_text(self, name: str, design: str | None) -> str:
+        return _metrics_text(self.c.ledger.metrics(design=design, name=name))
+
+
+# --- verbs
+
+def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
+    """The board, or one run with its stages, metrics and log tail."""
+    if a.handle:
+        row = c.resolve(a.handle)
+        hb, run_id = c.heartbeat(row), row["run_id"]
+        stages = [dict(r) for r in c.ledger.db.execute(
+            "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
+        mets = c.ledger.metrics(run_ids=[run_id])
+        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or "")),
+               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets})
+        return 0
+    code = 0
+    while True:
+        rows = c.rows(a.batch or os.environ.get("EDR_BATCH"))
+        if a.live:
+            code = max(code, _mark_live(c, rows))
+        c.save_board(rows)
+        text = _triage(c, rows) if a.triage else board.narrow(rows) if a.narrow else board.wide(rows)
+        if a.watch and not a.json:
+            print("\x1b[2J\x1b[H", end="")
+        c.emit(text, {"runs": rows})
+        if not a.watch or a.json:
+            return code
+        time.sleep(c.project.limits.heartbeat_s)
+
+
+def _mark_live(c: Ctx, rows: list[Row]) -> int:
+    """Ask each host whether the driver of a live run exists; a gone driver marks the run dead."""
+    code = 0
+    for r in rows:
+        pid = c.heartbeat(r).get("driver_pid") if board.is_live(r) else None
+        if not pid or not r.get("host"):
+            continue
+        try:
+            r["alive"] = c.ssh.pid_alive(str(r["host"]), int(pid))
+        except HostError:
+            r["alive"], code = None, 3
+        if r["alive"] is False:
+            r["state"] = "dead"
+    return code
+
+
+def _triage(c: Ctx, rows: list[Row]) -> str:
+    lines = []
+    for r in board.order(rows):
+        state, h = board.state_of(r), f"{r['label']}@{r['batch']}"
+        if state == "running":
+            continue
+        if state == "queued":
+            cmd = f"edr launch {r['batch']} --only {r['label']}"
+        elif state == "stale":
+            cmd = f"edr status {h} --live"
+        elif state == "dead":
+            hb = c.heartbeat(r)
+            cmd = f"edr run {h} --stage {hb.get('stage') or r.get('stage')}" + (
+                f" --from {hb['step_name']}" if hb.get("step_name") else "")
+        elif state in _STOP_FLAGS:
+            cmd = f"edr stop {h} {_STOP_FLAGS[state]}"
+        elif state == "done":
+            cmd = f"edr export --design {r.get('src')} --out exports/{r.get('src')}"
+        else:
+            cmd = f"edr retire {h} --why {state}"
+        lines.append(f"{state:<11} {h:<28} {r.get('phase') or '-'}\n    {cmd}")
+    return "\n".join(lines) or "nothing to triage"
+
+
+def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
+    """The last events, filtered by time and run."""
+    since = _since(a.since) if a.since else None
+    run_id = c.resolve(a.run)["run_id"] if a.run else None
+    events = c.ledger.events(since_s=since, run_id=run_id, n=a.n)
+    c.emit(_events_text(c, events), events)
+    return 0 if events else 2
+
+
+def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
+    """Probe every site host."""
+    rows = _probe_rows(c)
+    c.emit(_hosts_text(rows, a.narrow), rows)
+    return 3 if any("error" in r for r in rows) else 0
+
+
+def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
+    """Probe every site licence from the head node."""
+    rows = _lic_rows(c)
+    c.emit(_lic_text(rows), rows)
+    return 3 if any("note" in r for r in rows) else 0
+
+
+def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
+    """The metrics of one design, as a table or CSV."""
+    rows = c.ledger.metrics(design=a.design, stage=a.stage, step=a.step)
+    if a.csv and not a.json:
+        w = csv.writer(sys.stdout, lineterminator="\n")
+        w.writerow(export.METRIC_COLUMNS)
+        w.writerows([m["run_id"], m.get("label"), m.get("config"), m.get("src"), m["stage"], m.get("step"),
+                     m.get("task"), m["name"], m.get("canonical"), m["value"], m.get("unit"), m.get("source_file")]
+                    for m in rows)
+        c.data = rows
+    else:
+        c.emit(_metrics_text(rows), rows)
+    return 0 if rows else 2
+
+
+def cmd_init(c: Ctx, a: argparse.Namespace) -> int:
+    """Write edr.toml and the watch unit into the current directory."""
+    cwd = Path(os.getcwd())
+    if (cwd / "edr.toml").exists():
+        raise Refuse(f"{cwd / 'edr.toml'} exists; edit it or remove it first")
+    site = Path(a.site).expanduser()
+    if site.suffix != ".toml":
+        site = site / "site.toml"
+    values = {"project": cwd.name, "site": str(site), "project_root": str(cwd),
+              "edr": shutil.which("edr") or f"{sys.executable} -m edarunner.cli"}
+    written = []
+    for name in ("edr.toml", "edr-watch.service"):
+        if (cwd / name).exists():
+            continue
+        text = Template((TEMPLATES / name).read_text()).substitute(values)
+        if not a.dry_run:
+            (cwd / name).write_text(text)
+        written.append(str(cwd / name))
+    c.emit("\n".join(f"write {w}" + (" (dry)" if a.dry_run else "") for w in written),
+           {"written": written, "site": str(site)})
+    return 0
+
+
+def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
+    """Load every file, probe the hosts, import the hooks, plan every batch."""
+    problems: list[str] = []
+    try:
+        project = c.project
+    except ConfigError as e:
+        c.emit(f"problem: {e}", {"problems": [str(e)]})
+        return 1
+    hooks = [project.source.build_tag, project.task_resolver, *(m.python for m in project.metrics.values())]
+    for spec in filter(None, hooks):
+        try:
+            config.load_hook(project.root, spec)
+        except ConfigError as e:
+            problems.append(f"hook {spec}: {e}")
+    if not launch.DRIVER_SRC.is_file():
+        problems.append(f"driver missing: {launch.DRIVER_SRC}")
+    batches: list[Batch] = []
+    for f in sorted((project.root / "jobs").glob("*.toml")):
+        try:
+            batches.append(config.load_batch(project, str(f)))
+        except ConfigError as e:
+            problems.append(str(e))
+    hosts = _probe_rows(c)
+    problems += [f"{r['host']}: {r['error']}" for r in hosts if "error" in r]
+    for b in batches:
+        bad = [f"{b.batch}: job {j.label} names unknown host {j.host}" for j in b.jobs
+               if j.host != "auto" and j.host not in project.site.hosts]
+        problems += bad
+        if not bad:
+            for p in launch.plan(project, b, c.ssh, c.ledger):
+                problems += [f"{b.batch}/{p.label}: {x}" for x in p.problems]
+    text = "\n".join(f"problem: {p}" for p in problems) or (
+        f"ok: {len(hosts)} hosts, {len(project.stages)} stages, {len(project.metrics)} metrics, {len(batches)} batches")
+    c.emit(text, {"problems": problems, "hosts": hosts, "batches": [b.batch for b in batches]})
+    return 1 if problems else 0
+
+
+def cmd_stage(c: Ctx, a: argparse.Namespace) -> int:
+    """Stage a ref as a worktree, or a dirty tree as a snapshot."""
+    res = stagectl.stage(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
+    c.emit(f"{res.src} {res.path}" + (" (dirty)" if res.dirty else ""),
+           {"src": res.src, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
+    return 0
+
+
+def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
+    """Render every job of a batch; writes nothing."""
+    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.ledger)
+    c.emit("\n".join(f"{p.run_id}: {p.host or 'queued'} {p.root}" + "".join(f"\n    problem: {x}" for x in p.problems)
+                     for p in plans),
+           [{"run_id": p.run_id, "label": p.label, "host": p.host, "root": p.root, "queued": p.queued,
+             "problems": p.problems, "spec": p.spec} for p in plans])
+    return 1 if any(p.problems for p in plans) else 0
+
+
+def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
+    """Start one driver per job of a batch."""
+    only = a.only.split(",") if a.only else None
+    rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.ledger, dry_run=a.dry_run, only=only,
+                         allow_dirty=a.allow_dirty)
+    started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
+    c.emit(f"{started} started, {queued} queued, {sum(bool(r['problems']) for r in rows)} with problems"
+           + (" (dry)" if a.dry_run else ""), rows)
+    if any(r["problems"] for r in rows):
+        return 1
+    return 0 if started or queued or a.dry_run else 2
+
+
+def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
+    """Run one stage on the tree of an existing run, or fetch a collect_on_request list."""
+    row = c.resolve(a.handle)
+    project, run_id = c.project, row["run_id"]
+    if a.collect:
+        tasks = list(c.heartbeat(row).get("tasks") or [])
+        res = collect.collect_on_request(project, c.ssh, c.ledger, {**row, "tasks": tasks}, a.collect, a.dry_run)
+        if not a.dry_run:
+            c.ledger.add_event("user", run_id, "collect", f"{a.collect}: {res.files} files, {len(res.failures)} failed")
+        c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
+        return 3 if res.failures else 0
+    if not a.stage:
+        raise Refuse("run needs --stage or --collect")
+    if a.stage not in project.stages:
+        raise Refuse(f"unknown stage {a.stage}")
+    batch = config.load_batch(project, str(row["batch"]))
+    job = next((j for j in batch.jobs if j.label == row["label"]), None)
+    if job is None:
+        raise Refuse(f"{run_id}: no job {row['label']} in {batch.path}")
+    job.reuse, job.stages, job.host = {"run_id": run_id}, [a.stage], a.on or "auto"
+    if a.tasks:
+        job.tasks = a.tasks
+    if a.parallel:
+        project.stages[a.stage].parallel = a.parallel
+    # The stage in the label and a batch per call keep the new run id apart from the reused one.
+    job.label = f"{job.label}.{a.stage}"
+    batch.batch, batch.jobs = f"run_{time.strftime(launch.DATE_FMT)}", [job]
+    state = project.state
+    date = launch.pin_date(state, batch.batch, a.dry_run)
+    (p,) = launch.plan(project, batch, c.ssh, c.ledger, date=date)
+    if p.problems:
+        c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
+        return 1
+    if a.from_:
+        if not p.spec["stages"][0].get("resume"):
+            raise Refuse(f"stage {a.stage} has no resume command; --from needs one")
+        p.spec["start_at"]["checkpoint"] = a.from_
+    driver = sync.publish_driver(state, batch.batch, launch.DRIVER_SRC, a.dry_run)
+    spec_path = launch.write_spec(state, batch.batch, p, a.dry_run)
+    c.emit(f"{p.run_id}: {a.stage} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
+           {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
+    if a.dry_run:
+        return 0
+    now = int(time.time())
+    c.ledger.upsert_batch({"batch": batch.batch, "project": project.project, "source": p.src, "run_date": date})
+    c.ledger.upsert_run({"run_id": p.run_id, "batch": batch.batch, "label": job.label, "config": job.config,
+                         "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
+                         "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now})
+    c.ledger.add_event("user", p.run_id, "run", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
+    launch.start_driver(c.ssh, str(p.host), driver, spec_path, spec_path.with_name(f"{p.run_id}.driver.log"),
+                        project.site.env)
+    return 0
+
+
+def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
+    """Write the keep file of a run."""
+    row = c.resolve(a.handle)
+    if not board.is_live(row):
+        c.emit(f"{row['run_id']}: already {row['phase']}")
+        return 2
+    hours = a.hours if a.hours is not None or a.ack else 12
+    c.emit(_keep(c, row, hours, a.ack or None, "user") + (" (dry)" if a.dry_run else ""))
+    return 0
+
+
+def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
+    """Write a frozen snapshot of one design."""
+    labels = a.labels.split(",") if a.labels else None
+    manifest = export.export(c.project, c.ledger, a.design, Path(a.out), labels, a.dry_run)
+    if not a.dry_run:
+        c.ledger.add_event("user", "", "export", f"{a.design} -> {a.out}")
+    c.emit(f"{a.out}: {len(manifest['runs'])} runs, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""),
+           manifest)
+    return 0
+
+
+def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
+    """Stop one run through the driver, or the stop file with --after-task."""
+    row = c.resolve(a.handle)
+    hb = c.heartbeat(row)
+    if not board.is_live(hb or row):
+        c.emit(f"{row['run_id']}: already {(hb or row).get('phase')}")
+        return 2
+    ok = launch.stop(c.ssh, c.ledger, row, hb, after_task=a.after_task, now=a.now,
+                     grace_s=30 if a.now else c.project.limits.grace_s, dry_run=a.dry_run, why=a.why,
+                     state=c.project.state)
+    c.data = {"run_id": row["run_id"], "stopped": ok}
+    return 0 if ok else 3
+
+
+def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
+    """Remove the run tree, or the prune targets, after the guard; --batch marks RETIRED."""
+    if not a.handle and not a.batch:
+        raise Refuse("retire needs a handle or --batch")
+    project, dry = c.project, " (dry)" if a.dry_run else ""
+    rows = c.ledger.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
+    if a.batch and not rows and not (project.state / a.batch).is_dir():
+        c.emit(f"no runs in batch {a.batch}")
+        return 2
+    checked = []
+    for row in rows:
+        run_id, hb = row["run_id"], c.heartbeat(row)
+        host, root = row.get("host") or hb.get("host"), row.get("root") or hb.get("root")
+        targets = _retire_targets(c, row, hb, str(root), a) if root else []
+        pid = hb.get("driver_pid")
+        if root and board.is_live(hb) and pid and c.ssh.pid_alive(str(host), int(pid)):
+            raise Refuse(f"{run_id}: driver {pid} is alive on {host}; stop it first")
+        checked.append((row, hb, host, root, targets))
+    failed, done = 0, []
+    for row, hb, host, root, targets in checked:
+        run_id = row["run_id"]
+        for t in targets:
+            print(f"{run_id}: rm -rf {t} on {host}{dry}")
+            if a.dry_run:
+                continue
+            rc, _, err = c.ssh.run(str(host), f"rm -rf -- {shlex.quote(t)}")
+            if rc != 0:
+                failed += 1
+                print(f"{run_id}: rm rc {rc}: {err.strip()}", file=sys.stderr)
+        if a.dry_run or (a.prune and not root):
+            continue
+        if not a.prune and board.is_live(hb or row):
+            phase = f"ABANDONED:{a.why}"
+            if hb:
+                hb["phase"], hb["exit"] = phase, 1 if hb.get("exit") is None else hb["exit"]
+                _save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
+            c.ledger.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
+        c.ledger.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
+        done.append(run_id)
+    if a.batch and not a.prune and not a.dry_run:
+        (project.state / a.batch).mkdir(parents=True, exist_ok=True)
+        (project.state / a.batch / "RETIRED").touch()
+        c.ledger.mark_batch_retired(a.batch)
+    c.data = {"retired": done, "failed": failed}
+    return 3 if failed else 0
+
+
+def _retire_targets(c: Ctx, row: Row, hb: dict, root: str, a: argparse.Namespace) -> list[str]:
+    project = c.project
+    if a.prune:
+        scalars = {k: v for k, v in {**hb, **row}.items() if isinstance(v, (str, int, float))}
+        values = config.placeholders(project, **scalars)
+        targets = [posixpath.join(root, config.render(p, values))
+                   for st in project.stages.values() for p in st.prune.get(a.prune, [])]
+        if not targets:
+            raise Refuse(f"no stage has prune.{a.prune}")
+    else:
+        if not (project.data / "results" / row["run_id"] / "log").is_dir() and not a.uncollected:
+            raise Refuse(f"{row['run_id']}: results not collected; run edr watch --once, or pass --uncollected")
+        targets = [root]
+    return [str(assert_safe_target(t, project.safety.marker, project.safety.min_depth)) for t in targets]
+
+
+def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
+    """The watcher: one cycle, a check, or the loop with the bot."""
+    project = c.project
+    if a.dry_run:
+        watch.cycle(project, c.ssh, c.ledger, [], dry_run=True)
+        return 0
+    notifiers = _notifiers(c)
+    if a.check:
+        return watch.check(project, notifiers)
+    if a.serve:
+        _serve(project.data / "board", a.serve)
+    watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
+    return 0
+
+
+def _notifiers(c: Ctx) -> list:
+    project = c.project
+    bot = Ctx(c.a)
+    bot._project = project
+    bot._ledger = Ledger(project.data / "edr.db")
+    # The bot polls in its own thread, and sqlite refuses a connection made in another one.
+    bot._ledger.db.close()
+    bot._ledger.db = sqlite3.connect(project.data / "edr.db", check_same_thread=False)
+    bot._ledger.db.row_factory = sqlite3.Row
+    return make_notifiers(project.site, project, bot.ledger, Actions(bot))
+
+
+def _serve(directory: Path, port: int) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"board on http://127.0.0.1:{server.server_address[1]}/status.html")
+
+
+# --- parser and main
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # type: ignore[override]
+        # Bad input is exit 1 in section 10, not the 2 of argparse.
+        self.print_usage(sys.stderr)
+        print(f"edr: {message}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def _parser() -> argparse.ArgumentParser:
+    p = _Parser(prog="edr", description="Run flows on hosts, keep a ledger, watch, export.")
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
+    p.add_argument("--version", action="version", version=f"edr {__version__}")
+    p.set_defaults(dry_run=False)
+    sub = p.add_subparsers(dest="verb", metavar="verb", required=True)
+
+    def verb(name: str, help_: str, write: bool = False, why: bool = False) -> argparse.ArgumentParser:
+        s = sub.add_parser(name, help=help_, description=help_)
+        s.set_defaults(fn=globals()["cmd_" + name])
+        if write:
+            s.add_argument("--dry-run", action="store_true", help="print what would happen and write nothing")
+        if why:
+            s.add_argument("--why", required=True, help="the reason; it goes into the events table")
+        return s
+
+    s = verb("status", "the board, or one run")
+    s.add_argument("handle", nargs="?", help="label@batch, a run id prefix, or #n from the last board")
+    s.add_argument("--batch", metavar="B")
+    s.add_argument("--narrow", action="store_true", help="48 columns, two lines per live run")
+    s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s")
+    s.add_argument("--live", action="store_true", help="ask each host whether the driver exists")
+    s.add_argument("--triage", action="store_true", help="every run not running, with a proposed command")
+    s = verb("events", "the last events")
+    s.add_argument("--since", metavar="T", help="30m, 2h, 1d or seconds")
+    s.add_argument("--run", metavar="HANDLE")
+    s.add_argument("-n", type=int, default=50)
+    verb("hosts", "probe every host").add_argument("--narrow", action="store_true")
+    verb("lic", "probe every licence")
+    s = verb("metrics", "the metrics of one design")
+    s.add_argument("--design", required=True, metavar="H")
+    s.add_argument("--stage", metavar="S")
+    s.add_argument("--step", type=int, metavar="N")
+    s.add_argument("--csv", action="store_true", help="CSV on stdout")
+    verb("init", "write edr.toml and the watch unit here", write=True).add_argument("--site", required=True, metavar="DIR")
+    verb("check", "load everything, probe the hosts, check the hooks")
+    s = verb("stage", "stage a ref as a worktree, or a dirty tree as a snapshot", write=True)
+    s.add_argument("ref", nargs="?", help="default: source.ref")
+    s.add_argument("--dirty", metavar="DIR")
+    verb("plan", "render the run specs of a batch; writes nothing", write=True).add_argument("batch", nargs="?")
+    s = verb("launch", "start one driver per job of a batch", write=True)
+    s.add_argument("batch", nargs="?")
+    s.add_argument("--only", metavar="L", help="labels, comma separated")
+    s.add_argument("--allow-dirty", action="store_true")
+    s = verb("run", "more work on the tree of an existing run", write=True)
+    s.add_argument("handle")
+    s.add_argument("--stage", metavar="S")
+    s.add_argument("--tasks", nargs="+", metavar="ID")
+    s.add_argument("--from", dest="from_", metavar="CHECKPOINT")
+    s.add_argument("--on", metavar="HOST")
+    s.add_argument("--parallel", type=int, metavar="N")
+    s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
+    s = verb("keep", "add hours to the running stage or task; --ack cancels a pending kill", write=True)
+    s.add_argument("handle")
+    s.add_argument("--hours", type=int, metavar="N", help="default 12")
+    s.add_argument("--ack", action="store_true")
+    s = verb("export", "a frozen snapshot of one design", write=True)
+    s.add_argument("--design", required=True, metavar="SRC")
+    s.add_argument("--out", required=True, metavar="DIR")
+    s.add_argument("--labels", metavar="a,b")
+    s = verb("stop", "stop one run", write=True, why=True)
+    s.add_argument("handle")
+    s.add_argument("--after-task", action="store_true", help="write the stop file; the running task ends first")
+    s.add_argument("--now", action="store_true", help="SIGKILL after 30 s")
+    s = verb("retire", "remove the run tree, or its prune targets", write=True, why=True)
+    s.add_argument("handle", nargs="?")
+    s.add_argument("--batch", metavar="B", help="every run of the batch, then mark it RETIRED")
+    s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
+    s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
+    s = verb("watch", "the watcher", write=True)
+    s.add_argument("--once", action="store_true")
+    s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")
+    s.add_argument("--serve", type=int, metavar="PORT", help="serve data/board over http on 127.0.0.1")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run one verb and return its exit code."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+    try:
+        a = _parser().parse_args(argv)
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else 1
+    c, buf = Ctx(a), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf) if a.json else contextlib.nullcontext():
+            code = a.fn(c, a)
+    except (Refuse, ConfigError, stagectl.StageError, runid.GitError) as e:
+        print(f"edr: {e}", file=sys.stderr)
+        code = 1
+    except HostError as e:
+        print(f"edr: {e}", file=sys.stderr)
+        code = 3
+    except KeyboardInterrupt:
+        code = 130
+    finally:
+        c.close()
+    if a.json:
+        print(json.dumps({"code": code, "data": c.data, "output": buf.getvalue()}, indent=1, default=str))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

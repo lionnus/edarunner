@@ -1,0 +1,54 @@
+# edarunner project file. Every key: docs/config.md. Placeholders: docs/design.md 3.5.
+schema = 1
+project = "$project"
+site = "$site"
+state = "~/.edr/{project}"
+data = "data"
+run_prefix = "{user}/edr/{project}"
+
+[source]
+repo = "../rtl"                 # one git repository
+worktrees = "../rtl-wt"         # `edr stage` adds worktrees here
+ref = "HEAD"
+nested = []
+run_id = "{date}_{label}_{build_tag}_g{src}"
+
+[sync]
+exclude = [".git", ".venv"]
+
+[safety]
+marker = "/edr/"
+min_depth = 4
+
+[limits]
+stagger_s = 120
+stale_s = 600
+dead_s = 2700
+hung_s = 21600
+grace_s = 3600
+host_free_min_gb = 100
+streak = 3
+heartbeat_s = 60
+gate_max_s = 14400
+
+[placement]
+max_per_host = 2
+min_free_cores = 16
+min_free_ram_gb = 60
+
+# One stage per command of the flow. A task group: docs/design.md 3.1.
+[stages.synth]
+cmd = "make synth RUN={run_id} CONFIG={config} CORES={cores} {overrides}"
+steps = ["analyze", "elaborate", "compile"]
+progress = "ls reports 2>/dev/null | grep -cE '^[0-9]+$$'"
+needs = { cores = 16, disk_gb = 50 }
+budget = { hours = 6 }
+collect = ["reports/"]
+
+[metrics.area_um2]
+stage = "synth"
+step = "*"
+file = "reports/{step}/area.rpt"
+regex = '^total\s+(\S+)'
+unit = "um2"
+canonical = "area.cell"
