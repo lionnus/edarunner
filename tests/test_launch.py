@@ -289,3 +289,16 @@ def test_project_env_is_rendered_over_the_site_env(env) -> None:
     assert e["PATH"] == f"{a.root}/.venv/bin:$PATH" and e["FLOW_TAG"] == a.values["build_tag"]
     for k, val in project.site.env.items():
         assert k in e
+
+
+def test_tree_id_survives_a_chain_of_reuse(env) -> None:
+    project, batch, ssh, ledger = env
+    ledger.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
+                       "root": "/x/edr/old", "src": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
+    ledger.upsert_run({"run_id": "20260102_0000_a_demo_gOLD", "batch": "mid", "label": "a", "host": "local",
+                       "root": "/x/edr/old", "src": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
+    batch.jobs[0].reuse = {"label": "a", "latest": True}
+    batch.jobs[0].stages = ["pnr"]
+    a = next(p for p in launch.plan(project, batch, ssh, ledger, date=DATE) if p.label == "a")
+    assert a.reuse == "20260102_0000_a_demo_gOLD" and a.values["tree_id"] == "20260101_0000_a_demo_gOLD"
+    assert launch._run_row(a, batch)["tree_id"] == "20260101_0000_a_demo_gOLD"
