@@ -316,3 +316,26 @@ def test_check_on_a_stale_watch_json(env: Env) -> None:
     wj.write_text(json.dumps({"ts": time.time() - 100, "cycle": 3, "pid": 1}))
     assert watch.check(env.project, [env.notifier]) == 1
     assert env.notifier.sent == [("watch", ""), ("watch", "")]
+
+
+def test_stage_rows_follow_the_stages_map(env) -> None:
+    """One-command stages get terminal rows with times; a stage left running in a finished run takes the run's class."""
+    stages = {"synth": {"status": "done", "attempt": 1, "started": NOW - 3000, "ended": NOW - 2000, "exit": 0},
+              "pnr": {"status": "done", "attempt": 1, "started": NOW - 2000, "ended": NOW - 1000, "exit": 0},
+              "power": {"status": "done", "attempt": 1, "started": NOW - 1000, "ended": NOW - 10, "exit": 0}}
+    hb = env.heartbeat("s1", phase="done", stage="power", exit=0, stages=stages)
+    env.cycle()
+    rows = {r[0]: tuple(r[1:]) for r in env.ledger.db.execute(
+        "SELECT stage, status, started, ended, exit FROM stage_runs WHERE run_id=? AND task=''", (hb["run_id"],))}
+    assert rows["synth"] == ("done", NOW - 3000, NOW - 2000, 0)
+    assert rows["pnr"] == ("done", NOW - 2000, NOW - 1000, 0)
+    failed = {"synth": {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0},
+              "pnr": {"status": "failed", "attempt": 1, "started": 2, "ended": 3, "exit": 5}}
+    hb2 = env.heartbeat("s2", phase="FAILED:pnr", stage="pnr", exit=5, stages=failed)
+    killed = {"synth": {"status": "running", "attempt": 1, "started": 1, "ended": None, "exit": None}}
+    hb3 = env.heartbeat("s3", phase="KILLED:SIGTERM", stage="synth", exit=10, stages=killed)
+    env.cycle()
+    assert tuple(env.ledger.db.execute("SELECT status, exit FROM stage_runs WHERE run_id=? AND stage='pnr'",
+                                       (hb2["run_id"],)).fetchone()) == ("failed", 5)
+    assert env.ledger.db.execute("SELECT status FROM stage_runs WHERE run_id=? AND stage='synth'",
+                                 (hb3["run_id"],)).fetchone()[0] == "killed"

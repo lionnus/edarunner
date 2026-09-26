@@ -83,9 +83,15 @@ def ingest(ledger: Ledger, heartbeats: list[tuple[str, dict]]) -> None:
     for batch, hb in heartbeats:
         ledger.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
         stage = hb.get("stage") or ""
-        if stage:
-            status = "running" if board.is_live(hb) else hb.get("phase")
-            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "status": status, "log": hb.get("log")})
+        stages = hb.get("stages") or ({stage: {"status": "running", "log": hb.get("log")}} if stage else {})
+        for name, s in stages.items():
+            status = s.get("status") or "running"
+            # A stage still running in a finished run ended with the run: killed, stopped or failed.
+            if status == "running" and not board.is_live(hb):
+                status = board.state_of(hb)
+            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
+                                     "status": status, "started": s.get("started"), "ended": s.get("ended"),
+                                     "exit": s.get("exit"), "log": s.get("log")})
         for tid, t in (hb.get("tasks") or {}).items():
             ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
                                      **{k: t.get(k) for k in _TASK_KEYS}})
