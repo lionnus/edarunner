@@ -7,6 +7,7 @@ See docs/design.md section 12.
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 from pathlib import Path
 
@@ -29,17 +30,18 @@ def assert_safe_target(path: str | os.PathLike, marker: str, min_depth: int = 4)
         raise Refuse("empty path")
     if not text.startswith("/"):
         raise Refuse(f"'{text}' is not absolute")
-    norm = text.rstrip("/") or "/"
+    # A '..' segment would carry the marker and the depth past the tree it names.
+    norm = posixpath.normpath(text)
     if norm in _ROOTS or norm == os.path.expanduser("~"):
         raise Refuse(f"'{text}' is a root, not a target")
     if not marker:
         raise Refuse("empty safety marker")
-    if marker not in text:
+    if marker not in norm:
         raise Refuse(f"'{text}' does not contain the marker '{marker}'")
     depth = norm.count("/")
     if depth < min_depth:
         raise Refuse(f"'{text}' is too shallow (depth {depth}, need {min_depth})")
-    return Path(text)
+    return Path(norm)
 
 
 def assert_run_id(run_id: str) -> str:

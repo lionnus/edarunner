@@ -320,7 +320,8 @@ Behaviour, in order:
      `gate_max_s`, then fail with 4. A probe that fails counts as unknown:
      log it, record `licence_unknown` in the heartbeat, and go on.
    - one command: run `cmd` (or `resume` with `{checkpoint}` filled when
-     `start_at.checkpoint` is set and this is the first stage) through
+     `start_at.checkpoint` is set and this is the first stage; a checkpoint
+     on a stage without `resume` is a bad spec, exit 2) through
      `shell -c`, in `cwd`, with `env`, in a new session
      (`start_new_session=True`), stdin from `/dev/null`, stdout and stderr
      appended to `log/<stage>.log`. Record the pgid. Poll every 5 s: run
@@ -407,8 +408,9 @@ name. `--after-task` writes the `stop` file instead.
 4. Extract every metric whose file arrived and is not in `metrics` yet.
    Write `params` from the resolved configuration once.
 5. Retry a dead run's last stage from its last step through `resume`,
-   once, when the spec has `resume`.
-6. Launch queued jobs whose host now fits.
+   once, when the spec has `resume` and no recorded pgid of the run is
+   alive on the host; while one is, log one event and wait.
+6. Launch queued jobs whose host now fits, one per batch per cycle.
 7. Notify through every configured channel: one message per event class
    per run, edited on change where the channel allows it.
 8. Write `data/board/board.json`, `data/board/status.html` and
