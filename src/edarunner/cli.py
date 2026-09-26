@@ -34,7 +34,7 @@ from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, Ssh
 from .ledger import Ledger
-from .model import Batch, Job, Batch, Project
+from .model import Batch, Job, Project
 from .notify import make_notifiers
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
