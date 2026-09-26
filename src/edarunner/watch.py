@@ -64,11 +64,11 @@ def _keep(project: Project, run: Row) -> dict:
     return _load(project.state / str(run.get("batch")) / f"{run['run_id']}.keep.json")
 
 
-def read_heartbeats(project: Project) -> list[tuple[str, dict]]:
-    """Every heartbeat of every batch without RETIRED, as (batch, heartbeat)."""
+def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
+    """Every heartbeat of every batch without RETIRED (or of `batches`), as (batch, heartbeat)."""
     out = []
     for bdir in sorted(p for p in project.state.glob("*") if p.is_dir() and p.name != "bin"):
-        if (bdir / "RETIRED").exists():
+        if (bdir / "RETIRED").exists() or (batches is not None and bdir.name not in batches):
             continue
         for f in sorted(bdir.glob("*.json")):
             if not f.name.endswith((".spec.json", ".keep.json")):

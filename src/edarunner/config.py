@@ -24,7 +24,7 @@ PathLike = str | os.PathLike[str]
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
     "schema", "project", "site", "state", "data", "run_prefix",
-    "source", "sync", "safety", "limits", "placement", "stages", "metrics",
+    "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "licences", "nfs_export", "telegram"}
 _SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
@@ -221,6 +221,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         placement=_build(Placement, raw.get("placement", {}), file, "placement"),
         stages=stages,
         metrics=metrics,
+        env={str(k): str(val) for k, val in _table(raw.get("env", {}), None, file, "env").items()},
         tasks=tasks,
         task_resolver=resolver,
     )

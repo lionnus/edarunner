@@ -71,6 +71,9 @@ nested = ["nonfree"]            # nested repositories inside the worktree, pinne
 run_id = "{date}_{label}_{build_tag}_g{src}"
 build_tag = "python:hooks/build_tag.py:build_tag"   # optional; default "{config}[_{overrides}]"
 
+[env]
+PATH = "{root}/.venv/bin:$PATH"   # the flow's own additions; rendered per run, `$VAR` expands on the host
+
 [sync]
 exclude = [".venv", "simulation/tests"]
 after = "hooks/seed_python.sh {host} {root} {mount}"   # optional, runs on the head node

@@ -35,6 +35,13 @@ Rules that apply to every file:
 | `run_id` | run id template | `"{date}_{label}_{build_tag}_g{src}"` |
 | `build_tag` | hook that returns the build tag | `""` (`{config}[_{overrides}]`) |
 
+### [env]
+
+Variables the flow needs in every command of every stage, on top of the
+site `env`. Values take the run placeholders (`{root}`, `{build_tag}`) and
+`$VAR` expands on the host. Example: `PATH = "{root}/.venv/bin:$PATH"` for a
+flow that calls `python` from the venv of the tree.
+
 ### [sync]
 
 | Key | Meaning | Default |

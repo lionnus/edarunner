@@ -131,10 +131,26 @@ class Ctx:
             b.source = runid.src_tag(stagectl.find(self.project, b.source))
         return b
 
+    def refresh(self, batch: str | None = None) -> None:
+        """Ingest the heartbeat files of the shown batches, so the board follows the driver, not the last watcher cycle."""
+        if not (self.project.data / "edr.db").exists():
+            return
+        heartbeats = watch.read_heartbeats(self.project, {batch} if batch else None)
+        if heartbeats:
+            watch.ingest(self.ledger, heartbeats)
+
     def rows(self, batch: str | None = None) -> list[Row]:
-        """The runs of the batches that are not retired."""
+        """The runs of the batches that are not retired, with the state a heartbeat age gives."""
+        self.refresh(batch)
         retired = {b["batch"] for b in self.ledger.batches() if b.get("retired")}
-        return [r for r in self.ledger.runs(batch=batch) if r["batch"] not in retired]
+        rows = [r for r in self.ledger.runs(batch=batch) if r["batch"] not in retired]
+        now, lim = time.time(), self.project.limits
+        for r in rows:
+            # The watcher's own classes (hung, host_full, ...) stay; only the age classes follow the heartbeat.
+            if board.is_live(r) and r.get("updated") is not None and r.get("state") in (None, "running", "stale", "dead"):
+                age = now - r["updated"]
+                r["state"] = "dead" if age > lim.dead_s else "stale" if age > lim.stale_s else "running"
+        return rows
 
     def resolve(self, handle: str) -> Row:
         """The ledger row of label@batch, a run id prefix, or #n from the last board."""
@@ -298,6 +314,8 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
     """The board, or one run with its stages, metrics and log tail."""
     if a.handle:
         row = c.resolve(a.handle)
+        c.refresh(str(row["batch"]))
+        row = c.ledger.run(row["run_id"]) or row
         hb, run_id = c.heartbeat(row), row["run_id"]
         stages = [dict(r) for r in c.ledger.db.execute(
             "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]

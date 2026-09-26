@@ -149,6 +149,14 @@ def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[
     return out
 
 
+def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
+    """The site env, then the project env rendered per run; `$VAR` expands on the host."""
+    env = dict(project.site.env)
+    for k, val in project.env.items():
+        env[k] = config.render(val, v)
+    return env
+
+
 def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: list[Task],
           v: dict[str, object]) -> dict[str, Any]:
     state_dir = project.state / batch.batch
@@ -157,7 +165,7 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
         "schema": 1, "run_id": run_id, "batch": batch.batch, "project": project.project,
         "label": job.label, "config": job.config, "host": v["host"], "root": v["root"],
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
-        "shell": "/bin/bash", "env": dict(project.site.env),
+        "shell": "/bin/bash", "env": _env(project, v),
         "limits": {k: getattr(project.limits, k) for k in _SPEC_LIMITS},
         "netlist_stage": v["netlist_stage"],
         "start_at": {"stage": names[0], "checkpoint": None},

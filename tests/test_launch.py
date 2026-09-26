@@ -279,3 +279,13 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
     assert pid == 4242
     assert ssh.cmd.index("py=$(command -v python3)") < ssh.cmd.index("export PATH=")
     assert 'nohup "$py"' in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
+
+
+def test_project_env_is_rendered_over_the_site_env(env) -> None:
+    project, batch, ssh, ledger = env
+    project.env = {"PATH": "{root}/.venv/bin:$PATH", "FLOW_TAG": "{build_tag}"}
+    a = launch.plan(project, batch, ssh, ledger, date=DATE)[0]
+    e = a.spec["env"]
+    assert e["PATH"] == f"{a.root}/.venv/bin:$PATH" and e["FLOW_TAG"] == a.values["build_tag"]
+    for k, val in project.site.env.items():
+        assert k in e
