@@ -59,11 +59,25 @@ def pin_date(state: Path, batch: str, dry_run: bool = False) -> str:
     return date
 
 
-def build_tag(project: Project, job: Job) -> str:
-    """The build tag of a job: the source hook, else config plus one token per override."""
+def build_tag(project: Project, job: Job, src: str = "") -> str:
+    """The build tag of a job: the source hook, else config plus one token per override.
+
+    The hook gets the worktree of `src` as a third argument when one exists, so it
+    can read the configuration table and the interpreter of that source.
+    """
     if project.source.build_tag:
-        fn, _ = config.load_hook(project.root, project.source.build_tag)
-        return str(fn(job.config, job.overrides))
+        fn, name = config.load_hook(project.root, project.source.build_tag)
+        worktree = None
+        if src:
+            candidate = project.source.worktrees / src
+            worktree = str(candidate) if candidate.is_dir() else None
+        try:
+            try:
+                return str(fn(job.config, job.overrides, worktree))
+            except TypeError:
+                return str(fn(job.config, job.overrides))
+        except Exception as e:  # a hook fault is a plan problem, never a traceback
+            raise ConfigError(f"build_tag hook {name}: {e}") from e
     return job.config + "".join(f"_{k}{v}" for k, v in job.overrides.items())
 
 
@@ -190,7 +204,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
             problems.append(str(e))
     if not tag:
         try:
-            tag = build_tag(project, job)
+            tag = build_tag(project, job, src)
         except ConfigError as e:
             problems.append(str(e))
             tag = job.config
@@ -209,7 +223,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
             if not mount:
                 problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
-    v.update(run_id=run_id, host=host, mount=mount, root=root)
+    # {tree_id} names the tree the flow writes in: the reused run's id, else this run's.
+    v.update(run_id=run_id, tree_id=reused or run_id, host=host, mount=mount, root=root)
     spec: dict[str, Any] = {}
     if host and not problems:
         try:
