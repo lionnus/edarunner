@@ -87,16 +87,24 @@ edr run b_nodw@demo --stage synth --from elaborate
 The first line holds the mark of the state, the project and the state
 in bold, and the handle in monospace. The second line is the reason.
 The third line is the one command that `edr status --triage` proposes
-for the run, in monospace. The alert carries two inline buttons:
+for the run, in monospace. The alert carries three inline buttons:
 
 | Button | `callback_data` | Action |
 |---|---|---|
 | keep 12h | `keep12:<handle>` | `edr keep <handle> --hours 12` |
 | ack | `ack:<handle>` | `edr keep <handle> --ack` |
+| stop | `stop:<handle>` | asks first, then `edr stop <handle> --after-task` |
 
 The bot answers every press, appends the result to the alert text, and
-keeps the buttons. A press records one ledger event: the `keep` event of
-the action, with the actor `telegram`.
+keeps the buttons. A press records one ledger event: the `keep` or the
+`stop` event of the action, with the actor `telegram`.
+
+The stop button acts only on a second tap. The first tap adds the line
+`Stop <handle>?` to the alert and shows two buttons, `Yes, stop` and
+`No`. `No` restores the three buttons. A question older than 10 minutes
+is stale: `Yes, stop` then restores the buttons and stops nothing. The
+bot reads the age from the edit date of the message, so a question
+survives a restart of the watcher.
 
 ## The board
 

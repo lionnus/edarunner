@@ -48,8 +48,8 @@ class Notifier:
 
 
 def alert_buttons(handle: str) -> list[Button]:
-    """The two buttons of an alert: keep 12 h and ack."""
-    return [("keep 12h", f"keep12:{handle}"), ("ack", f"ack:{handle}")]
+    """The three buttons of an alert: keep 12 h, ack, and stop after the running task."""
+    return [("keep 12h", f"keep12:{handle}"), ("ack", f"ack:{handle}"), ("stop", f"stop:{handle}")]
 
 
 def make_notifiers(site: Site, project: Project, ledger: Ledger, actions: Actions) -> list[Notifier]:
