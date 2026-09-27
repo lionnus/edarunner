@@ -92,12 +92,19 @@ renders a spec for the demo flow and starts the driver on it.
 The driver writes `<run_id>.json` by a temporary file and a rename every
 `heartbeat_s` seconds and at every phase change, so a reader never sees
 a torn file. A heartbeat keeps its last phase after the driver dies;
-the watcher marks such a run `dead` after `dead_s`.
+the watcher marks such a run `dead` after `dead_s`. The hung check of
+the watcher compares `cpu_s` and `log_bytes` from cycle to cycle. A
+heartbeat without them, from an older driver, makes the watcher read
+the two values over ssh.
 
 | Field | Meaning |
 |---|---|
 | `phase`, `stage`, `step`, `step_name` | where the run is; `step` comes from `progress` every 5 s |
+| `host` | the `host` of the spec; the name `socket.gethostname()` gives when the spec has none |
+| `sched_id` | the job id of a scheduler: `EDR_SCHED_ID`, else `SLURM_JOB_ID`, else `LSB_JOBID`; null without one |
 | `driver_pid`, `pgids` | what `edr stop` signals |
+| `cpu_s` | the CPU time in seconds of every process in `pgids`, with its reaped children, from `/proc`, else from `ps`; every heartbeat |
+| `log_bytes` | the size of `log` in bytes; every heartbeat |
 | `stages` | per stage started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
 | `tasks` | per task: `phase`, `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
 | `counts` | `done`, `failed`, `skipped`, `running`, `queued`, over every task group of the run |
@@ -151,7 +158,7 @@ claims nothing more.
 | A change to | Also changes |
 |---|---|
 | the spec | `launch._spec`, `tests/test_driver.py`, the table above |
-| a heartbeat field | `watch.ingest`, `board.py`, the table above |
+| a heartbeat field | `watch.ingest`, `board.py`, the table above; `cpu_s` and `log_bytes` also `watch._signature` |
 | a phase or an exit code | `board.state_of`, `watch.STATES`, the table in `run.md` |
 | the queue layout | `collect.py`, which reads the task directories from the spec |
 

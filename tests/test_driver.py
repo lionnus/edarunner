@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import signal
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -368,3 +369,29 @@ def test_leases_vanish_at_stage_end(tmp_path: Path) -> None:
     assert os.listdir(leases) == []
     assert finish(proc, spec)[0] == 0
 
+
+
+def test_heartbeat_names_the_host_the_job_and_the_samples(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("EDR_SCHED_ID", "42.0")
+    spec = render_spec(tmp_path, stages=("synth",))
+    spec["host"] = None
+    proc = start(spec)
+    hb = wait_for(spec, lambda h: h["phase"] == "stage:synth" and h["pgids"] and h["log_bytes"])
+    assert hb["cpu_s"] >= 0 and hb["log"].endswith("synth.log")
+    rc, hb = finish(proc, spec)
+    assert (rc, hb["host"], hb["sched_id"]) == (0, socket.gethostname(), "42.0")
+    assert hb["log_bytes"] == (Path(spec["root"]) / "log" / "synth.log").stat().st_size and hb["cpu_s"] == 0.0
+
+
+def test_cpu_seconds_of_a_busy_group_from_proc_and_from_ps(monkeypatch) -> None:
+    mod = _load_driver()
+    busy = subprocess.Popen(["python3", "-c", "import time\nend = time.time() + 30\nwhile time.time() < end: pass"],
+                            start_new_session=True)
+    try:
+        time.sleep(1.5)
+        assert mod.cpu_seconds([busy.pid]) > 0.3 and mod.cpu_seconds([]) == 0.0
+        monkeypatch.setattr(mod.os.path, "isdir", lambda p: False)
+        assert mod.cpu_seconds([busy.pid]) >= 1.0
+    finally:
+        busy.kill()
+        busy.wait()

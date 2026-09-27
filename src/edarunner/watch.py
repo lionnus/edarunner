@@ -138,9 +138,12 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
 # classify
 
 def _signature(ssh: Ssh, hb: dict) -> list:
+    """What the hung check compares between cycles; the log size and the CPU time come from the heartbeat, else over ssh."""
     counts = hb.get("counts") or {}
     sig = [hb.get("phase"), hb.get("step"), hb.get("tree_gb"), hb.get("last_log"),
            sum(counts.get(k, 0) for k in ("done", "failed", "skipped"))]
+    if "cpu_s" in hb or "log_bytes" in hb:
+        return [*sig, [hb.get("log_bytes"), hb.get("cpu_s")]]
     pgids = " ".join(str(int(g)) for g in hb.get("pgids") or [])
     cmds = [f"stat -c %s {shlex.quote(str(hb['log']))} 2>/dev/null"] if hb.get("log") else []
     if pgids:

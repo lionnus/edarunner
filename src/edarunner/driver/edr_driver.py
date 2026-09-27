@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import string
 import subprocess
 import sys
@@ -19,6 +20,51 @@ POLL_S = 5
 TICK_S = 0.5
 TAIL_LINES = 80
 GB = 1024.0 ** 3
+
+
+def identity(spec, env):
+    # type: (dict, dict) -> dict
+    """The host the driver runs on, when the spec names none, and the job id of a scheduler."""
+    sched = env.get("EDR_SCHED_ID") or env.get("SLURM_JOB_ID") or env.get("LSB_JOBID")
+    return {"host": spec.get("host") or socket.gethostname(), "sched_id": sched or None}
+
+
+def cpu_seconds(pgids):
+    # type: (list) -> float
+    """The CPU time of every process in `pgids`, with its reaped children, from /proc, else from ps."""
+    if not pgids:
+        return 0.0
+    want = set(pgids)
+    if not os.path.isdir("/proc/self"):
+        try:
+            out = subprocess.run(["ps", "-e", "-o", "pgid=,cputimes="], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, universal_newlines=True, timeout=30).stdout
+            return float(sum(int(t) for g, t in (ln.split() for ln in out.splitlines() if ln.strip())
+                             if int(g) in want))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+    ticks, hz = 0, float(os.sysconf("SC_CLK_TCK"))
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % name) as f:
+                fields = f.read().rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        # After the comm: state, ppid, pgrp, ..., utime, stime, cutime, cstime at 11 to 14.
+        if int(fields[2]) in want:
+            ticks += sum(int(x) for x in fields[11:15])
+    return round(ticks / hz, 2)
+
+
+def log_size(path):
+    # type: (str) -> int
+    """The size of a log in bytes, or None when it does not exist."""
+    try:
+        return os.path.getsize(path) if path else None
+    except OSError:
+        return None
 
 
 class Fail(Exception):
@@ -131,6 +177,7 @@ class Driver(object):
             "started": now, "updated": now, "elapsed_s": 0, "disk_free_gb": None,
             "tree_gb": None, "exit": None, "killed_by": None, "last_cmd": None,
             "last_log": None, "log": None}
+        self.hb.update(identity(spec, os.environ))
 
     # heartbeat
 
@@ -139,8 +186,10 @@ class Driver(object):
         """Write the heartbeat by an atomic rename; `tree` also runs du."""
         free = free_gb(self.root)
         tree = du_gb(self.root) if tree else None
+        samples = self.samples()
         with self.lock:
             hb = self.hb
+            hb.update(samples)
             now = int(time.time())
             hb["updated"] = now
             hb["elapsed_s"] = now - hb["started"]
@@ -161,6 +210,13 @@ class Driver(object):
                 os.rename(tmp, self.state_file)
             except OSError as e:
                 sys.stderr.write("heartbeat write failed: %s\n" % e)
+
+    def samples(self):
+        # type: () -> dict
+        """What the watcher's hung check compares: the CPU time of the process groups and the size of the current log."""
+        with self.lock:
+            pgids, log = sorted(self.procs), self.hb["log"]
+        return {"cpu_s": cpu_seconds(pgids), "log_bytes": log_size(log)}
 
     def beat_loop(self):
         period = float(self.limits.get("heartbeat_s") or 60)

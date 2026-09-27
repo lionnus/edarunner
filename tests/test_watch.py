@@ -488,3 +488,17 @@ def test_the_backend_is_asked_once_per_cycle_for_every_live_run(env: Env) -> Non
     env.cycle(backend=fake)
     env.cycle(NOW + 1, backend=fake)
     assert [sorted(ids) for ids in fake.asked] == [["7", "local:4242"]] * 2
+
+
+def test_hung_reads_the_samples_of_the_heartbeat_without_ssh(env: Env, monkeypatch) -> None:
+    lim = env.project.limits
+    lim.hung_s, lim.grace_s = 0, 3600
+    cmds: list[str] = []
+    real = env.ssh.run
+    monkeypatch.setattr(env.ssh, "run", lambda host, cmd, timeout_s=None: cmds.append(cmd) or real(host, cmd, timeout_s))
+    env.heartbeat("a", cpu_s=1.5, log_bytes=100)
+    assert env.cycle()[rid("a")] == "running"
+    env.heartbeat("a", cpu_s=2.5, log_bytes=100)
+    assert env.cycle(NOW + 1)[rid("a")] == "running"
+    assert env.cycle(NOW + 2)[rid("a")] == "hung"
+    assert not [c for c in cmds if "stat -c" in str(c) or "cputimes" in str(c)]
