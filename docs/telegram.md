@@ -3,7 +3,8 @@
 The bot is a thread of `edr watch`. It sends alerts with two buttons,
 keeps one pinned board message, and answers commands from one chat. It
 uses long polling over outbound HTTPS, so it needs no open port and no
-webhook. `docs/configuration.md` lists the keys of `[telegram]`.
+webhook. `docs/reference/configuration.md` lists the keys of
+`[telegram]`.
 
 ## Set up the bot
 
@@ -52,17 +53,8 @@ reply is formatted text: one short line per item, a run handle in
 monospace, and a count or a note in italics. A tap on a handle copies
 it, so you can paste it into `/status <handle>`.
 
-Each run line starts with one mark for its state:
-
-| Mark | States |
-|---|---|
-| 🟢 | running |
-| 🔵 | queued |
-| 🟡 | stale, host_full, superseded |
-| 🔴 | dead, hung, looping, over_budget, orphan, failed, killed |
-| 🟠 | incomplete |
-| ⚪ | done |
-| ⚫ | retired, stopped, imported |
+Each run line starts with one mark for its state;
+`docs/reference/states.md` lists them.
 
 A `<pre>` block holds only text whose width the bot does not control:
 the last log line of `/status <handle>`, the columns of `/compare` and
@@ -120,22 +112,8 @@ chat.
 
 ## Built-in commands
 
+`docs/reference/bot.md` lists every built-in command with its arguments.
 A handle is `label@batch`, a run id prefix, or `#n` from the last board.
-
-| Command | Effect |
-|---|---|
-| `/status` | the board, as pinned |
-| `/status <handle>` | the state, stage, step, age, host and last log line of one run |
-| `/events [n]` | the last `n` events, default 8, at most 30, newest first |
-| `/hosts` | the worst mark of `edr hosts`, used cores, free scratch GB and idle GPUs per host, each of the total |
-| `/tools` | free seats and hosts per tool |
-| `/board` | pin a new board message |
-| `/keep <handle> [hours]` | add hours to the running stage or task, default 12 |
-| `/ack <handle>` | cancel a pending kill |
-| `/stop <handle> [why]` | `edr stop --after-task`; never a kill |
-| `/compare <handle>...` | metrics side by side |
-| `/metric <name> [--design H]` | one metric for every run of a design |
-| `/help` | the commands by purpose, plus the custom commands |
 
 `/status <handle>` shows the mark, the handle and the state, then the
 stage and step, the host and the age, the proposed command in monospace,
@@ -171,31 +149,9 @@ run = ["tmux", "new-session", "-d", "-s", "claude-{project}-{dir}", "-c", "{root
 reply = "session claude-{project}-{dir} started; open the Claude app"
 ```
 
-| Key | Meaning |
-|---|---|
-| `help` | the line in the `/` menu and in `/help` |
-| `run` | the argv list; never a shell string |
-| `args` | argument name to regex, in order; the last argument takes the rest of the message |
-| `skip_if` | an argv list; exit 0 makes the bot reply `skip_reply` and run nothing |
-| `skip_reply` | the reply when `skip_if` passes, default `skipped` |
-| `reply` | the reply on exit 0 instead of the output |
-| `detach` | start the command in its own session and reply with the pid; the output goes to `data/telegram-<name>.log` |
-| `timeout_s` | kill the command after this many seconds, default 60 |
-| `cwd` | the working directory, default `{root}` |
-| `dry_run` | reply with the rendered argv and run nothing |
-
-Placeholders render per argument: `{project}`, `{root}` and
-`{project_root}` (the project directory), `{site_dir}`, `{user}`, and one
-per name in `args`. No shell runs between the bot and `run[0]`. A program
-that parses its argument itself, such as `tmux new-session <cmd>`,
-`ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so
-gate every placeholder inside such a token with an exact allowlist regex,
-as the `claude` example does.
-
-The regex gate works like this: every value must match its regex in full,
-or the bot replies `refused: <name> must match <regex>`, records the
-refusal in the ledger, and runs nothing. Write the regex as an allowlist
-of the exact values you expect.
+`docs/reference/bot.md` lists every key, the placeholders a string
+renders, and the regex gate on every argument. Write each regex as an
+allowlist of the exact values you expect, as the `claude` example does.
 
 ## One chat, or one per project
 

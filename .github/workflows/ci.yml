@@ -68,9 +68,20 @@ jobs:
           name: openroad
           path: _status
 
+  docs:
+    # docs/reference/ is generated from the code; a page that is not current fails here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync
+      - run: uv run tools/gen_docs.py --check
+
   status:
     # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/ci.md.
-    needs: [tests, driver, openroad]
+    needs: [tests, driver, openroad, docs]
     if: always()
     # One run at a time writes the branch; two pushes at once made one fail.
     concurrency:
