@@ -179,6 +179,60 @@ class CondorBackend(_Scheduler):
         return False if "not defined" in (out + err).lower() else None
 
 
+class SlurmBackend(_Scheduler):
+    """Slurm: the script next to the spec, the handle `slurm:<jobid>`."""
+
+    name = "slurm"
+    STATES = {"PENDING": Live.PENDING, "CONFIGURING": Live.PENDING, "RUNNING": Live.RUNNING,
+              "COMPLETING": Live.RUNNING, "SUSPENDED": Live.SUSPENDED}
+
+    def submit(self, req: Request) -> Handle:
+        script = req.spec.with_name(f"{req.run_id}.sbatch")
+        script.write_text(slurm_script(req))
+        ident = self._ok(["sbatch", "--parsable", str(script)]).strip().split(";")[0]
+        if not ident.isdigit():
+            raise HostError(f"sbatch: no job id in {ident!r}")
+        return Handle(self.name, ident)
+
+    def _state(self, state: str, reason: str) -> Live:
+        if state == "PENDING" and reason.startswith("JobHeld"):
+            return Live.HELD
+        return self.STATES.get(state, Live.GONE)
+
+    def alive(self, handles: Iterable[Handle]) -> dict[Handle, tuple[Live, str]]:
+        """One `squeue`; `sacct` for the jobs that left the queue."""
+        handles = list(handles)
+        ids = ",".join(h.id for h in handles)
+        rc, out, err = self.run(["squeue", "-h", "-o", "%i %T %r", "-j", ids])
+        found: dict[str, tuple[Live, str]] = {}
+        for line in out.splitlines() if rc == 0 else []:
+            parts = line.split(None, 2)
+            if len(parts) >= 2:
+                found[parts[0]] = (self._state(parts[1], parts[2] if len(parts) > 2 else ""), "")
+        missing = [h.id for h in handles if h.id not in found]
+        if missing:
+            rc2, out2, err2 = self.run(["sacct", "-n", "-P", "-X", "-o", "JobID,State", "-j", ",".join(missing)])
+            if rc != 0 and rc2 != 0:
+                why = f"squeue: rc {rc}: {err.strip()}; sacct: rc {rc2}: {err2.strip()}"
+                return {h: found.get(h.id, (Live.UNKNOWN, why)) for h in handles}
+            for line in out2.splitlines() if rc2 == 0 else []:
+                parts = line.split("|")
+                if len(parts) >= 2 and parts[0] in missing:
+                    state = parts[1].split()[0] if parts[1].split() else ""
+                    found[parts[0]] = (self._state(state, ""), "" if state in self.STATES else state)
+        return {h: found.get(h.id, (Live.GONE, f"job {h.id} left the queue")) for h in handles}
+
+    def stop(self, handle: Handle, hard: bool, pgids: Sequence[int] = ()) -> None:
+        """`scancel`: SIGTERM, and SIGKILL after `KillWait`; `hard` sends SIGKILL to the batch script at once."""
+        self._ok(["scancel", *(["-f", "-s", "KILL"] if hard else []), handle.id])
+
+    def licence(self, name: str) -> bool | None:
+        rc, out, err = self.run(["scontrol", "show", "lic", name])
+        if rc == 0 and f"LicenseName={name}" in out:
+            return True
+        return False if rc == 0 or "not found" in (out + err).lower() else None
+
+
 class LsfBackend(_Scheduler):
     """LSF: `bsub` with the argv of `lsf_argv`, the handle `lsf:<jobid>`."""
 
@@ -207,4 +261,4 @@ class LsfBackend(_Scheduler):
         self._ok(["bkill", *(["-s", "KILL"] if hard else []), handle.id])
 
 
-BY_NAME: dict[str, type[_Scheduler]] = {b.name: b for b in (CondorBackend, LsfBackend)}
+BY_NAME: dict[str, type[_Scheduler]] = {b.name: b for b in (CondorBackend, SlurmBackend, LsfBackend)}

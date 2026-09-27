@@ -15,7 +15,7 @@ from edarunner.backend import Handle, Live, Request, make_backend
 from edarunner.db import Database
 from edarunner.hosts import HostError, Ssh
 from edarunner.model import Scheduler
-from edarunner.schedulers import CondorBackend, LsfBackend, condor_submit, lsf_argv, slurm_script
+from edarunner.schedulers import CondorBackend, LsfBackend, SlurmBackend, condor_submit, lsf_argv, slurm_script
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 GOLDEN = Path(__file__).resolve().parent / "golden"
@@ -97,6 +97,36 @@ def test_condor_licence(shims: Shims, rc: int, out: str, err: str, known: bool |
     shims.add("condor_config_val", out, rc, err)
     assert CondorBackend(Scheduler()).licence("fc") is known
     assert shims.calls() == [["condor_config_val", "-negotiator", "FC_LIMIT"]]
+
+
+def test_slurm(shims: Shims, tmp_path: Path) -> None:
+    b = SlurmBackend(Scheduler(backend="slurm", tree_root="/t"))
+    shims.add("sbatch", "77;cluster\n")
+    h = b.submit(req(tmp_path))
+    script = tmp_path / "b" / "r1.sbatch"
+    assert h == Handle("slurm", "77") and shims.calls() == [["sbatch", "--parsable", str(script)]]
+    assert "#SBATCH --licenses=fc:1,vcs:2" in script.read_text()
+    shims.add("squeue", "77 RUNNING None\n78 PENDING JobHeldUser\n79 PENDING Priority\n80 SUSPENDED None\n")
+    shims.add("sacct", "81|COMPLETED\n82|CANCELLED by 0\n")
+    hs = [Handle("slurm", str(i)) for i in range(77, 84)]
+    got = b.alive(hs)
+    assert [got[h][0] for h in hs] == [Live.RUNNING, Live.HELD, Live.PENDING, Live.SUSPENDED, Live.GONE, Live.GONE, Live.GONE]
+    assert got[hs[5]][1] == "CANCELLED" and got[hs[6]][1] == "job 83 left the queue"
+    assert shims.calls()[-2:] == [["squeue", "-h", "-o", "%i %T %r", "-j", "77,78,79,80,81,82,83"],
+                                  ["sacct", "-n", "-P", "-X", "-o", "JobID,State", "-j", "81,82,83"]]
+    shims.add("squeue", rc=1, err="slurm_load_jobs error: Invalid job id specified\n")
+    shims.add("sacct", "81|RUNNING\n")
+    assert b.alive(hs[4:5]) == {hs[4]: (Live.RUNNING, "")}
+    shims.add("sacct", rc=1, err="Connection refused\n")
+    assert b.alive(hs[4:5])[hs[4]][0] is Live.UNKNOWN
+    shims.add("scancel")
+    b.stop(hs[0], hard=False)
+    b.stop(hs[0], hard=True)
+    assert shims.calls()[-2:] == [["scancel", "77"], ["scancel", "-f", "-s", "KILL", "77"]]
+    shims.add("scontrol", "LicenseName=fc\n    Total=1 Used=0 Free=1\n")
+    assert b.licence("fc") is True
+    shims.add("scontrol", rc=1, err="scontrol: error: slurm_load_licenses error: Unable to contact slurm controller\n")
+    assert b.licence("fc") is None
 
 
 def test_lsf(shims: Shims, tmp_path: Path) -> None:
