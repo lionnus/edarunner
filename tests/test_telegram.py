@@ -551,7 +551,7 @@ def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
     bot.handle_update(reply_to("/where", mid))
     assert last_reply(bot) == pre("a@demo run1 hostA:/scratch/edr/demo/run1")
     bot.handle_update(msg("/where"))
-    assert last_reply(bot) == pre("/where: bad placeholder 'handle'")
+    assert last_reply(bot) == pre("/where: missing placeholder {handle} in '{handle} {run_id} {host}:{run_root}'")
     bot.handle_update(reply_to("/ack", 999))
     assert last_reply(bot).startswith("error: a handle is")
     monkeypatch.setattr(tgbot.time, "time", lambda: 1e12)

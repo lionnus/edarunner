@@ -12,9 +12,10 @@ from typing import Any
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from . import board
+from . import board, config
+from .config import ConfigError
 from .db import Database
-from .metrics import fill, owned_steps
+from .metrics import owned_steps
 from .model import Project
 
 Row = dict[str, Any]
@@ -221,8 +222,8 @@ def _log_steps(project: Project, run: Row, stage: str, first: int) -> list[Row]:
     spec = project.stages[stage].step_log
     values = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
     try:
-        rel = fill(spec["file"], values)
-    except KeyError:
+        rel = config.render(spec["file"], values)
+    except ConfigError:
         return []
     path = project.data / "results" / str(run["run_id"]) / rel
     if not path.is_file():

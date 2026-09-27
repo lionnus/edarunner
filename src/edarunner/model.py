@@ -51,7 +51,8 @@ class Tool:
     name: str
     seats: int | None = doc("the seat total, for `edr tools`", None)
     probe: list[str] = doc("an argv list that prints the free seats; it runs on the host with the run placeholders "
-                           "filled", factory=list)
+                           "filled, and `edr tools` runs it on the head node with `{root}` set to the project "
+                           "directory", factory=list)
     licence: str = doc("the licence or concurrency limit that counts the tool in the scheduler; a job asks it for "
                        "the most seats one of its stages needs, for its whole run", "",
                        shown="unset; the scheduler does not count the tool")
@@ -61,9 +62,10 @@ class Tool:
 class BotCommand:
     """Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
 
-    Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
-    `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. A command sent as a reply to an alert
-    also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run. No shell runs between the bot and
+    Every string renders `{project}`, `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`.
+    Here `{root}` and `{project_root}` both give the project directory, not a run tree. A command sent
+    as a reply to an alert also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run;
+    `{run_root}` is the run tree. No shell runs between the bot and
     `run[0]`. A program that parses its argument itself, such as `tmux new-session <cmd>`,
     `ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so gate every placeholder
     inside such a token with an exact allowlist regex. Every value must match its regex in full, or
@@ -144,7 +146,8 @@ BACKENDS = ("ssh", "local", *SCHEDULERS)
 class Scheduler:
     """What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
     `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
-    driver writes into its first heartbeat. `docs/configure.md` shows a site file for each."""
+    driver writes into its first heartbeat. `docs/configure.md` shows a Slurm site file
+    and how each setting maps to HTCondor, Slurm and LSF."""
 
     backend: str = doc("`\"ssh\"` on the site hosts, `\"local\"` on the head node only, or `\"condor\"`, "
                        "`\"slurm\"`, `\"lsf\"`", "ssh")
@@ -224,11 +227,21 @@ class Stage:
     A flow that runs several steps inside one tool session stays one stage, and `edr` tracks the
     steps. The driver runs `progress` every 5 s in the stage's `cwd` and takes the first number it
     prints as the current step. `steps[step]` is the step name in the heartbeat and on the board,
-    and the checkpoint the watcher resumes from. A numbered step belongs to one stage. The `steps`
-    list of a stage is indexed by the step number and continues the list of the stage before it,
-    so a flow with two sessions over one numbering lists all names in the second stage. A list
-    that is not longer than the steps before it names the stage's own steps and continues from
-    the previous end. A stage without `steps` owns no numbered step.
+    and the checkpoint the watcher resumes from. A numbered step belongs to one stage.
+
+    The numbering starts at 0 and runs on across the stages. A later stage lists either every name
+    from step 0 or only its own names. Both forms below give `synth` the steps 0 to 3 and `pnr` the
+    steps 4 and 5:
+
+    ```toml
+    [stages.synth]
+    steps = ["setup", "analyze", "elaborate", "synth"]
+
+    [stages.pnr]
+    steps = ["cts", "route"]  # or all six names: "setup", ..., "cts", "route"
+    ```
+
+    A stage without `steps` owns no numbered step.
 
     A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
     `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
@@ -325,9 +338,11 @@ class Source:
     ref: str = doc("the ref `edr checkout` takes without an argument", "HEAD")
     nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
                             factory=list)
-    run_id: str = doc("the run id template", "{date}_{label}_{build_tag}_g{src}")
-    build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)`; `\"\"` gives "
-                         "`{config}` plus `_KEYVALUE` per override", "")
+    run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows",
+                      "{date}_{label}_{build_tag}_g{src}")
+    build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)` or from "
+                         "`(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each "
+                         "override, such as `base_FREQ500`", "")
 
 
 @dataclass

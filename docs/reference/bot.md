@@ -65,9 +65,10 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 
 Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
 
-Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
-`{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. A command sent as a reply to an alert
-also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run. No shell runs between the bot and
+Every string renders `{project}`, `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`.
+Here `{root}` and `{project_root}` both give the project directory, not a run tree. A command sent
+as a reply to an alert also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run;
+`{run_root}` is the run tree. No shell runs between the bot and
 `run[0]`. A program that parses its argument itself, such as `tmux new-session <cmd>`,
 `ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so gate every placeholder
 inside such a token with an exact allowlist regex. Every value must match its regex in full, or

@@ -152,3 +152,17 @@ def test_a_numbered_step_belongs_to_one_stage(tmp_path):
     assert steps("synth") == [0, 1, 2, 3] and steps("pnr") == [4, 5]
     assert steps("export") == [6, 7, 8] and steps("nosteps") == []
     assert steps("synth", "fixed") == [2] and steps("pnr", "fixed") == []
+
+
+def test_a_metric_file_follows_the_placeholder_rules_of_the_stage_strings(tmp_path):
+    run = results_tree(tmp_path / "results")
+    (run / "${OUT}").mkdir()
+    (run / "${OUT}" / "area.rpt").write_text("i_top 7.0\n")
+    project = demo_project(tmp_path)
+    project.metrics = {
+        "shell": Metric(name="shell", stage=["synth"], file="${OUT}/area.rpt", regex=r"i_top (\S+)"),
+        "bad": Metric(name="bad", stage=["synth"], file="{nope}/area.rpt", regex=r"i_top (\S+)"),
+    }
+    rows = extract(project, RUN, tmp_path / "results", {})
+    assert [(r["name"], r["value"]) for r in rows] == [("shell", 7.0), ("bad", None)]
+    assert rows[1]["source_file"] == "unknown placeholder {nope} in '{nope}/area.rpt'"

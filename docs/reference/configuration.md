@@ -14,7 +14,8 @@ hold for every file:
 - A path is absolute or relative to the file that names it, and `~` expands.
 - A string may hold `{placeholders}`; the last section lists them. `${VAR}` belongs to the shell
   and stays as it is.
-- A hook is `python:<file>:<function>`, with `<file>` relative to the project directory.
+- A hook is `<file>:<function>`, with `<file>` relative to the project directory; a leading
+  `python:` is optional.
 
 `edr check` loads all four, imports every hook, probes the hosts and plans every batch under
 `jobs/`, so a wrong file stops there.
@@ -45,8 +46,8 @@ The git repository of the flow, and how `edr checkout` pins a version of it.
 | `worktrees` | where `edr checkout` adds a worktree per commit | required |
 | `ref` | the ref `edr checkout` takes without an argument | `"HEAD"` |
 | `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has | `[]` |
-| `run_id` | the run id template | `"{date}_{label}_{build_tag}_g{src}"` |
-| `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)`; `""` gives `{config}` plus `_KEYVALUE` per override | `""` |
+| `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{src}"` |
+| `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)` or from `(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each override, such as `base_FREQ500` | `""` |
 
 ### [sync]
 
@@ -119,11 +120,21 @@ stage, or the subset its `stages` list names, in that same order.
 A flow that runs several steps inside one tool session stays one stage, and `edr` tracks the
 steps. The driver runs `progress` every 5 s in the stage's `cwd` and takes the first number it
 prints as the current step. `steps[step]` is the step name in the heartbeat and on the board,
-and the checkpoint the watcher resumes from. A numbered step belongs to one stage. The `steps`
-list of a stage is indexed by the step number and continues the list of the stage before it,
-so a flow with two sessions over one numbering lists all names in the second stage. A list
-that is not longer than the steps before it names the stage's own steps and continues from
-the previous end. A stage without `steps` owns no numbered step.
+and the checkpoint the watcher resumes from. A numbered step belongs to one stage.
+
+The numbering starts at 0 and runs on across the stages. A later stage lists either every name
+from step 0 or only its own names. Both forms below give `synth` the steps 0 to 3 and `pnr` the
+steps 4 and 5:
+
+```toml
+[stages.synth]
+steps = ["setup", "analyze", "elaborate", "synth"]
+
+[stages.pnr]
+steps = ["cts", "route"]  # or all six names: "setup", ..., "cts", "route"
+```
+
+A stage without `steps` owns no numbered step.
 
 A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
 `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
@@ -224,7 +235,8 @@ remote command runs through `sh -c`, so the login shell of a host may be `csh` o
 
 What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
 `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
-driver writes into its first heartbeat. `docs/configure.md` shows a site file for each.
+driver writes into its first heartbeat. `docs/configure.md` shows a Slurm site file
+and how each setting maps to HTCondor, Slurm and LSF.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -275,7 +287,7 @@ declares is an error where it appears. The core knows no licence manager;
 | Key | Meaning | Default |
 |---|---|---|
 | `seats` | the seat total, for `edr tools` | unset |
-| `probe` | an argv list that prints the free seats; it runs on the host with the run placeholders filled | `[]` |
+| `probe` | an argv list that prints the free seats; it runs on the host with the run placeholders filled, and `edr tools` runs it on the head node with `{root}` set to the project directory | `[]` |
 | `licence` | the licence or concurrency limit that counts the tool in the scheduler; a job asks it for the most seats one of its stages needs, for its whole run | unset; the scheduler does not count the tool |
 
 ### [telegram]
@@ -377,7 +389,7 @@ plan problem.
 
 ## Placeholders
 
-A placeholder without a value is a ConfigError that names it: `missing` for one of the
+A placeholder without a value is a load error that names it: `missing` for one of the
 table below that this string cannot use, `unknown` for a name edr never fills. A dict
 value flattens to dotted keys, so a task table gives `{task.kernel}`. `${VAR}` belongs
 to the shell and stays as it is.
@@ -407,3 +419,5 @@ to the shell and stays as it is.
 | `{task_dir}` | the task directory | the strings of a task group, `collect`, metric files |
 | `{task.<key>}` | a key of the task table | the strings of a task group, `collect`, metric files |
 | `{step}` | the step number | a metric `file` with `step = "*"` |
+| `{handle}` | the handle of the run, `label@batch` | a bot command sent as a reply to an alert |
+| `{run_root}` | the run tree | a bot command sent as a reply to an alert |
