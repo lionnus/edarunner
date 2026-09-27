@@ -273,8 +273,9 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: s
 
 # --- launch
 
-def write_spec(state: Path, batch: str, plan_: RunPlan, dry_run: bool = False) -> Path:
-    """Write <state>/<batch>/<run_id>.spec.json by a temporary file and rename."""
+def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: bool = False) -> Path:
+    """Write <state>/<batch>/<run_id>.spec.json by a temporary file and rename; the spec records `driver`."""
+    plan_.spec["driver"] = str(driver)
     path = Path(state) / batch / f"{plan_.run_id}.spec.json"
     if not dry_run:
         config.save_json(path, plan_.spec)
@@ -322,7 +323,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
     state = project.state
     date = pin_date(state, batch.batch, dry_run)
     plans = plan(project, batch, ssh, ledger, date=date, only=only)
-    driver = sync.publish_driver(state, batch.batch, DRIVER_SRC, dry_run)
+    driver = sync.publish_driver(state, DRIVER_SRC, dry_run)
     if not dry_run:
         ledger.upsert_batch({"batch": batch.batch, "project": project.project, "source": batch.source, "run_date": date})
     stagger = project.limits.stagger_s if stagger_s is None else stagger_s
@@ -350,7 +351,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
             if not ok:
                 p.problems.append("sync failed")
                 continue
-        path = write_spec(state, batch.batch, p, dry_run)
+        path = write_spec(state, batch.batch, p, driver, dry_run)
         log = path.with_name(f"{p.run_id}.driver.log")
         print(f"{p.run_id}: {p.host} {p.root}" + (" (dry)" if dry_run else ""))
         if dry_run:
