@@ -326,7 +326,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
     assert acts.hosts_text().split(" ", 1)[1].startswith("<b>local</b> · ")
-    assert acts.lic_text() == "<b>demo</b> · 8/10 seats free"
+    assert acts.tools_text() == "<b>demo</b> · 8/10 seats free · 1 host"
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
@@ -394,7 +394,7 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     assert edr(capsys, "retire", "--batch", "empty", "--why", "x")[0] == 2
 
 
-# metrics, export, hosts, lic
+# metrics, export, hosts, tools
 
 
 def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
@@ -424,20 +424,31 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
         assert [e["kind"] for e in led.events()] == ["export"]
 
 
-def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
+def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     head, row = out.splitlines()[0], out.splitlines()[2]
     assert code == 0 and head.split() == ["ok", "host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
     assert row.split()[1] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
-    code, out, _ = edr(capsys, "lic")
-    assert code == 0 and out.splitlines()[2].split() == ["demo", "demo", "10", "2", "8", "0", "2", "2"]
-    assert out.splitlines()[0].split()[-1] == "note"
+    code, out, _ = edr(capsys, "tools")
+    assert code == 0 and out.splitlines()[0].split() == ["tool", "free", "total", "hosts", "note"]
+    assert out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"]
+    code, out, err = edr(capsys, "lic")
+    assert code == 0 and out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"] and "deprecated" in err
+    code, out, _ = edr(capsys, "--json", "tools")
+    assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 8, "total": 10, "hosts": {"local": "1.0"}}]
     site = demo / "site.toml"
-    site.write_text(site.read_text().replace("bash {root}/flow/lmstat.sh", "false"))
-    code, out, _ = edr(capsys, "lic")
+    text = site.read_text()
+    site.write_text(text.replace('["bash", "{root}/flow/seats.sh"]', '["false"]'))
+    code, out, _ = edr(capsys, "tools")
     assert code == 3 and "unknown" in out
+    site.write_text(text.replace('["bash", "{root}/flow/seats.sh"]', '["echo", "3"]') + '\n[tools.plain]\n')
+    code, out, _ = edr(capsys, "--json", "tools")
+    assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 3, "total": 10, "hosts": {"local": "1.0"}},
+                                                     {"tool": "plain", "hosts": {}}]  # local lists demo only
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert acts.tools_text().splitlines() == ["<b>demo</b> · 3/10 seats free · 1 host", "<b>plain</b> · 0 hosts"]
 
 
 # run (reuse), watch, bad input
@@ -553,7 +564,7 @@ def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
     seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
     with Ledger(demo / "data" / "edr.db") as led:
         led.add_event("user", a, "launch", "local /x")
-    for argv in (["status"], ["status", "--narrow"], ["status", "--triage"], ["status", "a@demo"], ["hosts"], ["lic"],
+    for argv in (["status"], ["status", "--narrow"], ["status", "--triage"], ["status", "a@demo"], ["hosts"], ["tools"],
                  ["events"], ["check"]):
         assert b"\x1b" not in _edr_bytes(demo, *argv), argv
         assert b"\x1b" not in _edr_bytes(demo, *argv, NO_COLOR="1", FORCE_COLOR="1", TERM="xterm-256color"), argv
@@ -567,7 +578,7 @@ def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path) -> No
     a = seed(demo, "a", "done")
     with Ledger(demo / "data" / "edr.db") as led:
         led.add_event("user", a, "launch", "local /x")
-    for argv in (["status"], ["hosts"], ["lic"], ["events"], ["check"], ["status", "a@demo"]):
+    for argv in (["status"], ["hosts"], ["tools"], ["events"], ["check"], ["status", "a@demo"]):
         plain = _edr_bytes(demo, "--json", *argv)
         forced = _edr_bytes(demo, "--json", *argv, FORCE_COLOR="1", TERM="xterm-256color")
         assert plain == forced and b"\x1b" not in plain, argv

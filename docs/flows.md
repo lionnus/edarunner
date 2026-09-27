@@ -23,7 +23,7 @@ resume = "make -C flow pnr RUN={tree_id} CONFIG={config} MAX_CORES={cores} FIRST
 steps = ["setup", "analyze", "elaborate", "constraints", "synth-map", "floorplan", "pg",
          "synth-logic-opto", "synth-init-opto", "synth-final-opto", "cts", "route", "route-opt"]
 progress = "ls flow/runs/{tree_id}/reports 2>/dev/null | grep -cE '^[0-9]+$'"
-needs = { cores = 16, disk_gb = 70, licence = "pnr" }
+needs = { cores = 16, disk_gb = 70, tools = ["pnr"] }
 budget = { hours = 14, disk_gb = 150 }
 retry = { match = "licen[cs]e", wait_s = 900, max = 3 }
 collect = ["flow/runs/{tree_id}/reports/"]
@@ -36,7 +36,7 @@ parallel = 1
 task_dir = "sim/tests/{build_tag}/{task.test}"
 cmd = "env RUN_DIR={root}/flow/runs/{tree_id} NETLIST={root}/flow/runs/{tree_id}/out/{netlist_stage}/top.v flow/power/run.sh {task.kernel} CONFIG={config} {task.args}"
 after_each = "rm -f {task_dir}/wave.vcd"
-needs = { cores = 4, disk_gb = 60, licence = { sim = 1 } }
+needs = { cores = 4, disk_gb = 60, tools = { sim = 1 } }
 budget = { hours = 8, disk_gb = 400, per = "task" }
 collect = ["{task_dir}/power/"]
 
