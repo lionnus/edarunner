@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config, hosts, sync
+from . import collect, config, hosts, sync
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
 from .ledger import Ledger
@@ -34,7 +34,8 @@ class RunPlan:
     problems: list[str] = field(default_factory=list)
     src: str = ""
     build_tag: str = ""
-    reuse: str = ""  # the run id whose tree this run continues
+    reuse: str = ""  # the run id whose tree this run continues, or whose archive it restores
+    restore: str = ""  # the collect_on_request list copied back from data/results of `reuse`
     values: dict[str, object] = field(default_factory=dict)
 
 
@@ -170,15 +171,20 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
 
 # --- plan
 
-def _reuse_row(ledger: Ledger, reuse: dict[str, object]) -> dict[str, Any]:
+def _reuse_row(ledger: Ledger, reuse: dict[str, object], need_tree: bool = True) -> dict[str, Any]:
     if "run_id" in reuse:
         row = ledger.run(ledger.resolve(str(reuse["run_id"])))
     else:
         rows = [r for r in ledger.runs() if r["label"] == reuse["label"]]
         row = rows[-1] if rows else None
-    if row is None or not row.get("root") or not row.get("host"):
-        raise KeyError(f"reuse {reuse}: no run with a host and a root in the ledger")
+    if row is None or (need_tree and not (row.get("root") and row.get("host"))):
+        raise KeyError(f"reuse {reuse}: no run{' with a host and a root' if need_tree else ''} in the ledger")
     return row
+
+
+def _fresh(job: Job) -> bool:
+    """A job placed on a new tree: no reuse, or a reuse that restores from the archive."""
+    return not job.reuse or bool(job.reuse.get("restore"))
 
 
 def _check_overrides(project: Project, job: Job, names: list[str]) -> list[str]:
@@ -195,15 +201,18 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
     names = job.stages or list(project.stages)
     problems = _check_overrides(project, job, names)
     src, host, mount, root, reused, tag, tree = batch.source, None, "", "", "", "", ""
+    restore = str(job.reuse.get("restore") or "") if job.reuse else ""
     if job.reuse:
         try:
-            row = _reuse_row(ledger, job.reuse)
-            host, root, src, reused = row["host"], row["root"], row["src"], row["run_id"]
+            row = _reuse_row(ledger, job.reuse, need_tree=not restore)
+            src, reused = row["src"], row["run_id"]
             # The tag and the tree id belong to the tree, through any chain of reuse.
             tag = row.get("build_tag") or ""
             tree = row.get("tree_id") or reused
-            if job.host not in ("auto", host):
-                problems.append(f"reuse of {reused} needs host {host}, the job says {job.host}")
+            if not restore:
+                host, root = row["host"], row["root"]
+                if job.host not in ("auto", host):
+                    problems.append(f"reuse of {reused} needs host {host}, the job says {job.host}")
         except KeyError as e:
             problems.append(str(e))
     if not tag:
@@ -217,7 +226,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
     if job.netlist_stage is not None:
         v["netlist_stage"] = job.netlist_stage
     run_id = config.render(project.source.run_id, v)
-    if not job.reuse:
+    if _fresh(job):
         host = job.host if job.host != "auto" else placed.get(job.label)
         if host in errors:
             problems.append(f"{host}: {errors[host]}")
@@ -243,7 +252,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
             problems.append(str(e))
     return RunPlan(run_id=run_id, label=job.label, host=host, root=root, spec=spec,
                    queued=host is None and not problems, problems=problems, src=src, build_tag=tag,
-                   reuse=reused, values=v)
+                   reuse=reused, restore=restore, values=v)
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: str | None = None,
@@ -254,7 +263,7 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: s
     """
     date = date or pin_date(project.state, batch.batch, dry_run=True)
     jobs = [j for j in batch.jobs if not only or j.label in only]
-    wanted = {j.host for j in jobs if not j.reuse}
+    wanted = {j.host for j in jobs if _fresh(j)}
     names = (set(project.site.hosts) if "auto" in wanted else set()) | (wanted - {"auto"})
     errors: dict[str, str] = {}
     if probes is None:
@@ -266,7 +275,7 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: s
                 errors[h] = str(e)
     else:
         errors = {h: "no probe of the host" for h in names if h not in probes}
-    auto = [j for j in jobs if j.host == "auto" and not j.reuse]
+    auto = [j for j in jobs if j.host == "auto" and _fresh(j)]
     placed = hosts.place(project, auto, probes, {h: p.our_runs for h, p in probes.items()}) if auto else {}
     return [_plan_job(project, batch, j, ledger, date, probes, errors, placed) for j in jobs]
 
@@ -303,14 +312,14 @@ def start_driver(ssh: hosts.Ssh, host: str, driver_path: Path, spec_path: Path, 
     return int(last) if last.isdigit() else None
 
 
-def _src_dir(project: Project, batch: Batch, src_dir: Path | None) -> Path:
+def _src_dir(project: Project, src: str, src_dir: Path | None) -> Path:
     if src_dir is not None:
         return Path(src_dir)
     try:
         from . import stagectl
     except ImportError:
         raise Refuse("no src_dir given and stagectl is missing") from None
-    return Path(stagectl.find(project, batch.source))
+    return Path(stagectl.find(project, src))
 
 
 def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_run: bool = False,
@@ -342,9 +351,16 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
             continue
         if started and stagger > 0:
             time.sleep(stagger)
-        if not p.reuse:
-            ok = sync.sync_tree(ssh, p.host, _src_dir(project, batch, src_dir), p.root, project.sync.exclude,
+        if not p.reuse or p.restore:
+            ok = sync.sync_tree(ssh, p.host, _src_dir(project, p.src, src_dir), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
+            if ok and p.restore:
+                res = collect.restore_on_request(project, ssh, ledger, ledger.run(p.reuse) or {}, p.restore,
+                                                 p.host, p.root, dry_run)
+                print(f"{p.run_id}: restore {p.restore} of {p.reuse}: {res.files} files" + (" (dry)" if dry_run else ""))
+                for f in res.failures:
+                    print(f"{p.run_id}: {f}")
+                ok = not res.failures
             if ok and project.sync.after and not dry_run:
                 ok = sync.run_after_hook(project.site, project, project.sync.after, p.values)
             if not ok:
