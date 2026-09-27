@@ -1,4 +1,4 @@
-"""A frozen snapshot of one design for a paper. See docs/design.md section 9."""
+"""A frozen snapshot of one design for a paper: manifest, two tables and the collected files."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Copy the driver by rename and the source tree by rsync. See docs/design.md sections 2 and 6."""
+"""Copy the driver by rename and the source tree by rsync."""
 
 from __future__ import annotations
 

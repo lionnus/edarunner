@@ -1,4 +1,4 @@
-"""Load and validate the four TOML files. See docs/design.md section 3."""
+"""Load and validate the four TOML files, and read and write the JSON state files."""
 
 from __future__ import annotations
 

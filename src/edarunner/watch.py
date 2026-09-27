@@ -1,4 +1,4 @@
-"""The watcher: one cycle over every heartbeat. See docs/design.md section 7.
+"""The watcher: one cycle over every heartbeat.
 
 The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a file or a tree. Its memory between cycles
@@ -102,7 +102,7 @@ def _signature(ssh: Ssh, hb: dict) -> list:
 
 def classify(project: Project, ssh: Ssh, ledger: Ledger, run: Row, heartbeat: dict, now: float,
              progress: dict | None = None) -> tuple[str, list[str]]:
-    """The state of one run by the table of section 7, and every reason found."""
+    """The state of one run (running, stale, dead, hung, looping, over_budget, host_full or superseded) and every reason found."""
     hb, lim = heartbeat, project.limits
     if not board.is_live(hb):
         return board.state_of(hb), []

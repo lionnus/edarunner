@@ -1,6 +1,6 @@
 """`edr stage`: a detached worktree per ref, or a snapshot of a dirty tree.
 
-See docs/design.md sections 3.1 and 14. A dry run prints and writes nothing.
+A dry run prints and writes nothing.
 """
 
 from __future__ import annotations

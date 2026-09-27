@@ -1,4 +1,4 @@
-"""The notifier interface. See docs/design.md sections 7 and 11.
+"""The notifier interface.
 
 The watcher calls `make_notifiers` once and then `send`, `edit` and `board`
 on every channel. The channels never import `cli` or `watch` at run time;

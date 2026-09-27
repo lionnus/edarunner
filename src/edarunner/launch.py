@@ -1,4 +1,4 @@
-"""Plan, launch and stop runs. See docs/design.md sections 4 and 6."""
+"""Plan, launch and stop runs: the run spec, the driver start and the stop signals."""
 
 from __future__ import annotations
 

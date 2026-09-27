@@ -1,4 +1,4 @@
-"""The SQLite ledger: schema, upserts, queries, board.json. See docs/design.md section 8."""
+"""The SQLite ledger: schema, upserts, queries, board.json."""
 
 from __future__ import annotations
 

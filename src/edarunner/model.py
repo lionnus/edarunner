@@ -1,4 +1,4 @@
-"""The data model shared by every module. See docs/design.md section 3.
+"""The data model shared by every module.
 
 `config.py` fills these from the TOML files. Nothing here reads a file.
 """
