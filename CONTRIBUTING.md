@@ -1,11 +1,11 @@
 # Contributing
 
-## The contract
+## Where things live
 
-`docs/design.md` is the contract between the modules. A change that needs
-a different shape changes the contract first, in the same commit. Section
-14 says which module owns what. Keep a module near 300 lines, and split it
-only when the contract forces you to.
+`docs/architecture.md` names the modules, what each owns, and the rules
+every change keeps. A change that moves a responsibility updates that
+page in the same commit. The user pages under `docs/` describe the
+behaviour; a change in behaviour changes the page that describes it.
 
 ## Standard library only
 
@@ -27,9 +27,10 @@ own `python3`, which is 3.6 on some of them. So the file:
 - keeps working on every newer Python
 
 `tests/test_driver.py::test_compiles_on_py36` compiles it with
-`/usr/bin/python3`, and CI runs the driver tests in a `python:3.6`
-container. A feature that the 3.6 subset cannot express belongs in the
-controller, not in the driver.
+`EDR_DRIVER_PYTHON`, else `python3.6` on `PATH`, else `/usr/bin/python3`,
+and skips unless that interpreter is 3.6. CI runs the driver tests in a
+`python:3.6` container. A feature that the 3.6 subset cannot express
+belongs in the controller, not in the driver.
 
 ## Tests
 
