@@ -75,6 +75,9 @@ The text lands in the events table with the actor. `edr events --run
 <handle>` shows the history of a run; read it before you act on a run you
 did not start.
 
+`edr notify "<text>"` sends one line to the chat of the project; send it
+when a long task ends or needs a person.
+
 ## Read a number before you use it
 
 - `edr metrics --design <src>` gives one design. Never put two hashes in

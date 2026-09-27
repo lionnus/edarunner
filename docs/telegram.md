@@ -238,6 +238,39 @@ reply = "Claude session for {handle} started on {host}"
 The same command without a reply answers `bad placeholder 'host'` and
 runs nothing.
 
+## edr notify
+
+`edr notify TEXT` sends one message to the chat, or to the topic of the
+project, with the project name in the bold first line:
+
+```sh
+edr notify "session backend: the sweep is done"
+edr notify --silent "session backend: waiting for input"
+edr notify --dry-run "test"       # prints the message, sends nothing
+```
+
+It exits 1 when no bot is configured or the send failed. It runs from
+any directory below `edr.toml`.
+
+A Claude Code hook can call it, so a session reports to the phone. Put
+this into `.claude/settings.json` of the repository where the session
+runs, and replace the path with the project directory:
+
+```json
+{
+  "hooks": {
+    "Notification": [{"hooks": [{"type": "command",
+      "command": "cd ~/work/backend && edr notify \"session $(basename \"$CLAUDE_PROJECT_DIR\"): $(jq -r .message)\""}]}],
+    "Stop": [{"hooks": [{"type": "command",
+      "command": "cd ~/work/backend && edr notify --silent \"session $(basename \"$CLAUDE_PROJECT_DIR\"): turn ended\""}]}]
+  }
+}
+```
+
+The `Notification` hook gets a JSON object on stdin, and `jq` takes its
+`message`. The `Stop` hook runs at the end of every turn, so it sends
+silently.
+
 ## One chat, or one per project
 
 The default is one bot in one chat for every project of a site. The bold

@@ -1,4 +1,4 @@
-"""The `edr` command: seventeen verbs.
+"""The `edr` command: eighteen verbs.
 
 Every verb wires the modules; nothing here knows a file format. Exit
 codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
@@ -56,7 +56,8 @@ def _since(text: str) -> int:
     return int(time.time() - secs)
 
 
-_READ_VERBS = frozenset({"status", "events", "hosts", "lic", "metrics", "check"})
+# These verbs never create data/edr.db; `notify` reads the bot's message ids only.
+_READ_VERBS = frozenset({"status", "events", "hosts", "lic", "metrics", "check", "notify"})
 
 
 class Ctx:
@@ -877,6 +878,20 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     return watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
 
 
+def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
+    """Send one message through every configured notifier."""
+    html = tgfmt.esc(a.text)
+    if a.dry_run:
+        c.emit(tgfmt.head(c.project.project, "note") + "\n" + html + "\n(dry)", {"sent": 0, "text": a.text})
+        return 0
+    notifiers = make_notifiers(c.project.site, c.project, c.ledger, Actions(c))
+    if not notifiers:
+        raise Refuse("no notifier is configured; see docs/telegram.md")
+    sent = sum(n.post("note", html, a.silent) for n in notifiers)
+    c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": a.text})
+    return 0 if sent == len(notifiers) else 1
+
+
 def _notifiers(c: Ctx) -> list:
     project = c.project
     bot = Ctx(c.a)
@@ -981,6 +996,9 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
+    s = verb("notify", "send one message through every notifier", write=True)
+    s.add_argument("text", help="the message; the first line of the message names the project")
+    s.add_argument("--silent", action="store_true", help="send without a sound on the phone")
     s = verb("watch", "the watcher", write=True)
     s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")
     s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")

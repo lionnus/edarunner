@@ -19,6 +19,7 @@ from edarunner import board, cli, config, launch
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.ledger import Ledger
 from edarunner.model import Telegram
+from edarunner.notify import Notifier
 from edarunner.notify.telegram import TelegramBot
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -754,3 +755,26 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
     assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()
+
+
+def test_notify_sends_one_message_through_every_notifier(demo: Path, capsys, monkeypatch) -> None:
+    code, out, _ = edr(capsys, "notify", "--dry-run", "session x: <done>")
+    assert code == 0 and out == "<b>demo · note</b>\nsession x: &lt;done&gt;\n(dry)\n"
+    code, _, err = edr(capsys, "notify", "hi")
+    assert code == 1 and "no notifier is configured" in err and not (demo / "data" / "edr.db").exists()
+    posts: list[tuple] = []
+
+    class Rec(Notifier):
+        def __init__(self, ok: bool) -> None:
+            self.ok = ok
+
+        def post(self, title, html, silent=False):
+            posts.append((title, html, silent))
+            return self.ok
+
+    monkeypatch.setattr(cli, "make_notifiers", lambda *a: [Rec(True), Rec(True)])
+    code, out, _ = edr(capsys, "--json", "notify", "--silent", "a & b")
+    assert code == 0 and json.loads(out)["data"] == {"sent": 2, "text": "a & b"}
+    assert posts == [("note", "a &amp; b", True)] * 2
+    monkeypatch.setattr(cli, "make_notifiers", lambda *a: [Rec(True), Rec(False)])
+    assert edr(capsys, "notify", "x")[0] == 1

@@ -102,6 +102,11 @@ class TelegramBot(Notifier):
         except ApiError as e:
             log.warning("telegram: %s", e)
 
+    def post(self, title: str, html: str, silent: bool = False) -> bool:
+        """Send one message: the bold first line with `title`, then `html`."""
+        text = fmt.fit(fmt.head(self.project.project, title) + "\n" + html)
+        return self._call(self.api.send_message, self.chat_id, text, silent=silent, thread_id=self.topic) is not None
+
     def repin(self) -> None:
         """Unpin the board message and pin a new one at the bottom of the chat."""
         with self._lock:

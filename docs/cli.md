@@ -19,7 +19,8 @@ from anywhere below the project. Without one it refuses.
 `output` the text.
 
 `--dry-run` exists on every verb that writes: `init`, `stage`, `plan`,
-`launch`, `run`, `keep`, `import`, `export`, `stop`, `retire` and `watch`.
+`launch`, `run`, `keep`, `import`, `export`, `stop`, `retire`, `notify`
+and `watch`.
 A dry run prints every path and every command with the mark `(dry)` or
 the prefix `dry:` and writes nothing: no date pin, no spec, no file on a
 host, no ledger row, no event, not even an empty database.
@@ -326,6 +327,19 @@ live run uses, a tree shared with a run whose results are not collected
 (retire them together with `--batch`), and a tree whose own results are
 not collected unless `--uncollected`. Exit 2 when the batch has no run,
 3 when an `rm` failed.
+
+## notify
+
+```
+edr notify TEXT [--silent] [--dry-run]
+```
+
+Sends one message through every notifier that the site configures. The
+first line names the project and the word `note`, as in every message of
+the bot; `TEXT` follows as plain text. `--silent` sends it without a
+sound. `--dry-run` prints the message and sends nothing. Exit 0 when
+every notifier sent it, 1 when no notifier is configured or a send
+failed. `docs/telegram.md` shows a Claude Code hook that calls it.
 
 ## watch
 
