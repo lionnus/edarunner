@@ -20,6 +20,7 @@ import posixpath
 import shlex
 import shutil
 import sys
+import textwrap
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -41,8 +42,6 @@ from .notify import make_notifiers
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 Row = dict[str, Any]
 _UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-_STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "--why over-budget",
-               "host_full": "--now --why host-full", "superseded": "--after-task --why superseded"}
 
 
 # --- helpers
@@ -257,16 +256,14 @@ def _metric_key(m: Row) -> str:
     return (m.get("canonical") or m["name"]) + (f"[{m['task']}]" if m.get("task") else "")
 
 
-def _compare_text(c: Ctx, handles: list[str]) -> str:
-    rows = [c.resolve(h) for h in handles]
+def _final_metrics(c: Ctx, rows: list[Row]) -> dict[str, dict[str, tuple[int, Any]]]:
+    """{metric key: {run id: (step, value)}} with the last step of each run."""
     final: dict[str, dict[str, tuple[int, Any]]] = {}
     for m in c.ledger.metrics(run_ids=[r["run_id"] for r in rows]):
         cur, step = final.setdefault(_metric_key(m), {}), -1 if m.get("step") is None else int(m["step"])
         if step >= cur.get(m["run_id"], (-2, None))[0]:
             cur[m["run_id"]] = (step, m["value"])
-    body = [[k, *[cur.get(r["run_id"], (0, None))[1] for r in rows]] for k, cur in sorted(final.items())]
-    labels = [str(r["label"]) for r in rows]
-    return board.table(["metric", *labels], body, styles={"metric": "bold"}, right=tuple(labels)) if body else "no metrics"
+    return final
 
 
 def _metrics_table(rows: list[Row]) -> Table | str:
@@ -287,47 +284,103 @@ def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> 
     if not c.a.dry_run:
         config.save_json(path, data)
         c.ledger.add_event(actor, run_id, "keep", note)
-    return f"{run_id}: {note}"
+    return note
 
 
 class Actions:
-    """The verbs the Telegram bot may call; each one is a CLI verb without the printing."""
+    """The verbs the Telegram bot may call; each one is a CLI verb without the printing. Every text fits 40 columns."""
 
     def __init__(self, c: Ctx) -> None:
         self.c = c
 
     def keep(self, handle: str, hours: int, actor: str) -> str:
-        return _keep(self.c, self.c.resolve(handle), hours, None, actor)
+        row = self.c.resolve(handle)
+        return f"{board.handle(row)}: " + _keep(self.c, row, hours, None, actor)
 
     def ack(self, handle: str, actor: str) -> str:
-        return _keep(self.c, self.c.resolve(handle), None, True, actor)
+        row = self.c.resolve(handle)
+        return f"{board.handle(row)}: " + _keep(self.c, row, None, True, actor)
 
     def stop_after_task(self, handle: str, actor: str, why: str) -> str:
         c, row = self.c, self.c.resolve(handle)
         if not board.is_live(row):
-            return f"{row['run_id']} already {row['phase']}"
+            return f"{board.handle(row)} already {row['phase']}"
         launch.stop(c.ssh, c.ledger, row, {}, after_task=True, why=why, state=c.project.state, actor=actor)
-        return f"{row['run_id']} stops after its task"
+        return f"{board.handle(row)} stops after its task"
 
-    def status_text(self, narrow: bool = True) -> str:
-        rows = self.c.rows()
-        self.c.save_board(rows)
-        return board.narrow(rows) if narrow else board.plain(board.wide(rows))
+    def status_text(self, handle: str | None = None) -> str:
+        """The board, or stage, step, age and the last log line of one run."""
+        if handle is None:
+            rows = self.c.rows()
+            self.c.save_board(rows)
+            return board.phone(rows)
+        row = self.c.resolve(handle)
+        self.c.refresh(str(row["batch"]))
+        row = self.c.ledger.run(row["run_id"]) or row
+        hb = self.c.heartbeat(row)
+        state = board.state_of(row)
+        step = " ".join(str(v) for v in (hb.get("step") or row.get("step"), hb.get("step_name")) if v not in (None, ""))
+        age = board.hm(None if row.get("updated") is None else time.time() - row["updated"])
+        log_line = next((ln for ln in reversed(str(hb.get("last_log") or "").splitlines()) if ln.strip()), "-")
+        lines = [f"{state} {board.handle(row)}", f"stage {row.get('stage') or '-'}, step {step or '-'}",
+                 f"age {age} on {row.get('host') or '-'}", "last log:"]
+        lines += textwrap.wrap(log_line, 40, initial_indent="  ", subsequent_indent="  ", max_lines=4) or ["  -"]
+        return "\n".join(ln[:40] for ln in lines)
 
     def events_text(self, n: int) -> str:
-        return board.plain(_events_table(self.c, self.c.ledger.events(n=n)))
+        """Newest first: `HH:MM kind handle`, the reason indented under it, run ids replaced by handles."""
+        names = {r["run_id"]: board.handle(r) for r in self.c.ledger.runs()}
+        lines = []
+        for e in reversed(self.c.ledger.events(n=n)):
+            text = str(e["text"] or "")
+            for run_id, h in names.items():
+                text = text.replace(run_id, h)
+            head = f"{time.strftime('%H:%M', time.localtime(e['ts']))} {e['kind']} {names.get(e['run_id'], '')}"
+            lines.append(head.rstrip()[:40])
+            if text and text != e["kind"]:
+                lines += textwrap.wrap(text, 40, initial_indent="  ", subsequent_indent="  ", max_lines=3)
+        return "\n".join(lines) or "no events"
 
     def hosts_text(self) -> str:
-        return board.plain(_hosts_table(_probe_rows(self.c), narrow=True), width=48)
+        """`host cores scratch gpu`: used cores, free scratch GB and idle GPUs, each of the total."""
+        body, errors = [], []
+        for r in _probe_rows(self.c):
+            if "error" in r:
+                errors += textwrap.wrap(f"{r['host']}: {r['error']}", 40, subsequent_indent="  ", max_lines=2)
+                continue
+            used = max(0, min(r["cores"], round(r["load"])))
+            body.append([r["host"], f"{used}/{r['cores']}", f"{r['free_gb']:.0f}/{r['total_gb']:.0f}",
+                         f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"])
+        return "\n".join([board.cols(["host", "cores", "scratch", "gpu"], body)] + errors)
 
     def lic_text(self) -> str:
-        return board.plain(_lic_table(_lic_rows(self.c)))
+        """`licence free used ours` per licence; a failed probe as `licence: note`."""
+        rows = _lic_rows(self.c)
+        if not rows:
+            return "no licences"
+        body = [[r["licence"], f"{r['free']}/{r['pool']}", r["used"], r["ours"]] for r in rows if "free" in r]
+        notes = [ln for r in rows if "note" in r for ln in textwrap.wrap(f"{r['licence']}: {r['note']}", 40, max_lines=2)]
+        return "\n".join(([board.cols(["licence", "free", "used", "ours"], body)] if body else []) + notes)
 
     def compare_text(self, handles: list[str]) -> str:
-        return board.plain(_compare_text(self.c, handles))
+        """One block per metric: its name, then one `label value` line per run."""
+        rows = [self.c.resolve(h) for h in handles]
+        final = _final_metrics(self.c, rows)
+        if not final:
+            return "no metrics"
+        out = []
+        for key, cur in sorted(final.items()):
+            out.append(key[:40])
+            out += board.cols(["", ""], [["  " + str(r["label"]), cur.get(r["run_id"], (0, None))[1]] for r in rows]
+                              ).splitlines()[1:]
+        return "\n".join(out)
 
     def metric_text(self, name: str, design: str | None) -> str:
-        return board.plain(_metrics_table(self.c.ledger.metrics(design=design, name=name)))
+        """`label design step value` per metric row."""
+        rows = self.c.ledger.metrics(design=design, name=name)
+        body = [[str(m.get("label")) + (f"[{m['task']}]" if m.get("task") else ""), m.get("src"), m.get("step"),
+                 f"{m['value']}{' ' + m['unit'] if m.get('unit') else ''}"] for m in rows]
+        return board.cols(["label", "design", "step", "value"], body) if body else "no metrics"
 
 
 # --- verbs
@@ -379,24 +432,11 @@ def _mark_live(c: Ctx, rows: list[Row]) -> int:
 def _triage(c: Ctx, rows: list[Row]) -> Text | str:
     lines = []
     for r in board.order(rows):
-        state, h = board.state_of(r), f"{r['label']}@{r['batch']}"
-        if state == "running":
+        state = board.state_of(r)
+        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {})
+        if cmd is None:
             continue
-        if state == "queued":
-            cmd = f"edr launch {r['batch']} --only {r['label']}"
-        elif state == "stale":
-            cmd = f"edr status {h} --live"
-        elif state == "dead":
-            hb = c.heartbeat(r)
-            cmd = f"edr run {h} --stage {hb.get('stage') or r.get('stage')}" + (
-                f" --from {hb['step_name']}" if hb.get("step_name") else "")
-        elif state in _STOP_FLAGS:
-            cmd = f"edr stop {h} {_STOP_FLAGS[state]}"
-        elif state == "done":
-            cmd = f"edr export --design {r.get('src')} --out exports/{r.get('src')}"
-        else:
-            cmd = f"edr retire {h} --why {state}"
-        lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ", (f"{h:<28}", "bold"),
+        lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ", (f"{board.handle(r):<28}", "bold"),
                                    f" {r.get('phase') or '-'}\n    {cmd}"))
     return Text("\n").join(lines) if lines else "nothing to triage"
 
@@ -611,7 +651,7 @@ def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
         c.emit(f"{row['run_id']}: already {row['phase']}")
         return 2
     hours = a.hours if a.hours is not None or a.ack else 12
-    c.emit(_keep(c, row, hours, a.ack or None, "user") + (" (dry)" if a.dry_run else ""))
+    c.emit(f"{row['run_id']}: " + _keep(c, row, hours, a.ack or None, "user") + (" (dry)" if a.dry_run else ""))
     return 0
 
 

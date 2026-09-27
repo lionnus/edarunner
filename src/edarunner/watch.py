@@ -189,11 +189,12 @@ def actions(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     if state in _NOTIFY:
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
-            handle = f"{run.get('label')}@{run.get('batch')}"
-            body = f"{handle} {state}\n{text}\n{run_id or run.get('label')} on {run.get('host')}, {run.get('phase')}"
+            handle = board.handle(run)
+            cmd = board.triage_cmd(run, state, _hb(project, run) if state == "dead" else {})
             # A repeat send edits the earlier message in place and keeps its buttons.
-            ids = [n.send(state, run.get("key") or run_id, body, alert_buttons(handle) if run_id else None)
-                   for n in notifiers]
+            reason = text if reasons else run.get("phase") or state
+            ids = [n.send(state, run.get("key") or run_id, f"{state} {handle}\n{reason}",
+                          alert_buttons(handle) if run_id else None, cmd) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
@@ -343,7 +344,7 @@ def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     params = [dict(r) for r in ledger.db.execute("SELECT run_id, key, value, source FROM params")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
     config.save_text(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly))
-    text = board.narrow(rows, now=now)
+    text = board.phone(rows, now=now)
     for n in notifiers:
         n.board(text)
 
@@ -422,8 +423,8 @@ def check(project: Project, notifiers: list[Notifier] = ()) -> int:
     age = time.time() - float(w.get("ts") or 0)
     if age <= 3 * project.limits.heartbeat_s:
         return 0
-    text = f"edr watch: watch.json is {int(age)} s old (pid {w.get('pid')})" if w else "edr watch: no watch.json"
-    print(text)
+    text = f"watch.json is {int(age)} s old (pid {w.get('pid')})" if w else "no watch.json"
+    print(f"edr watch: {text}")
     for n in notifiers:
-        n.send("watch", "", text)
+        n.send("watch", "", f"watch stale\n{text}")
     return 1

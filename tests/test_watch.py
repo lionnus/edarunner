@@ -58,14 +58,16 @@ class FakeSsh(Ssh):
 class Rec(Notifier):
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
+        self.texts: dict[str, tuple[str, str | None]] = {}
         self.boards: list[str] = []
         self.started = 0
 
     def start(self):
         self.started += 1
 
-    def send(self, kind, run_id, text, buttons=None):
+    def send(self, kind, run_id, text, buttons=None, cmd=None):
         self.sent.append((kind, run_id))
+        self.texts[run_id] = (text, cmd)
         return str(len(self.sent))
 
     def board(self, text):
@@ -154,6 +156,10 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert sorted(env.notifier.sent) == sorted([("superseded", rid("a")), ("dead", rid("d")), ("looping", rid("l")),
                                                 ("over_budget", rid("o")), ("host_full", rid("f"))])
     assert len(env.notifier.boards) == 1 and "DEAD" in env.notifier.boards[0]
+    text, cmd = env.notifier.texts[rid("l")]
+    assert text.splitlines()[0] == "looping l@demo" and cmd == "edr stop l@demo --why looping"
+    assert env.notifier.texts[rid("d")][1].startswith("edr run d@demo --stage ")
+    assert all(len(ln) <= 40 for ln in env.notifier.boards[0].splitlines())
     bdir = env.project.data / "board"
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
     assert set(env.ledger.get_kv("progress")) == set(states) and rid("d") in env.ledger.get_kv("notified")

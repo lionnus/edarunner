@@ -37,19 +37,19 @@ HANDLE = re.compile(r"^[\w.@#-]{1,64}$")
 LIMIT = 4000  # the message limit is 4096 characters after parsing
 # Only an idempotent call is sent again after a network failure; a resent sendMessage posts twice.
 RETRIES = {"getUpdates", "editMessageText", "answerCallbackQuery"}
-BUILTINS = {
-    "status": "the narrow board",
-    "events": "the last events: /events [n]",
-    "hosts": "cores, RAM, scratch and GPUs per host, used or free of total",
-    "lic": "free licence seats",
-    "board": "pin a new board message",
-    "keep": "add hours to a run: /keep <handle> [hours]",
-    "ack": "cancel a pending kill: /ack <handle>",
-    "stop": "stop after the running task: /stop <handle> [why]",
-    "compare": "metrics side by side: /compare <handle>...",
-    "metric": "one metric per run: /metric <name> [--design H]",
-    "help": "this list",
+# The built-in commands by purpose: (name, arguments, help).
+GROUPS = {
+    "Look": [("status", "[handle]", "the board, or one run"), ("events", "[n]", "the last events, newest first"),
+             ("hosts", "", "used cores, free scratch, idle GPUs"), ("lic", "", "free licence seats"),
+             ("board", "", "pin a new board message")],
+    "Act on a run": [("keep", "<handle> [hours]", "add hours, default 12"), ("ack", "<handle>", "cancel a pending kill"),
+                     ("stop", "<handle> [why]", "stop after the running task")],
+    "Compare": [("compare", "<handle>...", "metrics side by side"), ("metric", "<name> [--design H]", "one metric per run"),
+                ("help", "", "this list")],
 }
+BUILTINS = {c: f"{h}: /{c} {a}" if a else h for g in GROUPS.values() for c, a, h in g}
+# These verbs write their own ledger event.
+SELF_LOGGED = {"keep", "ack", "stop"}
 
 
 class ApiError(Exception):
@@ -59,6 +59,11 @@ class ApiError(Exception):
 def pre(text: str) -> str:
     """The last 4000 characters of `text` as an HTML <pre> block."""
     return "<pre>" + html.escape(str(text)[-LIMIT:], quote=False) + "</pre>"
+
+
+def esc(text: object) -> str:
+    """`text` escaped for parse_mode HTML."""
+    return html.escape(str(text), quote=False)
 
 
 def _multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes]]) -> tuple[bytes, str]:
@@ -136,23 +141,36 @@ class TelegramBot(Notifier):
 
     # Notifier
 
-    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None) -> str | None:
+    def head(self, title: str) -> str:
+        """The bold first line of every message: the project, then `title`."""
+        return f"<b>{esc(self.project.project)} · {esc(title)}</b>"
+
+    def alert(self, text: str, cmd: str | None = None) -> str:
+        """The first line of `text` as the title, the rest as prose, `cmd` in monospace."""
+        title, _, rest = text.partition("\n")
+        return self.head(title) + (f"\n{esc(rest)}" if rest else "") + (f"\n<code>{esc(cmd)}</code>" if cmd else "")
+
+    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
+             cmd: str | None = None) -> str | None:
         """Send one alert; a repeat with the same kind and run id edits it in place."""
-        markup = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]} if buttons else None
+        # A press reaches the watcher that polls, which acts on its own project only.
+        markup = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]} if (
+            buttons and self.project.telegram_poll) else None
         try:
-            return str(self._upsert(f"alert:{kind}:{run_id}", pre(text), markup))
+            return str(self._upsert(f"alert:{kind}:{run_id}", self.alert(text, cmd), markup))
         except ApiError as e:
             log.warning("telegram: %s", e)
             return None
 
     def edit(self, msg_id: str, text: str) -> None:
         """Rewrite one message; this drops its buttons."""
-        self._call("editMessageText", self._edit_params(int(msg_id), pre(text), None))
+        self._call("editMessageText", self._edit_params(int(msg_id), self.alert(text), None))
 
     def board(self, text: str) -> None:
         """Rewrite the pinned board silently; create and pin it once."""
         try:
-            self._upsert("board", pre(text), None, silent=True, pin=True)
+            self._upsert("board", self.head("board " + time.strftime("%H:%M")) + "\n" + pre(text), None,
+                         silent=True, pin=True)
         except ApiError as e:
             log.warning("telegram: %s", e)
 
@@ -228,7 +246,7 @@ class TelegramBot(Notifier):
                 self._rejected.add(who)
                 self._event("rejected", f"chat {who} ignored")
                 if self.chat_id == 0:
-                    print(f"telegram: the first message came from chat {who}; set chat_id = {who} in site.toml", file=sys.stderr)
+                    print(f"telegram: the first message came from chat {who}; set chat_id = {who} in [telegram]", file=sys.stderr)
             return
         if self.user_id and actor != self.user_id:
             if actor not in self._rejected:
@@ -243,25 +261,28 @@ class TelegramBot(Notifier):
     def _event(self, kind: str, text: str) -> None:
         self.ledger.add_event(actor="telegram", run_id="", kind=kind, text=text)  # type: ignore[attr-defined]
 
-    def _reply(self, text: object) -> None:
-        self._call("sendMessage", {"chat_id": self.chat_id, "text": pre(str(text)), "parse_mode": "HTML"})
+    def _reply(self, title: str, text: object, prose: bool = False) -> None:
+        body = str(text) if prose else pre(str(text))
+        self._call("sendMessage", {"chat_id": self.chat_id, "text": self.head(title) + "\n" + body, "parse_mode": "HTML"})
 
     # Commands
 
     def _command(self, text: str) -> None:
         parts = text.split()
         name, args = parts[0][1:].split("@")[0], parts[1:]
+        if name not in self.tg.commands and name not in BUILTINS:
+            name = "help"
         try:
             if name in self.tg.commands:
                 out = self._custom(self.tg.commands[name], args)
             else:
-                fn = getattr(self, "_cmd_" + name) if name in BUILTINS else self._cmd_help
-                out = fn(args)
-                self._event("command", text[:200])
+                out = getattr(self, "_cmd_" + name)(args)
+                if name not in SELF_LOGGED:
+                    self._event("command", text[:200])
         except Exception as e:  # a refused handle is an answer, not a crash
             out = f"error: {e}"
             self._event("refused", f"{text[:200]}: {e}")
-        self._reply(out)
+        self._reply(name, out, prose=name == "help")
 
     def _handle(self, args: list[str]) -> str:
         if not args or not HANDLE.match(args[0]):
@@ -269,10 +290,10 @@ class TelegramBot(Notifier):
         return args[0]
 
     def _cmd_status(self, args: list[str]) -> str:
-        return self.actions.status_text(narrow=True)
+        return self.actions.status_text(self._handle(args) if args else None)
 
     def _cmd_events(self, args: list[str]) -> str:
-        return self.actions.events_text(int(args[0]) if args and args[0].isdigit() else 10)
+        return self.actions.events_text(min(30, int(args[0])) if args and args[0].isdecimal() else 8)
 
     def _cmd_hosts(self, args: list[str]) -> str:
         return self.actions.hosts_text()
@@ -285,7 +306,7 @@ class TelegramBot(Notifier):
             old = self._state.pop("board", None)
         if old is not None:
             self._call("unpinChatMessage", {"chat_id": self.chat_id, "message_id": old})
-        self.board(self.actions.status_text(narrow=True))
+        self.board(self.actions.status_text())
         return "board pinned"
 
     def _cmd_keep(self, args: list[str]) -> str:
@@ -314,9 +335,12 @@ class TelegramBot(Notifier):
         return self.actions.metric_text(args[0], design)
 
     def _cmd_help(self, args: list[str]) -> str:
-        lines = [f"/{c} - {h}" for c, h in BUILTINS.items()]
-        lines += [f"/{n} - {c.help}" for n, c in self.tg.commands.items()]
-        return "\n".join(lines)
+        """Prose: a bold line per group, then one line per command."""
+        groups = {g: [(f"/{c} {a}".rstrip(), h) for c, a, h in cmds] for g, cmds in GROUPS.items()}
+        if self.tg.commands:
+            groups["Custom"] = [(f"/{n} " + " ".join(f"<{a}>" for a in c.args), c.help or "") for n, c in self.tg.commands.items()]
+        return "\n\n".join(f"<b>{esc(g)}</b>\n" + "\n".join(f"{esc(u.rstrip())} · {esc(h)}" for u, h in cmds)
+                           for g, cmds in groups.items())
 
     def _callback(self, q: dict) -> None:
         verb, _, handle = q.get("data", "").partition(":")
@@ -329,11 +353,15 @@ class TelegramBot(Notifier):
                 note = "unknown button"
         except Exception as e:
             note = f"error: {e}"
-        self._event("button", f"{q.get('data')}: {note}")
+        if note == "unknown button" or note.startswith("error:"):
+            self._event("refused", f"button {q.get('data')}: {note}")
         self._call("answerCallbackQuery", {"callback_query_id": q["id"], "text": str(note)[:200]})
         m = q.get("message")
         if m:
-            self._call("editMessageText", self._edit_params(m["message_id"], pre(m.get("text", "") + "\n" + str(note)), m.get("reply_markup")))
+            # Plain text plus the old entities keeps the bold title; the note goes after the last entity.
+            self._call("editMessageText", {"chat_id": self.chat_id, "message_id": m["message_id"],
+                                           "text": m.get("text", "") + "\n" + str(note), "entities": m.get("entities"),
+                                           "reply_markup": m.get("reply_markup")})
 
     def _custom(self, c: BotCommand, args: list[str]) -> str:
         names = list(c.args)
