@@ -96,7 +96,7 @@ def _step(m: Row) -> int:
 
 
 def _state_row(r: Row, hb: dict, now: float) -> Row:
-    state = board.state_of(r)
+    state = r["state"] if r.get("state") in ("retired", "abandoned") else board.state_of(r)
     return {"handle": board.handle(r), "run_id": r["run_id"], "batch": r["batch"], "state": state,
             "phase": r.get("phase"), "stage": r.get("stage"), "step": r.get("step"), "step_name": hb.get("step_name"),
             "host": r.get("host"), "age_s": None if r.get("updated") is None else int(now - r["updated"]),

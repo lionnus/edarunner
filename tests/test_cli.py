@@ -251,6 +251,15 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert data["hosts"][0]["marks"]["cores"] == "🔴" and [d["handle"] for d in data["decisions"]] == ["b@demo", "a@demo"]
 
 
+def test_brief_proposes_nothing_for_a_retired_run(demo: Path, capsys) -> None:
+    seed(demo, "b", "FAILED:synth", exit=5)
+    seed(demo, "c", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 3600)
+    assert edr(capsys, "retire", "b@demo", "--uncollected", "--why", "failed")[0] == 0
+    assert edr(capsys, "retire", "c@demo", "--uncollected", "--why", "gone")[0] == 0
+    code, out, _ = edr(capsys, "brief", "--json")
+    data = json.loads(out)["data"]
+    assert code == 0 and data["decisions"] == [] and data["batches"][0]["states"] == {"retired": 2}
+
 def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> None:
     b = seed(demo, "b", "FAILED:synth", exit=5, stage="synth", step=2)
     log = Path(json.loads((bdir(demo) / f"{b}.json").read_text())["root"]) / "log" / "synth.log"
