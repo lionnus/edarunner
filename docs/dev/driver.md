@@ -1,13 +1,13 @@
 # The driver protocol
 
-After this page you can change the driver, the spec it reads or the
-heartbeat it writes, and you know which tests and pages change with it.
+This page describes the driver, the spec it reads and the heartbeat it
+writes, and which tests and pages must change along with them.
 
 ## One file, one run
 
-`edr_driver.py` is one file, Python 3.6 or newer, standard library only.
-It reads one spec and nothing else, runs the stages in order, and writes
-one heartbeat. It never imports the package; a feature the 3.6 subset
+`edr_driver.py` is a single file for Python 3.6 or newer that uses only
+the standard library. It reads one spec and nothing else, runs the stages
+in order, and writes one heartbeat. It never imports the package; a feature the 3.6 subset
 cannot express belongs in the controller.
 
 `edr launch` copies the file to `<state_dir>/bin/edr_driver-<hash>.py`, where
