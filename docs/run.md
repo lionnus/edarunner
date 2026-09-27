@@ -1,8 +1,8 @@
 # Run and watch
 
-After this page you can start a batch, read the board and keep a watcher
-behind it. You can act on a run that stopped, continue on an existing
-tree, and clear the hosts at the end.
+This page covers the life of a batch: launching it, reading the board,
+keeping a watcher behind it, acting on a run that stopped, continuing on
+an existing tree, and clearing the hosts at the end.
 
 ![One run, from a commit to an analysis](diagrams/run-lifecycle.svg)
 
@@ -57,9 +57,9 @@ edr events --run base@sweep1  # the history of one run, with the reason of every
 id prefix, or `#n` from the last board that `edr status` printed. Every
 command that acts on one run takes a handle.
 
-A heartbeat keeps its last phase after the driver dies, so a running
-count on the board is not proof of life. `--live` asks the hosts, and
-the watcher marks such a run `dead` after `dead_s`.
+A heartbeat file keeps its last phase after the driver dies, so a run
+that the board shows as running may already be gone. `--live` asks the
+hosts, and the watcher marks such a run `dead` after `dead_s`.
 
 The board shows the phase of a live run and the state of every run. The
 phase is the driver's word for where the run is or how it ended. The
@@ -161,8 +161,8 @@ service up.
    and the overrides.
 4. Resume a `dead` run once, when its stage has `resume` and no process
    group of the run is alive on the host.
-5. Find orphans: our processes that match `tool_procs` on a host and
-   belong to no live run tree.
+5. Find orphans: processes of the current user that match `tool_procs`
+   on a host and belong to no live run tree.
 6. Sweep the seat leases in `<state_dir>/leases/`. A lease older than
    2 minutes is stale when its run has no live heartbeat, is `dead`,
    `retired` or `abandoned`, has left the lease's stage, or when the
@@ -189,12 +189,13 @@ the scheduler stopped the job, so its heartbeat stands still; the run is
 not `dead` while the scheduler reports it suspended. A job that leaves
 the queue before its first heartbeat ends `FAILED:scheduler`.
 
-The watcher sends one alert per run and state for the states that
-[reference/states.md](reference/states.md) marks. A repeat with a new
-reason edits the earlier message in place, so an alert never repeats.
-The only channel today is Telegram; [telegram.md](telegram.md) sets it
-up. [guarantees.md](guarantees.md) says what the watcher does on its own
-and what it never does.
+The watcher sends an alert when a run enters one of the states that
+[reference/states.md](reference/states.md) marks, to every channel
+configured in `site.toml`: Telegram, ntfy or mail. There is one message
+per run and state. On Telegram a new reason for the same state edits that
+message; ntfy and mail send a new one. [notify.md](notify.md) sets up the
+channels, and [guarantees.md](guarantees.md) says what the watcher does
+on its own and what it never does.
 
 ## Limits: gates, retries, budgets and the disk
 
@@ -266,8 +267,8 @@ of the current stage or task does not count. `--ack` cancels the pending
 kill of `hung` and the stop of `host_full`; any keep file holds off the
 `superseded` stop.
 
-`stop` and `retire` need `--why`. The text lands in the events table
-with the actor, and `edr events --run <handle>` shows it later. Try
+`stop` and `retire` need `--why`. The text goes into the event log
+together with who acted, and `edr events --run <handle>` shows it later. Try
 `--after-task` first, then a plain `stop`, then `--now`;
 [guarantees.md](guarantees.md) says what each one signals. A queued run
 that `edr stop` marks `stopped` never starts.
@@ -317,22 +318,25 @@ its own. [dev/driver.md](dev/driver.md) shows the queue.
 
 ## Import a run
 
-`edr import` records a run the package did not make.
+`edr import` records a run that edarunner did not launch. With `--host`
+and `--root` it records a tree on a host:
 
 ```sh
 edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --src abc1234 \
     --host hostA --root /scratch/user/edr/myflow/20260830_0000_base_base_gabc1234
 ```
 
-records a tree, so `reuse` and `edr continue` can use it. A tree is a
-delete target only when its path carries the safety marker.
+After that, `reuse` and `edr continue` can use the tree. `edr retire`
+deletes it only when its path carries the safety marker.
+
+With `--results` it links an archive of the collected files instead:
 
 ```sh
 edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --src abc1234 \
     --results /archive/base --tasks softmax_197 --why "tree gone, reports kept"
 ```
 
-links `/archive/base` as `data/results/<run id>` and extracts the
+This links `/archive/base` as `data/results/<run id>` and extracts the
 project's metrics from it, so `metrics` and `export` cover a result
 whose tree is gone. The directory holds the collected files in the run
 layout, the same paths `collect` names. An imported run carries the

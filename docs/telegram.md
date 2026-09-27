@@ -1,7 +1,8 @@
 # Telegram
 
-After this page your phone shows the alerts and the board of a project,
-and you can keep, acknowledge or stop a run from there.
+This page sets up the Telegram bot, which puts the alerts and the board
+of a project on your phone and lets you keep, acknowledge or stop a run
+from there.
 
 The bot is a thread of `edr watch`. It sends alerts with three buttons,
 keeps one pinned board message, and answers commands from one chat. It
@@ -58,10 +59,7 @@ reply is formatted text: one short line per item, a run handle in
 monospace, and a count or a note in italics. A tap on a handle copies
 it, so you can paste it into `/status <handle>`.
 
-The first line is `<project>: <title>`. Inside a line, commas separate
-the parts; no text uses a middle dot.
-
-Each run line starts with one mark for its state;
+The first line is `<project>: <title>`. Each run line starts with one mark for its state;
 `docs/reference/states.md` lists them.
 
 A `<pre>` block holds only text whose width the bot does not control:
@@ -71,9 +69,9 @@ the limit of 4096 characters; the bot cuts a long reply at a line end.
 
 ## Alerts
 
-The watcher sends one message per event class per run. A repeat for the
-same class and run edits that message in place, so an alert never
-repeats. An alert looks like this:
+The watcher sends one message per run and state. A new reason for the
+same state edits that message instead of sending another. An alert looks
+like this:
 
 ```
 🔴 demo: dead b_nodw@demo
@@ -108,8 +106,8 @@ survives a restart of the watcher.
 The board is one message, pinned once and edited silently on every
 watcher cycle. Its first line holds the project name and the time of
 the last edit. Under it, each run has one line: the mark, the handle,
-the state, and the age. A live run also shows its stage and its step
-of the total. Live runs come first. The last line, in italics, holds
+the state and the age. A running run shows its stage in place of the
+state, and a live run also shows its step out of the total. Live runs come first. The last line, in italics, holds
 the count per state:
 
 ```
@@ -136,8 +134,8 @@ stage and step, the host and the age, the proposed command in monospace,
 and the last log line in a `<pre>` block. `/events` shows one line
 `HH:MM kind handle` per event, the kind in bold, and the reason indented
 under it in italics; it shows a handle in place of a run id. `/hosts`
-shows one line per host, with the mark of `edr hosts` and the used of
-total of every resource:
+shows one line per host, with the same colour marks as `edr hosts` and
+each resource as used/total:
 
 ```
 hostA 🟢 cores 21/32, 🟡 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0/1
@@ -146,7 +144,7 @@ hostA 🟢 cores 21/32, 🟡 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0
 The hosts come in the order of `edr hosts`, the worst mark first. A host
 without a GPU has no `gpu` part, and a host that fails the probe shows
 `⚫ no answer`. `/tools` shows `fc 3/8 seats used, hostA, hostB` per tool.
-`/help` is prose, so a tap on a command sends it. `/compare` and
+`/help` lists the commands as links that you can tap. `/compare` and
 `/metric` reply with a `<pre>` block of aligned columns.
 
 A custom command replies with the output of its program as it is. Give
@@ -301,19 +299,20 @@ runs nothing.
 
 ## edr notify
 
-`edr notify TEXT` sends one message to the chat, or to the topic of the
-project, with the project name in the bold first line:
+`edr notify TEXT` sends one message with the project name in the bold
+first line. On Telegram it goes to the chat, or to the topic of the
+project:
 
 ```sh
-edr notify "session backend: the sweep is done"
-edr notify --silent "session backend: waiting for input"
+edr notify "session myflow: the sweep is done"
+edr notify --silent "session myflow: waiting for input"
 edr notify --dry-run "test"       # prints the message, sends nothing
 edr notify --board                # the board as a new message
 edr notify --digest               # the daily digest now
 ```
 
-It sends through every channel that is on, ntfy and mail too. It exits
-1 when no channel is configured or a send failed. It runs from
+It sends through every channel that is on, so ntfy and mail get the
+message too. It exits 1 when no channel is configured or a send failed. It runs from
 any directory below `edr.toml`.
 
 A Claude Code hook can call it, so a session reports to the phone. Put
@@ -324,9 +323,9 @@ runs, and replace the path with the project directory:
 {
   "hooks": {
     "Notification": [{"hooks": [{"type": "command",
-      "command": "cd ~/work/backend && edr notify \"session $(basename \"$CLAUDE_PROJECT_DIR\"): $(jq -r .message)\""}]}],
+      "command": "cd ~/myflow && edr notify \"session $(basename \"$CLAUDE_PROJECT_DIR\"): $(jq -r .message)\""}]}],
     "Stop": [{"hooks": [{"type": "command",
-      "command": "cd ~/work/backend && edr notify --silent \"session $(basename \"$CLAUDE_PROJECT_DIR\"): turn ended\""}]}]
+      "command": "cd ~/myflow && edr notify --silent \"session $(basename \"$CLAUDE_PROJECT_DIR\"): turn ended\""}]}]
   }
 }
 ```
