@@ -16,8 +16,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      # The demo flow computes its fake area with bc.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq bc rsync
       - run: uv sync --extra dev
       - name: pytest
         run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
@@ -34,10 +32,6 @@ jobs:
     container: python:3.6
     steps:
       - uses: actions/checkout@v4
-      # The image is Debian buster, whose mirrors moved to the archive. The demo flow needs bc.
-      - run: |
-          sed -i 's|deb.debian.org|archive.debian.org|; s|security.debian.org|archive.debian.org|; /buster-updates/d' /etc/apt/sources.list
-          apt-get -o Acquire::Check-Valid-Until=false update -qq && apt-get install -y -qq bc
       # tests/helpers_driver.py starts the driver with /usr/bin/python3; the image keeps 3.6 in /usr/local/bin.
       - run: ln -sf /usr/local/bin/python3 /usr/bin/python3 && /usr/bin/python3 --version
       - uses: astral-sh/setup-uv@v6
@@ -57,33 +51,14 @@ jobs:
       - run: apt-get update -qq && apt-get install -y -qq rsync
       - run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: uv venv -q --python 3.11 .venv && uv pip install -q --python .venv/bin/python -e .
-      # Probe: where ORFS writes, and which keys the metrics carry.
-      - name: probe
-        continue-on-error: true
-        run: |
-          set -x
-          mkdir -p _status/openroad
-          . /OpenROAD-flow-scripts/env.sh
-          cd "$FLOW_HOME"
-          for s in synth floorplan place; do
-            t0=$SECONDS
-            make DESIGN_CONFIG=./designs/nangate45/gcd/config.mk WORK_HOME=$GITHUB_WORKSPACE/probe $s > $GITHUB_WORKSPACE/_status/openroad/probe_$s.log 2>&1 || { tail -40 $GITHUB_WORKSPACE/_status/openroad/probe_$s.log; exit 1; }
-            echo "$s $((SECONDS - t0)) s" >> $GITHUB_WORKSPACE/_status/openroad/probe_time.txt
-          done
-          cd $GITHUB_WORKSPACE/probe
-          find . -type f | sort > ../_status/openroad/probe_find.txt
-          python3 - > ../_status/openroad/probe_keys.txt <<'EOF'
-          import glob, json
-          for f in sorted(glob.glob("logs/**/*.json", recursive=True)):
-              for k, v in json.load(open(f)).items():
-                  print(f, k, v)
-          EOF
-          cp reports/nangate45/gcd/base/synth_stat.txt ../_status/openroad/probe_synth_stat.txt
+      # The default step shell of a container job is sh; bash makes a failure pass through tee.
       - name: run
+        shell: bash
         run: |
           mkdir -p _status/openroad
           EDR=$PWD/.venv/bin/edr bash examples/openroad-gcd/run.sh 2>&1 | tee _status/openroad/run.log
           cp examples/openroad-gcd/data/exports/*/metrics.csv _status/openroad/
+          find examples/openroad-gcd/data/results -type f | sort > _status/openroad/files.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
