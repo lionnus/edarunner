@@ -1,0 +1,36 @@
+# An example site file for a farm with a FlexLM licence server. Copy it to
+# ~/.config/edarunner/site.toml and put your hosts, servers and features in.
+# Every name here is a placeholder.
+schema = 1
+scratch = ["/scratch"]
+env = { PATH = "/opt/eda/bin:$PATH" }
+tool_procs = "^(fc_shell|vsim|vlog)$"
+
+# A host without `tools` has every tool. A list says which tools it has; a
+# table adds the version, which reaches a stage as {tool.<name>.version}.
+[hosts.hostA]
+cores = 64
+ram_gb = 256
+tools = { fc = "2024.09", questa = "2024.1" }
+
+[hosts.hostB]
+cores = 128
+ram_gb = 512
+tools = ["questa"]
+
+[hosts.local]
+cores = 8
+ram_gb = 32
+
+# A tool with a probe gates a stage that needs it: the driver runs the probe on
+# the host and waits while the first number it prints is below the seats the
+# stage needs. The hook must exist at that path on every host, so keep it on a
+# shared filesystem. A tool without a probe is present or not, with no gate.
+[tools.fc]
+probe = ["bash", "{site_dir}/hooks/flexlm_free.sh", "27000@licence.example.com", "FEATURE-NAME"]
+
+[tools.questa]
+seats = 20
+probe = ["bash", "{site_dir}/hooks/flexlm_free.sh", "27001@licence.example.com", "OTHER-FEATURE"]
+
+[tools.yosys]
