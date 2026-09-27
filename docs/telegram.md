@@ -73,7 +73,8 @@ monospace. The alert carries two inline buttons:
 | ack | `ack:<handle>` | `edr keep <handle> --ack` |
 
 The bot answers every press, appends the result to the alert text, and
-keeps the buttons.
+keeps the buttons. A press records one ledger event: the `keep` event of
+the action, with the actor `telegram`.
 
 ## The board
 
@@ -188,8 +189,9 @@ that polls, and act on its project.
 - The command set, the argument shapes and the working directory come
   from `site.toml` on the head node. The phone chooses among those
   entries and fills the gated slots.
-- Every command, button press and refusal lands in `events` with the
-  actor `telegram`.
+- Every command, action and refusal lands in `events` with the actor
+  `telegram`. A button press or `/keep`, `/ack` and `/stop` records the
+  event of its action only.
 - A 429 from Telegram makes the bot wait `retry_after` seconds.
 
 ## What the bot never does
