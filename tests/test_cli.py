@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import board, cli, config
+from edarunner import board, cli, config, launch
+from edarunner.hosts import Ssh
 from edarunner.ledger import Ledger
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -224,6 +225,41 @@ def test_stop_after_task_now_and_finished(demo: Path, capsys) -> None:
     with Ledger(demo / "data" / "edr.db") as led:
         texts = [e["text"] for e in led.events(run_id=b)]
     assert len(texts) == 2 and texts[0] == "after-task: later" and texts[1].startswith("gone [driver")
+
+
+def test_stop_waits_60_s_then_says_now(demo: Path, capsys, monkeypatch) -> None:
+    b = seed(demo, "b_nodw", "stage:synth", pid=os.getpid())
+    cmds: list[str] = []
+
+    class AliveSsh(Ssh):
+        def run(self, host, cmd, timeout_s=None):
+            cmds.append(cmd)
+            return 0, "1\n", ""
+
+    class Clock:
+        now, sleeps = 0.0, []
+
+        def time(self):
+            return self.now
+
+        def sleep(self, s):
+            self.sleeps.append(s)
+            self.now += s
+
+    clock = Clock()
+    monkeypatch.setattr(cli, "Ssh", AliveSsh)
+    monkeypatch.setattr(launch, "time", clock)
+    code, out, _ = edr(capsys, "stop", "b_nodw@demo", "--why", "t")
+    assert code == 3 and f"{b}: still alive; use --now" in out
+    assert cmds[0] == f"kill -TERM {os.getpid()}" and clock.sleeps == [2] * 30
+    assert cmds[1:] == [f"ps -p {os.getpid()} -o pid="] * 30
+    cmds.clear()
+    clock.sleeps.clear()
+    code, out, _ = edr(capsys, "stop", "b_nodw@demo", "--now", "--why", "t")
+    assert code == 3 and "use --now" not in out and clock.sleeps == [2] * 15
+    assert cmds[0] == f"kill -TERM {os.getpid()}" and cmds[-2] == f"kill -KILL {os.getpid()}"
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert [e["text"].endswith(", alive]") for e in led.events(run_id=b)] == [True, True]
 
 
 def test_stop_marks_a_queued_run_stopped(demo: Path, capsys) -> None:

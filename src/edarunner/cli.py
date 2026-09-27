@@ -630,10 +630,12 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
     if not board.is_live(hb or row):
         c.emit(f"{row['run_id']}: already {(hb or row).get('phase')}")
         return 2
-    ok = launch.stop(c.ssh, c.ledger, row, hb, after_task=a.after_task, now=a.now,
-                     grace_s=30 if a.now else c.project.limits.grace_s, dry_run=a.dry_run, why=a.why,
-                     state=c.project.state)
+    # The driver's own handler ends the run in seconds; limits.grace_s is the watcher's delay.
+    ok = launch.stop(c.ssh, c.ledger, row, hb, after_task=a.after_task, now=a.now, grace_s=30 if a.now else 60,
+                     dry_run=a.dry_run, why=a.why, state=c.project.state)
     c.data = {"run_id": row["run_id"], "stopped": ok}
+    if not ok and not a.now:
+        print(f"{row['run_id']}: still alive; use --now")
     return 0 if ok else 3
 
 

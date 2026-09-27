@@ -402,7 +402,7 @@ def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dic
     end = time.time() + grace_s
     alive = pid is not None
     while alive and time.time() < end:
-        time.sleep(0.5)
+        time.sleep(2)
         alive = ssh.pid_alive(host, pid)
     if alive and now:
         _signal(ssh, host, pid, pgids, "KILL")
