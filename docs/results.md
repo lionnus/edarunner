@@ -72,6 +72,27 @@ unit; `--csv` writes the columns of `metrics.csv` below. Every row
 carries its source file. Read the source of a number before it goes in a
 table.
 
+## Extract again
+
+The watcher extracts metrics as the files arrive, using the definitions
+in `edr.toml` at that moment. If you add or change a metric later, runs
+that have already finished keep the rows from the old definitions.
+`edr extract` runs the watcher's extraction again over the files that
+were collected for those runs:
+
+```sh
+edr extract base@g8 --dry-run   # counts only, writes nothing
+edr extract --batch g8
+edr extract --design 3f9a2c1
+```
+
+For each run it prints how many rows are new, changed, unchanged and
+failed. A row counts as changed when its value, canonical name or unit
+differs, or when it is missing its area rows, and `extract` replaces it.
+A failed row is a file that did not parse. Rows that the new extraction
+no longer finds are left in place. Every run gets an `extract` event with
+the counts.
+
 ## A number the flow does not print
 
 A metric has one of five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A

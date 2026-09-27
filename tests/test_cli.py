@@ -453,6 +453,29 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
         assert [e["kind"] for e in db.events()] == ["export"]
 
 
+def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    add_metric(demo, a, "area_cell_um2", 1000.0)  # unit u, the config says um2
+    reports = demo / "data" / "results" / a / "reports" / "3"
+    reports.mkdir(parents=True)
+    (reports / "area.rpt").write_text("i_top 1000.0\n")
+    (reports / "qor.rpt").write_text("Critical Path Slack: -0.25\n")
+    assert edr(capsys, "extract")[0] == 1 and edr(capsys, "extract", "a@demo", "--batch", "demo")[0] == 1
+    code, out, _ = edr(capsys, "extract", "a@demo", "--dry-run")
+    assert code == 0 and out == f"{a}: 1 new, 1 changed, 0 unchanged, 0 failed (dry)\n"
+    with Database(demo / "data" / "edr.db") as db:
+        assert [m["unit"] for m in db.metrics(run_ids=[a])] == ["u"] and db.events() == []
+    code, out, _ = edr(capsys, "--json", "extract", "--design", "abc1234")
+    assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 1, "changed": 1, "unchanged": 0, "failed": 0}]
+    with Database(demo / "data" / "edr.db") as db:
+        assert {(m["name"], m["value"], m["unit"]) for m in db.metrics(run_ids=[a])} == {
+            ("area_cell_um2", 1000.0, "um2"), ("wns_ns", -0.25, "ns")}
+        assert [(e["kind"], e["text"]) for e in db.events()] == [("extract", "1 new, 1 changed, 0 unchanged, 0 failed")]
+    code, out, _ = edr(capsys, "extract", "--batch", "demo")
+    assert code == 0 and out == f"{a}: 0 new, 0 changed, 2 unchanged, 0 failed\n"
+    assert edr(capsys, "extract", "--design", "0000000")[0] == 2
+
+
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     head, row = out.splitlines()[0], out.splitlines()[2]

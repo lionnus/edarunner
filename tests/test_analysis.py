@@ -121,6 +121,20 @@ def test_area_rows_filter_and_compare(demo: Path, capsys) -> None:
     assert last[a]["rows"] == [["<top>", 0, 1000.0], ["i_top", 1, 990.0]]
 
 
+def test_extract_fills_the_area_rows_of_an_old_run(demo: Path, capsys) -> None:
+    _area_metric(demo)
+    a = seed(demo, "a", "done")
+    _extract(demo, a, {2: SYNOPSYS})
+    with Database(demo / "data" / "edr.db") as db:
+        db.conn.execute("DELETE FROM area")
+        db.conn.commit()
+    code, out, _ = edr(capsys, "extract", "a@demo")
+    assert code == 0 and out == f"{a}: 0 new, 1 changed, 0 unchanged, 0 failed\n"
+    with Database(demo / "data" / "edr.db") as db:
+        assert {r["depth"] for r in db.area()} == {0, 1, 2}
+    assert edr(capsys, "extract", "a@demo")[1] == f"{a}: 0 new, 0 changed, 1 unchanged, 0 failed\n"
+
+
 def test_area_hier_takes_a_depth_from_one(demo: Path) -> None:
     _area_metric(demo, True)
     with pytest.raises(config.ConfigError, match="area_hier"):

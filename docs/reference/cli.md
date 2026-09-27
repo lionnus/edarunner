@@ -213,6 +213,37 @@ has one. --instance takes that instance and every instance below it.
 |---|---|
 | 2 | no metric row |
 
+## extract
+
+```
+edr extract [--dry-run] [--batch B] [--design SRC] [handle]
+```
+
+Extracts every metric in edr.toml again from the files collected for
+each run under data/results. It uses the same function as the watcher,
+so it reads the tasks that finished and the stages that ended done. A
+run without a heartbeat, such as an imported one, is read for every
+stage. New rows are added. A row is replaced when its value, canonical
+name or unit has changed, or when its area_hier metric has no area
+rows yet. Rows that the new extraction does not find are kept.
+
+Pass exactly one of a handle, --batch or --design. For each run,
+extract prints how many rows are new, changed, unchanged and failed,
+where a failed row is a file that did not parse, and it writes an
+extract event with the same counts. With --json, data holds run_id,
+new, changed, unchanged and failed for each run.
+
+| Flag | Meaning |
+|---|---|
+| `[handle]` | label@batch, a run id prefix, or #n from the last board |
+| `--dry-run` | print what would happen and write nothing |
+| `--batch B` | every run of the batch |
+| `--design SRC` | every run of the exact source tag |
+
+| Exit | Meaning |
+|---|---|
+| 2 | no run matches |
+
 ## compare
 
 ```

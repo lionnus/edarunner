@@ -577,6 +577,41 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.DONE if rows else Exit.NOTHING
 
 
+def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
+    """Extract every configured metric again from the collected files of runs, as the watcher does."""
+    if sum(map(bool, (a.handle, a.batch, a.design))) != 1:
+        raise Refuse("extract needs one of a handle, --batch or --design")
+    if a.handle:
+        runs = [c.resolve(a.handle)]
+    else:
+        runs = [r for r in c.db.runs(batch=a.batch) if not a.design or r["src"] == a.design]
+    out, lines = [], []
+    for run in runs:
+        old = {(m["stage"], m["step"], m["task"], m["name"]): m for m in c.db.metrics(run_ids=[run["run_id"]])}
+        areas: dict[tuple, set] = {}
+        for x in c.db.area(run_ids=[run["run_id"]]):
+            areas.setdefault((x["stage"], x["step"], x["name"]), set()).add(
+                (x["instance"], x["depth"], x["area"], x["local_area"], x["cells"]))
+        n = {"run_id": run["run_id"], "new": 0, "changed": 0, "unchanged": 0, "failed": 0}
+        rows = watch.extract_run(c.project, c.db, run, c.heartbeat(run), actor=None if a.dry_run else "user")
+        for r in rows:
+            m = old.get((r["stage"], r["step"], r["task"], r["name"]))
+            area = {(i["instance"], i["depth"], i["area"], i["local_area"], i["cells"]) for i in r.get("instances") or []}
+            same = (m is not None and (m["value"], m["canonical"], m["unit"]) == (r["value"], r["canonical"], r["unit"])
+                    and area <= areas.get((r["stage"], r["step"], r["name"]), set()))
+            kind = "failed" if r["value"] is None else "new" if m is None else "unchanged" if same else "changed"
+            n[kind] += 1
+            if not a.dry_run and kind in ("new", "changed"):
+                c.db.add_metric(r, replace=True)
+        text = f"{n['new']} new, {n['changed']} changed, {n['unchanged']} unchanged, {n['failed']} failed"
+        if not a.dry_run:
+            c.db.add_event("user", run["run_id"], "extract", text)
+        out.append(n)
+        lines.append(f"{run['run_id']}: {text}" + (" (dry)" if a.dry_run else ""))
+    c.emit("\n".join(lines) or "no runs", out)
+    return Exit.DONE if runs else Exit.NOTHING
+
+
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     """Two or more runs side by side."""
     runs = [c.resolve(h) for h in a.handles]
@@ -1303,6 +1338,24 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
     s.add_argument("--instance", metavar="PATH", help="the area rows of this instance and every instance below it")
     s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
+    s = command("extract", "extract the metrics of runs again from their collected files", """
+        Extracts every metric in edr.toml again from the files collected for
+        each run under data/results. It uses the same function as the watcher,
+        so it reads the tasks that finished and the stages that ended done. A
+        run without a heartbeat, such as an imported one, is read for every
+        stage. New rows are added. A row is replaced when its value, canonical
+        name or unit has changed, or when its area_hier metric has no area
+        rows yet. Rows that the new extraction does not find are kept.
+
+        Pass exactly one of a handle, --batch or --design. For each run,
+        extract prints how many rows are new, changed, unchanged and failed,
+        where a failed row is a file that did not parse, and it writes an
+        extract event with the same counts. With --json, data holds run_id,
+        new, changed, unchanged and failed for each run.
+        """, write=True, exits={Exit.NOTHING: "no run matches"})
+    s.add_argument("handle", nargs="?", help=HANDLE)
+    s.add_argument("--batch", metavar="B", help="every run of the batch")
+    s.add_argument("--design", metavar="SRC", help="every run of the exact source tag")
     s = command("compare", "two or more runs side by side", """
         Puts two or more runs side by side. Without --area, one row per stage,
         step, task and metric: the step name, the value of each run, and the

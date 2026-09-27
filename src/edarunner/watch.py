@@ -326,6 +326,28 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
         db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
     # No new file does not mean no new metric: a broad collect path copies a stage's reports while it
     # runs, and the stage becomes eligible only when it ends. Extraction is idempotent, so run it.
+    rows = extract_run(project, db, run, hb, spec, tasks)
+    n = sum(db.add_metric(r) for r in rows if r["value"] is not None)
+    if not rec.get("params"):
+        db.set_parameters(run["run_id"], _parameters(project, run), "spec")
+        rec["params"] = True
+    log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
+
+
+def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict | None = None,
+                tasks: dict[str, str] | None = None, actor: str | None = "watch") -> list[dict]:
+    """The metric rows of a run from its collected files: the done tasks, and the stages that ended done.
+
+    `tasks` maps a task id to its phase, by default from the heartbeat. A run without a heartbeat,
+    such as an imported one, takes every stage and the tasks its metric rows already name. An
+    unknown task is an event of `actor`; None writes no event.
+    """
+    spec = collect.load_spec(project, run) if spec is None else spec
+    only = collect.spec_stages(spec)
+    if tasks is None:
+        tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items()}
+    if not hb:
+        tasks = {m["task"]: "done" for m in db.metrics(run_ids=[run["run_id"]]) if m["task"]}
     task_dirs = collect.spec_task_dirs(spec, str(run.get("root") or hb.get("root") or ""))
     done: dict[str, Task] = {}
     for t, p in tasks.items():
@@ -337,19 +359,15 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
             # The spec names the task's directory even when the task table no longer has it.
             if t in task_dirs:
                 done[t] = Task(id=t, fields={"id": t})
-            else:
-                db.add_event("watch", run["run_id"], "extract", f"unknown task {t}: {e}")
+            elif actor:
+                db.add_event(actor, run["run_id"], "extract", f"unknown task {t}: {e}")
     # A failed stage can leave a stale report from a copied tree: a one-command stage counts
     # only with status done, and a task group counts per task with phase done.
     status = _stages(hb)
     eligible = {n for n, st in project.stages.items() if (only is None or n in only)
                 and (st.is_group or status.get(n, {}).get("status") == "done")}
-    rows = metrics.extract(project, run, project.data / "results", done, stages=eligible, task_dirs=task_dirs)
-    n = sum(db.add_metric(r) for r in rows if r["value"] is not None)
-    if not rec.get("params"):
-        db.set_parameters(run["run_id"], _parameters(project, run), "spec")
-        rec["params"] = True
-    log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
+    return metrics.extract(project, run, project.data / "results", done, stages=eligible if hb else None,
+                           task_dirs=task_dirs)
 
 
 def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict,
