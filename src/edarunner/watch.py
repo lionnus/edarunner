@@ -532,6 +532,9 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         run = db.run(hb["run_id"]) or {**hb, "batch": batch}
         h = handles.get(hb["run_id"])
         live = alive[h][0] if h in alive else None
+        if run.get("state") in ("retired", "abandoned"):
+            states[hb["run_id"]] = run["state"]
+            continue
         state, reasons = classify(project, ssh, db, run, hb, now, progress, live)
         states[hb["run_id"]] = state
         if dry_run:

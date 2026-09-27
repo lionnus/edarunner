@@ -1048,6 +1048,8 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
                 hb["phase"], hb["exit"] = phase, 1 if hb.get("exit") is None else hb["exit"]
                 config.save_json(project.state_dir / str(row["batch"]) / f"{run_id}.json", hb)
             c.db.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
+        elif not a.prune:
+            c.db.upsert_run({"run_id": run_id, "state": "retired"})
         c.db.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
         done.append(run_id)
     if a.batch and not a.prune and not a.dry_run:

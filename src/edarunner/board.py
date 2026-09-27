@@ -33,7 +33,7 @@ Row = dict[str, Any]
 # compare.html loads Plotly from this file in data/board when a user put a copy there, else from the CDN.
 PLOTLY_FILE = "plotly.min.js"
 PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
-TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED")
+TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED", "ABANDONED")
 # Sort rank on a board; the live rows go before the finished ones.
 RANK = {"dead": 0, "failed": 0, "hung": 1, "incomplete": 1, "looping": 2, "over_budget": 3,
          "host_full": 4, "killed": 4, "superseded": 5, "stopped": 5, "stale": 6, "running": 8, "done": 9}

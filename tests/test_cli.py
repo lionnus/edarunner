@@ -487,6 +487,22 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     assert edr(capsys, "retire", "--batch", "empty", "--why", "x")[0] == 2
 
 
+def test_a_retired_live_run_stays_retired_and_the_watcher_does_not_resume_it(demo: Path, capsys, monkeypatch) -> None:
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 3600)
+    code, _, _ = edr(capsys, "retire", "b@demo", "--uncollected", "--why", "gone")
+    assert code == 0
+    resumed, sent = [], []
+    monkeypatch.setattr(watch, "_resume", lambda *a, **k: resumed.append(a))
+    monkeypatch.setattr(watch, "orphans", lambda *a: [])  # the sleeps of other tests on this machine
+    notifier = Notifier()
+    monkeypatch.setattr(notifier, "send", lambda *a, **k: sent.append(a))
+    project = config.load_project(demo)
+    with Database(project.data / "edr.db") as db:
+        assert watch.cycle(project, Ssh(project.site), db, [notifier])[b] == "retired"
+        assert db.run(b)["phase"] == "ABANDONED:gone" and not board.is_live(db.run(b))
+    assert resumed == [] and sent == []
+
+
 # metrics, export, hosts, tools
 
 
