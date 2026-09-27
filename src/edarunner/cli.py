@@ -862,6 +862,10 @@ def main(argv: list[str] | None = None) -> int:
         code = 3
     except KeyboardInterrupt:
         code = 130
+    except Exception as e:  # the exit code and the --json envelope must survive any fault
+        logging.getLogger("edr").exception("unhandled")
+        print(f"edr: {e}", file=sys.stderr)
+        code = 1
     finally:
         c.close()
     if a.json:
