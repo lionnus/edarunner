@@ -163,6 +163,11 @@ def _expressions(project: Project, rows: list[dict], run_id: str, now: int) -> l
     return out
 
 
+def step_totals(project: Project) -> dict[str, int]:
+    """The step count of the flow at the end of each stage that has `steps`."""
+    return {k: r.stop for k, r in _owned_steps(project).items()}
+
+
 def _owned_steps(project: Project) -> dict[str, range]:
     """The step numbers each stage owns, in stage order.
 

@@ -40,7 +40,7 @@ class Notifier:
         """Rewrite a sent message in place."""
 
     def board(self, text: str) -> None:
-        """Rewrite the one pinned board message in place."""
+        """Rewrite the one pinned board message in place; `text` is Telegram HTML."""
 
 
 def alert_buttons(handle: str) -> list[Button]:

@@ -155,11 +155,11 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
                                            (rid("g"), "done"), (rid("g"), "collect")])
     assert sorted(env.notifier.sent) == sorted([("superseded", rid("a")), ("dead", rid("d")), ("looping", rid("l")),
                                                 ("over_budget", rid("o")), ("host_full", rid("f"))])
-    assert len(env.notifier.boards) == 1 and "DEAD" in env.notifier.boards[0]
+    assert len(env.notifier.boards) == 1
+    assert env.notifier.boards[0].splitlines()[0] == "🔴 <code>d@demo</code> dead · synth 1/4 · 3m"
     text, cmd = env.notifier.texts[rid("l")]
     assert text.splitlines()[0] == "looping l@demo" and cmd == "edr stop l@demo --why looping"
     assert env.notifier.texts[rid("d")][1].startswith("edr run d@demo --stage ")
-    assert all(len(ln) <= 40 for ln in env.notifier.boards[0].splitlines())
     bdir = env.project.data / "board"
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
     assert set(env.ledger.get_kv("progress")) == set(states) and rid("d") in env.ledger.get_kv("notified")

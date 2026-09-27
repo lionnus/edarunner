@@ -13,10 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from edarunner import board
 from edarunner.model import BotCommand, Host, Site, Telegram
 from edarunner.notify import alert_buttons, make_notifiers
 from edarunner.notify import telegram as tgmod
-from edarunner.notify.telegram import TelegramBot, pre
+from edarunner.notify.telegram import LIMIT, TelegramBot, fit, pre
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 CHAT = 42
@@ -142,7 +143,8 @@ def test_make_notifiers_needs_a_private_token(tmp_path):
 def test_builtin_dispatch(bot, text, call):
     bot.handle_update(msg(text))
     assert call in bot.actions.calls
-    assert last_reply(bot) == pre(call[0] + " ok")
+    out = call[0] + " ok"
+    assert last_reply(bot) == (pre(out) if call[0] in ("compare_text", "metric_text") else out)
 
 
 def test_bad_handle_is_an_answer(bot):
@@ -196,7 +198,7 @@ def test_custom_skip_if_renders_placeholders(bot):
 def test_keep_refuses_a_unicode_digit(bot):
     bot.handle_update(msg("/keep x \u00b2"))
     assert bot.actions.calls == []
-    assert last_reply(bot).startswith("<pre>error")
+    assert last_reply(bot).startswith("error: ")
     assert [e["kind"] for e in bot.ledger.events] == ["refused"]
 
 
@@ -266,7 +268,7 @@ def test_press_by_another_user_needs_no_user_id(bot, caplog):
     bot.handle_update(callback("ack:a@demo", user=999))
     assert ("ack", ("a@demo", "telegram"), {}) in bot.actions.calls
     bot.handle_update(msg("/status", user=999))
-    assert last_reply(bot) == pre("status_text ok")
+    assert last_reply(bot) == "status_text ok"
 
 
 def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
@@ -307,7 +309,7 @@ def test_alert_send_edits_a_repeat(bot):
     mid = bot.send("hung", "run1", "hung a@demo\nno progress <3 h", alert_buttons("a@demo"), "edr stop a@demo --why hung")
     sent = bot.api.of("sendMessage")[-1]
     assert mid == "1" and sent["disable_notification"] is False
-    assert sent["text"] == "<b>demo · hung a@demo</b>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
+    assert sent["text"] == "🔴 <b>demo · hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
     assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo"]
     assert bot.send("hung", "run1", "no progress for 3 h") == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
@@ -326,7 +328,7 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     assert len(bot.api.of("sendMessage")) == 1
     edit = bot.api.of("editMessageText")[-1]
     assert edit["message_id"] == 1 and edit["reply_markup"] is None
-    assert re.fullmatch(r"<b>demo · board \d\d:\d\d</b>\n<pre>board v2</pre>", edit["text"])
+    assert re.fullmatch(r"<b>demo · board \d\d:\d\d</b>\nboard v2", edit["text"])
     # A new bot on the same ledger edits the same message.
     again = TelegramBot(bot.site, bot.project, bot.ledger, bot.actions, str(bot.tg.token_file))
     again.api = FakeApi()
@@ -441,3 +443,22 @@ def test_custom_output_keeps_a_non_utf8_byte(bot):
 def test_pre_escapes_and_cuts():
     assert pre("a<b>&") == "<pre>a&lt;b&gt;&amp;</pre>"
     assert len(pre("x" * 5000)) == 4000 + len("<pre></pre>")
+
+
+def test_every_run_state_has_a_mark():
+    states = set(board.STYLE) | set(board._RANK) | {"queued", "orphan", "retired", "imported"}
+    states |= {t.lower() for t in board.TERMINAL}
+    assert states <= set(board.MARK) and len(set(board.MARK.values())) == 7
+
+
+def test_a_long_reply_is_cut_at_a_line(bot):
+    text = fit("\n".join(f"<i>line {n}</i>" for n in range(1000)))
+    assert len(text) <= LIMIT + 2 and text.endswith("</i>\n…")
+    bot.actions.status_text = lambda h=None: "\n".join(["<code>x</code>"] * 1000)
+    bot.handle_update(msg("/status"))
+    assert len(bot.api.of("sendMessage")[-1]["text"]) <= LIMIT + 2
+
+
+def test_an_alert_without_a_state_keeps_its_title(bot):
+    bot.send("watch", "", "watch stale\nno watch.json")
+    assert bot.api.of("sendMessage")[-1]["text"] == "<b>demo · watch stale</b>\nno watch.json"

@@ -310,23 +310,24 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert (bdir(demo) / f"{b}.stop").exists()
     with Ledger(demo / "data" / "edr.db") as led:
         assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
-    status = acts.status_text().splitlines()
-    assert [ln.split() for ln in status] == [["RUN", "b_nodw@demo", "0m"], ["done", "a@demo", "0m"], ["RUN:1", "done:1"]]
+    assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4 · 0m", "⚪ <code>a@demo</code> done · 0m",
+                                               "<i>1 running · 1 done</i>"]
     with Ledger(demo / "data" / "edr.db") as led:
         assert len(led.get_kv("last_board")) == 2
     one = acts.status_text("b_nodw@demo").splitlines()
-    assert one[:2] == ["running b_nodw@demo", "stage synth, step 2 elaborate"] and one[-1] == "  step 2 elaborate"
+    assert one == ["🟢 <code>b_nodw@demo</code> running", "stage synth, step 2 elaborate", "on local, 0m",
+                   "<pre>step 2 elaborate</pre>"]
+    assert acts.status_text("a@demo").splitlines()[3] .startswith("<code>edr export --design ")
     events = acts.events_text(2).splitlines()
-    assert events[0].split()[1:] == ["stop", "b_nodw@demo"] and events[1] == "  after-task: why" and len(events) == 4
+    assert events[0][5:] == " <b>stop</b> <code>b_nodw@demo</code>" and events[1] == "    <i>after-task: why</i>"
+    assert len(events) == 4
     assert b not in acts.events_text(8)
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
-    assert acts.hosts_text().splitlines()[1].split()[0] == "local"
-    lic = acts.lic_text().splitlines()
-    assert lic[0].split() == ["licence", "free", "used", "ours"] and lic[1].split() == ["demo", "8/10", "2", "0"]
-    for text in (acts.status_text(), acts.status_text("a@demo"), acts.events_text(30), acts.hosts_text(),
-                 acts.lic_text(), "\n".join(cmp), acts.metric_text("area.cell", None)):
+    assert acts.hosts_text().startswith("<b>local</b> · ")
+    assert acts.lic_text() == "<b>demo</b> · 8/10 seats free"
+    for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
 
@@ -476,9 +477,7 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     text = acts.hosts_text().splitlines()
-    assert text[0].split() == ["host", "cores", "scratch", "gpu"] and all(len(ln) <= 40 for ln in text)
-    assert next(ln for ln in text if ln.startswith("hostA")).split() == ["hostA", "52/64", "800/2000", "1/4"]
-    assert text[-1].startswith("hostB: hostB: rc 255")
+    assert "<b>hostA</b> · 52/64 cores · 800/2000 GB free · gpu 1/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
 
 
 def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
