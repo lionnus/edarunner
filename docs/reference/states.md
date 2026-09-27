@@ -15,7 +15,7 @@ and the stop of `host_full`; any keep file holds off the stop of `superseded`.
 |---|---|---|---|---|---|
 | `running` | 🟢 | the heartbeat is younger than `stale_s` |  | none |  |
 | `stale` | 🟡 | the heartbeat is older than `stale_s`; or older than `dead_s`, but the driver is alive or the host did not answer |  | none | `edr status <label>@<batch> --live` |
-| `dead` | 🔴 | the heartbeat is older than `dead_s` and the driver process is gone from the host | yes | one resume from the last step, when the stage has `resume` and no process group of the run is alive | `edr run <label>@<batch> --stage <stage> --from <step>` |
+| `dead` | 🔴 | the heartbeat is older than `dead_s` and the driver process is gone from the host | yes | one resume from the last step, when the stage has `resume` and no process group of the run is alive | `edr continue <label>@<batch> --stage <stage> --from <step>` |
 | `hung` | 🔴 | the heartbeat is fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, tree size, log tail, task counts, log size, CPU time of the process groups | yes | `SIGTERM` to the process groups, only with `kill_hung` and no `ack` | `edr stop <label>@<batch> --why hung` |
 | `looping` | 🔴 | the driver set `looping`: `streak` equal failure signatures in a row | yes | none | `edr stop <label>@<batch> --why looping` |
 | `over_budget` | 🔴 | the driver set `over_budget`, or the run ended `OVER_BUDGET` | yes | none | `edr stop <label>@<batch> --why over-budget` |

@@ -94,7 +94,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert any(",power,,k_small,energy_nj,energy,850.0,nJ," in ln for ln in lines)
     assert any(f"{ids['b_nodw']},b_nodw,demo,{src},pnr,5,,area_cell_um2,area.cell,1052.5,um2,reports/5/area.rpt" == ln for ln in lines)
     with Database(demo / "data" / "edr.db") as db:
-        params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM params")}
+        params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM parameters")}
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "src", src) in params
 
     exp = tmp_path / "exp"
@@ -105,7 +105,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "stop", "a@demo", "--after-task", "--why", "test")
     assert code == 2 and "already done" in out
 
-    code, out, _ = edr(capsys, "--json", "run", "a@demo", "--stage", "export", "--on", "local")
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "export", "--on", "local")
     new = json.loads(out)["data"]
     assert code == 0 and new["batch"] == "demo" and new["root"] == str(roots["a"])
     assert re.fullmatch(rf"\d{{8}}_\d{{4}}_a\.export_demo_g{src}", new["run_id"]) and new["run_id"] != ids["a"]
@@ -124,7 +124,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert runs(capsys) == []  # the export run went with its batch
     code, out, _ = edr(capsys, "--json", "events", "-n", "100")
     kinds = [(e["actor"], e["kind"]) for e in json.loads(out)["data"]]
-    assert kinds.count(("user", "launch")) == 2 and ("user", "keep") in kinds and ("user", "run") in kinds
+    assert kinds.count(("user", "launch")) == 2 and ("user", "keep") in kinds and ("user", "continue") in kinds
     assert kinds.count(("user", "retire")) == 4 and ("user", "export") in kinds and ("watch", "done") in kinds
 
 

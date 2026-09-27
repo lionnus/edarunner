@@ -2,7 +2,7 @@
 
 The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a file or a tree. Its memory between cycles
-is two rows of the database's kv table: progress (what each run looked
+is two rows of the database's store table: progress (what each run looked
 like last time) and notified (states, alerts, grace clocks).
 """
 
@@ -84,17 +84,17 @@ _NOTIFY = frozenset(s for s, st in STATES.items() if st.alert)
 # files
 
 def _hb(project: Project, run: Row) -> dict:
-    return config.load_json(project.state / str(run.get("batch")) / f"{run['run_id']}.json")
+    return config.load_json(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.json")
 
 
 def _keep(project: Project, run: Row) -> dict:
-    return config.load_json(project.state / str(run.get("batch")) / f"{run['run_id']}.keep.json")
+    return config.load_json(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.keep.json")
 
 
 def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
     """Every heartbeat of every batch without RETIRED (or of `batches`), as (batch, heartbeat)."""
     out = []
-    for bdir in sorted(p for p in project.state.glob("*") if p.is_dir() and p.name != "bin"):
+    for bdir in sorted(p for p in project.state_dir.glob("*") if p.is_dir() and p.name != "bin"):
         if (bdir / "RETIRED").exists() or (batches is not None and bdir.name not in batches):
             continue
         for f in sorted(bdir.glob("*.json")):
@@ -201,9 +201,9 @@ def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
     lim, host, run_id = project.limits, run.get("host"), run["run_id"]
     if any(r.startswith("superseded:") for r in reasons):
-        stop_path = project.state / str(run.get("batch")) / f"{run_id}.stop"
+        stop_path = project.state_dir / str(run.get("batch")) / f"{run_id}.stop"
         if not _keep(project, run) and not stop_path.exists():
-            launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state, actor="watch")
+            launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state_dir, actor="watch")
         if state == "superseded":
             return True
     if state == "host_full":
@@ -281,7 +281,7 @@ def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
 
 # collect, extract, resume, queue
 
-def _params(project: Project, run: Row) -> dict[str, Any]:
+def _parameters(project: Project, run: Row) -> dict[str, Any]:
     out = {k: run.get(k) for k in ("config", "build_tag", "src") if run.get(k)}
     try:
         job = next(j for j in config.load_batch(project, str(run["batch"])).jobs if j.label == run.get("label"))
@@ -327,14 +327,14 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     rows = metrics.extract(project, run, project.data / "results", done, stages=eligible, task_dirs=task_dirs)
     n = sum(db.add_metric(r) for r in rows if r["value"] is not None)
     if not rec.get("params"):
-        db.set_params(run["run_id"], _params(project, run), "spec")
+        db.set_parameters(run["run_id"], _parameters(project, run), "spec")
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
 
 
 def _resume(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, now: float) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
-    spec_path = project.state / str(run["batch"]) / f"{run_id}.spec.json"
+    spec_path = project.state_dir / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
     stage = next((s for s in spec.get("stages") or [] if s.get("name") == hb.get("stage")), None)
     driver = spec.get("driver")
@@ -389,9 +389,9 @@ def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
     rows = [r for r in db.runs() if r["batch"] not in retired]
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now))
-    params = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM params")]
+    parameters = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM parameters")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
-    config.save_text(bdir / "compare.html", board.compare_html(rows, params, db.metrics(), plotly))
+    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)
@@ -401,7 +401,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
           dry_run: bool = False) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing."""
     now = time.time() if now is None else now
-    progress, notes = db.get_kv("progress", {}), db.get_kv("notified", {})
+    progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
     heartbeats = read_heartbeats(project)
     if not dry_run:
         ingest(db, heartbeats)
@@ -434,10 +434,10 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         for n in notifiers:
             n.post("digest", text)
         digest.mark_sent(now)
-    db.set_kv("progress", progress)
-    db.set_kv("notified", notes)
-    n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1
-    config.save_json(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
+    db.set_store("progress", progress)
+    db.set_store("notified", notes)
+    n = int(config.load_json(project.state_dir / "watch.json").get("cycle") or 0) + 1
+    config.save_json(project.state_dir / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states
 
 
@@ -473,7 +473,7 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
 
 def check(project: Project, notifiers: list[Notifier] = ()) -> int:
     """1 (and an alert) when watch.json is older than three cycles, else 0."""
-    w = config.load_json(project.state / "watch.json")
+    w = config.load_json(project.state_dir / "watch.json")
     age = time.time() - float(w.get("ts") or 0)
     if age <= 3 * project.limits.heartbeat_s:
         return 0

@@ -2,6 +2,7 @@
 
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -28,7 +29,7 @@ def test_schema_twice(tmp_path):
     with Database(path) as db:
         assert len(db.events()) == 1
         tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {"batches", "runs", "stage_runs", "params", "metrics", "artifacts", "events", "kv"} <= tables
+        assert {"batches", "runs", "stage_runs", "parameters", "metrics", "artifacts", "events", "store"} <= tables
         assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
@@ -55,9 +56,9 @@ def test_upsert_then_update(tmp_path):
         assert [(r["stage"], r["task"], r["attempt"], r["status"], r["ended"]) for r in rows] == [
             ("power", "k_small", 1, "done", None), ("synth", "", 1, "done", 2)]
 
-        db.set_params(RUN_A, {"DW": 0, "name": "x"}, "config")
-        db.set_params(RUN_A, {"DW": 1}, "override")
-        params = {r["key"]: (r["value"], r["source"]) for r in db.conn.execute("SELECT * FROM params")}
+        db.set_parameters(RUN_A, {"DW": 0, "name": "x"}, "config")
+        db.set_parameters(RUN_A, {"DW": 1}, "override")
+        params = {r["key"]: (r["value"], r["source"]) for r in db.conn.execute("SELECT * FROM parameters")}
         assert params == {"DW": ("1", "override"), "name": ("x", "config")}
 
         db.add_artifact({"run_id": RUN_A, "path": "reports/3/area.rpt", "bytes": 10, "class": "report"})
@@ -121,14 +122,35 @@ def test_events(tmp_path):
         assert db.events(since_s=2**40) == []
 
 
-def test_kv(tmp_path):
+def test_store(tmp_path):
     with Database(tmp_path / "edr.db") as db:
-        assert db.get_kv("x") is None and db.get_kv("x", {}) == {}
-        db.set_kv("x", {"a": [1, 2]})
-        db.set_kv("x", {"a": [1, 2, 3]})
-        assert db.get_kv("x") == {"a": [1, 2, 3]}
+        assert db.get_store("x") is None and db.get_store("x", {}) == {}
+        db.set_store("x", {"a": [1, 2]})
+        db.set_store("x", {"a": [1, 2, 3]})
+        assert db.get_store("x") == {"a": [1, 2, 3]}
     with Database(tmp_path / "edr.db") as db:
-        assert db.get_kv("x") == {"a": [1, 2, 3]}
+        assert db.get_store("x") == {"a": [1, 2, 3]}
+
+
+def test_old_schema_migrates_on_open(tmp_path):
+    path = tmp_path / "edr.db"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT);
+        CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO kv VALUES('last_board', '["r1"]');
+        CREATE TABLE params(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));
+        INSERT INTO params VALUES('r1', 'DW', '0', 'spec');
+    """)
+    old.close()
+    with Database(path) as db:
+        tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert not {"kv", "params"} & tables and {"store", "parameters"} <= tables
+        assert db.conn.execute("SELECT value FROM parameters WHERE run_id='r1'").fetchone()[0] == "0"
+        assert db.get_store("last_board") == ["r1"]
+        assert "tree_id" in db._table_columns("runs")
+    with Database(path) as db:
+        assert db.get_store("last_board") == ["r1"]
 
 
 def test_board_json(tmp_path, monkeypatch):

@@ -27,7 +27,7 @@ def test_demo_end_to_end():
     p = config.load_project(DEMO)
     assert p.project == "demo" and p.root == DEMO
     assert p.site.path == DEMO / "site.toml"
-    assert p.state == Path("~/.edr/demo").expanduser()
+    assert p.state_dir == Path("~/.edr/demo").expanduser()
     assert p.data == DEMO / "data" and p.source.repo == DEMO / "repo"
     assert p.run_prefix == "{user}/edr/{project}"
     assert p.safety.min_depth == 3 and p.limits.heartbeat_s == 5 and p.placement.max_per_host == 4
@@ -80,6 +80,7 @@ def test_render_and_placeholders():
         ('tools = ["demo"]', 'tools = ["fc"]', "stages.synth.needs.tools names unknown tool 'fc'"),
         ("tools = { demo = 1 }", "tools = { questa = 1 }", "unknown tool 'questa'"),
         ('tools = ["demo"]', 'licence = "demo"', "stages.synth.needs.licence is gone; use stages.synth.needs.tools"),
+        ("state_dir = ", "state = ", "'state' is now 'state_dir'"),
         ('tools = ["demo"]', "tools = 1", "stages.synth.needs.tools must be a list of names or"),
         ('tools = ["demo"]', 'tools = { demo = "2" }', "stages.synth.needs.tools must be a list of names or"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
@@ -229,7 +230,7 @@ def test_site_path_forms(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     shutil.copy(root / "etc" / "site.toml", tmp_path / "site.toml")
     p = config.load_project(root, "~/site.toml")
-    assert p.site.path == tmp_path / "site.toml" and p.state == tmp_path / ".edr" / "demo"
+    assert p.site.path == tmp_path / "site.toml" and p.state_dir == tmp_path / ".edr" / "demo"
 
 
 def test_pattern_resolver(tmp_path):

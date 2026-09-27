@@ -79,16 +79,16 @@ class FakeActions:
 class FakeDatabase:
     def __init__(self) -> None:
         self.events: list[dict] = []
-        self.kv: dict = {}
+        self.store: dict = {}
 
     def add_event(self, **kw) -> None:
         self.events.append(kw)
 
-    def get_kv(self, key, default=None):
-        return self.kv.get(key, default)
+    def get_store(self, key, default=None):
+        return self.store.get(key, default)
 
-    def set_kv(self, key, value) -> None:
-        self.kv[key] = json.loads(json.dumps(value))
+    def set_store(self, key, value) -> None:
+        self.store[key] = json.loads(json.dumps(value))
 
 
 COMMANDS = {
@@ -359,7 +359,7 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     sent = bot.api.of("sendMessage")
     assert len(sent) == 1 and sent[0]["disable_notification"] is True
     assert bot.api.of("pinChatMessage")[0]["message_id"] == 1
-    assert bot.db.kv["telegram"]["board"] == 1 and not (tmp_path / "data").exists()
+    assert bot.db.store["telegram"]["board"] == 1 and not (tmp_path / "data").exists()
     bot.board("board v2")
     assert len(bot.api.of("sendMessage")) == 1
     edit = bot.api.of("editMessageText")[-1]
@@ -553,7 +553,7 @@ def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
     monkeypatch.setattr(tgbot.time, "time", lambda: 1e12)
     bot.handle_update(reply_to("/ack", mid))
     assert last_reply(bot).startswith("error: a handle is")
-    assert list(bot.db.kv["telegram"]["replies"]) == [str(mid)]
+    assert list(bot.db.store["telegram"]["replies"]) == [str(mid)]
 
 
 def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):

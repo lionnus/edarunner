@@ -44,7 +44,7 @@ def demo_project(site: Site) -> Project:
     t = tomllib.loads((DEMO / "edr.toml").read_text())
     stages = {n: Stage(n, needs=needs_of(s)) for n, s in t["stages"].items()}
     return Project(
-        root=DEMO, project=t["project"], site=site, state=Path("/nonexistent"), data=Path("data"),
+        root=DEMO, project=t["project"], site=site, state_dir=Path("/nonexistent"), data=Path("data"),
         run_prefix=t["run_prefix"],
         source=Source(Path("repo"), Path("wt"), "HEAD", [], t["source"]["run_id"], ""),
         sync=Sync(exclude=[".git"]), safety=Safety("/edr/", 3), limits=Limits(),

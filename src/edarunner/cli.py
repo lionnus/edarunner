@@ -118,9 +118,9 @@ class Ctx:
         name = name or os.environ.get("EDR_BATCH")
         if name:
             return name
-        dirs = [p for p in self.project.state.glob("*") if p.is_dir() and p.name != "bin"]
+        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name != "bin"]
         if not dirs:
-            raise Refuse(f"no batch given and no batch directory in {self.project.state}")
+            raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name
 
     def batch(self, name: str | None) -> Batch:
@@ -158,7 +158,7 @@ class Ctx:
     def resolve(self, handle: str) -> Row:
         """The database row of label@batch, a run id prefix, or #n from the last board."""
         try:
-            run_id = self.db.resolve(handle, self.db.get_kv("last_board"))
+            run_id = self.db.resolve(handle, self.db.get_store("last_board"))
         except KeyError as e:
             raise Refuse(str(e.args[0])) from None
         row = self.db.run(run_id)
@@ -168,12 +168,12 @@ class Ctx:
 
     def heartbeat(self, row: Row) -> dict:
         """The heartbeat of a run, or {} when the driver wrote none."""
-        return config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
+        return config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.json")
 
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""
         if rows:
-            self.db.set_kv("last_board", [r["run_id"] for r in board.order(rows)])
+            self.db.set_store("last_board", [r["run_id"] for r in board.order(rows)])
 
 
 # --- texts shared by the commands and the bot
@@ -307,7 +307,7 @@ def _metrics_table(rows: list[Row]) -> Table | str:
 def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
     """Write the keep file next to the spec; a field not given keeps its current value."""
     run_id = row["run_id"]
-    path = c.project.state / str(row["batch"]) / f"{run_id}.keep.json"
+    path = c.project.state_dir / str(row["batch"]) / f"{run_id}.keep.json"
     cur = config.load_json(path)
     data = {"hours": cur.get("hours", 0) if hours is None else hours,
             "ack": bool(cur.get("ack")) if ack is None else ack}
@@ -345,7 +345,7 @@ class Actions:
         c, row = self.c, self.c.resolve(handle)
         if not board.is_live(row):
             return f"{board.handle(row)} already {row['phase']}"
-        launch.stop(c.ssh, c.db, row, {}, after_task=True, why=why, state=c.project.state, actor=actor)
+        launch.stop(c.ssh, c.db, row, {}, after_task=True, why=why, state=c.project.state_dir, actor=actor)
         return f"{board.handle(row)} stops after its task"
 
     def status_text(self, handle: str | None = None) -> str:
@@ -636,8 +636,10 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.NOTHING if all(any(p.startswith("already launched") for p in ps) for ps in problems) else Exit.REFUSED
 
 
-def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
-    """Run one stage on the tree of an existing run, or fetch a collect_on_request list."""
+def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
+    """Run one stage on the tree of an existing run, or fetch a collect_on_request list; `run` is the old name."""
+    if a.command == "run":
+        print("edr: run is deprecated; use edr continue", file=sys.stderr)
     row = c.resolve(a.handle)
     project, run_id = c.project, row["run_id"]
     if a.collect:
@@ -648,7 +650,7 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
         return Exit.HOSTS if res.failures else Exit.DONE
     if not a.stage:
-        raise Refuse("run needs --stage or --collect")
+        raise Refuse("continue needs --stage or --collect")
     if a.stage not in project.stages:
         raise Refuse(f"unknown stage {a.stage}")
     try:
@@ -671,7 +673,7 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
     # The run joins the batch of the tree it continues; the stage in the label and the time keep its id apart.
     job.label = f"{job.label}.{a.stage}"
     batch.batch, batch.jobs = str(row["batch"]), [job]
-    state = project.state
+    state = project.state_dir
     (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT))
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
@@ -691,7 +693,7 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
                          "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
                          "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
                          "tree_id": p.values.get("tree_id") or p.run_id})
-    c.db.add_event("user", p.run_id, "run", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
+    c.db.add_event("user", p.run_id, "continue", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
     launch.start_driver(c.ssh, str(p.host), driver, spec_path, spec_path.with_name(f"{p.run_id}.driver.log"),
                         project.site.env)
     return Exit.DONE
@@ -732,7 +734,7 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     if not a.dry_run:
         c.db.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.src, created=now))
         c.db.upsert_run(row)
-        c.db.set_params(a.run_id, {k: row[k] for k in ("config", "build_tag", "src") if row[k]}, "import")
+        c.db.set_parameters(a.run_id, {k: row[k] for k in ("config", "build_tag", "src") if row[k]}, "import")
         if results:
             text += f", {_import_results(c, row, results, tasks)} metrics"
         c.db.add_event("user", a.run_id, "import", text)
@@ -789,7 +791,7 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.NOTHING
     # The driver's own handler ends the run in seconds; limits.grace_s is the watcher's delay.
     ok = launch.stop(c.ssh, c.db, row, hb, after_task=a.after_task, now=a.now, grace_s=30 if a.now else 60,
-                     dry_run=a.dry_run, why=a.why, state=c.project.state)
+                     dry_run=a.dry_run, why=a.why, state=c.project.state_dir)
     c.data = {"run_id": row["run_id"], "stopped": ok}
     if not ok and not a.now:
         print(f"{row['run_id']}: still alive; use --now")
@@ -802,7 +804,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         raise Refuse("retire needs a handle or --batch")
     project, dry = c.project, " (dry)" if a.dry_run else ""
     rows = c.db.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
-    if a.batch and not rows and not (project.state / a.batch).is_dir():
+    if a.batch and not rows and not (project.state_dir / a.batch).is_dir():
         c.emit(f"no runs in batch {a.batch}")
         return Exit.NOTHING
     checked, retiring = [], {r["run_id"] for r in rows}
@@ -847,13 +849,13 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
             phase = f"ABANDONED:{a.why}"
             if hb:
                 hb["phase"], hb["exit"] = phase, 1 if hb.get("exit") is None else hb["exit"]
-                config.save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
+                config.save_json(project.state_dir / str(row["batch"]) / f"{run_id}.json", hb)
             c.db.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
         c.db.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
         done.append(run_id)
     if a.batch and not a.prune and not a.dry_run:
-        (project.state / a.batch).mkdir(parents=True, exist_ok=True)
-        (project.state / a.batch / "RETIRED").touch()
+        (project.state_dir / a.batch).mkdir(parents=True, exist_ok=True)
+        (project.state_dir / a.batch / "RETIRED").touch()
         c.db.mark_batch_retired(a.batch)
     if worktree is not None:
         real = (worktree / ".git").exists()
@@ -1166,7 +1168,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s.add_argument("--only", metavar="L", help="labels, comma separated")
     s.add_argument("--allow-dirty", action="store_true", help="launch a dirty snapshot source")
-    s = command("run", "more work on the tree of an existing run", """
+    s = command("continue", "more work on the tree of an existing run", """
         More work on the tree of an existing run: one stage, on the same tree,
         as a new run in the batch of that run with the label <label>.<stage>.
         --tasks names the tasks of a task group, --parallel its width, --on the
@@ -1177,13 +1179,17 @@ def _parser() -> argparse.ArgumentParser:
         stage from the tree into data/results/<run id>/.
         """, write=True, exits={Exit.REFUSED: "the plan has a problem, or --from names a stage without resume",
                                 Exit.HOSTS: "with --collect, a copy failed"})
-    s.add_argument("handle", help=HANDLE)
-    s.add_argument("--stage", metavar="S", help="the stage to run on the tree")
-    s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
-    s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
-    s.add_argument("--on", metavar="HOST", help="the host; default auto")
-    s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
-    s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
+    old = sub.add_parser("run")  # the old name; no help keeps it out of the listing; gone in the next release
+    old.set_defaults(fn=cmd_continue)
+    old.add_argument("--dry-run", action="store_true")
+    for each in (s, old):
+        each.add_argument("handle", help=HANDLE)
+        each.add_argument("--stage", metavar="S", help="the stage to run on the tree")
+        each.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
+        each.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
+        each.add_argument("--on", metavar="HOST", help="the host; default auto")
+        each.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
+        each.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
     s = command("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
         Writes the keep file of a live run. --hours (default 12 when --ack is
         absent) adds hours to the budget of the running stage or task; --ack
@@ -1194,7 +1200,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--ack", action="store_true", help="cancel the pending kill of the run")
     s = command("import", "record a run tree that edr did not make, or its collected results", """
         Records a run the package did not make. With --host and --root, the tree
-        on that host, so reuse and edr run can continue it. With --results DIR,
+        on that host, so reuse and edr continue can use it. With --results DIR,
         a directory of collected files of a run whose tree is gone: it is linked
         as data/results/<run id> and the project's metrics are extracted from
         it; --tasks names the tasks whose files it holds. The run id must start

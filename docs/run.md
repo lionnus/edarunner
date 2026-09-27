@@ -35,7 +35,7 @@ used once: a second launch finds the specs and does nothing.
 
 Confirm within a minute that `edr status` shows a phase past `setup`.
 A run that never writes a heartbeat left its reason in
-`<state>/<batch>/<run_id>.driver.log`.
+`<state_dir>/<batch>/<run_id>.driver.log`.
 
 ## The board
 
@@ -108,7 +108,7 @@ job. In both cases a cron line tells you when the watcher stopped:
 */10 * * * * cd ~/myflow && edr watch --check
 ```
 
-`--check` reads `<state>/watch.json`, the watcher's own heartbeat. When
+`--check` reads `<state_dir>/watch.json`, the watcher's own heartbeat. When
 the file is older than three cycles, or missing, it prints why, sends an
 alert and exits 1. `edr watch --once` runs one cycle and exits 1 when
 the cycle failed.
@@ -127,7 +127,7 @@ service up.
    and task into `data/results/<run_id>/`, plus the step directories of
    a running stage that are older than 10 minutes. Extract every metric
    whose file has arrived from the stages and tasks that ended `done`,
-   and write the params of the run once: `config`, `build_tag`, `src`
+   and write the parameters of the run once: `config`, `build_tag`, `src`
    and the overrides.
 4. Resume a `dead` run once, when its stage has `resume` and no process
    group of the run is alive on the host.
@@ -138,9 +138,9 @@ service up.
    [results.md](results.md) lists the files.
 8. Send the daily digest once a day, at the first cycle after
    `limits.digest_at`.
-9. Write `<state>/watch.json` with the time, the cycle count and the pid.
+9. Write `<state_dir>/watch.json` with the time, the cycle count and the pid.
 
-Its memory between cycles is three rows of the database's `kv` table.
+Its memory between cycles is three rows of the database's `store` table.
 `progress` holds what each run looked like last time; `notified` the
 states, the alerts sent and the grace clocks; `digest` the day and the
 time of the last digest.
@@ -217,7 +217,7 @@ skips the steps before it. The watcher resumes a `dead` run this way
 once, from the last `step_name` of its heartbeat. By hand:
 
 ```sh
-edr run a@sweep1 --stage pnr --from cts
+edr continue a@sweep1 --stage pnr --from cts
 ```
 
 Without `--from` the stage starts from its first step, which in many
@@ -226,7 +226,7 @@ proposes the command with `--from` filled from the heartbeat.
 
 ## More work on an existing tree
 
-`edr run <handle> --stage <S>` starts one stage on the tree of a run
+`edr continue <handle> --stage <S>` starts one stage on the tree of a run
 that ended: more tasks of a task group, a stage the job skipped, or a
 resume. The new run joins the batch of that run, so `retire --batch`
 takes both. It has its own id and heartbeat, with the time of the call
@@ -249,7 +249,7 @@ reuse = { label = "base", latest = true }
 
 A task group runs its tasks through a queue in the state directory. Two
 drivers with the same queue share one pool, so a spec written by hand
-with that `queue_dir` adds a shard; `edr run` gives its run a queue of
+with that `queue_dir` adds a shard; `edr continue` gives its run a queue of
 its own. [dev/driver.md](dev/driver.md) shows the queue.
 
 ## Import a run
@@ -261,7 +261,7 @@ edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base 
     --host hostA --root /scratch/user/edr/myflow/20260830_0000_base_base_gabc1234
 ```
 
-records a tree, so `reuse` and `edr run` can continue it. A tree is a
+records a tree, so `reuse` and `edr continue` can use it. A tree is a
 delete target only when its path carries the safety marker.
 
 ```sh
@@ -320,7 +320,7 @@ target. The real run copies first and deletes nothing when a copy
 failed, so a tree is gone only when its files are on the head node. The
 `artifacts` table records every copied file with its class, `always` or
 the list name, and `edr export` takes the small files from the same
-directory. `edr run <handle> --collect <name>` copies a list without a
+directory. `edr continue <handle> --collect <name>` copies a list without a
 retire.
 
 A rerun starts from the archive through `restore` on `reuse`:

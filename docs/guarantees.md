@@ -29,7 +29,7 @@ Every command that writes takes `--dry-run`;
 path and every command with the mark `(dry)` or the prefix `dry:`, and
 writes nothing:
 
-- no date pin in `<state>/<batch>/RUN_DATE`
+- no date pin in `<state_dir>/<batch>/RUN_DATE`
 - no spec, no driver copy, no stop file, no keep file
 - no database row, no event, not even the database file
 - no `data/board/` and no `data/results/`

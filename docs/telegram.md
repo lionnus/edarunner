@@ -77,7 +77,7 @@ repeats. An alert looks like this:
 ```
 🔴 demo: dead b_nodw@demo
 heartbeat older than 90 s, driver 4711 gone on local
-edr run b_nodw@demo --stage synth --from elaborate
+edr continue b_nodw@demo --stage synth --from elaborate
 ```
 
 The first line holds the mark of the state, the project and the state
@@ -121,7 +121,7 @@ demo: board 14:05
 
 The board shows at most 30 runs and then a line `… and N more`. When
 no run is live, a line `nothing live` comes before the counts. Its message id lives in the
-database's `kv` table under `telegram`, so a restart edits the same message.
+database's `store` table under `telegram`, so a restart edits the same message.
 `/pin` unpins the old message and pins a new one at the bottom of the
 chat.
 
@@ -245,7 +245,7 @@ Open alerts
 
 The host figures come from `data/board/board.json` of the last cycle,
 so the digest runs no probe. The day and the time of the last digest
-live in the database's `kv` table under `digest`; the first digest covers
+live in the database's `store` table under `digest`; the first digest covers
 the last 24 hours. `/digest` sends the same text at any time, and
 `edr status --digest` prints it on the terminal. Neither moves the start
 of the next digest.
@@ -270,7 +270,7 @@ limit instead.
 
 A command sent as a reply to an alert acts on the run of that alert, so
 it needs no handle. The bot keeps the message id and the run id of every
-alert of the last 7 days in the database's `kv` table, under `telegram`.
+alert of the last 7 days in the database's `store` table, under `telegram`.
 
 | Reply | Same as |
 |---|---|

@@ -1,7 +1,7 @@
 """The daily digest of one project: what ended, what runs, what waits, where scratch is short, what is open.
 
 The watcher sends it once a day at `limits.digest_at`; `/digest` and `edr status --digest`
-show the same text on demand. The day of the last digest lives in the database's kv table.
+show the same text on demand. The day of the last digest lives in the database's store table.
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ class Digest:
 
     def text(self, now: float) -> str:
         """The digest as Telegram HTML."""
-        last = self.db.get_kv("digest", {})
+        last = self.db.get_store("digest", {})
         since = float(last.get("ts") or now - DAY_S)
         retired = {b["batch"] for b in self.db.batches() if b.get("retired")}
         rows = board.order([r for r in self.db.runs() if r["batch"] not in retired])
         live = [r for r in rows if board.is_live(r)]
         ended = [r for r in rows if not board.is_live(r) and (r.get("updated") or 0) >= since]
-        notes = self.db.get_kv("notified", {})
+        notes = self.db.get_store("notified", {})
         alerts = [r for r in live if self._alerted(notes.get(r["run_id"]) or {}) and not self._acked(r)]
         probes = config.load_json(self.project.data / "board" / "board.json").get("hosts") or {}
         hosts = sorted((p for p in probes.values() if "error" not in p and p.get("total_gb")),
@@ -44,12 +44,12 @@ class Digest:
         """True once a day, from `digest_at` local time on."""
         at = self.project.limits.digest_at
         day = time.strftime("%Y-%m-%d", time.localtime(now))
-        return bool(at) and time.strftime("%H:%M", time.localtime(now)) >= at and self.db.get_kv(
+        return bool(at) and time.strftime("%H:%M", time.localtime(now)) >= at and self.db.get_store(
             "digest", {}).get("day") != day
 
     def mark_sent(self, now: float) -> None:
         """Record today as sent, and `now` as the start of the next digest."""
-        self.db.set_kv("digest", {"day": time.strftime("%Y-%m-%d", time.localtime(now)), "ts": now})
+        self.db.set_store("digest", {"day": time.strftime("%Y-%m-%d", time.localtime(now)), "ts": now})
 
     @staticmethod
     def _alerted(note: dict) -> bool:
@@ -57,5 +57,5 @@ class Digest:
         return note.get("state") in (note.get("msgs") or {})
 
     def _acked(self, row: dict) -> bool:
-        keep = config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.keep.json")
+        keep = config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.keep.json")
         return bool(keep.get("ack"))

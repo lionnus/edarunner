@@ -10,7 +10,7 @@ It reads one spec and nothing else, runs the stages in order, and writes
 one heartbeat. It never imports the package; a feature the 3.6 subset
 cannot express belongs in the controller.
 
-`edr launch` copies the file to `<state>/bin/edr_driver-<hash>.py`, where
+`edr launch` copies the file to `<state_dir>/bin/edr_driver-<hash>.py`, where
 `<hash>` is the first 8 hex digits of the sha256 of the text, by a
 temporary file and a rename (`sync.publish_driver`). A copy that exists
 is reused. A new version gets a new name, so a live driver never sees
@@ -21,7 +21,7 @@ The host starts the driver with its own `python3` from the login `PATH`,
 in its own session (`launch.start_driver`):
 
 ```sh
-setsid nohup python3 <state>/bin/edr_driver-<hash>.py <state>/<batch>/<run_id>.spec.json
+setsid nohup python3 <state_dir>/bin/edr_driver-<hash>.py <state_dir>/<batch>/<run_id>.spec.json
 ```
 
 Each stage command runs through `<shell> -c` in a new session
@@ -38,12 +38,12 @@ the command through the spec; `$VAR` in a value expands on the host.
 
 ## The state directory
 
-`state` in `edr.toml` names a directory on a filesystem every host
+`state_dir` in `edr.toml` names a directory on a filesystem every host
 mounts. The hosts read the driver and the spec there and write the
 heartbeat; the head node reads the heartbeat.
 
 ```
-<state>/
+<state_dir>/
   bin/edr_driver-<hash>.py        one driver copy per version
   watch.json                      the watcher's own heartbeat
   <batch>/
@@ -139,7 +139,7 @@ a claim is not created again. A claim renames `pending/<id>` to
 `claimed/<id>.<run_id>`; a rename that fails means another driver took
 the task. At the end the claim moves to `done/<id>`. The rename is
 atomic on one filesystem, so two drivers with the same `queue_dir` share
-one pool. `edr run` gives its run a queue of its own.
+one pool. `edr continue` gives its run a queue of its own.
 
 A task that fails gets a `signature`, the last log line with every digit
 removed. `streak` equal signatures in a row set `looping`, and the group

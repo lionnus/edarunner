@@ -16,7 +16,7 @@ from .model import Project, Site
 
 
 def publish_driver(state: Path, driver_src: Path, dry_run: bool = False) -> Path:
-    """Copy the driver to <state>/bin/edr_driver-<sha256[:8]>.py by a temporary file and rename.
+    """Copy the driver to <state_dir>/bin/edr_driver-<sha256[:8]>.py by a temporary file and rename.
 
     A copy that exists is reused. A new version is a new name, so a live driver never
     sees its text change.

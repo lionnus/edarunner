@@ -14,11 +14,11 @@ Every run, every number and every action lands there.
 | `batches` | batch | the project, the source tag, the pinned date, when it was retired |
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id` |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
-| `params` | key of a run | `config`, `build_tag`, `src` and each override, as text |
+| `parameters` | key of a run | `config`, `build_tag`, `src` and each override, as text |
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
-| `kv` | key | one JSON value per key, a small key-value store: the watcher's `progress`, `notified` and `digest`, the `last_board` row order for `#n`, and the `telegram` message ids |
+| `store` | key | one JSON value per key, a small key-value store: the watcher's `progress`, `notified` and `digest`, the `last_board` row order for `#n`, and the `telegram` message ids |
 
 `data/results/<run_id>/` holds the collected files in the layout of the
 run tree, so a metric's `source_file` is a path under it.
@@ -50,9 +50,9 @@ Every watcher cycle writes `data/board/`:
 |---|---|
 | `board.json` | the runs of the live batches, the last 50 events and the host probes, for a script |
 | `status.html` | a phone-width page: every run in board order, the last 50 events, the hosts |
-| `compare.html` | the runs with their params as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
+| `compare.html` | the runs with their parameters as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
 
-`compare.html` is one self-contained page over the database's runs, params
+`compare.html` is one self-contained page over the database's runs, parameters
 and metrics. Its tables work as they are. The plots (a metric over the
 steps, a scatter of any two columns, the power phases, parallel
 coordinates) need Plotly. The page loads `data/board/plotly.min.js` when
@@ -125,5 +125,5 @@ publish.
 A snapshot is small by design. A large collected file, a VCD or a full
 netlist, belongs to `data/results/` on the head node, not to a snapshot.
 Leave it out of `collect`, name it under `collect_on_request`, and fetch
-it with `edr run <handle> --collect <name>` or `edr retire --collect`
+it with `edr continue <handle> --collect <name>` or `edr retire --collect`
 when you need it; [run.md](run.md) shows both.
