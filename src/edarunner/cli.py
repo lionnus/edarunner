@@ -582,26 +582,56 @@ def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
-    """Record a run tree that edr did not make, so `reuse` and `run` can continue it."""
+    """Record a run tree that edr did not make, or its collected results, so `reuse`, `metrics` and `export` see it."""
     assert_run_id(a.run_id)
-    root = a.root.rstrip("/")
-    if not root.startswith("/"):
-        raise Refuse(f"'{root}' is not absolute")
-    rc, _, _ = c.ssh.run(a.host, ["test", "-d", root])
-    if rc != 0:
-        raise Refuse(f"{a.host}:{root} is not a directory")
+    if not a.results and not (a.host and a.root):
+        raise Refuse("import needs --host and --root, or --results DIR")
+    root = (a.root or "").rstrip("/")
+    if root:
+        if not root.startswith("/"):
+            raise Refuse(f"'{root}' is not absolute")
+        rc, _, _ = c.ssh.run(a.host, ["test", "-d", root])
+        if rc != 0:
+            raise Refuse(f"{a.host}:{root} is not a directory")
+    results = _results_dir(c, a.run_id, a.results) if a.results else None
+    tasks = {t: config.resolve_task(c.project, t) for t in a.tasks or []}
     now = int(time.time())
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
-               src=a.src, dirty=0, host=a.host, root=root, created=now, phase=a.phase, state="imported",
+               src=a.src, dirty=0, host=a.host or "", root=root or None, created=now, phase=a.phase, state="imported",
                stage="", step=-1, exit=0 if a.phase == "done" else None, started=now, updated=now,
                counts=json.dumps({}), tree_id=a.run_id)
-    text = f"{a.host}:{root} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
+    where = f"{a.host}:{root}" if root else f"results {results}"
+    text = f"{where} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
     if not a.dry_run:
         c.ledger.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.src, created=now))
         c.ledger.upsert_run(row)
+        c.ledger.set_params(a.run_id, {k: row[k] for k in ("config", "build_tag", "src") if row[k]}, "import")
+        if results:
+            text += f", {_import_results(c, row, results, tasks)} metrics"
         c.ledger.add_event("user", a.run_id, "import", text)
     c.emit(f"imported {text}" + (" (dry)" if a.dry_run else ""), row)
     return 0
+
+
+def _results_dir(c: Ctx, run_id: str, text: str) -> Path:
+    """The collected results to link as data/results/<run_id>; a different tree there is refused."""
+    src = Path(text).expanduser().resolve()
+    if not src.is_dir():
+        raise Refuse(f"'{text}' is not a directory")
+    dest = c.project.data / "results" / run_id
+    if (dest.is_symlink() or dest.exists()) and dest.resolve() != src:
+        raise Refuse(f"{dest} exists and is not {src}")
+    return src
+
+
+def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
+    """Link `src` under data/results and extract every metric of the project from it."""
+    dest = c.project.data / "results" / row["run_id"]
+    if not (dest.is_symlink() or dest.exists()):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.symlink_to(src)
+    rows = metrics.extract(c.project, row, c.project.data / "results", tasks)
+    return sum(c.ledger.add_metric(r) for r in rows if r["value"] is not None)
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
@@ -816,13 +846,15 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handle")
     s.add_argument("--hours", type=int, metavar="N", help="default 12")
     s.add_argument("--ack", action="store_true")
-    s = verb("import", "record a run tree that edr did not make, for reuse", write=True)
+    s = verb("import", "record a run tree that edr did not make, or its collected results", write=True)
     s.add_argument("--run-id", required=True, dest="run_id")
     s.add_argument("--label", required=True)
     s.add_argument("--config", required=True)
     s.add_argument("--src", required=True, metavar="HASH")
-    s.add_argument("--host", required=True)
-    s.add_argument("--root", required=True, metavar="PATH", help="the tree on the host")
+    s.add_argument("--host", help="the host of the tree")
+    s.add_argument("--root", metavar="PATH", help="the tree on the host")
+    s.add_argument("--results", metavar="DIR", help="collected files in the run layout; linked as data/results/<run id>")
+    s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks whose files the results hold")
     s.add_argument("--batch", default="imported")
     s.add_argument("--phase", default="done")
     s.add_argument("--build-tag", dest="build_tag", metavar="TAG")
