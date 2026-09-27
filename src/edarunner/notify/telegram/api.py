@@ -95,6 +95,11 @@ class BotApi:
                                        "parse_mode": "HTML"}, files={"document": (name, data)})
         return int(r["message_id"])
 
+    def set_reaction(self, chat_id: int, msg_id: int, emoji: str) -> None:
+        """Put one emoji reaction on a message, in place of the bot's earlier one."""
+        self.call("setMessageReaction", {"chat_id": chat_id, "message_id": msg_id,
+                                         "reaction": [{"type": "emoji", "emoji": emoji}]})
+
     def pin(self, chat_id: int, msg_id: int) -> None:
         """Pin a message without a notification."""
         self.call("pinChatMessage", {"chat_id": chat_id, "message_id": msg_id, "disable_notification": True})

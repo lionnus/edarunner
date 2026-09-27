@@ -239,6 +239,20 @@ word do not matter; any other plain text gets no answer.
 In a group, a bot sees plain text only when it is an admin, or when
 @BotFather turned its privacy mode off with `/setprivacy`.
 
+## Reactions
+
+The bot reacts to the message of a command:
+
+| Reaction | Meaning |
+|---|---|
+| 👀 | a command that can take more than a second started: a custom command, `/log` or `/hosts` |
+| 👍 | the reply went out |
+| 👎 | the command failed or was refused, or the reply did not go out |
+
+Telegram accepts only a fixed set of reaction emoji, and ⏳, ✅ and ❌
+are not in it. A chat or a client without reactions makes the call
+fail; the bot ignores that failure and answers as usual.
+
 ## Files
 
 Three commands answer with a file instead of a message. The phone opens

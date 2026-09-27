@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 
 REPLY_DAYS = 7  # how long a reply to an alert still finds its run
 MAX_DOCUMENT = 20 * 2**20  # the upload limit of the Bot API is 50 MB; a phone needs far less
+# The reaction on a command message. ⏳, ✅ and ❌ are not in the set of reactions that Telegram accepts.
+REACTIONS = {"busy": "👀", "ok": "👍", "failed": "👎"}
 
 
 class TelegramBot(Notifier):
@@ -201,10 +203,24 @@ class TelegramBot(Notifier):
             self._press(q)
         elif msg and msg.get("text", "").startswith("/"):
             parts = msg["text"].split()
-            name, run = parts[0][1:].split("@")[0], self._replied_run(msg)
-            self._reply(self.commands.run(name, parts[1:], msg["text"], run), thread)
+            self._command(msg, parts[0][1:].split("@")[0], parts[1:], self._replied_run(msg), thread)
         elif msg and (word := keyboard_word(msg.get("text", ""))):
-            self._reply(self.commands.run(word, [], "/" + word), thread)
+            self._command(msg, word, [], None, thread)
+
+    def _command(self, msg: dict, name: str, args: list[str], run: str | None, thread: int | None) -> None:
+        """Run one command and react on its message: busy while a slow one runs, then ok or failed."""
+        if self.commands.slow(name):
+            self._react(msg, "busy")
+        r = self.commands.run(name, args, msg["text"] if msg["text"].startswith("/") else "/" + name, run)
+        sent = self._reply(r, thread)
+        self._react(msg, "ok" if r.ok and sent else "failed")
+
+    def _react(self, msg: dict, what: str) -> None:
+        """Set the reaction `what` on a message; a chat without reactions is no fault."""
+        try:
+            self.api.set_reaction(self.chat_id, msg["message_id"], REACTIONS[what])
+        except ApiError as e:
+            log.debug("telegram: %s", e)
 
     def _in_topic(self, thread: int | None) -> bool:
         """True when the bot obeys a message of forum thread `thread`; the first one of a thread prints its id."""
@@ -217,22 +233,26 @@ class TelegramBot(Notifier):
                   f"set topic_id = {thread} in [telegram] of edr.toml", file=sys.stderr)
         return True
 
-    def _reply(self, r: Reply, thread: int | None = None) -> None:
-        """Send a reply under the bold first line, into the project's topic or the thread of the command."""
-        thread = self.topic or thread
+    def _reply(self, r: Reply, thread: int | None = None) -> bool:
+        """Send a reply under the bold first line, into the project's topic or the thread of the command.
+
+        True when every part went out; a file over MAX_DOCUMENT goes out as a line that says so.
+        """
+        thread, ok = self.topic or thread, True
         for d in r.documents:
             if len(d.data) > MAX_DOCUMENT:
+                ok = False
                 self._reply(Reply(r.title, f"{d.name}: {len(d.data) / 2**20:.1f} MB is over the limit of "
-                                           f"{MAX_DOCUMENT // 2**20} MB", ok=False), thread)
+                                           f"{MAX_DOCUMENT // 2**20} MB"), thread)
                 continue
             caption = fmt.head(self.project.project, r.title) + (f"\n{fmt.esc(r.body)}" if r.body else "")
-            self._call(self.api.send_document, self.chat_id, d.name, d.data, caption, thread_id=thread)
+            ok &= self._call(self.api.send_document, self.chat_id, d.name, d.data, caption, thread_id=thread) is not None
         if r.documents:
-            return
+            return ok
         body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
         full = fmt.head(self.project.project, r.title) + "\n" + body
-        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full), markup=r.markup,
-                   thread_id=thread)
+        return self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full),
+                          markup=r.markup, thread_id=thread) is not None
 
     def _press(self, q: dict) -> None:
         """Answer a button press and rewrite its alert."""

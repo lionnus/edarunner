@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The bot reacts to a command message: 👀 when a slow command starts,
+  then 👍 when the reply went out or 👎 when the command failed.
 - `/start` and `/keyboard` show a reply keyboard with `Status`, `Hosts`,
   `Events` and `Lic`; `/keyboard off` removes it.
 - An alert has a third button, `stop`, which stops the run after its
