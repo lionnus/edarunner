@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -59,7 +60,7 @@ def test_narrow_width_and_order(width):
     text = board.narrow(_rows(), width=width, now=NOW)
     lines = text.splitlines()
     assert all(len(line) <= width for line in lines), text
-    assert lines[0].startswith("15.01 09:00 DEAD:1 INC:1")
+    assert lines[0].startswith(time.strftime("%d.%m %H:%M", time.localtime(NOW)) + " DEAD:1 INC:1")
     body = lines[2:]
     assert len(body) == 8, text
     assert body[0].startswith(" #1 DEAD  a") and body[2].startswith(" #2 stale b_nodw")
