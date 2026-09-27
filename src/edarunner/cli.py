@@ -457,7 +457,7 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         row = c.db.run(row["run_id"]) or row
         hb, run_id = c.heartbeat(row), row["run_id"]
         stages = [dict(r) for r in c.db.conn.execute(
-            "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
+            "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage != 'setup', stage, task, attempt", (run_id,))]
         mets = c.db.metrics(run_ids=[run_id])
         samples = c.db.run_samples(run_id)
         c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples),

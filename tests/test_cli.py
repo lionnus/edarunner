@@ -262,17 +262,22 @@ def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> No
     hb = json.loads((bdir(demo) / f"{b}.json").read_text())
     (bdir(demo) / f"{b}.json").write_text(json.dumps({
         **hb, "exit": 5, "log": str(log), "step_times": {"synth": {"1": now - 90, "2": now - 50}},
-        "stages": {"synth": {"attempt": 1, "status": "failed", "started": now - 90, "ended": now - 10, "exit": 5}}}))
+        "stages": {"synth": {"attempt": 1, "status": "failed", "started": now - 90, "ended": now - 10, "exit": 5},
+                   "setup": {"attempt": 1, "status": "done", "started": now - 100, "ended": now - 95, "exit": 0}}}))
     with Database(demo / "data" / "edr.db") as db:
         db.add_event("watch", b, "failed", "synth ended FAILED")
     add_metric(demo, b, "area_cell_um2", 12.5)
     code, out, _ = edr(capsys, "brief", "--run", "b@demo")
     assert code == 0 and out.startswith("# b@demo\n") and f"`{b}`" in out and "ended with the phase `FAILED:synth` and exit 5, so its state is failed." in out
     assert "- Stage `synth`, attempt 1," in out and "ran for 1m, ending failed with exit 5." in out
+    assert "- The runtime setup started " in out and " and ran for 5s, ending done with exit 0.\n- Stage `synth`" in out
     assert "  - Step 2 (elaborate) started" in out and "watch recorded `failed` on `b@demo`: synth ended FAILED" in out
     assert "Error: no licence" in out and "line 11\n" in out and "line 10\n" not in out
     assert "`design__instance__area` is 12.5 u at `synth` step 3." in out
     assert "The triage proposes `edr retire b@demo --why failed`." in out and "the run ended `FAILED`" in out
+    code, out, _ = edr(capsys, "status", "b@demo")
+    rows = [ln.split()[0] for ln in out.splitlines() if ln.split()[:1] in (["setup"], ["synth"])]
+    assert code == 0 and rows[:2] == ["setup", "synth"] and re.search(r"setup +1 +done +0 .* 0m", out)
     code, out, _ = edr(capsys, "--json", "brief", "--run", "b@demo")
     data = json.loads(out)["data"]
     assert code == 0 and data["command"] == "edr retire b@demo --why failed" and data["state"] == "failed"

@@ -291,6 +291,13 @@ def run_text(d: Row) -> str:
                 took = f" and ran for {analysis.dur(s['wall_s'])}" if s.get("wall_s") is not None else ", with no end recorded"
                 status = f", ending {s['status']}" if s.get("status") and s.get("ended") else ""
                 ex = f" with exit {s['exit']}" if s.get("exit") is not None and s.get("ended") else ""
+                if name == "setup" and s.get("status") == "skipped":
+                    out.append(f"- The runtime setup was skipped at {_when(s.get('started'))}, because the "
+                               "`when_changed` files had not changed.")
+                    continue
+                if name == "setup":
+                    out.append(f"- The runtime setup started {_when(s.get('started'))}{took}{status}{ex}.")
+                    continue
                 out.append(f"- Stage `{name}`, attempt {s['attempt']}, started {_when(s.get('started'))}{took}"
                            f"{status}{ex}.")
             for s in (x for x in rt["steps"] if x["stage"] == name):

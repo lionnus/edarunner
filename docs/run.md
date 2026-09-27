@@ -90,6 +90,11 @@ that is not a directory; then no heartbeat is written and the reason is
 in the driver log. A terminal phase sets `exit`, and the watcher and the
 board treat the run as finished.
 
+The driver records `[runtime] setup` as a stage row named `setup`, with
+its start, end, outcome and exit code. `edr status <handle>` and
+`edr brief --run <handle>` list it before the first stage. When the
+`when_changed` files have not changed, the row says `skipped`.
+
 The logs are in the run tree on the host: `log/<stage>.log` for a stage,
 `log/<stage>.<task>.log` for a task. `edr status <handle>` shows the
 tail, and the watcher copies `log/` to the head node when a stage ends.

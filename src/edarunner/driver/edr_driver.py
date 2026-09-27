@@ -564,12 +564,17 @@ class Driver(object):
                 with open(stamp_file) as f:
                     if json.load(f) == stamp:
                         sys.stderr.write("runtime: %s unchanged, setup skipped\n" % ", ".join(watched))
+                        now = int(time.time())
+                        self.record_stage("setup", "skipped", started=now, ended=now)
                         return
             except (OSError, ValueError):
                 pass
         log = self.log_path("setup")
         self.set_phase("setup", log=log)
-        if self.run_wait(cmd, self.root, log):
+        self.record_stage("setup", "running", started=int(time.time()), log=log)
+        rc = self.run_wait(cmd, self.root, log)
+        self.record_stage("setup", "failed" if rc else "done", ended=int(time.time()), exit=rc)
+        if rc:
             raise Fail(5, "FAILED:runtime")
         with open(stamp_file, "w") as f:
             json.dump(stamp, f)
