@@ -46,6 +46,7 @@ class Telegram:
     token_file: Path
     chat_id: int
     commands: dict[str, BotCommand] = field(default_factory=dict)
+    user_id: int | None = None  # None: the chat is the only gate
 
 
 @dataclass
