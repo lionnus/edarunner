@@ -118,6 +118,16 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     assert " DW=0" in b.spec["stages"][0]["cmd"] and b.spec["stages"][0]["cmd"].endswith("DW=0")
 
 
+def test_plan_takes_the_probes_of_the_caller(env, tmp_path: Path, monkeypatch) -> None:
+    project, batch, ssh, ledger = env
+    monkeypatch.setattr(ssh, "probe", lambda host: pytest.fail(f"plan probed {host}"))
+    given = {"local": HostProbe("local", 4.0, 8.0, str(tmp_path / "given"), 50.0)}
+    a, b = launch.plan(project, batch, ssh, ledger, date=DATE, probes=given)
+    assert a.problems == [] and b.problems == [] and a.root.startswith(f"{tmp_path}/given/")
+    a, b = launch.plan(project, batch, ssh, ledger, date=DATE, probes={})
+    assert a.problems == ["local: not probed"] and a.host is None and not a.queued
+
+
 def test_plan_reports_problems(env) -> None:
     project, batch, ssh, ledger = env
     batch.jobs[1].overrides = {"bad key": "1"}

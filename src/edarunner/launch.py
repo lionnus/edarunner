@@ -251,18 +251,24 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: str | None = None,
-         only: list[str] | None = None) -> list[RunPlan]:
-    """Render every job of a batch into a RunPlan; a problem is reported in the plan, not raised."""
+         only: list[str] | None = None, probes: dict[str, hosts.HostProbe] | None = None) -> list[RunPlan]:
+    """Render every job of a batch into a RunPlan; a problem is reported in the plan, not raised.
+
+    `probes` skips the host probe; a wanted host missing from it is a plan problem.
+    """
     date = date or pin_date(project.state, batch.batch, dry_run=True)
     jobs = [j for j in batch.jobs if not only or j.label in only]
     wanted = {j.host for j in jobs if not j.reuse}
     names = (set(project.site.hosts) if "auto" in wanted else set()) | (wanted - {"auto"})
-    probes, errors = {}, {}
-    for h in sorted(names):
-        try:
-            probes[h] = ssh.probe(h)
-        except hosts.HostError as e:
-            errors[h] = str(e)
+    if probes is None:
+        probes, errors = {}, {}
+        for h in sorted(names):
+            try:
+                probes[h] = ssh.probe(h)
+            except hosts.HostError as e:
+                errors[h] = str(e)
+    else:
+        errors = {h: "not probed" for h in names if h not in probes}
     auto = [j for j in jobs if j.host == "auto" and not j.reuse]
     placed = hosts.place(project, auto, probes, {h: p.our_runs for h, p in probes.items()}) if auto else {}
     return [_plan_job(project, batch, j, ledger, date, probes, errors, placed) for j in jobs]
