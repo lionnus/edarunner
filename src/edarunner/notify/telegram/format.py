@@ -141,11 +141,20 @@ def hosts(rows: Iterable[Row]) -> str:
     return fit("\n".join(lines)) or "<i>no hosts</i>"
 
 
-def licences(rows: Iterable[Row]) -> str:
-    """`licence used/pool seats used` per licence; a failed probe shows its note."""
-    lines = [f"<b>{esc(r['licence'])}</b> " + (f"{r['used']}/{r['pool']} seats used" if "used" in r
-                                                  else f"<i>{esc(r['note'])}</i>") for r in rows]
-    return fit("\n".join(lines)) or "<i>no licences</i>"
+def tools(rows: Iterable[Row]) -> str:
+    """`tool used/total seats used, host, host` per tool; a failed probe shows its note."""
+    lines = []
+    for r in rows:
+        if "note" in r:
+            seats = f"<i>{esc(r['note'])}</i>"
+        elif "free" in r and "total" in r:
+            seats = f"{r['total'] - r['free']}/{r['total']} seats used"
+        elif "free" in r:
+            seats = f"{r['free']} seats left"
+        else:
+            seats = f"{r['total']} seats" if "total" in r else ""
+        lines.append(f"<b>{esc(r['tool'])}</b> " + ", ".join(filter(None, [seats, *map(esc, r["hosts"])])))
+    return fit("\n".join(ln.rstrip() for ln in lines)) or "<i>no tools</i>"
 
 
 def help_text(groups: dict[str, list[tuple[str, str]]]) -> str:

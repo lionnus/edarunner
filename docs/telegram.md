@@ -139,7 +139,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/status <handle>` | the state, stage, step, age, host and last log line of one run |
 | `/events [n]` | the last `n` events, default 8, at most 30, newest first |
 | `/hosts` | cores, RAM, scratch and GPUs per host, each as used of total |
-| `/lic` | licence seats, used of total |
+| `/tools` | seats used of total, and the hosts, per tool; `/lic` still answers for one release |
 | `/digest` | the daily digest now |
 | `/pin` | pin a new board message |
 | `/log <handle> [n]` | the last `n` lines of the log of a run as a file, default 200 |
@@ -168,7 +168,7 @@ hostA 🟢 cores 21/32, 🟡 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0
 
 The hosts come in the order of `edr hosts`, the worst mark first. A host
 without a GPU has no `gpu` part, and a host that fails the probe shows
-`⚫ no answer`. `/lic` shows `demo 3/8 seats used` per licence.
+`⚫ no answer`. `/tools` shows `fc 3/8 seats used, hostA, hostB` per tool.
 `/help` is prose, so a tap on a command sends it. `/compare` and
 `/metric` reply with a `<pre>` block of aligned columns.
 
@@ -235,7 +235,7 @@ stays until `/keyboard off` removes it. Its buttons are five words:
 
 ```
 Status   Hosts
-Events   Lic   Digest
+Events   Tools   Digest
 ```
 
 A tap sends the word as a plain message, and the bot runs the command

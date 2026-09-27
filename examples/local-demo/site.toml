@@ -8,9 +8,8 @@ tool_procs = "^(sleep)$"
 [hosts.local]
 cores = 4
 ram_gb = 8
+tools = { demo = "1.0" }
 
-[licences.demo]
-feature = "demo"
-floor = 2
-seats_per_task = 1
-probe = "bash {root}/flow/lmstat.sh"
+[tools.demo]
+seats = 10
+probe = ["bash", "{root}/flow/seats.sh"]

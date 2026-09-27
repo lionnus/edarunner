@@ -157,7 +157,8 @@ def test_make_notifiers_needs_a_private_token(tmp_path):
     ("/events 500", ("events_text", (30,), {})),
     ("/events", ("events_text", (8,), {})),
     ("/hosts", ("hosts_text", (), {})),
-    ("/lic", ("lic_text", (), {})),
+    ("/tools", ("tools_text", (), {})),
+    ("/lic", ("tools_text", (), {})),
     ("/keep a@demo 6", ("keep", ("a@demo", 6, "telegram"), {})),
     ("/keep a@demo", ("keep", ("a@demo", 12, "telegram"), {})),
     ("/ack #3", ("ack", ("#3", "telegram"), {})),
@@ -642,9 +643,9 @@ def test_the_reply_keyboard_sends_plain_words(bot):
     sent = bot.api.of("sendMessage")[-1]
     assert sent["text"].startswith("<b>demo: help</b>\n<b>Look</b>")
     assert sent["reply_markup"]["keyboard"] == [[{"text": "Status"}, {"text": "Hosts"}],
-                                                [{"text": "Events"}, {"text": "Lic"}, {"text": "Digest"}]]
+                                                [{"text": "Events"}, {"text": "Tools"}, {"text": "Digest"}]]
     assert sent["reply_markup"]["is_persistent"] is True
-    for word, call in (("Status", "status_text"), ("hosts", "hosts_text"), (" Events ", "events_text"), ("Lic", "lic_text"),
+    for word, call in (("Status", "status_text"), ("hosts", "hosts_text"), (" Events ", "events_text"), ("Tools", "tools_text"),
                        ("Digest", "digest_text")):
         bot.handle_update(msg(word))
         assert bot.actions.calls[-1][0] == call

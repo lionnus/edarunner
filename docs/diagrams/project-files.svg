@@ -1,22 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="456" viewBox="0 0 960 456" role="img" aria-label="The files of an edarunner project: what you write, what edr writes, and where they live">
 <style>
-  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
-  .gen { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 2; }
-  .priv { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; stroke-dasharray: 6 4; }
-  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
-  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
-  .mark { fill: #3b7dd8; }
-  .run { fill: #f28c38; }
-  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
-  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
-  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
-  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .box { fill: #ffffff; stroke: #0d1117; stroke-width: 2; }
+  .gen { fill: #f6f8fa; stroke: #0d1117; stroke-width: 2; }
+  .priv { fill: #ffffff; stroke: #0d1117; stroke-width: 2; stroke-dasharray: 6 4; }
+  .frame { fill: none; stroke: #0d1117; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #0d1117; stroke-width: 1.5; }
+  .mark { fill: #0d1117; }
+  .run { fill: #008000; }
+  .t { font-family: Helvetica, Arial, sans-serif; font-size: 14px; fill: #0d1117; }
+  .s { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #0d1117; }
   .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
-  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  .al { font-family: Helvetica, Arial, sans-serif; font-size: 11px; fill: #6e7781; }
   @media (prefers-color-scheme: dark) {
     .box, .priv { fill: #0d1117; }
     .gen, .frame-fill { fill: #161b22; }
-    .t, .m { fill: #c9d1d9; }
+    .t, .m { fill: #e6edf3; }
+    .box, .gen, .priv, .frame, .frame-fill { stroke: #e6edf3; }
+    .mark { fill: #e6edf3; }
   }
 </style>
 <defs>
@@ -27,7 +29,7 @@
 
 <!-- Project directory, in git -->
 <rect class="frame" x="24" y="24" width="252" height="364" rx="10"/>
-<text class="h" x="40" y="48">PROJECT · IN GIT</text>
+<text class="h" x="40" y="48">PROJECT, IN GIT</text>
 
 <rect class="box" x="40" y="64" width="220" height="52" rx="7"/>
 <text class="t" x="54" y="86">Project config</text>
@@ -55,7 +57,7 @@
 
 <!-- Project directory, not in git -->
 <rect class="frame" x="300" y="24" width="252" height="364" rx="10"/>
-<text class="h" x="316" y="48">PROJECT · NOT IN GIT</text>
+<text class="h" x="316" y="48">PROJECT, NOT IN GIT</text>
 
 <rect class="gen" x="316" y="64" width="220" height="52" rx="7"/>
 <rect class="mark" x="317" y="74" width="4" height="32"/>

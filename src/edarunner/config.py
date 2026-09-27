@@ -16,8 +16,8 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    Batch, BotCommand, Budget, Host, Job, Licence, Limits, Marks, Metric, Needs,
-    Placement, Project, Retry, Safety, Site, Source, Stage, Sync, Task, Telegram,
+    Batch, BotCommand, Budget, Host, Job, Limits, Marks, Metric, Needs, Placement,
+    Project, Retry, Safety, Site, Source, Stage, Sync, Task, Telegram, Tool,
 )
 
 T = TypeVar("T")
@@ -29,7 +29,7 @@ _PROJECT_KEYS = {
     "schema", "project", "site", "state", "data", "run_prefix", "telegram_poll", "telegram",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
-_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "licences", "nfs_export", "telegram", "marks"}
+_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
 _SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 _EXTRACTORS = ("regex", "csv", "json", "python", "expr")
 
@@ -207,13 +207,15 @@ def _path(value: str, base: Path, values: Mapping[str, object] | None = None) ->
 def load_site(path: PathLike) -> Site:
     """Load site.toml; `path` may start with ~."""
     file = Path(os.path.abspath(Path(path).expanduser()))
-    raw = _table(_read(file), _SITE_KEYS, file, "")
+    raw = _read(file)
+    if "licences" in raw:
+        raise ConfigError(f"{file}: [licences] is gone; declare [tools.<name>] with seats and probe")
+    raw = _table(raw, _SITE_KEYS, file, "")
     _schema(raw, file)
     ssh = _table(raw.get("ssh", {}), {"options", "timeout_s"}, file, "ssh")
-    hosts = {n: _build(Host, t, file, f"hosts.{n}", name=n)
-             for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
-    licences = {n: _build(Licence, t, file, f"licences.{n}", name=n)
-                for n, t in _table(raw.get("licences", {}), None, file, "licences").items()}
+    tools = {n: _build(Tool, t, file, f"tools.{n}", name=n)
+             for n, t in _table(raw.get("tools", {}), None, file, "tools").items()}
+    hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
     telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
     return Site(
         path=file,
@@ -223,11 +225,29 @@ def load_site(path: PathLike) -> Site:
         ssh_timeout_s=ssh.get("timeout_s", 45),
         tool_procs=raw.get("tool_procs", ""),
         hosts=hosts,
-        licences=licences,
+        tools=tools,
         nfs_export=raw.get("nfs_export", ""),
         telegram=telegram,
         marks=_marks(raw.get("marks", {}), file, Marks()),
     )
+
+
+def _host(name: str, raw: object, tools: dict[str, Tool], file: Path) -> Host:
+    """A host table; `tools` is a list of names or `{ name = version }` and is kept as a dict."""
+    at = f"hosts.{name}"
+    raw = dict(_table(raw, None, file, at))
+    if isinstance(raw.get("tools"), list):
+        raw["tools"] = {str(t): "" for t in raw["tools"]}
+    host = _build(Host, raw, file, at, name=name)
+    _check_tools(host.tools or {}, tools, file, f"{at}.tools")
+    return host
+
+
+def _check_tools(names: Mapping[str, object], tools: dict[str, Tool], file: Path, at: str) -> None:
+    for name in names:
+        if name not in tools:
+            known = ", ".join(sorted(tools)) or "none"
+            raise ConfigError(f"{file}: {at} names unknown tool '{name}' (site has: {known})")
 
 
 def _marks(raw: object, file: Path, base: Marks) -> Marks:
@@ -324,10 +344,26 @@ def _limits(raw: object, file: Path) -> Limits:
 def _stage(name: str, raw: object, file: Path) -> Stage:
     at = f"stages.{name}"
     raw = dict(_table(raw, None, file, at))
-    for key, cls in (("needs", Needs), ("budget", Budget), ("retry", Retry)):
+    for key, cls in (("budget", Budget), ("retry", Retry)):
         if key in raw:
             raw[key] = _build(cls, raw[key], file, f"{at}.{key}")
+    if "needs" in raw:
+        raw["needs"] = _needs(raw["needs"], file, f"{at}.needs")
     return _build(Stage, raw, file, at, name=name)
+
+
+def _needs(raw: object, file: Path, at: str) -> Needs:
+    """A needs table; `tools` is a list of names or `{ name = seats }` and is kept as a dict."""
+    raw = dict(_table(raw, None, file, at))
+    if "licence" in raw:
+        raise ConfigError(f"{file}: {at}.licence is gone; use {at}.tools = [\"<name>\"] or {{ <name> = <seats> }}")
+    tools = raw.get("tools", {})
+    if isinstance(tools, list):
+        tools = {str(t): 1 for t in tools}
+    if not isinstance(tools, dict) or not all(type(v) is int for v in tools.values()):
+        raise ConfigError(f"{file}: {at}.tools must be a list of names or {{ name = seats }}")
+    raw["tools"] = tools
+    return _build(Needs, raw, file, at)
 
 
 def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path) -> None:
@@ -336,15 +372,7 @@ def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path)
         raise ConfigError(f"{file}: {at} needs cmd")
     if stage.is_group and not stage.task_dir:
         raise ConfigError(f"{file}: {at} is a task group and needs task_dir")
-    _check_licence(stage.needs, site, file, f"{at}.needs.licence")
-
-
-def _check_licence(needs: Needs | None, site: Site, file: Path, at: str) -> None:
-    lic = needs.licence if needs else None
-    for name in [lic] if isinstance(lic, str) else list(lic or {}):
-        if name not in site.licences:
-            known = ", ".join(sorted(site.licences)) or "none"
-            raise ConfigError(f"{file}: {at} names unknown licence '{name}' (site has: {known})")
+    _check_tools(stage.needs.tools, site.tools, file, f"{at}.needs.tools")
 
 
 def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Metric:
@@ -378,9 +406,9 @@ def _load_tasks(file: Path, site: Site) -> tuple[dict[str, Task], str]:
 
 def _task(task_id: str, raw: object, site: Site, file: Path, at: str) -> Task:
     raw = _table(raw, None, file, at)
-    needs = _build(Needs, raw["needs"], file, f"{at}.needs") if "needs" in raw else None
+    needs = _needs(raw["needs"], file, f"{at}.needs") if "needs" in raw else None
     budget = _build(Budget, raw["budget"], file, f"{at}.budget") if "budget" in raw else None
-    _check_licence(needs, site, file, f"{at}.needs.licence")
+    _check_tools(needs.tools if needs else {}, site.tools, file, f"{at}.needs.tools")
     values = {k: str(v) for k, v in raw.items() if k not in ("needs", "budget")}
     return Task(id=task_id, fields=values, needs=needs, budget=budget)
 

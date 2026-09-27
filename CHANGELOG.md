@@ -10,7 +10,7 @@
 - The bot reacts to a command message: 👀 when a slow command starts,
   then 👍 when the reply went out or 👎 when the command failed.
 - `/start` and `/keyboard` show a reply keyboard with `Status`, `Hosts`,
-  `Events` and `Lic`; `/keyboard off` removes it.
+  `Events`, `Tools` and `Digest`; `/keyboard off` removes it.
 - An alert has a third button, `stop`, which stops the run after its
   task. It asks `Stop <handle>?` first and acts only on `Yes, stop`
   within 10 minutes.
@@ -29,8 +29,21 @@
 - `[telegram] topic_id` puts every message of a project into one topic
   of a forum group; the bot ignores a command from another topic.
 - `/hosts` shows every resource as used of total, in one order:
-  `cores 21/32, ram 93/376 GB, scratch 195/1538 GB, gpu 0/1`. `/lic`
-  shows the seats used of the pool.
+  `cores 21/32, ram 93/376 GB, scratch 195/1538 GB, gpu 0/1`. `/tools`
+  shows the seats used of the total and the hosts of each tool.
+- Breaking: the site table `[licences.<name>]` is now `[tools.<name>]`,
+  with `seats` and a `probe` argv that prints `free` or `free total`.
+  The stage and task key `needs.licence` is now `needs.tools`: a list of
+  names, or `{ name = seats }`. An old key stops the load with an error
+  that names the new one. The core no longer reads `lmstat` output;
+  `examples/site/hooks/flexlm_free.sh` does that as a site hook.
+- `[hosts.<name>] tools` lists the tools a host has, with an optional
+  version. A stage reads the version as `{tool.<name>.version}`.
+  Placement skips a host that lacks a tool of the job, and `plan` names
+  the missing tool.
+- `edr tools` replaces `edr lic`: free and total seats per tool, and the
+  hosts that have it. `lic` and `/lic` still answer for one release. The
+  heartbeat field `licence_unknown` is gone; `gate` says why a run waits.
 - `edr hosts` marks each resource from 🟢 to 🔴 by the thresholds of a
   new `[marks]` table in `site.toml`, which `edr.toml` may override. A
   new first column `ok` holds the worst mark, and the rows go by it.

@@ -23,7 +23,8 @@ HANDLE = re.compile(r"^[\w.@#-]{1,128}$")
 DESIGN = re.compile(r"^[\w.-]{1,64}$")
 LOG_LINES = 200
 # The words of the reply keyboard, in rows; a tap sends the word, which runs the command of that name.
-KEYBOARD = (("Status", "Hosts"), ("Events", "Lic", "Digest"))
+KEYBOARD = (("Status", "Hosts"), ("Events", "Tools", "Digest"))
+ALIASES = {"lic": "tools"}  # old names, gone in the next release
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ BUILTINS = {b.name: b for b in (
     Builtin("status", "[handle]", "the board, or one run", "Look", "html", on_run=True),
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
     Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html", slow=True),
-    Builtin("lic", "", "licence seats, used of total", "Look", "html"),
+    Builtin("tools", "", "seats used of total, and the hosts, per tool", "Look", "html"),
     Builtin("digest", "", "the daily digest now", "Look", "html"),
     Builtin("pin", "", "pin a new board message", "Look"),
     Builtin("log", "<handle> [n]", "the last n log lines as a file, default 200", "Files", on_run=True, slow=True),
@@ -126,6 +127,7 @@ class Commands:
         `run` is the run of the alert the message replies to: it fills the handle of a built-in
         and the run placeholders of a custom command.
         """
+        name = ALIASES.get(name, name)
         if name not in self.tg.commands and name not in BUILTINS:
             name = "help"
         try:
@@ -169,9 +171,9 @@ class Commands:
         """One line per host."""
         return self.actions.hosts_text()
 
-    def cmd_lic(self, args: list[str]) -> str:
-        """One line per licence."""
-        return self.actions.lic_text()
+    def cmd_tools(self, args: list[str]) -> str:
+        """One line per tool."""
+        return self.actions.tools_text()
 
     def cmd_pin(self, args: list[str]) -> str:
         """Unpin the board and pin a new one."""
