@@ -803,6 +803,24 @@ def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Pat
         assert [e["text"] for e in db.events() if e["run_id"] == ""] == [f"x: worktree {wt}", f"y: worktree {snap}"]
 
 
+def test_retire_batch_keeps_a_worktree_without_the_marker(demo: Path, capsys, tmp_path: Path) -> None:
+    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text().replace('worktrees = "wt"', f'worktrees = "{tmp_path / "rtl-wt"}"'))
+    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]
+    wt = tmp_path / "rtl-wt" / src
+    a = seed(demo, "a", "done", src=src)
+    with Database(demo / "data" / "edr.db") as db:
+        root = Path(db.run(a)["root"])
+    code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
+    assert code == 0 and f"demo: worktree kept: '{wt}' does not contain the marker '/edr/'; " \
+        "remove it with git worktree remove" in out
+    assert (wt / ".git").is_file() and not root.exists() and f"rm -rf {root}" in out
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["kind"] for e in db.events(run_id=a)] == ["retire"] and db.batches()[0]["retired"]
+        assert not [e for e in db.events() if e["run_id"] == ""]  # no worktree event
+
+
 def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -> None:
     run_id = "20260904_0411_ref_demo_gabc1234"
     src = tmp_path / "legacy" / run_id

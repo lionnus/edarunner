@@ -364,7 +364,10 @@ the tree. `--batch <B>` retires every run of a batch and writes
 removes the checked-out tree of the batch's source under
 `source.worktrees`, unless another batch that is not retired has the
 same source. A worktree goes with `git worktree remove --force`, a dirty
-snapshot with a plain delete, both on the head node.
+snapshot with a plain delete, both on the head node. If the worktree does
+not pass the guard, for example because `source.worktrees` lies outside
+the marker path, `retire` keeps it, prints a `worktree kept` line and
+still removes the run trees. You can then remove the worktree by hand.
 
 Every target passes the guard of [guarantees.md](guarantees.md) first.
 `retire` refuses a tree whose results are not collected, a tree a live

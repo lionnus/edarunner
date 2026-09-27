@@ -1059,7 +1059,10 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def _worktree_target(c: Ctx, batch: str) -> Path | None:
-    """The checked-out tree of the batch's source, when no other batch that is not retired has it; guarded."""
+    """The checked-out tree of the batch's source, when no other batch that is not retired has it.
+
+    A tree that fails the guard is kept with one line on stdout, so the run trees still go.
+    """
     rows = {b["batch"]: b for b in c.db.batches()}
     src = str((rows.get(batch) or {}).get("source") or "")
     if not src or any(b["batch"] != batch and not b.get("retired") and b.get("source") == src for b in rows.values()):
@@ -1069,7 +1072,12 @@ def _worktree_target(c: Ctx, batch: str) -> Path | None:
         return None
     if path.resolve() == c.project.source.repo.resolve():
         raise Refuse(f"{path} is the source repository")
-    return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
+    try:
+        return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
+    except Refuse as e:
+        how = "git worktree remove" if (path / ".git").exists() else "rm -rf"
+        print(f"{batch}: worktree kept: {e}; remove it with {how}")
+        return None
 
 
 def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[str], prune: bool) -> None:
