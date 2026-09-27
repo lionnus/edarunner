@@ -1,4 +1,4 @@
-"""The `edr` command: the sixteen verbs of docs/design.md section 10.
+"""The `edr` command: seventeen verbs.
 
 Every verb wires the modules; nothing here knows a file format. Exit
 codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
@@ -12,7 +12,6 @@ import contextlib
 import csv
 import functools
 import getpass
-import http.server
 import io
 import json
 import logging
@@ -21,7 +20,6 @@ import posixpath
 import shlex
 import shutil
 import sys
-import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -44,26 +42,6 @@ _STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": 
 
 
 # --- helpers
-
-def _load_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_json(path: Path, obj: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, indent=1) + "\n")
-    os.replace(tmp, path)
-
-
-def _table(head: list[str], body: list[list[Any]]) -> str:
-    rows = [head, *[["-" if c is None else str(c) for c in r] + [""] * (len(head) - len(r)) for r in body]]
-    w = [max(len(r[i]) for r in rows) for i in range(len(head))]
-    return "\n".join(" ".join(f"{c:<{w[i]}}" for i, c in enumerate(r)).rstrip() for r in rows)
-
 
 def _since(text: str) -> int:
     """'30m', '2h', '1d' or seconds, as the unix time that long ago."""
@@ -165,7 +143,7 @@ class Ctx:
 
     def resolve(self, handle: str) -> Row:
         """The ledger row of label@batch, a run id prefix, or #n from the last board."""
-        last = _load_json(self.project.data / "board" / "last_board.json")
+        last = config.load_json(self.project.data / "board" / "last_board.json")
         try:
             run_id = self.ledger.resolve(handle, last if isinstance(last, list) else None)
         except KeyError as e:
@@ -177,12 +155,12 @@ class Ctx:
 
     def heartbeat(self, row: Row) -> dict:
         """The heartbeat of a run, or {} when the driver wrote none."""
-        return _load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
+        return config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
 
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in last_board.json, so #n resolves next time."""
         if rows:
-            _save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
+            config.save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
 
 
 # --- texts shared by the verbs and the bot
@@ -213,7 +191,7 @@ def _hosts_text(rows: list[Row], narrow: bool) -> str:
             continue
         body.append([r["host"], r["free_cores"], r["free_ram_gb"], r["free_gb"]] + ([] if narrow else [
             r["mount"], f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]]))
-    return _table(head, body)
+    return board.table(head, body)
 
 
 def _lic_rows(c: Ctx) -> list[Row]:
@@ -241,7 +219,7 @@ def _lic_rows(c: Ctx) -> list[Row]:
 
 def _lic_text(rows: list[Row]) -> str:
     keys = ["licence", "feature", "pool", "used", "free", "ours", "others", "floor", "note"]
-    return _table(keys, [[r.get(k, "") for k in keys] for r in rows]) if rows else "no licences"
+    return board.table(keys, [[r.get(k, "") for k in keys] for r in rows]) if rows else "no licences"
 
 
 def _metric_key(m: Row) -> str:
@@ -256,25 +234,25 @@ def _compare_text(c: Ctx, handles: list[str]) -> str:
         if step >= cur.get(m["run_id"], (-2, None))[0]:
             cur[m["run_id"]] = (step, m["value"])
     body = [[k, *[cur.get(r["run_id"], (0, None))[1] for r in rows]] for k, cur in sorted(final.items())]
-    return _table(["metric", *[str(r["label"]) for r in rows]], body) if body else "no metrics"
+    return board.table(["metric", *[str(r["label"]) for r in rows]], body) if body else "no metrics"
 
 
 def _metrics_text(rows: list[Row]) -> str:
     body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
              m.get("unit")] for m in rows]
-    return _table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body) if rows else "no metrics"
+    return board.table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body) if rows else "no metrics"
 
 
 def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
     """Write the keep file next to the spec; a field not given keeps its current value."""
     run_id = row["run_id"]
     path = c.project.state / str(row["batch"]) / f"{run_id}.keep.json"
-    cur = _load_json(path)
+    cur = config.load_json(path)
     data = {"hours": cur.get("hours", 0) if hours is None else hours,
             "ack": bool(cur.get("ack")) if ack is None else ack}
     note = f"keep {data['hours']} h" + (", ack" if data["ack"] else "")
     if not c.a.dry_run:
-        _save_json(path, data)
+        config.save_json(path, data)
         c.ledger.add_event(actor, run_id, "keep", note)
     return f"{run_id}: {note}"
 
@@ -656,7 +634,7 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     """Write a frozen snapshot of one design."""
     labels = a.labels.split(",") if a.labels else None
-    manifest = export.export(c.project, c.ledger, a.design, Path(a.out), labels, a.dry_run)
+    manifest = export.export(c.project, c.ledger, a.design, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
         c.ledger.add_event("user", "", "export", f"{a.design} -> {a.out}")
     c.emit(f"{a.out}: {len(manifest['runs'])} runs, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""),
@@ -728,7 +706,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
             phase = f"ABANDONED:{a.why}"
             if hb:
                 hb["phase"], hb["exit"] = phase, 1 if hb.get("exit") is None else hb["exit"]
-                _save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
+                config.save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
             c.ledger.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
         c.ledger.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
         done.append(run_id)
@@ -786,8 +764,6 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     notifiers = _notifiers(c)
     if a.check:
         return watch.check(project, notifiers)
-    if a.serve:
-        _serve(project.data / "board", a.serve)
     return watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
 
 
@@ -800,19 +776,11 @@ def _notifiers(c: Ctx) -> list:
     return make_notifiers(project.site, project, bot.ledger, Actions(bot))
 
 
-def _serve(directory: Path, port: int) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"board on http://127.0.0.1:{server.server_address[1]}/status.html")
-
-
 # --- parser and main
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> None:  # type: ignore[override]
-        # Bad input is exit 1 in section 10, not the 2 of argparse.
+        # Bad input exits 1 like a refused guard, not the 2 of argparse.
         self.print_usage(sys.stderr)
         print(f"edr: {message}", file=sys.stderr)
         raise SystemExit(1)
@@ -836,74 +804,75 @@ def _parser() -> argparse.ArgumentParser:
 
     s = verb("status", "the board, or one run")
     s.add_argument("handle", nargs="?", help="label@batch, a run id prefix, or #n from the last board")
-    s.add_argument("--batch", metavar="B")
+    s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH, else every batch")
     s.add_argument("--narrow", action="store_true", help="48 columns, two lines per live run")
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s")
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists")
     s.add_argument("--triage", action="store_true", help="every run not running, with a proposed command")
     s = verb("events", "the last events")
     s.add_argument("--since", metavar="T", help="30m, 2h, 1d or seconds")
-    s.add_argument("--run", metavar="HANDLE")
-    s.add_argument("-n", type=int, default=50)
-    verb("hosts", "probe every host").add_argument("--narrow", action="store_true")
+    s.add_argument("--run", metavar="HANDLE", help="the events of one run")
+    s.add_argument("-n", type=int, default=50, help="the last N events; default 50")
+    verb("hosts", "probe every host").add_argument("--narrow", action="store_true", help="host, free cores, RAM and space only")
     verb("lic", "probe every licence")
     s = verb("metrics", "the metrics of one design")
-    s.add_argument("--design", required=True, metavar="H")
-    s.add_argument("--stage", metavar="S")
-    s.add_argument("--step", type=int, metavar="N")
+    s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--stage", metavar="S", help="the metrics of one stage")
+    s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
-    verb("init", "write edr.toml and the watch unit here", write=True).add_argument("--site", required=True, metavar="DIR")
+    verb("init", "write edr.toml and the watch unit here", write=True).add_argument("--site", required=True, metavar="DIR", help="the site directory, or a site.toml path")
     verb("check", "load everything, probe the hosts, check the hooks")
     s = verb("stage", "stage a ref as a worktree, or a dirty tree as a snapshot", write=True)
     s.add_argument("ref", nargs="?", help="default: source.ref")
-    s.add_argument("--dirty", metavar="DIR")
-    verb("plan", "render the run specs of a batch; writes nothing", write=True).add_argument("batch", nargs="?")
+    s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
+    verb("plan", "render the run specs of a batch; writes nothing", write=True).add_argument(
+        "batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s = verb("launch", "start one driver per job of a batch", write=True)
-    s.add_argument("batch", nargs="?")
+    s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s.add_argument("--only", metavar="L", help="labels, comma separated")
-    s.add_argument("--allow-dirty", action="store_true")
+    s.add_argument("--allow-dirty", action="store_true", help="launch a dirty snapshot source")
     s = verb("run", "more work on the tree of an existing run", write=True)
-    s.add_argument("handle")
-    s.add_argument("--stage", metavar="S")
-    s.add_argument("--tasks", nargs="+", metavar="ID")
-    s.add_argument("--from", dest="from_", metavar="CHECKPOINT")
-    s.add_argument("--on", metavar="HOST")
-    s.add_argument("--parallel", type=int, metavar="N")
+    s.add_argument("handle", help="label@batch, a run id prefix, or #n from the last board")
+    s.add_argument("--stage", metavar="S", help="the stage to run on the tree")
+    s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
+    s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
+    s.add_argument("--on", metavar="HOST", help="the host; default auto")
+    s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
     s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
     s = verb("keep", "add hours to the running stage or task; --ack cancels a pending kill", write=True)
-    s.add_argument("handle")
+    s.add_argument("handle", help="label@batch, a run id prefix, or #n from the last board")
     s.add_argument("--hours", type=int, metavar="N", help="default 12")
-    s.add_argument("--ack", action="store_true")
+    s.add_argument("--ack", action="store_true", help="cancel the pending kill of the run")
     s = verb("import", "record a run tree that edr did not make, or its collected results", write=True)
-    s.add_argument("--run-id", required=True, dest="run_id")
-    s.add_argument("--label", required=True)
-    s.add_argument("--config", required=True)
-    s.add_argument("--src", required=True, metavar="HASH")
+    s.add_argument("--run-id", required=True, dest="run_id", help="the run id; it must start with YYYYMMDD_HHMM_")
+    s.add_argument("--label", required=True, help="the label of the run")
+    s.add_argument("--config", required=True, help="the configuration name of the run")
+    s.add_argument("--src", required=True, metavar="SRC", help="the source tag of the tree")
     s.add_argument("--host", help="the host of the tree")
     s.add_argument("--root", metavar="PATH", help="the tree on the host")
     s.add_argument("--results", metavar="DIR", help="collected files in the run layout; linked as data/results/<run id>")
     s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks whose files the results hold")
-    s.add_argument("--batch", default="imported")
-    s.add_argument("--phase", default="done")
-    s.add_argument("--build-tag", dest="build_tag", metavar="TAG")
-    s.add_argument("--why", default="")
+    s.add_argument("--batch", default="imported", help="the batch to record it in; default imported")
+    s.add_argument("--phase", default="done", help="the terminal phase; default done")
+    s.add_argument("--build-tag", dest="build_tag", metavar="TAG", help="the build tag of the run")
+    s.add_argument("--why", default="", help="the reason; it goes into the events table")
     s = verb("export", "a frozen snapshot of one design", write=True)
-    s.add_argument("--design", required=True, metavar="SRC")
-    s.add_argument("--out", required=True, metavar="DIR")
-    s.add_argument("--labels", metavar="a,b")
+    s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--out", required=True, metavar="DIR", help="the directory to write; it must be absent or empty")
+    s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")
+    s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
     s = verb("stop", "stop one run", write=True, why=True)
-    s.add_argument("handle")
+    s.add_argument("handle", help="label@batch, a run id prefix, or #n from the last board")
     s.add_argument("--after-task", action="store_true", help="write the stop file; the running task ends first")
     s.add_argument("--now", action="store_true", help="SIGKILL after 30 s")
     s = verb("retire", "remove the run tree, or its prune targets", write=True, why=True)
-    s.add_argument("handle", nargs="?")
+    s.add_argument("handle", nargs="?", help="label@batch, a run id prefix, or #n from the last board")
     s.add_argument("--batch", metavar="B", help="every run of the batch, then mark it RETIRED")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
     s = verb("watch", "the watcher", write=True)
-    s.add_argument("--once", action="store_true")
+    s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")
     s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")
-    s.add_argument("--serve", type=int, metavar="PORT", help="serve data/board over http on 127.0.0.1")
     return p
 
 

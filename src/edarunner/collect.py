@@ -1,4 +1,4 @@
-"""Copy the collect paths of a run into data/results. See docs/design.md section 7, step 3.
+"""Copy the collect paths of a run into data/results.
 
 Every copy is one `rsync -a` from the host to the same relative path under
 `data/results/<run_id>/`. A failure is counted and returned, never raised.
@@ -6,20 +6,19 @@ Every copy is one `rsync -a` from the host to the same relative path under
 
 from __future__ import annotations
 
-import json
 import posixpath
 import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import ConfigError, placeholders, render, resolve_task
+from . import board
+from .config import ConfigError, load_json, placeholders, render, resolve_task
 from .guards import Refuse, assert_run_id
 from .hosts import Ssh
 from .ledger import Ledger
 from .model import Project, Stage
 
-_TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED")
 _TASK_END = ("done", "failed")
 # rsync exit codes of a lost or refused connection.
 _SSH_RC = {12, 30, 35, 255}
@@ -30,17 +29,12 @@ _FORMAT = "--out-format=%i %l %n"
 class CollectResult:
     files: int = 0
     failures: list[str] = field(default_factory=list)
-    new_dirs: list[str] = field(default_factory=list)
     copied: list[str] = field(default_factory=list)
 
 
 def load_spec(project: Project, run: dict) -> dict:
     """The run's spec from the state directory, or {} when it has none (an imported tree)."""
-    path = project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json"
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
+    return load_json(project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json")
 
 
 def spec_stages(spec: dict) -> list[str] | None:
@@ -66,13 +60,12 @@ def stage_state(project: Project, heartbeat: dict, only: list[str] | None = None
     `only` limits the stages to those the run's spec lists; the tree's earlier
     stages belong to the run that made them.
     """
-    phase = str(heartbeat.get("phase") or "")
     current = heartbeat.get("stage")
     names = [n for n in project.stages if only is None or n in only]
     if not current or current not in names:
         return [], None
     i = names.index(current)
-    if phase.split(":", 1)[0] in _TERMINAL:
+    if not board.is_live(heartbeat):
         return names[: i + 1], None
     return names[:i], current
 
@@ -183,13 +176,12 @@ class _Copier:
         return [posixpath.relpath(p.strip(), self.root) + "/" for p in out.splitlines() if p.strip()]
 
     def copy_all(self, paths: list[str], klass: str) -> None:
-        """Copy every distinct path, then list the directories that received a file."""
+        """Copy every distinct path; an empty entry is a counted failure."""
         for entry in dict.fromkeys(paths):
             if entry:
                 self._copy(entry, klass)
             else:
                 self.result.failures.append("empty collect entry")
-        self.result.new_dirs = sorted({posixpath.dirname(p) for p in self.result.copied} - {""})
 
     def _copy(self, entry: str, klass: str) -> None:
         # A path without a trailing slash lands in its parent, so a second copy does not nest it.

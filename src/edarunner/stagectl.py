@@ -1,6 +1,6 @@
 """`edr stage`: a detached worktree per ref, or a snapshot of a dirty tree.
 
-See docs/design.md sections 3.1 and 14. A dry run prints and writes nothing.
+A dry run prints and writes nothing.
 """
 
 from __future__ import annotations
@@ -8,14 +8,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import runid
-from .guards import assert_safe_target
 from .model import Project
 
 SRC_RE = re.compile(r"^[0-9a-f]+(-dirty-[0-9a-f]{8})?$")
@@ -54,21 +52,6 @@ def find(project: Project, src: str) -> Path:
     if short and (wts / short).is_dir():
         return wts / short
     raise StageError(f"'{src}' is not staged; run: edr stage {src}")
-
-
-def remove(project: Project, src: str, dry_run: bool = False) -> Path:
-    """Remove the staged tree of a src tag after the safety guard."""
-    if not SRC_RE.match(src):
-        raise StageError(f"'{src}' is not a src tag")
-    path = assert_safe_target(project.source.worktrees / src, project.safety.marker, project.safety.min_depth)
-    if not path.is_dir():
-        raise StageError(f"'{src}' is not staged")
-    if dry_run:
-        print(f"dry-run: remove {path}")
-        return path
-    shutil.rmtree(path)
-    runid.git("worktree", "prune", cwd=project.source.repo)
-    return path
 
 
 # --- internals

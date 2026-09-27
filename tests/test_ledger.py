@@ -2,7 +2,6 @@
 
 import json
 import os
-import sqlite3
 
 import pytest
 
@@ -67,7 +66,6 @@ def test_upsert_then_update(tmp_path):
 
     with Ledger(tmp_path / "edr.db") as led:
         assert [r["run_id"] for r in led.runs(batch="demo")] == [RUN_A, RUN_B]
-        assert [r["run_id"] for r in led.runs(phase_prefix="stage:")] == [RUN_B, RUN_C]
         assert [r["run_id"] for r in led.runs(state="running", batch="demo2")] == [RUN_C]
 
 

@@ -46,14 +46,12 @@ budget = { hours = 0.5 }
 collect = ["reports/", "logs/"]
 
 [stages.floorplan]
-after = "synth"
 cmd = ". ${ORFS:-/OpenROAD-flow-scripts}/env.sh && make -C $FLOW_HOME DESIGN_CONFIG={root}/config.mk WORK_HOME={root} {overrides} floorplan"
 needs = { cores = 1, disk_gb = 0.5 }
 budget = { hours = 0.5 }
 collect = ["reports/", "logs/"]
 
 [stages.place]
-after = "floorplan"
 cmd = ". ${ORFS:-/OpenROAD-flow-scripts}/env.sh && make -C $FLOW_HOME DESIGN_CONFIG={root}/config.mk WORK_HOME={root} {overrides} place"
 needs = { cores = 1, disk_gb = 0.5 }
 budget = { hours = 0.5 }

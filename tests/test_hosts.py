@@ -150,7 +150,7 @@ def test_scratch_dirs_prefers_host_list(ssh: Ssh) -> None:
     assert ssh.scratch_dirs("local") == ssh.site.scratch
 
 
-# pid_alive, kill_pgid, tool_processes, scratch_free_gb
+# pid_alive, kill_pgid, tool_processes
 
 
 def test_pid_alive_local(ssh: Ssh) -> None:
@@ -199,13 +199,6 @@ def test_check_local_finds_every_tool_here(ssh: Ssh) -> None:
     assert ssh.check_local() == []
 
 
-def test_scratch_free_gb(ssh: Ssh, tmp_path: Path, monkeypatch) -> None:
-    assert ssh.scratch_free_gb("local", str(tmp_path)) > 0
-    fake_run(monkeypatch, {"df": (0, "", "")})
-    with pytest.raises(HostError):
-        ssh.scratch_free_gb("h", "/gone")
-
-
 # place
 
 
@@ -248,4 +241,3 @@ def test_place_fixed_host_and_needs_subtraction(ssh: Ssh) -> None:
     probes = {"a": probe("a", cores=8, disk=100)}
     got = place(proj, [job("f", host="zz"), job("j1"), job("j2")], probes, {})
     assert got == {"f": "zz", "j1": "a", "j2": None}
-    assert Ssh.place is place or Ssh.place(proj, [], {}, {}) == {}
