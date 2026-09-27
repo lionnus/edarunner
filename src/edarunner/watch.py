@@ -12,7 +12,7 @@ import logging
 import os
 import shlex
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from . import board, collect, config, launch, metrics
@@ -29,8 +29,52 @@ _RUN_KEYS = ("run_id", "label", "config", "host", "root", "phase", "stage", "ste
              "started", "updated", "disk_free_gb", "tree_gb", "counts")
 _TASK_KEYS = ("started", "ended", "exit", "signature", "log")
 _BUSY = ("stage:", "group:", "retry:")
-_NOTIFY = {"dead", "hung", "looping", "over_budget", "host_full", "superseded", "orphan", "incomplete", "failed",
-           "killed"}
+
+
+@dataclass(frozen=True)
+class State:
+    """One run state: the test that finds it, whether it alerts, and what the watcher does after `grace_s`.
+
+    A live run gets its state from the heartbeat and the ledger; a finished run from its phase.
+    Every change of state writes an event. A state that alerts sends one alert per run and reason,
+    and a new reason edits that alert in place. `edr keep --ack` cancels the pending kill of `hung`
+    and the stop of `host_full`; any keep file holds off the stop of `superseded`.
+    """
+
+    test: str
+    action: str
+    alert: bool = False
+
+
+STATES = {
+    "running": State("the heartbeat is younger than `stale_s`", "none"),
+    "stale": State("the heartbeat is older than `stale_s`; or older than `dead_s`, but the driver is alive or "
+                   "the host did not answer", "none"),
+    "dead": State("the heartbeat is older than `dead_s` and the driver process is gone from the host",
+                  "one resume from the last step, when the stage has `resume` and no process group of the run "
+                  "is alive", alert=True),
+    "hung": State("the heartbeat is fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, "
+                  "tree size, log tail, task counts, log size, CPU time of the process groups",
+                  "`SIGTERM` to the process groups, only with `kill_hung` and no `ack`", alert=True),
+    "looping": State("the driver set `looping`: `streak` equal failure signatures in a row", "none", alert=True),
+    "over_budget": State("the driver set `over_budget`, or the run ended `OVER_BUDGET`", "none", alert=True),
+    "host_full": State("the driver set `host_full`: free space below `host_free_min_gb`",
+                       "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
+    "superseded": State("a newer batch runs the same label at another source",
+                        "`stop --after-task`, unless the run has a keep file", alert=True),
+    "orphan": State("a process of ours that matches `tool_procs`, outside every live run tree",
+                    "`SIGTERM`, only with `kill_orphan`", alert=True),
+    "queued": State("no host fits the job", "a launch when a host fits, one per batch per cycle"),
+    "imported": State("`edr import` recorded the run", "none"),
+    "done": State("the run ended `done`", "none"),
+    "incomplete": State("the run ended `INCOMPLETE`: a task failed or was skipped", "none", alert=True),
+    "failed": State("the run ended `FAILED`", "none", alert=True),
+    "stopped": State("a stop file or `edr stop` ended the run, or `edr stop` marked a queued run", "none"),
+    "killed": State("a signal ended the run", "none", alert=True),
+    "abandoned": State("`edr retire` took a live run", "none"),
+    "retired": State("`edr retire` took the run", "none"),
+}
+_NOTIFY = frozenset(s for s, st in STATES.items() if st.alert)
 
 
 # files
