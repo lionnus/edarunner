@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `edr notify TEXT [--silent] [--dry-run]` sends one message through
+  every notifier, for example from a Claude Code hook.
 - A command sent as a reply to an alert acts on the run of the alert:
   `/keep 24`, `/ack`, `/stop` and `/status` need no handle, and a custom
   command gets `{handle}`, `{run_id}`, `{run_root}` and `{host}`.

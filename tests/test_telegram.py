@@ -531,3 +531,17 @@ def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
     bot.handle_update(reply_to("/ack", mid))
     assert last_reply(bot).startswith("error: a handle is")
     assert list(bot.ledger.kv["telegram"]["replies"]) == [str(mid)]
+
+
+def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
+    bot.topic = 17
+    assert bot.post("note", "a &amp; b", silent=True) is True
+    sent = bot.api.of("sendMessage")[-1]
+    assert sent["text"] == "<b>demo · note</b>\na &amp; b"
+    assert sent["disable_notification"] is True and sent["message_thread_id"] == 17
+
+    def refuse(method, params, files=None):
+        raise tgapi.ApiError("sendMessage: chat not found")
+
+    monkeypatch.setattr(bot.api, "call", refuse)
+    assert bot.post("note", "x") is False

@@ -42,6 +42,10 @@ class Notifier:
     def board(self, text: str) -> None:
         """Rewrite the one pinned board message in place; `text` is Telegram HTML."""
 
+    def post(self, title: str, html: str, silent: bool = False) -> bool:
+        """Send one message with the project and `title` in its first line; True when it was sent."""
+        return False
+
 
 def alert_buttons(handle: str) -> list[Button]:
     """The two buttons of an alert: keep 12 h and ack."""
