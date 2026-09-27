@@ -90,7 +90,11 @@ class Ctx:
     @property
     def project(self) -> Project:
         if self._project is None:
-            self._project = config.load_project(os.getcwd())
+            cwd = Path(os.getcwd())
+            root = next((p for p in (cwd, *cwd.parents) if (p / "edr.toml").is_file()), None)
+            if root is None:
+                raise Refuse(f"no edr.toml in {cwd} or above; run edr init")
+            self._project = config.load_project(root)
         return self._project
 
     @property
