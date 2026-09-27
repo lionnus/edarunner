@@ -95,6 +95,13 @@ def _nested(src: Path, dst: Path, dry_run: bool) -> str:
         return head
     runid.git("clone", "-q", str(src), str(dst))
     runid.git("checkout", "-q", "--detach", head, cwd=dst)
+    # The clone of a clone would fetch from the repo copy; point it at the upstream instead.
+    try:
+        upstream = runid.git("remote", "get-url", "origin", cwd=src)
+    except runid.GitError:
+        upstream = ""
+    if upstream:
+        runid.git("remote", "set-url", "origin", upstream, cwd=dst)
     return head
 
 
