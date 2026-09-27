@@ -6,20 +6,19 @@ Every copy is one `rsync -a` from the host to the same relative path under
 
 from __future__ import annotations
 
-import json
 import posixpath
 import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import ConfigError, placeholders, render, resolve_task
+from . import board
+from .config import ConfigError, load_json, placeholders, render, resolve_task
 from .guards import Refuse, assert_run_id
 from .hosts import Ssh
 from .ledger import Ledger
 from .model import Project, Stage
 
-_TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED")
 _TASK_END = ("done", "failed")
 # rsync exit codes of a lost or refused connection.
 _SSH_RC = {12, 30, 35, 255}
@@ -35,11 +34,7 @@ class CollectResult:
 
 def load_spec(project: Project, run: dict) -> dict:
     """The run's spec from the state directory, or {} when it has none (an imported tree)."""
-    path = project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json"
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
+    return load_json(project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json")
 
 
 def spec_stages(spec: dict) -> list[str] | None:
@@ -65,13 +60,12 @@ def stage_state(project: Project, heartbeat: dict, only: list[str] | None = None
     `only` limits the stages to those the run's spec lists; the tree's earlier
     stages belong to the run that made them.
     """
-    phase = str(heartbeat.get("phase") or "")
     current = heartbeat.get("stage")
     names = [n for n in project.stages if only is None or n in only]
     if not current or current not in names:
         return [], None
     i = names.index(current)
-    if phase.split(":", 1)[0] in _TERMINAL:
+    if not board.is_live(heartbeat):
         return names[: i + 1], None
     return names[:i], current
 

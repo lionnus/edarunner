@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import getpass
 import importlib.util
+import json
 import os
 import re
+import time
 import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import fields
@@ -87,6 +89,34 @@ def load_hook(root: Path, spec: str) -> tuple[Callable[..., Any], str]:
     if not callable(fn):
         raise ConfigError(f"{path} has no function '{func}'")
     return fn, f"{file}:{func}"
+
+
+# --- JSON state files
+
+def load_json(path: PathLike) -> Any:
+    """The parsed JSON of `path`; {} when the file is absent, or unreadable after three tries."""
+    for _ in range(3):
+        try:
+            return json.loads(Path(path).read_text())
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            time.sleep(0.05)
+    return {}
+
+
+def save_text(path: PathLike, text: str) -> None:
+    """Write `text` by a temporary file and a rename, so a reader never sees a torn file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def save_json(path: PathLike, obj: object) -> None:
+    """Write `obj` as indented JSON by a temporary file and a rename."""
+    save_text(path, json.dumps(obj, indent=1) + "\n")
 
 
 # --- table helpers

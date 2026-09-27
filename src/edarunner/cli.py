@@ -43,26 +43,6 @@ _STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": 
 
 # --- helpers
 
-def _load_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_json(path: Path, obj: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, indent=1) + "\n")
-    os.replace(tmp, path)
-
-
-def _table(head: list[str], body: list[list[Any]]) -> str:
-    rows = [head, *[["-" if c is None else str(c) for c in r] + [""] * (len(head) - len(r)) for r in body]]
-    w = [max(len(r[i]) for r in rows) for i in range(len(head))]
-    return "\n".join(" ".join(f"{c:<{w[i]}}" for i, c in enumerate(r)).rstrip() for r in rows)
-
-
 def _since(text: str) -> int:
     """'30m', '2h', '1d' or seconds, as the unix time that long ago."""
     try:
@@ -163,7 +143,7 @@ class Ctx:
 
     def resolve(self, handle: str) -> Row:
         """The ledger row of label@batch, a run id prefix, or #n from the last board."""
-        last = _load_json(self.project.data / "board" / "last_board.json")
+        last = config.load_json(self.project.data / "board" / "last_board.json")
         try:
             run_id = self.ledger.resolve(handle, last if isinstance(last, list) else None)
         except KeyError as e:
@@ -175,12 +155,12 @@ class Ctx:
 
     def heartbeat(self, row: Row) -> dict:
         """The heartbeat of a run, or {} when the driver wrote none."""
-        return _load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
+        return config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
 
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in last_board.json, so #n resolves next time."""
         if rows:
-            _save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
+            config.save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
 
 
 # --- texts shared by the verbs and the bot
@@ -211,7 +191,7 @@ def _hosts_text(rows: list[Row], narrow: bool) -> str:
             continue
         body.append([r["host"], r["free_cores"], r["free_ram_gb"], r["free_gb"]] + ([] if narrow else [
             r["mount"], f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]]))
-    return _table(head, body)
+    return board.table(head, body)
 
 
 def _lic_rows(c: Ctx) -> list[Row]:
@@ -239,7 +219,7 @@ def _lic_rows(c: Ctx) -> list[Row]:
 
 def _lic_text(rows: list[Row]) -> str:
     keys = ["licence", "feature", "pool", "used", "free", "ours", "others", "floor", "note"]
-    return _table(keys, [[r.get(k, "") for k in keys] for r in rows]) if rows else "no licences"
+    return board.table(keys, [[r.get(k, "") for k in keys] for r in rows]) if rows else "no licences"
 
 
 def _metric_key(m: Row) -> str:
@@ -254,25 +234,25 @@ def _compare_text(c: Ctx, handles: list[str]) -> str:
         if step >= cur.get(m["run_id"], (-2, None))[0]:
             cur[m["run_id"]] = (step, m["value"])
     body = [[k, *[cur.get(r["run_id"], (0, None))[1] for r in rows]] for k, cur in sorted(final.items())]
-    return _table(["metric", *[str(r["label"]) for r in rows]], body) if body else "no metrics"
+    return board.table(["metric", *[str(r["label"]) for r in rows]], body) if body else "no metrics"
 
 
 def _metrics_text(rows: list[Row]) -> str:
     body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
              m.get("unit")] for m in rows]
-    return _table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body) if rows else "no metrics"
+    return board.table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body) if rows else "no metrics"
 
 
 def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
     """Write the keep file next to the spec; a field not given keeps its current value."""
     run_id = row["run_id"]
     path = c.project.state / str(row["batch"]) / f"{run_id}.keep.json"
-    cur = _load_json(path)
+    cur = config.load_json(path)
     data = {"hours": cur.get("hours", 0) if hours is None else hours,
             "ack": bool(cur.get("ack")) if ack is None else ack}
     note = f"keep {data['hours']} h" + (", ack" if data["ack"] else "")
     if not c.a.dry_run:
-        _save_json(path, data)
+        config.save_json(path, data)
         c.ledger.add_event(actor, run_id, "keep", note)
     return f"{run_id}: {note}"
 
@@ -726,7 +706,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
             phase = f"ABANDONED:{a.why}"
             if hb:
                 hb["phase"], hb["exit"] = phase, 1 if hb.get("exit") is None else hb["exit"]
-                _save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
+                config.save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
             c.ledger.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
         c.ledger.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
         done.append(run_id)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -16,7 +15,7 @@ from . import config, hosts, sync
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
 from .ledger import Ledger
-from .model import Batch, Budget, Job, Needs, Project, Stage, Task
+from .model import Batch, Budget, Job, Project, Stage, Task
 
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
 DATE_FMT = "%Y%m%d_%H%M"
@@ -52,10 +51,7 @@ def pin_date(state: Path, batch: str, dry_run: bool = False) -> str:
         return date
     date = time.strftime(DATE_FMT)
     if not dry_run:
-        pin.parent.mkdir(parents=True, exist_ok=True)
-        tmp = pin.with_name(pin.name + ".tmp")
-        tmp.write_text(date + "\n")
-        os.replace(tmp, pin)
+        config.save_text(pin, date + "\n")
     return date
 
 
@@ -280,12 +276,8 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: s
 def write_spec(state: Path, batch: str, plan_: RunPlan, dry_run: bool = False) -> Path:
     """Write <state>/<batch>/<run_id>.spec.json by a temporary file and rename."""
     path = Path(state) / batch / f"{plan_.run_id}.spec.json"
-    if dry_run:
-        return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(plan_.spec, indent=1) + "\n")
-    os.replace(tmp, path)
+    if not dry_run:
+        config.save_json(path, plan_.spec)
     return path
 
 

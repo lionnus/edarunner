@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ast
 import csv
-import importlib.util
 import json
 import operator
 import re
@@ -15,6 +14,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from .config import load_hook
 from .model import Metric, Project, Stage, Task
 
 _PLACEHOLDER = re.compile(r"\{([\w.]+)\}")
@@ -72,8 +72,8 @@ def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
             obj = obj[int(key)] if isinstance(obj, list) else obj[key]
         return float(obj)
     if metric.python:
-        file, func = metric.python.removeprefix("python:").rsplit(":", 1)
-        return float(_hook(project_root / file, func)(path))
+        fn, _ = load_hook(project_root, metric.python)
+        return float(fn(path))
     raise ValueError(f"metric {metric.name} has no parser")
 
 
@@ -202,15 +202,6 @@ def _files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | No
 
 def _render(text: str, values: dict[str, object]) -> str:
     return _PLACEHOLDER.sub(lambda m: str(values[m.group(1)]), text)
-
-
-def _hook(file: Path, func: str) -> Callable[[Path], object]:
-    spec = importlib.util.spec_from_file_location(file.stem, file)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load {file}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return getattr(module, func)
 
 
 def _row(
