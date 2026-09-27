@@ -56,9 +56,8 @@ because nothing happened.
 
 ## Dry runs
 
-Every verb that writes takes `--dry-run`: `init`, `stage`, `plan`,
-`launch`, `run`, `keep`, `import`, `export`, `stop`, `retire` and `watch`.
-A dry run prints every path and every command with the mark `(dry)` or
+Every verb that writes takes `--dry-run`; `docs/reference/cli.md` marks
+them. A dry run prints every path and every command with the mark `(dry)` or
 the prefix `dry:`, and writes nothing:
 
 - no date pin in `<state>/<batch>/RUN_DATE`

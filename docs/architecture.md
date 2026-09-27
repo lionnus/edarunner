@@ -44,6 +44,7 @@ commands, the report files and the numbers in them.
 | `notify/telegram/buttons.py` | the inline buttons of an alert, the action of a press, the confirmation of a stop |
 | `notify/telegram/bot.py` | `TelegramBot`: the poll thread, the router, the allowlist, the alerts and the pinned board |
 | `cli.py` | the verbs, the exit codes, `--json`, the project lookup |
+| `tools/gen_docs.py` | the pages under `docs/reference/`, from the parser, the model, `STATES`, the marks and the bot table |
 
 A channel never imports `cli` or `watch`; it gets its verbs through the
 `Actions` object the CLI hands in.
@@ -111,3 +112,6 @@ changes the driver and the tests in the same commit.
   `hostA`, `user`, `demo` and `k_small`.
 - Tests write under `tmp_path`, use the host `local` only, and start a
   driver only through `tests/helpers_driver.py`.
+- A verb, flag, config key, state or bot command is documented where it
+  is defined. `uv run tools/gen_docs.py` regenerates `docs/reference/`,
+  and CI refuses a stale page.

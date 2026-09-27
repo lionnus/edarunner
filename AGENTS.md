@@ -23,7 +23,8 @@ Read `code` first: 0 means done, 1 means a guard refused or the input was
 bad, 2 means there was nothing to do, and 3 means some hosts failed. On
 `launch`, 2 means every job was already launched; on `stop`, 3 means the
 driver is still alive and `--now` is the next step. Act on `data`, and
-quote `output` when you report. `docs/cli.md` lists every verb.
+quote `output` when you report. `docs/reference/cli.md` lists every
+verb.
 
 ## Start with triage
 
@@ -35,16 +36,19 @@ dead        a@demo                       stage:pnr
     edr run a@demo --stage pnr --from cts
 ```
 
-| State | Proposed command | Check before you run it |
-|---|---|---|
-| `queued` | `edr launch <batch> --only <label>` | `edr hosts` shows a host that fits |
-| `stale` | `edr status <handle> --live` | nothing; it only asks the host |
-| `dead` | `edr run <handle> --stage <S> --from <step>` | keep `--from`; without it the stage starts from its first step and can destroy the checkpoints it needs |
-| `hung`, `looping`, `over_budget` | `edr stop <handle> --why <state>` | the log tail in `edr status <handle>` |
-| `host_full` | `edr stop <handle> --now --why host-full` | `edr hosts`; one stop frees the host |
-| `superseded` | `edr stop <handle> --after-task --why superseded` | the newer batch is the one you want |
-| `done` | `edr export --design <src> --out exports/<src>` | `edr metrics --design <src>` looks complete |
-| other finished | `edr retire <handle> --why <state>` | `edr watch --once` collected the results |
+`docs/reference/states.md` gives the proposed command per state. Check
+this before you run it:
+
+| State | Check before you run it |
+|---|---|
+| `queued` | `edr hosts` shows a host that fits |
+| `stale` | nothing; the command only asks the host |
+| `dead` | keep `--from`; without it the stage starts from its first step and can destroy the checkpoints it needs |
+| `hung`, `looping`, `over_budget` | the log tail in `edr status <handle>` |
+| `host_full` | `edr hosts`; one stop frees the host |
+| `superseded` | the newer batch is the one you want |
+| `done` | `edr metrics --design <src>` looks complete |
+| other finished | `edr watch --once` collected the results |
 
 `edr status --live` asks each host whether the driver process exists. Use
 it before you trust a running count, because a heartbeat file keeps its

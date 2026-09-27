@@ -1,4 +1,20 @@
-"""Load and validate the four TOML files, and read and write the JSON state files."""
+"""Load and validate the four TOML files, and read and write the JSON state files.
+
+`edr.toml` and `tasks.toml` live in the project directory, one `jobs/<batch>.toml` per batch next
+to them, and `site.toml` outside the project with the hosts, the tools and the bot. These rules
+hold for every file:
+
+- An unknown key is an error. A value of the wrong type is an error that names the file and the
+  key path, so `cores = "16"` stops at load.
+- A key without a default is required.
+- A path is absolute or relative to the file that names it, and `~` expands.
+- A string may hold `{placeholders}`; the last section lists them. `${VAR}` belongs to the shell
+  and stays as it is.
+- A hook is `python:<file>:<function>`, with `<file>` relative to the project directory.
+
+`edr check` loads all four, imports every hook, probes the hosts and plans every batch under
+`jobs/`, so a wrong file stops there.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +26,7 @@ import re
 import time
 import tomllib
 from collections.abc import Callable, Mapping
-from dataclasses import fields
+from dataclasses import MISSING, fields
 from pathlib import Path
 from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
@@ -30,7 +46,6 @@ _PROJECT_KEYS = {
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
-_SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 _EXTRACTORS = ("regex", "csv", "json", "python", "expr")
 
 
@@ -40,20 +55,63 @@ class ConfigError(Exception):
 
 # --- placeholders
 
+# Every placeholder edr fills: its value, and the strings that may use it.
+PLACEHOLDERS = {
+    "project": ("the project name", "everywhere"),
+    "project_root": ("the project directory", "everywhere"),
+    "site_dir": ("the directory of the site file", "everywhere"),
+    "user": ("the login name", "everywhere"),
+    "date": ("the pinned date of the batch, `YYYYMMDD_HHMM`", "the run id"),
+    "batch": ("the batch name", "the run id, the stage strings"),
+    "label": ("the label of the job", "the run id, the stage strings"),
+    "config": ("the configuration name of the job", "the run id, the stage strings"),
+    "build_tag": ("the build tag of the job", "the run id, the stage strings"),
+    "src": ("the source tag of the batch", "the run id, the stage strings"),
+    "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
+    "netlist_stage": ("the `netlist_stage` of the job, only when the job sets it", "the stage strings"),
+    "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),
+    "host": ("the host of the run", "the stage strings, `[env]`, `sync.after`"),
+    "mount": ("the scratch mount of the host", "the stage strings, `[env]`, `sync.after`"),
+    "root": ("the run tree", "the stage strings, `[env]`, `sync.after`"),
+    "tree_id": ("the run id of the tree the flow writes in: the reused run's id under `reuse`, else `{run_id}`",
+                "the stage strings"),
+    "cores": ("`needs.cores` of the stage or task", "the stage strings"),
+    "tool.<name>.version": ("the version the host lists for the tool; `\"\"` without one",
+                            "the stage strings, a tool `probe`"),
+    "checkpoint": ("the step name a resume starts from", "`resume`"),
+    "task_dir": ("the task directory", "the strings of a task group, `collect`, metric files"),
+    "task.<key>": ("a key of the task table", "the strings of a task group, `collect`, metric files"),
+    "step": ("the step number", "a metric `file` with `step = \"*\"`"),
+}
+
+
 def render(template: str, values: Mapping[str, object]) -> str:
-    """Fill every {name} and {a.b} from `values`; a missing name is a ConfigError."""
+    """Fill every `{name}` and `{a.b}` in `template` from `values`.
+
+    A placeholder without a value is a ConfigError that names it: `missing` for one of the
+    table below that this string cannot use, `unknown` for a name edr never fills. A dict
+    value flattens to dotted keys, so a task table gives `{task.kernel}`. `${VAR}` belongs
+    to the shell and stays as it is.
+    """
 
     def sub(m: re.Match[str]) -> str:
         key = m.group(1)
         if key not in values:
-            raise ConfigError(f"missing placeholder {{{key}}} in '{template}'")
+            known = key in PLACEHOLDERS or key.startswith(("task.", "tool."))
+            raise ConfigError(f"{'missing' if known else 'unknown'} placeholder {{{key}}} in '{template}'")
         return str(values[key])
 
     return _PH.sub(sub, template)
 
 
+def _default(cls: type, name: str) -> Any:
+    """The default the model carries for a key; the loader applies it when the file leaves the key out."""
+    f = next(f for f in fields(cls) if f.name == name)  # type: ignore[arg-type]
+    return f.default if f.default is not MISSING else f.default_factory()  # type: ignore[misc]
+
+
 def _flag(raw: dict, key: str, file: Path) -> bool:
-    value = raw.get(key, True)
+    value = raw.get(key, _default(Project, key))
     if not isinstance(value, bool):
         raise ConfigError(f"{file}: {key} must be true or false")
     return value
@@ -217,19 +275,10 @@ def load_site(path: PathLike) -> Site:
              for n, t in _table(raw.get("tools", {}), None, file, "tools").items()}
     hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
     telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
-    return Site(
-        path=file,
-        scratch=_need(raw, "scratch", file, ""),
-        env=raw.get("env", {}),
-        ssh_options=ssh.get("options", _SSH_OPTIONS),
-        ssh_timeout_s=ssh.get("timeout_s", 45),
-        tool_procs=raw.get("tool_procs", ""),
-        hosts=hosts,
-        tools=tools,
-        nfs_export=raw.get("nfs_export", ""),
-        telegram=telegram,
-        marks=_marks(raw.get("marks", {}), file, Marks()),
-    )
+    given = {k: raw[k] for k in ("env", "tool_procs", "nfs_export") if k in raw}
+    given.update({f"ssh_{k}": v for k, v in ssh.items()})
+    return Site(path=file, scratch=_need(raw, "scratch", file, ""), hosts=hosts, tools=tools, telegram=telegram,
+                marks=_marks(raw.get("marks", {}), file, Marks()), **given)
 
 
 def _host(name: str, raw: object, tools: dict[str, Tool], file: Path) -> Host:
@@ -264,11 +313,12 @@ def _marks(raw: object, file: Path, base: Marks) -> Marks:
 def _telegram(raw: object, file: Path, base: Telegram | None, allowed: set[str]) -> Telegram:
     """The [telegram] table of `file`; a key it leaves out keeps its value from `base`."""
     tg = dict(_table(raw, allowed, file, "telegram"))
-    token = tg.get("token_file", "~/.config/edarunner/telegram.token" if base is None else None)
-    if token is not None:
-        if not isinstance(token, str):
-            raise ConfigError(f"{file}: telegram.token_file must be str, not {type(token).__name__}")
-        tg["token_file"] = _path(token, file)
+    if "token_file" in tg:
+        if not isinstance(tg["token_file"], str):
+            raise ConfigError(f"{file}: telegram.token_file must be str, not {type(tg['token_file']).__name__}")
+        tg["token_file"] = _path(tg["token_file"], file)
+    elif base is None:
+        tg["token_file"] = _path(str(_default(Telegram, "token_file")), file)
     if "commands" in tg:
         tg["commands"] = {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
                           for n, t in _table(tg["commands"], None, file, "telegram.commands").items()}
@@ -298,15 +348,10 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     if "marks" in raw:
         site.marks = _marks(raw["marks"], file, site.marks)
 
-    src = _table(raw.get("source", {}), {f.name for f in fields(Source)}, file, "source")
-    source = Source(
-        repo=_path(_need(src, "repo", file, "source"), file, values),
-        worktrees=_path(_need(src, "worktrees", file, "source"), file, values),
-        ref=src.get("ref", "HEAD"),
-        nested=src.get("nested", []),
-        run_id=src.get("run_id", "{date}_{label}_{build_tag}_g{src}"),
-        build_tag=src.get("build_tag", ""),
-    )
+    src = _table(raw.get("source", {}), None, file, "source")
+    source = _build(Source, {k: v for k, v in src.items() if k not in ("repo", "worktrees")}, file, "source",
+                    repo=_path(_need(src, "repo", file, "source"), file, values),
+                    worktrees=_path(_need(src, "worktrees", file, "source"), file, values))
     stages = {n: _stage(n, t, file) for n, t in _table(raw.get("stages", {}), None, file, "stages").items()}
     for stage in stages.values():
         _check_stage(stage, stages, site, file)
@@ -317,13 +362,13 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         root=root,
         project=name,
         site=site,
-        state=_path(raw.get("state", "~/.edr/{project}"), file, values),
-        data=_path(raw.get("data", "data"), file, values),
-        run_prefix=raw.get("run_prefix", "{user}/edr/{project}"),
+        state=_path(raw.get("state", str(_default(Project, "state"))), file, values),
+        data=_path(raw.get("data", str(_default(Project, "data"))), file, values),
+        run_prefix=raw.get("run_prefix", _default(Project, "run_prefix")),
         telegram_poll=_flag(raw, "telegram_poll", file),
         source=source,
-        sync=_build(Sync, {"exclude": [], **raw.get("sync", {})}, file, "sync"),
-        safety=_build(Safety, {"marker": "/edr/", **raw.get("safety", {})}, file, "safety"),
+        sync=_build(Sync, raw.get("sync", {}), file, "sync"),
+        safety=_build(Safety, raw.get("safety", {}), file, "safety"),
         limits=_limits(raw.get("limits", {}), file),
         placement=_build(Placement, raw.get("placement", {}), file, "placement"),
         stages=stages,
@@ -396,12 +441,12 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
 
 def _load_tasks(file: Path, site: Site) -> tuple[dict[str, Task], str]:
     if not file.exists():
-        return {}, ""
+        return {}, _default(Project, "task_resolver")
     raw = _table(_read(file), {"tasks", "pattern"}, file, "")
     tasks = {i: _task(i, t, site, file, f"tasks.{i}")
              for i, t in _table(raw.get("tasks", {}), None, file, "tasks").items()}
     pattern = _table(raw.get("pattern", {}), {"resolver"}, file, "pattern")
-    return tasks, pattern.get("resolver", "")
+    return tasks, pattern.get("resolver", _default(Project, "task_resolver"))
 
 
 def _task(task_id: str, raw: object, site: Site, file: Path, at: str) -> Task:

@@ -143,4 +143,4 @@ retry rule or a stop of your own. Everything inside a stage is a step,
 which `edr` tracks through `progress`, extracts metrics from per step, and
 resumes through `{checkpoint}`. A stage with `foreach = "tasks"` fans out
 into tasks that run in parallel on the host and share one queue across
-shards. `docs/configuration.md` has every key.
+shards. `docs/reference/configuration.md` has every key.

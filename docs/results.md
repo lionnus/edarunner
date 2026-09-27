@@ -63,6 +63,8 @@ exports/3f9a2c1/
 | `metrics.csv` | `run_id,label,config,design,stage,step,task,metric,canonical,value,unit,source` |
 | `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs` |
 
+`docs/reference/cli.md` lists every flag of `metrics` and `export`.
+
 The directory is written under a temporary name and renamed at the end,
 so a reader never sees a half snapshot. A `--out` that exists and is not
 empty is refused. `--dry-run` lists the files.

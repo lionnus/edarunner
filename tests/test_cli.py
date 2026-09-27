@@ -135,7 +135,7 @@ def test_check_reports_problems(demo: Path, capsys) -> None:
     assert code == 1 and "unknown host mars" in out and "nope" not in out
     jobs.write_text(jobs.read_text().replace('host = "mars"', 'host = "local"'))
     code, out, _ = edr(capsys, "check")
-    assert code == 1 and "demo/a: missing placeholder {nope}" in out
+    assert code == 1 and "demo/a: unknown placeholder {nope}" in out
 
 
 # status, events, handles
