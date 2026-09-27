@@ -142,7 +142,8 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     q = seed(demo, "q", None, tree=False, state="queued")
     code, out, _ = edr(capsys, "status")
     assert code == 0 and "b_nodw" in out and "done" in out and out.startswith("#")
-    last = json.loads((demo / "data" / "board" / "last_board.json").read_text())
+    with Ledger(demo / "data" / "edr.db") as led:
+        last = led.get_kv("last_board")
     assert last == [r["run_id"] for r in board.order([{"run_id": a, "phase": "done"}, {"run_id": b, "phase": "stage:synth", "label": "b_nodw"}, {"run_id": q, "state": "queued", "label": "q"}])]
     code, out, _ = edr(capsys, "status", "#1")
     assert code == 0 and out.startswith(last[0])
@@ -308,7 +309,9 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
         assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
     text = acts.status_text()
     assert "b_nodw" in text and all(len(ln) <= 48 for ln in text.splitlines())
-    assert "#1" in acts.status_text(narrow=False) and (demo / "data" / "board" / "last_board.json").exists()
+    assert "#1" in acts.status_text(narrow=False) and not (demo / "data" / "board").exists()
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert len(led.get_kv("last_board")) == 2
     assert acts.events_text(2).count("\n") == 1
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[0].split() == ["metric", "a", "b_nodw"] and cmp[1].split() == ["area.cell", "1031.5", "999.0"]

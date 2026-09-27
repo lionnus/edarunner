@@ -61,8 +61,8 @@ keeps the buttons.
 ## The board
 
 The board is one message in an HTML `<pre>` block, pinned once and
-edited silently on every watcher cycle. Its message id lives in
-`data/board/telegram.json`, so a restart edits the same message.
+edited silently on every watcher cycle. Its message id lives in the
+ledger's `kv` table under `telegram`, so a restart edits the same message.
 `/board` unpins the old message and pins a new one at the bottom of the
 chat.
 
@@ -115,7 +115,7 @@ reply = "session claude-{project}-{dir} started; open the Claude app"
 | `skip_if` | an argv list; exit 0 makes the bot reply `skip_reply` and run nothing |
 | `skip_reply` | the reply when `skip_if` passes, default `skipped` |
 | `reply` | the reply on exit 0 instead of the output |
-| `detach` | start the command in its own session and reply with the pid; the output goes to `data/board/telegram-<name>.log` |
+| `detach` | start the command in its own session and reply with the pid; the output goes to `data/telegram-<name>.log` |
 | `timeout_s` | kill the command after this many seconds, default 60 |
 | `cwd` | the working directory, default `{root}` |
 | `dry_run` | reply with the rendered argv and run nothing |

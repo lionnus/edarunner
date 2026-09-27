@@ -143,9 +143,8 @@ class Ctx:
 
     def resolve(self, handle: str) -> Row:
         """The ledger row of label@batch, a run id prefix, or #n from the last board."""
-        last = config.load_json(self.project.data / "board" / "last_board.json")
         try:
-            run_id = self.ledger.resolve(handle, last if isinstance(last, list) else None)
+            run_id = self.ledger.resolve(handle, self.ledger.get_kv("last_board"))
         except KeyError as e:
             raise Refuse(str(e.args[0])) from None
         row = self.ledger.run(run_id)
@@ -158,9 +157,9 @@ class Ctx:
         return config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
 
     def save_board(self, rows: list[Row]) -> None:
-        """Keep the board order in last_board.json, so #n resolves next time."""
+        """Keep the board order in the ledger, so #n resolves next time."""
         if rows:
-            config.save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
+            self.ledger.set_kv("last_board", [r["run_id"] for r in board.order(rows)])
 
 
 # --- texts shared by the verbs and the bot
