@@ -289,11 +289,6 @@ def write_spec(state: Path, batch: str, plan_: RunPlan, dry_run: bool = False) -
     return path
 
 
-def _dq(text: str) -> str:
-    # Double quotes keep $VAR for the host's shell; single quotes would not.
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`") + '"'
-
-
 def start_driver(ssh: hosts.Ssh, host: str, driver_path: Path, spec_path: Path, log_path: Path,
                  env: dict[str, str]) -> int | None:
     """Start the driver on `host` with the host's python3; return its pid when known."""
@@ -304,10 +299,10 @@ def start_driver(ssh: hosts.Ssh, host: str, driver_path: Path, spec_path: Path, 
             p = subprocess.Popen(["python3", str(driver_path), str(spec_path)], stdin=subprocess.DEVNULL,
                                  stdout=log, stderr=subprocess.STDOUT, env=full, start_new_session=True)
         return p.pid
-    exports = "".join(f"export {k}={_dq(v)}; " for k, v in env.items())
-    # The interpreter is the host's own python3, resolved before the site env: a tool PATH
-    # once put a Python 3.4 first, and the driver died at its first subprocess.run.
-    cmd = (f"py=$(command -v python3); {exports}setsid nohup \"$py\" {shlex.quote(str(driver_path))} "
+    # The interpreter is the host's own python3 from the login PATH: a tool PATH once put a
+    # Python 3.4 first, and the driver died at its first subprocess.run. The site env reaches
+    # the driver's children through the spec, so nothing is exported here.
+    cmd = (f"py=$(command -v python3); setsid nohup \"$py\" {shlex.quote(str(driver_path))} "
            f"{shlex.quote(str(spec_path))} > {shlex.quote(str(log_path))} 2>&1 < /dev/null & echo $!")
     rc, out, err = ssh.run(host, cmd)
     if rc != 0:
@@ -399,6 +394,8 @@ def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dic
             ledger.add_event(actor, run_id, "stop", f"after-task: {why}")
         return True
     pid, pgids = heartbeat.get("driver_pid"), [g for g in heartbeat.get("pgids") or [] if g]
+    if pid is None and not pgids:
+        raise Refuse(f"{run_id}: no driver pid in the heartbeat; nothing to signal")
     print(f"{run_id}: TERM driver {pid} and pgids {pgids} on {host}" + (" (dry)" if dry_run else ""))
     if dry_run:
         return True
@@ -407,7 +404,7 @@ def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dic
     end = time.time() + grace_s
     alive = pid is not None
     while alive and time.time() < end:
-        time.sleep(0.5)
+        time.sleep(2)
         alive = ssh.pid_alive(host, pid)
     if alive and now:
         _signal(ssh, host, pid, pgids, "KILL")

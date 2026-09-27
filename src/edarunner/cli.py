@@ -518,11 +518,12 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.ledger, dry_run=a.dry_run, only=only,
                          allow_dirty=a.allow_dirty)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
-    c.emit(f"{started} started, {queued} queued, {sum(bool(r['problems']) for r in rows)} with problems"
-           + (" (dry)" if a.dry_run else ""), rows)
-    if any(r["problems"] for r in rows):
-        return 1
-    return 0 if started or queued or a.dry_run else 2
+    problems = [r["problems"] for r in rows if r["problems"]]
+    c.emit(f"{started} started, {queued} queued, {len(problems)} with problems" + (" (dry)" if a.dry_run else ""), rows)
+    if started or queued or (a.dry_run and not problems):
+        return 0
+    # A second launch of the same batch names every old job "already launched"; that is nothing to do.
+    return 2 if all(any(p.startswith("already launched") for p in ps) for ps in problems) else 1
 
 
 def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
@@ -667,13 +668,23 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
     """Stop one run through the driver, or the stop file with --after-task."""
     row = c.resolve(a.handle)
     hb = c.heartbeat(row)
+    if row.get("state") == "queued":
+        # The watcher launches every row in state queued; a stopped row never starts.
+        c.emit(f"{row['run_id']}: queued, marked stopped" + (" (dry)" if a.dry_run else ""),
+               {"run_id": row["run_id"], "stopped": True})
+        if not a.dry_run:
+            c.ledger.upsert_run({"run_id": row["run_id"], "state": "stopped"})
+            c.ledger.add_event("user", row["run_id"], "stop", f"queued: {a.why}")
+        return 0
     if not board.is_live(hb or row):
         c.emit(f"{row['run_id']}: already {(hb or row).get('phase')}")
         return 2
-    ok = launch.stop(c.ssh, c.ledger, row, hb, after_task=a.after_task, now=a.now,
-                     grace_s=30 if a.now else c.project.limits.grace_s, dry_run=a.dry_run, why=a.why,
-                     state=c.project.state)
+    # The driver's own handler ends the run in seconds; limits.grace_s is the watcher's delay.
+    ok = launch.stop(c.ssh, c.ledger, row, hb, after_task=a.after_task, now=a.now, grace_s=30 if a.now else 60,
+                     dry_run=a.dry_run, why=a.why, state=c.project.state)
     c.data = {"run_id": row["run_id"], "stopped": ok}
+    if not ok and not a.now:
+        print(f"{row['run_id']}: still alive; use --now")
     return 0 if ok else 3
 
 
@@ -694,6 +705,9 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         pid = hb.get("driver_pid")
         if root and board.is_live(hb) and pid and c.ssh.pid_alive(str(host), int(pid)):
             raise Refuse(f"{run_id}: driver {pid} is alive on {host}; stop it first")
+        # A driver writes its first heartbeat within seconds; none after dead_s means it never came up.
+        if root and not hb and board.is_live(row) and time.time() - (row.get("started") or 0) < project.limits.dead_s:
+            raise Refuse(f"{run_id}: no heartbeat yet; wait for the driver, then stop it first")
         if root:
             _refuse_shared_root(c, row, str(host), str(root), retiring, bool(a.prune))
         checked.append((row, hb, host, root, targets))
