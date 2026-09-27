@@ -8,7 +8,7 @@ what. The same pages are published at <https://lionnus.github.io/edarunner/>.
 
 | Page | Read it to |
 |---|---|
-| [install.md](install.md) | install `edr`, run the demo on one machine, and see what a host needs |
+| [install.md](install.md) | install `edr`, run a real OpenROAD flow on one machine, find the complete setup, try the tool-free demo, and see what a host needs |
 | [concepts.md](concepts.md) | know what a project, a stage, a run, a batch, a host, the database, the watcher and a snapshot are |
 | [configure.md](configure.md) | turn your own flow into a project: the project file, the site file, a batch |
 | [run.md](run.md) | launch a batch, read the board, run the watcher, resume, and clear the hosts |

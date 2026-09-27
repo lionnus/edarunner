@@ -34,20 +34,58 @@ installed there.
 
 ## Five minutes on one machine
 
+The first run takes the GCD design of OpenROAD-flow-scripts (ORFS) through
+Yosys and OpenROAD on your own machine. You need edarunner, git, and either
+an ORFS install or the `openroad/orfs` image that CI uses. With Docker, start
+the image in a clone of this repository and install edarunner inside it:
+
 ```sh
-git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
-bash setup.sh                 # a fake flow in a small git repository
-edr checkout HEAD             # a pinned worktree of the source; prints its short hash
-edr check                     # load the config, probe the hosts, check the hooks
-edr plan demo                 # run ids, hosts, every path; writes nothing
-edr launch demo               # one driver per run on the `local` host
-edr status                    # the board
-edr watch --once              # collect, extract metrics, classify
-edr metrics --design <src> --csv   # <src> is the hash that `edr checkout` printed
+git clone https://github.com/lionnus/edarunner && cd edarunner
+docker run --rm -it -v "$PWD":/edarunner -w /edarunner openroad/orfs:26Q3-657-gb74a7293e bash
+apt-get update -qq && apt-get install -y -qq rsync     # the image has no rsync
+curl -LsSf https://astral.sh/uv/install.sh | sh && . ~/.local/bin/env
+uv tool install /edarunner
 ```
 
-The flow is fake and needs no EDA tool or licence. The two runs end
-`done` within a minute. `examples/local-demo/README.md` explains the demo.
+With ORFS installed on the machine, skip the container and set `ORFS` to
+your checkout. `examples/openroad-gcd/README.md` shows the same run with
+Singularity. Then run the flow:
+
+```sh
+cd examples/openroad-gcd
+bash setup.sh                 # a small git repository with the design config
+edr checkout HEAD             # a pinned worktree of the source; prints its short hash
+edr check                     # load the config, probe the hosts, check the hooks
+edr plan gcd                  # run ids, hosts, every path; writes nothing
+edr launch gcd                # one driver on the `local` host
+edr status                    # the board
+edr watch --once              # collect the reports and extract the metrics
+edr metrics --design <src>    # <src> is the hash that `edr checkout` printed
+```
+
+Synthesis, floorplan and placement take about half a minute. Once the
+board says `done`, `edr watch --once` collects the reports and
+`edr metrics` prints the area and the setup slack of each stage:
+
+```text
+#   label  host   state  phase  stage/step  age  fail/done  cost
+────────────────────────────────────────────────────────────────
+#1  gcd    local  done   done   place        0m      0f/0d   0.0
+
+label  design   stage      step  task  metric                  value  unit
+──────────────────────────────────────────────────────────────────────────
+gcd    952ceeb  floorplan     -        area_floorplan_um2     698.25  um2
+gcd    952ceeb  floorplan     -        wns_floorplan_ns    -0.155306  ns
+gcd    952ceeb  place         -        area_place_um2        827.526  um2
+gcd    952ceeb  place         -        wns_place_ns        -0.151547  ns
+gcd    952ceeb  synth         -        area_synth_um2        626.696  um2
+```
+
+The synthesis area comes from the Yosys report, and the other numbers
+come from the metrics JSON that OpenROAD writes at each step. For a
+complete setup with a site template and a project that takes the Croc SoC
+from RTL to GDS, see
+[edarunner-example](https://github.com/lionnus/edarunner-example).
 
 ## See the farm
 
@@ -70,6 +108,29 @@ ok  host      cores            load      ram GB  mount       scratch GB         
 🟠  hostA  🟠 52/64  ██████░░  51.5  🟢 120/256  /scratch   🟢 800/2000  █████░░░  🟡 1/4  290/320    4/2     2
 🟠  hostB   🟢 3/32  █░░░░░░░   3.1   🟢 98/128  /scratch2  🟠 150/1000  ███████░       -        -    1/0     1
 ```
+
+## From your phone
+
+`edr watch` sends an alert when a run dies, hangs, fails or runs over its
+budget. On Telegram the alert carries the next command and three buttons
+to keep, acknowledge or stop the run. ntfy and mail get the same alerts,
+with the commands written out. The bot also answers `/status`, `/hosts`,
+`/events`, `/tools` and `/digest`. A site can add its own commands, such
+as one that opens a Claude Code session in the project directory. Scripts
+and hooks send their own messages with `edr notify`. See
+[docs/telegram.md](docs/telegram.md) for the bot and
+[docs/notify.md](docs/notify.md) for ntfy and mail.
+
+## Operate it with an agent
+
+Every command takes `--json` and prints one object with the exit code,
+the data and the text a person would see. Every command that writes takes
+`--dry-run`. `edr stop` and `edr retire` refuse to act without `--why`, and
+the reason lands in the events table with the actor. `edr status --triage`
+lists each run that needs attention with one proposed command.
+[AGENTS.md](AGENTS.md) is the operating guide for an agent. The example
+repository keeps a Claude Code setup next to the flow: a contract per
+directory, a session-start hook and a skill.
 
 ## How it works
 
