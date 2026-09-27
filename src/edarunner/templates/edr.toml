@@ -1,4 +1,4 @@
-# edarunner project file. Every key: docs/configuration.md.
+# edarunner project file. Every key: docs/reference/configuration.md.
 # A string value may use {placeholders}; a placeholder without a value is an error at plan.
 schema = 1
 project = "$project"
@@ -38,7 +38,7 @@ min_free_cores = 16
 min_free_ram_gb = 60
 
 # One stage per command of the flow, in run order. A stage with foreach = "tasks"
-# runs cmd once per task of the job; see docs/configuration.md.
+# runs cmd once per task of the job; see docs/reference/configuration.md.
 [stages.synth]
 cmd = "make synth RUN={run_id} CONFIG={config} CORES={cores} {overrides}"
 steps = ["analyze", "elaborate", "compile"]

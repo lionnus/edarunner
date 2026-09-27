@@ -120,9 +120,9 @@ when a host fits, and notifies. It never deletes anything.
 The ledger is one SQLite file, `data/edr.db`, with the batches, runs,
 stages, params, metrics, artifacts and events. Every verb that changes
 something writes an event with the actor and the reason.
-`docs/configuration.md` lists every key of the four config files: `edr.toml`, `tasks.toml`,
-`jobs/<batch>.toml`, and the private `site.toml` with the hosts and the
-bot.
+`docs/reference/configuration.md` lists every key of the four config
+files: `edr.toml`, `tasks.toml`, `jobs/<batch>.toml`, and the private
+`site.toml` with the hosts and the bot.
 
 ## Tools and processes
 
@@ -188,8 +188,8 @@ incident behind each rule.
 `docs/README.md` is the index. The pages:
 
 - `docs/getting-started.md`, install, the demo, and a first project.
-- `docs/configuration.md`, every key of the four TOML files.
-- `docs/cli.md`, every verb with its flags and exit codes.
+- `docs/reference/`, generated from the code: every verb with its flags
+  and exit codes, every config key, every run state, the bot commands.
 - `docs/running.md`, the driver, the run tree, phases, budgets, resume,
   shards, import and retire.
 - `docs/watcher.md`, the cycle, the run states, the boards, the service.

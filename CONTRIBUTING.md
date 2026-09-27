@@ -7,6 +7,16 @@ every change keeps. A change that moves a responsibility updates that
 page in the same commit. The user pages under `docs/` describe the
 behaviour; a change in behaviour changes the page that describes it.
 
+## The reference pages are generated
+
+`docs/reference/` comes from the code. A verb, a flag and its exit codes
+come from the argparse definitions in `cli.py`; a config key from its
+`doc` field in `model.py`; a placeholder from `PLACEHOLDERS` in
+`config.py`; a run state from `STATES` in `watch.py`; a bot command from
+the command table in `notify/`. Document a new one where you define it,
+then run `uv run tools/gen_docs.py` before the commit. CI refuses a
+stale page.
+
 ## Standard library, plus rich in the controller
 
 The controller needs Python 3.11 or newer, the standard library and
