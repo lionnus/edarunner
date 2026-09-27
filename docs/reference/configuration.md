@@ -140,7 +140,7 @@ takes tasks from the same pool; `docs/running.md` explains the queue and shards.
 | `budget` | `{ hours, disk_gb, kill, per }`; the table below | `{ kill = false, per = "stage" }` |
 | `retry` | `{ match, wait_s, max }`; the table below | `none` |
 | `collect` | paths under the run tree the watcher copies when the stage ends | `[]` |
-| `collect_on_request` | named path sets for `edr run --collect <name>` | `{}` |
+| `collect_on_request` | named path sets for `edr continue --collect <name>` | `{}` |
 | `prune` | named path sets for `edr retire --prune <name>` | `{}` |
 | `foreach` | `"tasks"` makes the stage a task group | `""` |
 | `parallel` | tasks at once in a group | `1` |

@@ -168,7 +168,7 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     assert code == 0 and f"edr export --design abc1234" in out and f"edr launch demo --only q" in out
     assert "b_nodw@demo" not in out  # fresh heartbeat: running, nothing to triage
     code, out, _ = edr(capsys, "status", "--triage", "--live")
-    assert code == 0 and f"edr run b_nodw@demo --stage synth --from elaborate" in out
+    assert code == 0 and f"edr continue b_nodw@demo --stage synth --from elaborate" in out
     code, out, _ = edr(capsys, "status", "--batch", "other")
     assert code == 0 and out == "no runs\n"
     code, _, err = edr(capsys, "status", "nope@demo")
@@ -525,13 +525,13 @@ def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
     assert code == 0 and [(r["host"], r["marks"]["ram"]) for r in data] == [("b", "🔴"), ("c", "🔴"), ("a", "🟠"), ("local", "🟢")]
 
 
-def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
+def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
-    assert edr(capsys, "run", "a@demo")[0] == 1
-    assert edr(capsys, "run", "a@demo", "--stage", "nope")[0] == 1
-    code, _, err = edr(capsys, "run", "a@demo", "--stage", "export", "--on", "local", "--from", "cts", "--dry-run")
+    assert edr(capsys, "continue", "a@demo")[0] == 1
+    assert edr(capsys, "continue", "a@demo", "--stage", "nope")[0] == 1
+    code, _, err = edr(capsys, "continue", "a@demo", "--stage", "export", "--on", "local", "--from", "cts", "--dry-run")
     assert code == 1 and "no resume" in err  # export has no resume command
-    code, out, _ = edr(capsys, "--json", "run", "a@demo", "--stage", "pnr", "--on", "local", "--from", "cts", "--dry-run")
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "pnr", "--on", "local", "--from", "cts", "--dry-run")
     data = json.loads(out)["data"]
     assert code == 0 and data["batch"] == "demo" and data["host"] == "local"
     assert re.fullmatch(r"\d{8}_\d{4}_a\.pnr_demo_gabc1234", data["run_id"])
@@ -539,11 +539,11 @@ def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
     assert spec["start_at"] == {"stage": "pnr", "checkpoint": "cts"} and [s["name"] for s in spec["stages"]] == ["pnr"]
     assert spec["root"] == spec["stages"][0]["cwd"] and f"pnr {data['run_id']} demo" in spec["stages"][0]["cmd"]
     assert data["run_id"] != a and not (bdir(demo) / f"{data['run_id']}.spec.json").exists()
-    code, _, err = edr(capsys, "run", "a@demo", "--stage", "export", "--on", "mars", "--dry-run")
+    code, _, err = edr(capsys, "continue", "a@demo", "--stage", "export", "--on", "mars", "--dry-run")
     assert code == 1
-    code, out, _ = edr(capsys, "run", "a@demo", "--collect", "netlist")
+    code, out, _ = edr(capsys, "continue", "a@demo", "--collect", "netlist")
     assert code == 0 and "1 files" in out and (demo / "data" / "results" / a / "out" / "11").is_dir()
-    code, out, _ = edr(capsys, "run", "a@demo", "--collect", "nope")
+    code, out, _ = edr(capsys, "continue", "a@demo", "--collect", "nope")
     assert code == 3
     with Database(demo / "data" / "edr.db") as db:
         assert [e["kind"] for e in db.events()] == ["collect", "collect"]
@@ -662,7 +662,7 @@ def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path
     root.mkdir(parents=True)
     assert edr(capsys, "import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
                "--host", "local", "--root", str(root))[0] == 0
-    code, out, err = edr(capsys, "run", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local",
+    code, out, err = edr(capsys, "continue", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local",
                          "--dry-run")
     assert code == 0, (out, err)
     assert "(dry)" in out and "ref.power" in out
@@ -723,6 +723,13 @@ def test_stage_is_the_old_name_of_checkout(demo: Path, capsys) -> None:
     assert code == 0 and json.loads(out)["data"]["src"] and "deprecated" in err and not (demo / "wt").exists()
 
 
+def test_run_is_the_old_name_of_continue(demo: Path, capsys) -> None:
+    seed(demo, "a", "done")
+    code, out, err = edr(capsys, "--json", "run", "a@demo", "--stage", "pnr", "--on", "local", "--dry-run")
+    assert code == 0 and json.loads(out)["data"]["batch"] == "demo"
+    assert "edr: run is deprecated; use edr continue" in err
+
+
 def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Path, capsys) -> None:
     subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
     repo = demo / "repo"
@@ -777,7 +784,7 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     other = tmp_path / "other"
     other.mkdir()
     assert edr(capsys, *base, "--results", str(other))[0] == 1  # never replaces a linked tree
-    assert edr(capsys, "run", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local", "--dry-run")[0] == 1
+    assert edr(capsys, "continue", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local", "--dry-run")[0] == 1
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
     assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()

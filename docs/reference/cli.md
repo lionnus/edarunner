@@ -286,10 +286,10 @@ exists is already launched; a batch name is used once.
 | 1 | a job has a problem |
 | 2 | every job was already launched |
 
-## run
+## continue
 
 ```
-edr run [--dry-run] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
+edr continue [--dry-run] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
 ```
 
 More work on the tree of an existing run: one stage, on the same tree,
@@ -346,7 +346,7 @@ edr import [--dry-run] --run-id RUN_ID --label LABEL --config CONFIG --src SRC [
 ```
 
 Records a run the package did not make. With --host and --root, the tree
-on that host, so reuse and edr run can continue it. With --results DIR,
+on that host, so reuse and edr continue can use it. With --results DIR,
 a directory of collected files of a run whose tree is gone: it is linked
 as data/results/<run id> and the project's metrics are extracted from
 it; --tasks names the tasks whose files it holds. The run id must start

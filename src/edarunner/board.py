@@ -248,7 +248,7 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
     if state == "stale":
         return f"edr status {h} --live"
     if state == "dead":
-        return f"edr run {h} --stage {hb.get('stage') or row.get('stage')}" + (
+        return f"edr continue {h} --stage {hb.get('stage') or row.get('stage')}" + (
             f" --from {hb['step_name']}" if hb.get("step_name") else "")
     if state in STOP_FLAGS:
         return f"edr stop {h} {STOP_FLAGS[state]}"

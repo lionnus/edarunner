@@ -187,7 +187,7 @@ class Stage:
     budget: Budget = doc("`{ hours, disk_gb, kill, per }`; the table below", factory=Budget)
     retry: Retry | None = doc("`{ match, wait_s, max }`; the table below", None)
     collect: list[str] = doc("paths under the run tree the watcher copies when the stage ends", factory=list)
-    collect_on_request: dict[str, list[str]] = doc("named path sets for `edr run --collect <name>`", factory=dict)
+    collect_on_request: dict[str, list[str]] = doc("named path sets for `edr continue --collect <name>`", factory=dict)
     prune: dict[str, list[str]] = doc("named path sets for `edr retire --prune <name>`", factory=dict)
     foreach: str = doc("`\"tasks\"` makes the stage a task group", "")
     parallel: int = doc("tasks at once in a group", 1)

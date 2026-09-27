@@ -105,7 +105,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "stop", "a@demo", "--after-task", "--why", "test")
     assert code == 2 and "already done" in out
 
-    code, out, _ = edr(capsys, "--json", "run", "a@demo", "--stage", "export", "--on", "local")
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "export", "--on", "local")
     new = json.loads(out)["data"]
     assert code == 0 and new["batch"] == "demo" and new["root"] == str(roots["a"])
     assert re.fullmatch(rf"\d{{8}}_\d{{4}}_a\.export_demo_g{src}", new["run_id"]) and new["run_id"] != ids["a"]
@@ -124,7 +124,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert runs(capsys) == []  # the export run went with its batch
     code, out, _ = edr(capsys, "--json", "events", "-n", "100")
     kinds = [(e["actor"], e["kind"]) for e in json.loads(out)["data"]]
-    assert kinds.count(("user", "launch")) == 2 and ("user", "keep") in kinds and ("user", "run") in kinds
+    assert kinds.count(("user", "launch")) == 2 and ("user", "keep") in kinds and ("user", "continue") in kinds
     assert kinds.count(("user", "retire")) == 4 and ("user", "export") in kinds and ("watch", "done") in kinds
 
 

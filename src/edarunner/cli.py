@@ -636,8 +636,10 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.NOTHING if all(any(p.startswith("already launched") for p in ps) for ps in problems) else Exit.REFUSED
 
 
-def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
-    """Run one stage on the tree of an existing run, or fetch a collect_on_request list."""
+def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
+    """Run one stage on the tree of an existing run, or fetch a collect_on_request list; `run` is the old name."""
+    if a.command == "run":
+        print("edr: run is deprecated; use edr continue", file=sys.stderr)
     row = c.resolve(a.handle)
     project, run_id = c.project, row["run_id"]
     if a.collect:
@@ -648,7 +650,7 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
         return Exit.HOSTS if res.failures else Exit.DONE
     if not a.stage:
-        raise Refuse("run needs --stage or --collect")
+        raise Refuse("continue needs --stage or --collect")
     if a.stage not in project.stages:
         raise Refuse(f"unknown stage {a.stage}")
     try:
@@ -691,7 +693,7 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
                          "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
                          "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
                          "tree_id": p.values.get("tree_id") or p.run_id})
-    c.db.add_event("user", p.run_id, "run", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
+    c.db.add_event("user", p.run_id, "continue", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
     launch.start_driver(c.ssh, str(p.host), driver, spec_path, spec_path.with_name(f"{p.run_id}.driver.log"),
                         project.site.env)
     return Exit.DONE
@@ -1166,7 +1168,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s.add_argument("--only", metavar="L", help="labels, comma separated")
     s.add_argument("--allow-dirty", action="store_true", help="launch a dirty snapshot source")
-    s = command("run", "more work on the tree of an existing run", """
+    s = command("continue", "more work on the tree of an existing run", """
         More work on the tree of an existing run: one stage, on the same tree,
         as a new run in the batch of that run with the label <label>.<stage>.
         --tasks names the tasks of a task group, --parallel its width, --on the
@@ -1177,13 +1179,17 @@ def _parser() -> argparse.ArgumentParser:
         stage from the tree into data/results/<run id>/.
         """, write=True, exits={Exit.REFUSED: "the plan has a problem, or --from names a stage without resume",
                                 Exit.HOSTS: "with --collect, a copy failed"})
-    s.add_argument("handle", help=HANDLE)
-    s.add_argument("--stage", metavar="S", help="the stage to run on the tree")
-    s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
-    s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
-    s.add_argument("--on", metavar="HOST", help="the host; default auto")
-    s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
-    s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
+    old = sub.add_parser("run")  # the old name; no help keeps it out of the listing; gone in the next release
+    old.set_defaults(fn=cmd_continue)
+    old.add_argument("--dry-run", action="store_true")
+    for each in (s, old):
+        each.add_argument("handle", help=HANDLE)
+        each.add_argument("--stage", metavar="S", help="the stage to run on the tree")
+        each.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
+        each.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
+        each.add_argument("--on", metavar="HOST", help="the host; default auto")
+        each.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
+        each.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
     s = command("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
         Writes the keep file of a live run. --hours (default 12 when --ack is
         absent) adds hours to the budget of the running stage or task; --ack
@@ -1194,7 +1200,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--ack", action="store_true", help="cancel the pending kill of the run")
     s = command("import", "record a run tree that edr did not make, or its collected results", """
         Records a run the package did not make. With --host and --root, the tree
-        on that host, so reuse and edr run can continue it. With --results DIR,
+        on that host, so reuse and edr continue can use it. With --results DIR,
         a directory of collected files of a run whose tree is gone: it is linked
         as data/results/<run id> and the project's metrics are extracted from
         it; --tasks names the tasks whose files it holds. The run id must start

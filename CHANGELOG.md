@@ -9,6 +9,10 @@
   `Database.set_params` is `set_parameters`. An existing `data/edr.db`
   migrates on the first open. In `compare.html` the data block
   `edr-params` is now `edr-parameters`. The export columns do not change.
+- Breaking: `edr run` is now `edr continue`, so the word run means a
+  run of the flow only. `run` still answers for one release, with a
+  deprecation line on stderr. Replace `edr run` with `edr continue` in
+  scripts and hooks. Its event kind is now `continue`.
 
 ## 0.2.0 (2026-09-27)
 

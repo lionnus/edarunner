@@ -33,7 +33,7 @@ command.
 
 ```
 dead        a@demo                       stage:pnr
-    edr run a@demo --stage pnr --from cts
+    edr continue a@demo --stage pnr --from cts
 ```
 
 `a@demo` is a handle. A handle names one run: `label@batch`, a run id
@@ -60,7 +60,7 @@ last phase after the driver dies.
 ## Dry run first
 
 Do a dry run before every write: `--dry-run` on `checkout`, `plan`,
-`launch`, `run`, `keep`, `export`, `stop` and `retire`. Read every path in
+`launch`, `continue`, `keep`, `export`, `stop` and `retire`. Read every path in
 the output. A launch shows the run id, the host and the root of every job,
 and a retire shows every `rm -rf` target. Then run the command without the
 flag.

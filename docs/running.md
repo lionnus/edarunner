@@ -26,7 +26,7 @@ reused. A new version gets a new name, and the copy is made by a
 temporary file and a rename, so a live driver never sees its text change.
 The spec records the copy the run started with, and the watcher resumes
 the run with that copy. Publish the driver only through `edr launch` or
-`edr run`.
+`edr continue`.
 
 ## The run tree
 
@@ -196,7 +196,7 @@ skips the steps before it. The watcher resumes a `dead` run this way
 once, from the last `step_name` of its heartbeat. By hand:
 
 ```sh
-edr run a@sweep1 --stage pnr --from cts
+edr continue a@sweep1 --stage pnr --from cts
 ```
 
 Without `--from` the stage starts from its first step, which in many
@@ -205,7 +205,7 @@ proposes the command with `--from` filled from the heartbeat.
 
 ## More work on an existing tree
 
-`edr run <handle> --stage <S>` starts one stage on the tree of a run
+`edr continue <handle> --stage <S>` starts one stage on the tree of a run
 that ended: more tasks of a task group, a stage the job skipped, or a
 resume. The new run joins the batch of that run, so `retire --batch`
 takes both. It has its own id and heartbeat, with the time of the call
@@ -236,7 +236,7 @@ a claim is not created again. A claim renames `pending/<id>` to
 the task. At the end the claim moves to `done/<id>`. The rename is
 atomic on one filesystem, so two drivers with the same `queue_dir` share
 one pool: a spec written by hand with that `queue_dir` adds a shard.
-`edr run` gives its run a queue of its own.
+`edr continue` gives its run a queue of its own.
 
 A task that fails gets a `signature`, the last log line with every digit
 removed; `edr status <handle>` shows it per task.
@@ -250,7 +250,7 @@ edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base 
     --host hostA --root /scratch/user/edr/myflow/20260830_0000_base_base_gabc1234
 ```
 
-records a tree, so `reuse` and `edr run` can continue it. A tree is a
+records a tree, so `reuse` and `edr continue` can continue it. A tree is a
 delete target only when its path carries the safety marker.
 
 ```sh
