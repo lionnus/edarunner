@@ -2,6 +2,8 @@
 
 `edr check` names every tool the head node lacks and every host that does
 not answer its probe. Run it after an install and after a host change.
+Nothing is installed on a host; the driver is one file that `edr launch`
+copies into the state directory.
 
 ## Head node
 
@@ -11,7 +13,9 @@ The machine that runs `edr` and the watcher.
 - Python 3.11 or newer for the controller.
 - `ssh` with keys that work under `BatchMode=yes`: no password prompt and
   no host key prompt for any host.
-- `rsync` and `git` on `PATH`.
+- `rsync`, `git` and `python3` on `PATH`, and `nproc`, `df`, `ps`, `awk`,
+  `stat` and `readlink` for the host `local`. `check` names each one
+  that is missing.
 - The `state` directory of `edr.toml` on a filesystem that every host
   mounts. The hosts read the driver and the spec from it; the head node
   reads the heartbeats.
@@ -31,6 +35,3 @@ Every host in `[hosts]` of the site file, and `local`, the head node.
   standard library only.
 - `rsync` for the sync of the source tree and the collect of the results.
 - `awk`, and `kill` from the shell.
-
-Nothing is installed on a host. The driver is one file that `edr launch`
-copies into the state directory.
