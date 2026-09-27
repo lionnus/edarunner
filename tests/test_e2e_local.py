@@ -94,7 +94,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert any(",power,,k_small,energy_nj,energy,850.0,nJ," in ln for ln in lines)
     assert any(f"{ids['b_nodw']},b_nodw,demo,{src},pnr,5,,area_cell_um2,area.cell,1052.5,um2,reports/5/area.rpt" == ln for ln in lines)
     with Database(demo / "data" / "edr.db") as db:
-        params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM params")}
+        params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM parameters")}
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "src", src) in params
 
     exp = tmp_path / "exp"

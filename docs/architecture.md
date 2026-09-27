@@ -67,7 +67,7 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    and the task queue in the state directory.
 5. `watch.cycle` ingests the heartbeats into `runs` and `stage_runs`,
    classifies, acts, collects into `data/results`, extracts metrics into
-   `metrics`, writes `params`, resumes, launches queued rows, writes the
+   `metrics`, writes `parameters`, resumes, launches queued rows, writes the
    boards.
 6. `export.export` selects the newest run per label of one source tag
    from the database and copies its results with a manifest.

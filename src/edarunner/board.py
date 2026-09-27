@@ -345,11 +345,11 @@ def status_html(rows: list[Row], events: list[Row], hosts: dict[str, Any], now: 
     return _STATUS.substitute(written=_h(_ts(now)), n=len(rows), runs=run_rows, events=event_rows, hosts=host_rows)
 
 
-def compare_html(runs: list[Row], params: list[Row], metrics: list[Row], plotly_src: str | None) -> str:
+def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plotly_src: str | None) -> str:
     """A self-contained page over the three lists; the plots need `plotly_src`, the tables do not."""
     enriched = [{**r, "state": state_of(r), "cost": round(cost(r), 2)} for r in order(runs)]
     script = f'<script src="{_h(plotly_src)}"></script>' if plotly_src else ""
-    return _COMPARE.substitute(plotly=script, runs=_json_block(enriched), params=_json_block(params),
+    return _COMPARE.substitute(plotly=script, runs=_json_block(enriched), parameters=_json_block(parameters),
                                metrics=_json_block(metrics))
 
 
@@ -382,7 +382,7 @@ _COMPARE = Template("""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>edr compare</title>
 <style>""" + _CSS + """</style>$plotly</head><body>
 <script type="application/json" id="edr-runs">$runs</script>
-<script type="application/json" id="edr-params">$params</script>
+<script type="application/json" id="edr-parameters">$parameters</script>
 <script type="application/json" id="edr-metrics">$metrics</script>
 <h3>runs</h3><table id="runs"></table>
 <h3>compare</h3><table id="cmp"></table>
@@ -394,9 +394,9 @@ _COMPARE = Template("""<!doctype html><html><head><meta charset="utf-8">
 </div>
 <script>
 const q = s => document.querySelector(s), get = id => JSON.parse(document.getElementById(id).textContent);
-const RUNS = get('edr-runs'), PARAMS = get('edr-params'), METRICS = get('edr-metrics');
+const RUNS = get('edr-runs'), PARAMETERS = get('edr-parameters'), METRICS = get('edr-metrics');
 const PAR = {}, PKEYS = [];
-for (const p of PARAMS) { (PAR[p.run_id] ??= {})[p.key] = p.value; if (!PKEYS.includes(p.key)) PKEYS.push(p.key); }
+for (const p of PARAMETERS) { (PAR[p.run_id] ??= {})[p.key] = p.value; if (!PKEYS.includes(p.key)) PKEYS.push(p.key); }
 PKEYS.sort();
 const mkey = m => (m.canonical || m.name) + (m.task ? '[' + m.task + ']' : '');
 const FIN = {}, MKEYS = [];

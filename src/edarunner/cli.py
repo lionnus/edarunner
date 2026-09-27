@@ -732,7 +732,7 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     if not a.dry_run:
         c.db.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.src, created=now))
         c.db.upsert_run(row)
-        c.db.set_params(a.run_id, {k: row[k] for k in ("config", "build_tag", "src") if row[k]}, "import")
+        c.db.set_parameters(a.run_id, {k: row[k] for k in ("config", "build_tag", "src") if row[k]}, "import")
         if results:
             text += f", {_import_results(c, row, results, tasks)} metrics"
         c.db.add_event("user", a.run_id, "import", text)

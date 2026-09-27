@@ -229,7 +229,7 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
     assert env.events().count((rid("f"), "stop")) == n == 1
 
 
-def test_collect_extract_and_params_once(env: Env, monkeypatch) -> None:
+def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
     root = Path(hb["root"])
     for n in range(4):
@@ -247,7 +247,7 @@ def test_collect_extract_and_params_once(env: Env, monkeypatch) -> None:
     by = {(r["stage"], r["step"], r["name"]): r["value"] for r in rows}
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
     assert len(by) == 8 and all(v is not None for v in by.values())
-    params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM params WHERE run_id=?", (run_id,))}
+    params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM parameters WHERE run_id=?", (run_id,))}
     assert params == {"config": "demo", "DW": "0", "src": "gabc1234"}
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)

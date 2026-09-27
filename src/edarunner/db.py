@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT,
   started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT, tree_id TEXT);
 CREATE TABLE IF NOT EXISTS stage_runs(run_id TEXT, stage TEXT, task TEXT, attempt INTEGER, started INTEGER, ended INTEGER,
   status TEXT, exit INTEGER, signature TEXT, log TEXT, PRIMARY KEY(run_id, stage, task, attempt));
-CREATE TABLE IF NOT EXISTS params(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));
+CREATE TABLE IF NOT EXISTS parameters(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));
 CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task TEXT, name TEXT, canonical TEXT, value REAL, unit TEXT,
   source_file TEXT, extracted_at INTEGER, PRIMARY KEY(run_id, stage, step, task, name));
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
 """
 
 # A table of an older schema, with its current name.
-_RENAMED = {"kv": "store"}
+_RENAMED = {"kv": "store", "params": "parameters"}
 
 _PK = {
     "batches": ("batch",),
@@ -125,11 +125,11 @@ class Database:
         """Insert a stage or task row, or update it. `task` defaults to '' and `attempt` to 1."""
         self._upsert("stage_runs", {"task": "", "attempt": 1, **row})
 
-    def set_params(self, run_id: str, params: dict[str, Any], source: str) -> None:
+    def set_parameters(self, run_id: str, parameters: dict[str, Any], source: str) -> None:
         """Write the resolved configuration of a run. A key already present is replaced."""
         self.conn.executemany(
-            "INSERT OR REPLACE INTO params(run_id, key, value, source) VALUES(?, ?, ?, ?)",
-            [(run_id, k, v if isinstance(v, str) else json.dumps(v), source) for k, v in params.items()],
+            "INSERT OR REPLACE INTO parameters(run_id, key, value, source) VALUES(?, ?, ?, ?)",
+            [(run_id, k, v if isinstance(v, str) else json.dumps(v), source) for k, v in parameters.items()],
         )
         self.conn.commit()
 

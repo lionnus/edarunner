@@ -5,6 +5,10 @@
 - The database table `kv` is now `store`, and `Database.get_kv` and
   `set_kv` are `get_store` and `set_store`. An existing `data/edr.db`
   migrates on the first open.
+- The database table `params` is now `parameters`, and
+  `Database.set_params` is `set_parameters`. An existing `data/edr.db`
+  migrates on the first open. In `compare.html` the data block
+  `edr-params` is now `edr-parameters`. The export columns do not change.
 
 ## 0.2.0 (2026-09-27)
 

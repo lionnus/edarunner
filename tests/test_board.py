@@ -149,7 +149,7 @@ def _json_blocks(page):
 
 def _compare_input():
     rows = _rows()[:3]
-    params = [{"run_id": r["run_id"], "key": k, "value": v, "source": "config"}
+    parameters = [{"run_id": r["run_id"], "key": k, "value": v, "source": "config"}
               for r in rows for k, v in (("DW", "0"), ("LANES", "8"), ("note", "a</script>b"))]
     metrics = []
     for i, r in enumerate(rows):
@@ -157,20 +157,20 @@ def _compare_input():
                      "canonical": "area.cell", "value": 1000 + 10 * s + i, "unit": "um2"} for s in (1, 2, 3)]
         metrics += [{"run_id": r["run_id"], "stage": "power", "step": None, "task": "k_small", "name": f"power_{ph}",
                      "canonical": f"power.{ph}", "value": 0.1 * (i + 1), "unit": "W"} for ph in ("A", "B", "total")]
-    return rows, params, metrics
+    return rows, parameters, metrics
 
 
 def test_compare_html_without_plotly():
-    rows, params, metrics = _compare_input()
-    page = board.compare_html(rows, params, metrics, None)
+    rows, parameters, metrics = _compare_input()
+    page = board.compare_html(rows, parameters, metrics, None)
     assert "<script src=" not in page
     blocks = _json_blocks(page)
-    assert set(blocks) == {"edr-runs", "edr-params", "edr-metrics"}
+    assert set(blocks) == {"edr-runs", "edr-parameters", "edr-metrics"}
     assert [r["run_id"] for r in blocks["edr-runs"]] == [RUN["run1"], RUN["fail"], RUN["done"]]
     assert blocks["edr-runs"][1]["state"] == "incomplete" and "cost" in blocks["edr-runs"][0]
-    assert blocks["edr-params"] == params and blocks["edr-metrics"] == metrics
-    assert "</script>b" not in page.split("<h3>")[0].split("edr-params")[1]
-    with_plotly = board.compare_html(rows, params, metrics, "plotly-2.35.2.min.js")
+    assert blocks["edr-parameters"] == parameters and blocks["edr-metrics"] == metrics
+    assert "</script>b" not in page.split("<h3>")[0].split("edr-parameters")[1]
+    with_plotly = board.compare_html(rows, parameters, metrics, "plotly-2.35.2.min.js")
     assert '<script src="plotly-2.35.2.min.js"></script>' in with_plotly
 
 
@@ -189,9 +189,9 @@ console.log(JSON.stringify({ runs: els['#runs'].innerHTML, cmp: els['#cmp'].inne
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_compare_script_runs_without_plotly(tmp_path):
-    rows, params, metrics = _compare_input()
+    rows, parameters, metrics = _compare_input()
     page = tmp_path / "compare.html"
-    page.write_text(board.compare_html(rows, params, metrics, None))
+    page.write_text(board.compare_html(rows, parameters, metrics, None))
     out = subprocess.run(["node", "-e", _NODE_STUB, page.as_posix()], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)

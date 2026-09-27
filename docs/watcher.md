@@ -22,7 +22,7 @@ service up.
    and task into `data/results/<run_id>/`, plus the step directories of
    a running stage that are older than 10 minutes. Extract every metric
    whose file has arrived from the stages and tasks that ended `done`,
-   and write the params of the run once: `config`, `build_tag`, `src`
+   and write the parameters of the run once: `config`, `build_tag`, `src`
    and the overrides.
 4. Resume a `dead` run once, when its stage has `resume` and no process
    group of the run is alive on the host.
@@ -72,12 +72,12 @@ Every cycle writes `data/board/`:
 |---|---|
 | `board.json` | the runs of the live batches, the last 50 events and the host probes, for a script |
 | `status.html` | a phone-width page: every run in board order, the last 50 events, the hosts |
-| `compare.html` | the runs with their params as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
+| `compare.html` | the runs with their parameters as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
 
 The row order of the last text board is the `last_board` row of the
 database's `store` table, so `#n` resolves.
 
-`compare.html` is one self-contained page over the database's runs, params
+`compare.html` is one self-contained page over the database's runs, parameters
 and metrics. Its tables work as they are. The plots (a metric over the
 steps, a scatter of any two columns, the power phases, parallel
 coordinates) need Plotly. The page loads `data/board/plotly.min.js` when

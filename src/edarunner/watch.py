@@ -281,7 +281,7 @@ def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
 
 # collect, extract, resume, queue
 
-def _params(project: Project, run: Row) -> dict[str, Any]:
+def _parameters(project: Project, run: Row) -> dict[str, Any]:
     out = {k: run.get(k) for k in ("config", "build_tag", "src") if run.get(k)}
     try:
         job = next(j for j in config.load_batch(project, str(run["batch"])).jobs if j.label == run.get("label"))
@@ -327,7 +327,7 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     rows = metrics.extract(project, run, project.data / "results", done, stages=eligible, task_dirs=task_dirs)
     n = sum(db.add_metric(r) for r in rows if r["value"] is not None)
     if not rec.get("params"):
-        db.set_params(run["run_id"], _params(project, run), "spec")
+        db.set_parameters(run["run_id"], _parameters(project, run), "spec")
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
 
@@ -389,9 +389,9 @@ def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
     rows = [r for r in db.runs() if r["batch"] not in retired]
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now))
-    params = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM params")]
+    parameters = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM parameters")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
-    config.save_text(bdir / "compare.html", board.compare_html(rows, params, db.metrics(), plotly))
+    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)
