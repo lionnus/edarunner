@@ -349,7 +349,7 @@ class Actions:
                 errors += textwrap.wrap(f"{r['host']}: {r['error']}", 40, subsequent_indent="  ", max_lines=2)
                 continue
             used = max(0, min(r["cores"], round(r["load"])))
-            body.append([r["host"], f"{used}/{r['cores']}", f"{r['free_gb']:g}/{r['total_gb']:g}",
+            body.append([r["host"], f"{used}/{r['cores']}", f"{r['free_gb']:.0f}/{r['total_gb']:.0f}",
                          f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"])
         return "\n".join([board.cols(["host", "cores", "scratch", "gpu"], body)] + errors)
 
