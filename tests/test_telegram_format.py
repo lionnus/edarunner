@@ -48,3 +48,9 @@ def test_hosts_and_licences():
         "<b>hostA</b> · 21/32 cores · 1343/1538 GB free · gpu 1/1", "<b>hostB</b> · <i>no answer</i>"]
     assert fmt.licences([{"licence": "demo", "free": 3, "pool": 8}, {"licence": "x", "note": "unknown: <none>"}]) == (
         "<b>demo</b> · 3/8 seats free\n<b>x</b> · <i>unknown: &lt;none&gt;</i>")
+
+
+def test_run_detail_strips_colour_codes_from_the_log_line():
+    row = _row("run1", "c", "stage:synth", "running")
+    hb = {"last_log": "ok\n\x1b[1;31mError:\x1b[0m timing <met>\x1b[K\n"}
+    assert fmt.run_detail(row, hb, NOW).splitlines()[-1] == "<pre>Error: timing &lt;met&gt;</pre>"
