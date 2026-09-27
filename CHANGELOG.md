@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A custom command with `detach` that ends within 5 seconds replies
+  `ended with rc N: <last output line>` instead of its `reply`.
 - The bot reacts to a command message: 👀 when a slow command starts,
   then 👍 when the reply went out or 👎 when the command failed.
 - `/start` and `/keyboard` show a reply keyboard with `Status`, `Hosts`,

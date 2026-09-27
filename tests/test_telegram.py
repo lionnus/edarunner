@@ -20,6 +20,7 @@ from edarunner.notify import alert_buttons, make_notifiers
 from edarunner.notify.telegram import TelegramBot
 from edarunner.notify.telegram import api as tgapi
 from edarunner.notify.telegram import bot as tgbot
+from edarunner.notify.telegram import custom as tgcustom
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import BotApi
 from edarunner.notify.telegram.format import LIMIT, fit, pre
@@ -94,7 +95,8 @@ COMMANDS = {
     "echo": BotCommand("echo", "echo a dir", ["echo", "{project}/{dir}"], args={"dir": "^(backend|paper)$"}),
     "dry": BotCommand("dry", "dry", ["rm", "-rf", "{dir}"], args={"dir": "^\\w+$"}, dry_run=True),
     "skip": BotCommand("skip", "skip", ["false"], skip_if=["true"], skip_reply="already {project}"),
-    "bg": BotCommand("bg", "bg", ["sleep", "0"], detach=True, reply="started {project}"),
+    "bg": BotCommand("bg", "bg", ["sleep", "1"], detach=True, reply="started {project}"),
+    "dies": BotCommand("dies", "dies", ["sh", "-c", "echo loading; echo Workspace not trusted; exit 3"], detach=True),
     "ask": BotCommand("ask", "ask", ["echo", "{question}"], args={"question": "^[\\w ?]{1,40}$"}),
     "slow": BotCommand("slow", "slow", ["sleep", "5"], timeout_s=1),
     "where": BotCommand("where", "where", ["echo", "{handle} {run_id} {host}:{run_root}"]),
@@ -227,13 +229,21 @@ def test_keep_refuses_a_unicode_digit(bot):
     assert [e["kind"] for e in bot.ledger.events] == ["refused"]
 
 
-def test_custom_dry_run_skip_detach_timeout(bot):
+def test_custom_dry_run_skip_detach_timeout(bot, monkeypatch):
+    monkeypatch.setattr(tgcustom, "DETACH_WATCH_S", 0.3)
     bot.handle_update(msg("/dry x"))
     assert "would run in" in last_reply(bot) and "rm -rf x" in last_reply(bot)
     bot.handle_update(msg("/skip"))
     assert last_reply(bot) == pre("already demo")
     bot.handle_update(msg("/bg"))
     assert "started demo (pid " in last_reply(bot) and (Path(bot.project.data) / "telegram-bg.log").exists()
+    monkeypatch.setattr(tgcustom, "DETACH_WATCH_S", 5.0)
+    bot.handle_update(msg("/dies"))
+    assert last_reply(bot) == pre("ended with rc 3: Workspace not trusted")
+    assert bot.api.of("setMessageReaction")[-1]["reaction"][0]["emoji"] == "👎"
+    bot.handle_update(msg("/dies"))
+    assert last_reply(bot) == pre("ended with rc 3: Workspace not trusted")
+    assert (Path(bot.project.data) / "telegram-dies.log").read_text().count("loading") == 2
     bot.handle_update(msg("/slow"))
     assert "timed out after 1 s" in last_reply(bot)
 

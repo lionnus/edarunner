@@ -10,6 +10,8 @@ from pathlib import Path
 
 from edarunner.model import BotCommand
 
+DETACH_WATCH_S = 5.0  # a detached command that ends this soon failed to start, as a rule
+
 
 def run_custom(c: BotCommand, args: list[str], env: dict[str, str], log_dir: Path,
                event: Callable[[str, str], None]) -> tuple[str, bool]:
@@ -43,12 +45,7 @@ def run_custom(c: BotCommand, args: list[str], env: dict[str, str], log_dir: Pat
         if skip and subprocess.run(skip, capture_output=True, cwd=cwd, timeout=c.timeout_s).returncode == 0:
             return skip_reply, True
         if c.detach:
-            logf = log_dir / f"telegram-{c.name}.log"
-            logf.parent.mkdir(parents=True, exist_ok=True)
-            with open(logf, "ab") as f:
-                p = subprocess.Popen(argv, cwd=cwd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=f,
-                                     stderr=subprocess.STDOUT)
-            return f"{done or 'started'} (pid {p.pid}, log {logf})", True
+            return _detach(argv, cwd, log_dir / f"telegram-{c.name}.log", done or "started")
         r = subprocess.run(argv, capture_output=True, text=True, errors="replace", cwd=cwd, timeout=c.timeout_s)
     except subprocess.TimeoutExpired:
         return f"/{c.name}: timed out after {c.timeout_s} s", False
@@ -58,3 +55,23 @@ def run_custom(c: BotCommand, args: list[str], env: dict[str, str], log_dir: Pat
         return done, True
     out = (r.stdout + r.stderr).strip()
     return out or f"(no output, exit {r.returncode})", r.returncode == 0
+
+
+def _detach(argv: list[str], cwd: str, logf: Path, started: str) -> tuple[str, bool]:
+    """Start `argv` in its own session with its output in `logf`, and watch it for DETACH_WATCH_S.
+
+    A process that ends in that window gives `ended with rc N: <its last output line>`.
+    """
+    logf.parent.mkdir(parents=True, exist_ok=True)
+    with open(logf, "ab") as f:
+        start = f.tell()
+        p = subprocess.Popen(argv, cwd=cwd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=f,
+                             stderr=subprocess.STDOUT)
+    try:
+        rc = p.wait(timeout=DETACH_WATCH_S)
+    except subprocess.TimeoutExpired:
+        return f"{started} (pid {p.pid}, log {logf})", True
+    with open(logf, "rb") as f:
+        f.seek(start)
+        lines = [ln for ln in f.read().decode(errors="replace").splitlines() if ln.strip()]
+    return f"ended with rc {rc}: {lines[-1] if lines else '(no output)'}", rc == 0
