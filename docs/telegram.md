@@ -308,9 +308,12 @@ project, with the project name in the bold first line:
 edr notify "session backend: the sweep is done"
 edr notify --silent "session backend: waiting for input"
 edr notify --dry-run "test"       # prints the message, sends nothing
+edr notify --board                # the board as a new message
+edr notify --digest               # the daily digest now
 ```
 
-It exits 1 when no bot is configured or the send failed. It runs from
+It sends through every channel that is on, ntfy and mail too. It exits
+1 when no channel is configured or a send failed. It runs from
 any directory below `edr.toml`.
 
 A Claude Code hook can call it, so a session reports to the phone. Put
