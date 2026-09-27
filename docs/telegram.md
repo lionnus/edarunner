@@ -133,6 +133,16 @@ or the bot replies `refused: <name> must match <regex>`, records the
 refusal in the ledger, and runs nothing. Write the regex as an allowlist
 of the exact values you expect.
 
+## Several projects
+
+Telegram lets one consumer poll a bot token. Two watchers on one token
+fight over the updates and each sees half of them. Either give every
+project its own bot (a `token_file` per site file, or one site file per
+project), or set `telegram_poll = false` in `edr.toml` of every project
+but one. A project without the poll still sends its alerts and its
+board to the chat; the commands and the buttons reach the one watcher
+that polls, and act on its project.
+
 ## Security
 
 - The token is the one secret. Keep it in a file with mode 600; the bot

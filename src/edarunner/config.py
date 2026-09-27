@@ -26,7 +26,7 @@ PathLike = str | os.PathLike[str]
 # `${VAR}` belongs to the shell, so a `$` before the brace is not a placeholder.
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
-    "schema", "project", "site", "state", "data", "run_prefix",
+    "schema", "project", "site", "state", "data", "run_prefix", "telegram_poll",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "licences", "nfs_export", "telegram"}
@@ -50,6 +50,13 @@ def render(template: str, values: Mapping[str, object]) -> str:
         return str(values[key])
 
     return _PH.sub(sub, template)
+
+
+def _flag(raw: dict, key: str, file: Path) -> bool:
+    value = raw.get(key, True)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{file}: {key} must be true or false")
+    return value
 
 
 def placeholders(project: Project, **extra: object) -> dict[str, object]:
@@ -270,6 +277,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         state=_path(raw.get("state", "~/.edr/{project}"), file, values),
         data=_path(raw.get("data", "data"), file, values),
         run_prefix=raw.get("run_prefix", "{user}/edr/{project}"),
+        telegram_poll=_flag(raw, "telegram_poll", file),
         source=source,
         sync=_build(Sync, {"exclude": [], **raw.get("sync", {})}, file, "sync"),
         safety=_build(Safety, {"marker": "/edr/", **raw.get("safety", {})}, file, "safety"),
