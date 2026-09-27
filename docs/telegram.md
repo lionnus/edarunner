@@ -48,8 +48,26 @@ the `from.id` of a message; a bot such as @userinfobot shows it.
 
 Every message starts with one bold line that names the project, so the
 messages of two projects in one chat stay apart. Under that line, a
-reply is either a `<pre>` block of at most 40 columns or plain prose.
-The board and the host list fit a phone screen without a wrap.
+reply is formatted text: one short line per item, a run handle in
+monospace, and a count or a note in italics. A tap on a handle copies
+it, so you can paste it into `/status <handle>`.
+
+Each run line starts with one mark for its state:
+
+| Mark | States |
+|---|---|
+| 🟢 | running |
+| 🔵 | queued |
+| 🟡 | stale, host_full, superseded |
+| 🔴 | dead, hung, looping, over_budget, orphan, failed, killed |
+| 🟠 | incomplete |
+| ⚪ | done |
+| ⚫ | retired, stopped, imported |
+
+A `<pre>` block holds only text whose width the bot does not control:
+the last log line of `/status <handle>`, the columns of `/compare` and
+`/metric`, and the output of a custom command. A message stays under
+the limit of 4096 characters; the bot cuts a long reply at a line end.
 
 ## Alerts
 
@@ -58,14 +76,15 @@ same class and run edits that message in place, so an alert never
 repeats. An alert looks like this:
 
 ```
-demo · dead b_nodw@demo
+🔴 demo · dead b_nodw@demo
 heartbeat older than 90 s, driver 4711 gone on local
 edr run b_nodw@demo --stage synth --from elaborate
 ```
 
-The first line is bold. The second line is the reason. The third line
-is the one command that `edr status --triage` proposes for the run, in
-monospace. The alert carries two inline buttons:
+The first line holds the mark of the state, the project and the state
+in bold, and the handle in monospace. The second line is the reason.
+The third line is the one command that `edr status --triage` proposes
+for the run, in monospace. The alert carries two inline buttons:
 
 | Button | `callback_data` | Action |
 |---|---|---|
@@ -80,18 +99,21 @@ the action, with the actor `telegram`.
 
 The board is one message, pinned once and edited silently on every
 watcher cycle. Its first line holds the project name and the time of
-the last edit. Under it, a `<pre>` block has one line per run,
-`state handle age`, live runs first, and a last line with the count per
-state:
+the last edit. Under it, each run has one line: the mark, the handle,
+the state, and the age. A live run also shows its stage and its step
+of the total. Live runs come first. The last line, in italics, holds
+the count per state:
 
 ```
 demo · board 14:05
-DEAD  a@demo                          1h
-RUN   c@demo                          0m
-done  a@demo                          1h
-DEAD:1 RUN:1 done:1
+🔴 a@demo dead · synth 3/13 · 1h
+🟢 c@demo pnr 4/13 · 0m
+⚪ b@demo done · 1h
+1 dead · 1 running · 1 done
 ```
- Its message id lives in the
+
+The board shows at most 30 runs and then a line `… and N more`. When
+no run is live, a line `nothing live` comes before the counts. Its message id lives in the
 ledger's `kv` table under `telegram`, so a restart edits the same message.
 `/board` unpins the old message and pins a new one at the bottom of the
 chat.
@@ -115,10 +137,16 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/metric <name> [--design H]` | one metric for every run of a design |
 | `/help` | the commands by purpose, plus the custom commands |
 
-A reply is a `<pre>` block with the last 4000 characters of the output,
-under the bold project line. `/help` is prose, so a tap on a command
-sends it. `/events` shows one line `HH:MM kind handle` per event and the
-reason indented under it; it shows a handle in place of a run id.
+`/status <handle>` shows the mark, the handle and the state, then the
+stage and step, the host and the age, the proposed command in monospace,
+and the last log line in a `<pre>` block. `/events` shows one line
+`HH:MM kind handle` per event, the kind in bold, and the reason indented
+under it in italics; it shows a handle in place of a run id. `/hosts`
+shows one line per host, `hostA · 21/32 cores · 195/1538 GB free · gpu -`,
+and `no answer` for a host that fails the probe. `/lic` shows
+`demo · 3/8 seats free` per licence. `/help` is prose, so a tap on a
+command sends it. `/compare` and `/metric` reply with a `<pre>` block
+of aligned columns.
 
 A custom command replies with the output of its program as it is. Give
 the program a narrow format, or the phone wraps the lines.
