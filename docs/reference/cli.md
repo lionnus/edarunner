@@ -102,9 +102,13 @@ follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.
 
-With a handle, one run: identity, state, counts, disk, every stage and
-task row, the CPU, RSS, tree size and free disk the driver sampled over
-the run, the metrics, and the log tail from the heartbeat.
+With a handle, one run: identity, state, disk, every stage and task
+row, the CPU, RSS, tree size and free disk the driver sampled over the
+run, the metrics, and the log tail from the heartbeat. A finished run
+shows driver exit <n> (<phase>): the code of the driver, whose phase
+names the stage that failed. The command exit column of the stage table
+is the code of the stage command itself. The tasks line with the done
+and failed counts appears only for a run with a task group.
 
 | Flag | Meaning |
 |---|---|
