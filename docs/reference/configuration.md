@@ -273,6 +273,31 @@ The bot, the one chat it answers, and the custom commands; `docs/telegram.md` ex
 
 One table per custom bot command; `bot.md` lists the keys.
 
+### [ntfy]
+
+An ntfy topic: one push message per alert, with a priority by alert kind; `docs/notify.md`
+explains the setup.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `topic` | the topic; anyone who knows the name can read it, so pick a long random one | required |
+| `url` | the ntfy server | `"https://ntfy.sh"` |
+| `token_file` | an access token for a protected topic, mode 600 | `none` |
+
+### [mail]
+
+An SMTP server: one mail per alert and per `edr notify`. The board is never mailed.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `host` | the SMTP server | required |
+| `from` | the From address | required |
+| `to` | the recipients | required |
+| `port` | the SMTP port | `587` |
+| `starttls` | upgrade the connection with STARTTLS before the login | `true` |
+| `user` | the login name | the `from` address |
+| `password_file` | the password, mode 600; without it there is no login | `none` |
+
 ## tasks.toml
 
 `tasks.toml` is optional. A task is a table `[tasks.<id>]`, and every key of a task is a

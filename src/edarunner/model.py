@@ -96,6 +96,29 @@ class Telegram:
 
 
 @dataclass
+class Ntfy:
+    """An ntfy topic: one push message per alert, with a priority by alert kind; `docs/notify.md`
+    explains the setup."""
+
+    topic: str = doc("the topic; anyone who knows the name can read it, so pick a long random one")
+    url: str = doc("the ntfy server", "https://ntfy.sh")
+    token_file: Path | None = doc("an access token for a protected topic, mode 600", None)
+
+
+@dataclass
+class Mail:
+    """An SMTP server: one mail per alert and per `edr notify`. The board is never mailed."""
+
+    host: str = doc("the SMTP server")
+    sender: str = doc("the From address", key="from")
+    to: list[str] = doc("the recipients")
+    port: int = doc("the SMTP port", 587)
+    starttls: bool = doc("upgrade the connection with STARTTLS before the login", True)
+    user: str = doc("the login name", "", shown="the `from` address")
+    password_file: Path | None = doc("the password, mode 600; without it there is no login", None)
+
+
+@dataclass
 class Marks:
     """The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
     fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
@@ -124,6 +147,8 @@ class Site:
     hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
     telegram: Telegram | None = None
+    ntfy: Ntfy | None = None
+    mail: Mail | None = None
     marks: Marks = field(default_factory=Marks)
 
 

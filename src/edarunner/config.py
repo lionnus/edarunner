@@ -32,7 +32,7 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    Batch, BotCommand, Budget, Host, Job, Limits, Marks, Metric, Needs, Placement,
+    Batch, BotCommand, Budget, Host, Job, Limits, Mail, Marks, Metric, Needs, Ntfy, Placement,
     Project, Retry, Safety, Site, Source, Stage, Sync, Task, Telegram, Tool,
 )
 
@@ -45,7 +45,8 @@ _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "telegram",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
-_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
+_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "ntfy",
+              "mail", "marks"}
 _EXTRACTORS = ("regex", "csv", "json", "python", "expr")
 
 
@@ -276,9 +277,26 @@ def load_site(path: PathLike) -> Site:
     hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
     telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
     given = {k: raw[k] for k in ("env", "tool_procs", "nfs_export") if k in raw}
+    if "ntfy" in raw:
+        given["ntfy"] = _channel(Ntfy, raw["ntfy"], file, "ntfy", "token_file")
+    if "mail" in raw:
+        given["mail"] = _channel(Mail, raw["mail"], file, "mail", "password_file")
     given.update({f"ssh_{k}": v for k, v in ssh.items()})
     return Site(path=file, scratch=_need(raw, "scratch", file, ""), hosts=hosts, tools=tools, telegram=telegram,
                 marks=_marks(raw.get("marks", {}), file, Marks()), **given)
+
+
+def _channel(cls: type[T], raw: object, file: Path, at: str, secret: str) -> T:
+    """A notifier table; the secret file is relative to `file`, and a `from` key fills `sender`."""
+    t = dict(_table(raw, None, file, at))
+    if "sender" in t:
+        raise ConfigError(f"{file}: unknown key '{at}.sender'")
+    if cls is Mail:
+        t["sender"] = _need(t, "from", file, at)
+        del t["from"]
+    if isinstance(t.get(secret), str):
+        t[secret] = _path(t[secret], file)
+    return _build(cls, t, file, at)
 
 
 def _host(name: str, raw: object, tools: dict[str, Tool], file: Path) -> Host:

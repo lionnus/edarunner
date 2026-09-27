@@ -943,7 +943,7 @@ def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     notifiers = make_notifiers(c.project.site, c.project, c.db, Actions(c))
     if not notifiers:
-        raise Refuse("no notifier is configured; see docs/telegram.md")
+        raise Refuse("no notifier is configured; see docs/notify.md")
     sent = sum(n.post("note", html, a.silent) for n in notifiers)
     c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": a.text})
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED

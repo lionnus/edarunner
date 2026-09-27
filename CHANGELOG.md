@@ -18,6 +18,10 @@
   `edr.toml`: `state = "..."` becomes `state_dir = "..."`, with the same
   value.
 
+- Two more notifiers next to Telegram: `[ntfy]` posts one push per
+  alert with a priority by kind, and `[mail]` sends one mail per alert
+  through SMTP. Both are stdlib only, and `edr notify` reaches every
+  channel. `docs/notify.md` shows the setup.
 - A job needs no `config`. Without it the build tag hook gets `""`, and
   the run id drops the empty part with its `_`.
 - Breaking: the job key `netlist_stage` is gone. A job table `vars`
