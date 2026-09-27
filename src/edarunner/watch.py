@@ -1,7 +1,8 @@
 """The watcher: one cycle over every heartbeat.
 
-The cycle reads, classifies, acts, collects, resumes, launches and writes
-the boards. It never deletes a file or a tree. Its memory between cycles
+The cycle reads, classifies, acts, collects, resumes, sweeps the stale
+seat leases, launches and writes the boards. It never deletes a tree, and
+the only files it removes are stale seat leases. Its memory between cycles
 is two rows of the database's store table: progress (what each run looked
 like last time) and notified (states, alerts, grace clocks).
 """
@@ -31,6 +32,8 @@ _RUN_KEYS = ("run_id", "label", "config", "host", "root", "phase", "stage", "ste
              "started", "updated", "disk_free_gb", "tree_gb", "counts")
 _TASK_KEYS = ("started", "ended", "exit", "signature", "log")
 _BUSY = ("stage:", "group:", "retry:")
+# A lease this young may belong to a driver that started after the cycle read the heartbeats.
+_LEASE_YOUNG_S = 120
 
 
 @dataclass(frozen=True)
@@ -94,7 +97,7 @@ def _keep(project: Project, run: Row) -> dict:
 def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
     """Every heartbeat of every batch without RETIRED (or of `batches`), as (batch, heartbeat)."""
     out = []
-    for bdir in sorted(p for p in project.state_dir.glob("*") if p.is_dir() and p.name != "bin"):
+    for bdir in sorted(p for p in project.state_dir.glob("*") if p.is_dir() and p.name not in ("bin", "leases")):
         if (bdir / "RETIRED").exists() or (batches is not None and bdir.name not in batches):
             continue
         for f in sorted(bdir.glob("*.json")):
@@ -363,6 +366,46 @@ def _resume(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progre
     db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {pid}")
 
 
+def sweep_leases(project: Project, db: Database, heartbeats: list[tuple[str, dict]], states: dict[str, str],
+                 now: float, dry_run: bool = False) -> list[str]:
+    """Remove each stale seat lease with an event, and return their paths.
+
+    A lease is stale when its run has no live heartbeat, is dead or retired, has left the lease's
+    stage, or when the lease is older than the budget of its stage."""
+    live = {hb["run_id"]: hb for _, hb in heartbeats}
+    out = []
+    for f in sorted((project.state_dir / "leases").glob("*/*")):
+        if f.name.startswith("."):
+            continue
+        lease = config.load_json(f)
+        run_id, age = lease.get("run_id"), now - float(lease.get("ts") or 0)
+        if age < _LEASE_YOUNG_S:
+            continue
+        hb, row = live.get(run_id), db.run(run_id) if run_id else None
+        if hb is None:
+            why = "no live heartbeat of the run"
+        elif not board.is_live(hb):
+            why = f"the run ended {hb.get('phase')}"
+        elif states.get(run_id) == "dead":
+            why = "the run is dead"
+        elif (row or {}).get("state") in ("retired", "abandoned"):
+            why = f"the run is {row['state']}"
+        elif hb.get("stage") != lease.get("stage"):
+            why = f"the run left stage {lease.get('stage')}"
+        elif lease.get("budget_s") and age > float(lease["budget_s"]):
+            why = f"older than the stage budget of {int(lease['budget_s'])} s"
+        else:
+            continue
+        text = f"stale lease {f.parent.name}/{f.name}: {why}"
+        out.append(str(f))
+        if dry_run:
+            print(f"{run_id}: {text}")
+            continue
+        f.unlink(missing_ok=True)
+        db.add_event("watch", run_id, "lease", text)
+    return out
+
+
 def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
     queued: dict[str, list[str]] = {}
     for r in db.runs(state="queued"):
@@ -424,6 +467,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
             print(f"{o['key']}: orphan {o['phase']} ({o['etimes']} s)")
         else:
             actions(project, ssh, db, notifiers, o, "orphan", [o["phase"]], now, notes)
+    sweep_leases(project, db, heartbeats, states, now, dry_run)
     if dry_run:
         return states
     _launch_queued(project, ssh, db)

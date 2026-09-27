@@ -268,8 +268,9 @@ def wide(rows: list[Row], now: float | None = None) -> Table | str:
                  styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "cost"))
 
 
-def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None) -> Group:
-    """One run: identity, state, counts, stage rows, metrics and the log tail."""
+def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None,
+               gate: str | None = None) -> Group:
+    """One run: identity, state, what its tool gate waits for, counts, stage rows, metrics and the log tail."""
     now = now or time.time()
     ex = row.get("exit")
     parts: list[RenderableType] = [
@@ -284,6 +285,8 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
         Text("counts " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-")),
         Text(f"disk free {_s(row.get('disk_free_gb')) or '-'} GB  tree {_s(row.get('tree_gb')) or '-'} GB"),
     ]
+    if gate and is_live(row):
+        parts.insert(2, Text(f"gate waits for {gate}", style="yellow"))
     if row.get("killed_by"):
         parts.append(Text(f"killed by {row['killed_by']}", style="red"))
     if stage_rows:

@@ -70,7 +70,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `driver` | the driver copy the run started with; a resume uses it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
 | `shell`, `env` | every command runs through `shell -c` with `env` added |
-| `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s` |
+| `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
 | `stages` | the stages in run order |
 
@@ -79,8 +79,9 @@ A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
 `parallel`, `prepare`, `after_each`, `budget`, `tools` and `tasks`, each
 task with `id`, `cmd`, `dir`, `needs`, `budget` and, when its own
 `needs` names tools, `tools`. A `tools` entry is `{"name", "seats",
-"probe"}`: the seats needed and the probe argv, rendered; a tool without
-a probe is not in the list.
+"probe", "leases"}`: the seats needed, the probe argv, rendered, and the
+lease directory `<state_dir>/leases/<tool>/`, which the launch creates; a
+tool without a probe is not in the list.
 
 A change to the spec changes `launch._spec`, the driver and
 `tests/test_driver.py` in the same commit. `tests/helpers_driver.py`
@@ -105,7 +106,7 @@ the watcher marks such a run `dead` after `dead_s`.
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
 | `last_cmd`, `last_log`, `log` | the last command, the last three lines of the current log, its path |
 | `keep_hours` | the hours the keep file adds |
-| `gate` | why the run waits at a gate, such as `pnr: 0 free, 1 needed`; null when it does not |
+| `gate` | why the run waits at a gate, such as `pnr: 1 free, 1 held by others, 1 needed`; null when it does not |
 | `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
 
 The exit code of the driver names its terminal phase. [run.md](../run.md)

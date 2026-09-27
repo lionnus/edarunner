@@ -79,7 +79,8 @@ ok  host      cores            load      ram GB  mount       scratch GB         
 copies a one-file driver to the host and starts it. The driver runs the
 stages and writes a heartbeat file every minute. `edr watch` on the head
 node reads the heartbeats, collects the reports, extracts the metrics
-and sends the alerts. It never deletes a file.
+and sends the alerts. It never deletes a tree, and removes no file but a
+stale seat lease.
 
 ## Documents
 

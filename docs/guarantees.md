@@ -8,7 +8,7 @@ Each guarantee names the code that holds it, so you can read it.
 
 | edr never | Held by |
 |---|---|
-| deletes on its own. Only `edr retire` removes a tree, after `--why`, a guard on every target and a check that the results are on the head node. The watcher stops or kills a run; it never removes a file. | `cli.cmd_retire`, `cli._retire_targets`, `watch._act` |
+| deletes on its own. Only `edr retire` removes a tree, after `--why`, a guard on every target and a check that the results are on the head node. The watcher stops or kills a run; it removes no file but a stale seat lease. | `cli.cmd_retire`, `cli._retire_targets`, `watch._act`, `watch.sweep_leases` |
 | signals by a session name or a process pattern. A stop signals the `driver_pid` and the `pgids` the heartbeat recorded, and refuses a pid or a group id of 1 or lower. | `launch.stop`, `launch._signal`, `hosts.Ssh.kill_pgid` |
 | runs an `rm -rf` or an `rsync --delete` without the guard below. | `guards.assert_safe_target`, `sync.sync_tree`, `cli._retire_targets`, `cli._worktree_target` |
 | deletes the source repository, or a tree another run uses. `retire` refuses a root a live run uses, and a root shared with a run whose results are not collected. | `cli._worktree_target`, `cli._refuse_shared_root` |
@@ -20,6 +20,7 @@ Each guarantee names the code that holds it, so you can read it.
 | mixes two designs in one table. `metrics` and `export` take `--design` with no default, and the tag matches exactly. | `cli.cmd_metrics`, `export._select` |
 | creates a file on a read. A read command without a database reads an empty one in memory. | `cli.Ctx`, `cli._READ_COMMANDS` |
 | reads a retired batch. `RETIRED` in the batch directory keeps the watcher and the board off it. | `cli.cmd_retire`, `watch.read_heartbeats` |
+| starts two stages on one free seat. The tool gate leases each seat by a rename, and the later of two drivers that read the same free seat backs off. | `Driver.take`, `Driver.release`, `watch.sweep_leases` |
 | launches a batch twice. A job whose spec exists is already launched; a new sweep needs a new batch name. | `launch.launch` |
 
 ## Dry runs
@@ -85,10 +86,23 @@ The watcher acts on its own only after `grace_s` and only as
 - It resumes a `dead` run once, from its last step, when the stage has
   `resume` and no process group of the run is alive.
 - It launches a queued job when a host fits, one per batch per cycle.
+- It removes a stale seat lease, with a `lease` event that says why.
 
-It never deletes a file or a tree, never reads a batch with `RETIRED`,
+It never deletes a tree or any file but a stale seat lease, never reads a batch with `RETIRED`,
 never downloads anything, and never resumes a run twice
-(`watch.cycle`, `watch._act`, `watch._resume`).
+(`watch.cycle`, `watch._act`, `watch._resume`, `watch.sweep_leases`).
+
+## The database
+
+SQLite documents that WAL does not work on a network filesystem: every
+process must share one memory index, and two hosts do not. A project
+directory under a home on NFS puts `data/edr.db` there. The database reads
+the statfs type of its directory at open and uses the DELETE journal with
+`synchronous=FULL` on NFS, SMB, 9p and FUSE, and WAL elsewhere. `edr check`
+warns when the database sits on such a filesystem. A local `data/` is still
+the better place, since the watcher and each `edr` call take a file lock
+there that NFS gives only through its lock daemon (`db.Database`,
+`cli.cmd_check`).
 
 ## A stop
 
