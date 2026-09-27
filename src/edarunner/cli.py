@@ -654,7 +654,7 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     """Write a frozen snapshot of one design."""
     labels = a.labels.split(",") if a.labels else None
-    manifest = export.export(c.project, c.ledger, a.design, Path(a.out), labels, a.dry_run)
+    manifest = export.export(c.project, c.ledger, a.design, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
         c.ledger.add_event("user", "", "export", f"{a.design} -> {a.out}")
     c.emit(f"{a.out}: {len(manifest['runs'])} runs, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""),
@@ -879,6 +879,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--design", required=True, metavar="SRC")
     s.add_argument("--out", required=True, metavar="DIR")
     s.add_argument("--labels", metavar="a,b")
+    s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
     s = verb("stop", "stop one run", write=True, why=True)
     s.add_argument("handle")
     s.add_argument("--after-task", action="store_true", help="write the stop file; the running task ends first")
