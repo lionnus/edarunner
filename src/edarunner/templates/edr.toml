@@ -9,13 +9,17 @@ run_prefix = "{user}/edr/{project}"
 
 [source]
 repo = "../rtl"                 # one git repository
-worktrees = "../rtl-wt"         # `edr checkout` adds worktrees here
+worktrees = "../rtl-wt"         # `edr checkout` adds a local clone per commit here
 ref = "HEAD"
 nested = []
 run_id = "{date}_{label}_{build_tag}_g{src}"
 
 [sync]
-exclude = [".git", ".venv"]
+exclude = [".venv"]             # .git goes along, so the flow can ask git on the host
+
+# [runtime]
+# setup = "uv sync --frozen"    # runs on the host before the first stage
+# when_changed = ["uv.lock"]
 
 [safety]
 marker = "/edr/"

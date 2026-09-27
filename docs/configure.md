@@ -22,7 +22,7 @@ the directory that holds your private site file, or the file itself.
 Put `data/` in the project's `.gitignore`. Commit `edr.toml`,
 `tasks.toml`, `jobs/`, `hooks/` and `edr-watch.service`. Keep out of git
 the database, results and boards under `data/`, the state directory, the
-worktrees, the run trees on the hosts, `site.toml` and the Telegram
+checked-out clones, the run trees on the hosts, `site.toml` and the Telegram
 token.
 
 ## 2. Write the site file
@@ -193,8 +193,8 @@ The synthesis area comes from the Yosys report, and the numbers of the
 later stages come from the METRICS2.1 JSON that ORFS writes at each step.
 
 If your source keeps a file that git ignores, such as a PDK directory,
-`edr checkout --dirty <tree>` snapshots the working tree instead of adding
-a worktree. The run id then carries `-dirty-<hash of the diff>`.
+`edr checkout --dirty <tree>` snapshots the working tree instead of cloning
+a commit. The run id then carries `-dirty-<hash of the diff>`.
 
 ### The environment
 
@@ -219,57 +219,92 @@ host expands the last `$PATH` to its own path. A project value without
 such a reference, such as `LM_LICENSE_FILE = "2020@lic"`, replaces the
 site's value.
 
-### The copy of the tree
+### Source and runtime on the host
 
-`edr launch` copies the checked-out tree to the host with `rsync
---delete`. `[sync] exclude` lists the paths that stay behind, such as a
-virtual environment that the host builds itself:
+#### What the host gets
+
+`edr checkout` makes a local clone of the pinned
+commit under `source.worktrees`, and clones each `source.nested`
+repository inside it. `edr launch` copies that clone to the host with
+`rsync --delete`, `.git` included. The host gets a normal git checkout
+of the pinned commit, and every git command works there as it does on
+your desk. On the head node a local clone shares its objects with your
+repository through hard links, so it takes little space. The host gets a
+full copy of `.git`; `du -sh .git` in your repository tells you its size.
+
+`[sync] exclude` lists the paths that stay on the head node, such as a
+virtual environment or a build directory:
 
 ```toml
+[sync]
+exclude = [".venv", "build"]
+```
+
+If you list `.git` there, the host copy has no history and the flow
+cannot ask git. A source that an older edr checked out as a git
+worktree has a `.git` file that points at the head node, and git on the
+host fails on it. Remove that tree with `git worktree remove` and run
+`edr checkout` again to get a clone.
+
+#### How the flow finds its version
+
+The flow asks git, as it would
+anywhere else: `git describe --always --dirty` gives the commit, and
+`git -C <nested> describe --always --dirty` gives the commit of a nested
+repository. A dirty snapshot is a clone too, with your uncommitted
+changes copied over it, so `--dirty` reports them. Every command on the
+host also gets three variables: `EDR_SRC` is the source tag of the
+batch, `EDR_RUN_ID` the run id, and `EDR_TREE_ID` the id of the tree the
+run writes in (`{tree_id}`).
+
+#### How the Python environment is made
+
+`[runtime] setup` is one command
+that the driver runs on the host, in the root of the run tree, after the
+copy and before the first stage. It runs with the environment of the
+stages, and its output goes to `log/setup.log`. If it fails, the run
+ends as `FAILED:runtime` before any stage waits for a tool seat. For a
+flow with a `uv.lock`:
+
+```toml
+[runtime]
+setup = "uv sync --frozen"
+when_changed = ["uv.lock"]
+
+[env]
+UV_CACHE_DIR = "{mount}/{user}/uv-cache"
+UV_PYTHON_INSTALL_DIR = "{mount}/{user}/uv-python"
+PATH = "{root}/.venv/bin:$PATH"
+
 [sync]
 exclude = [".venv"]
 ```
 
-`.git` never goes, whether the list names it or not. `edr checkout`
-makes a git worktree, and its `.git` is a file that points at the
-repository on the head node. On the host that pointer leads nowhere, so
-every git command in the flow would fail. The run id and the spec
-already record the source tag, and the flow on the host needs no git.
+`uv sync --frozen` builds `.venv` in the run tree from the lock file and
+does not resolve the dependencies again. The cache and the Python
+installs lie on the scratch disk of the host, the same filesystem as the
+run tree. uv then links the packages from its cache into `.venv` instead
+of downloading or copying them again, and your home directory stays
+small. The `PATH` line makes
+`python` in every stage the one from `.venv`. The head node's `.venv`
+stays behind because it points at an interpreter path that may not
+exist on the host. `uv` itself must be on the `PATH` of the host; the
+site `[env]` table is the place to add its directory.
 
-### The host runs your flow's runtime
+`when_changed` names files relative to the tree root. On a tree that
+already ran the same `setup`, such as a run of `edr continue`, the
+command runs again only when one of these files changed. Without
+`when_changed`, the command runs at the start of every run. Any other
+setup command works the same way, for example `make deps` or
+`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
 
-The copy brings your source to the host, but the flow still runs with the
-host's own interpreter and tools. A Python virtual environment that you
-built on the head node does not work there: it points at an interpreter
-path that may not exist on the host, and `[sync] exclude` often leaves it
-behind anyway. A flow that calls `python` from `{root}/.venv/bin`, as in
-the first example above, then fails at its first step.
+#### What edr check verifies
 
-`[sync] after` runs a command on the head node after each copy, with the
-run's `{host}`, `{root}` and `{mount}`. Use it to set up the environment
-on the host. The seed hook of
-[edarunner-example](https://github.com/lionnus/edarunner-example)
-(`site/hooks/seed_python.sh`) copies the uv-managed Python onto the
-host's scratch disk and runs `uv sync` in the run tree:
-
-```toml
-[sync]
-exclude = [".venv"]
-after = "bash {site_dir}/hooks/seed_python.sh {host} {root} {mount}"
-```
-
-The core of such a hook is one ssh call:
-
-```sh
-#!/usr/bin/env bash
-# seed_python.sh <host> <root> <mount>
-set -euo pipefail
-host=$1 root=$2 mount=$3
-ssh -n -o BatchMode=yes "$host" "cd '$root' && UV_CACHE_DIR='$mount/$USER/uv-cache' uv sync -q"
-```
-
-When the command exits with a non-zero code, the sync counts as failed
-and the run does not start.
+`check` loads the files, probes the hosts
+and plans every batch. It does not run `setup` and does not look for git
+or uv on the hosts. A missing tool shows at the first launch: the run
+ends as `FAILED:runtime` within a minute, and `log/setup.log` in the run
+tree says why.
 
 ## 4. Write a batch
 

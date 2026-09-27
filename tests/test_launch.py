@@ -319,7 +319,7 @@ def test_dry_run_writes_nothing(env, tmp_path: Path, capsys) -> None:
     assert [r["run_id"] for r in out] == [f"{DATE}_a_demo_gHEAD", f"{DATE}_b_nodw_demo_DW0_gHEAD"]
     assert all(not r["started"] and r["problems"] == [] for r in out)
     text = capsys.readouterr().out
-    assert "rsync -a --delete --exclude=.git" in text and f"{DATE}_a_demo_gHEAD" in text
+    assert "rsync -a --delete -e " not in text and "rsync -a --delete " in text and f"{DATE}_a_demo_gHEAD" in text
     assert launch.stop(ssh, db, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": 1, "pgids": [2]},
                        dry_run=True) and db.events() == []
 

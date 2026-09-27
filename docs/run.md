@@ -13,7 +13,7 @@ edr checkout origin/main
 ```
 
 This prints `<src> <path>`: the short hash of the commit and a detached
-worktree at `<worktrees>/<src>`. Every run of that source works on a copy
+local clone at `<worktrees>/<src>`. Every run of that source works on a copy
 of this tree, so a later commit never changes a running flow. A tree
 with uncommitted changes goes in with `edr checkout --dirty <dir>`; its tag
 is `<hash>-dirty-<8 hex>`, and `launch` needs `--allow-dirty` for it.
@@ -69,7 +69,7 @@ test, its action and the command `--triage` proposes.
 
 | Phase | Exit | Meaning |
 |---|---|---|
-| `setup` | | the spec is loaded, the first disk check runs |
+| `setup` | | the spec is loaded, the first disk check runs, then `[runtime] setup` |
 | `gate:<stage>` | | the driver waits for the seats of a tool |
 | `stage:<stage>` | | one command runs |
 | `retry:<stage>:<n>` | | attempt `n` after a failure that matched `retry.match` |
@@ -80,6 +80,7 @@ test, its action and the command `--triage` proposes.
 | `FAILED:<stage>` | 4 | the tool gate timed out after `gate_max_s` |
 | `FAILED:<stage>` | 5 | a command or `prepare` failed with no retry left, or the driver hit an error |
 | `FAILED:<stage>` | 2 | a checkpoint on a stage without `resume` |
+| `FAILED:runtime` | 5 | `[runtime] setup` failed; no stage ran, and `log/setup.log` says why |
 | `OVER_BUDGET:<stage>` | 9 | a budget passed; the command ended or was killed |
 | `STOPPED` | 10 | a stop file ended the run |
 | `KILLED:<signal>` | 10 | a signal ended the run |
@@ -390,11 +391,12 @@ the tree. `--batch <B>` retires every run of a batch and writes
 `RETIRED`, so the watcher skips it and the board drops it. It then
 removes the checked-out tree of the batch's source under
 `source.worktrees`, unless another batch that is not retired has the
-same source. A worktree goes with `git worktree remove --force`, a dirty
-snapshot with a plain delete, both on the head node. If the worktree does
-not pass the guard, for example because `source.worktrees` lies outside
-the marker path, `retire` keeps it, prints a `worktree kept` line and
-still removes the run trees. You can then remove the worktree by hand.
+same source. A clone and a dirty snapshot go with a plain delete on the
+head node; a git worktree that an older edr made goes with `git worktree
+remove --force`. If the tree does not pass the guard, for example
+because `source.worktrees` lies outside the marker path, `retire` keeps
+it, prints a `worktree kept` line and still removes the run trees. You
+can then remove the tree by hand.
 
 Every target passes the guard of [guarantees.md](guarantees.md) first.
 `retire` refuses a tree whose results are not collected, a tree a live

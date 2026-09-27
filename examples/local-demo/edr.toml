@@ -15,9 +15,6 @@ ref = "HEAD"
 nested = []
 run_id = "{date}_{label}_{build_tag}_g{src}"
 
-[sync]
-exclude = [".git"]
-
 [safety]
 marker = "/edr/"
 min_depth = 3

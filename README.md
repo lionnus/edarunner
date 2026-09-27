@@ -57,7 +57,7 @@ Singularity. Then run the flow:
 ```sh
 cd examples/openroad-gcd
 bash setup.sh                 # a small git repository with the design config
-edr checkout HEAD             # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned clone of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan gcd                  # run ids, hosts, every path; writes nothing
 edr launch gcd                # one driver on the `local` host
