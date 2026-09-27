@@ -1,33 +1,25 @@
 """The notifier interface. See docs/design.md sections 7 and 11.
 
 The watcher calls `make_notifiers` once and then `send`, `edit` and `board`
-on every channel. The channels never import `cli` or `watch`; they get
-their verbs through the `Actions` object the CLI side hands in.
+on every channel. The channels never import `cli` or `watch` at run time;
+they get their verbs through the `cli.Actions` object the CLI hands in.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Protocol
+from typing import TYPE_CHECKING
+
+from edarunner.ledger import Ledger
+from edarunner.model import Project, Site
+
+if TYPE_CHECKING:
+    from edarunner.cli import Actions
 
 log = logging.getLogger(__name__)
 
 Button = tuple[str, str]  # (label, callback_data)
-
-
-class Actions(Protocol):
-    """The verbs a channel may call. The CLI side provides an object like this."""
-
-    def keep(self, handle: str, hours: int, actor: str) -> str | None: ...
-    def ack(self, handle: str, actor: str) -> str | None: ...
-    def stop_after_task(self, handle: str, actor: str, why: str) -> str | None: ...
-    def status_text(self, narrow: bool = True) -> str: ...
-    def events_text(self, n: int) -> str: ...
-    def hosts_text(self) -> str: ...
-    def lic_text(self) -> str: ...
-    def compare_text(self, handles: list[str]) -> str: ...
-    def metric_text(self, name: str, design: str | None) -> str: ...
 
 
 class Notifier:
@@ -55,10 +47,10 @@ def alert_buttons(handle: str) -> list[Button]:
     return [("keep 12h", f"keep12:{handle}"), ("ack", f"ack:{handle}")]
 
 
-def make_notifiers(site: object, project: object, ledger: object, actions: Actions) -> list[Notifier]:
+def make_notifiers(site: Site, project: Project, ledger: Ledger, actions: Actions) -> list[Notifier]:
     """Build every configured channel. A channel without its secret is skipped."""
     out: list[Notifier] = []
-    tg = getattr(site, "telegram", None)
+    tg = site.telegram
     if tg is not None:
         token_file = os.path.expanduser(str(tg.token_file))
         if not os.path.isfile(token_file):

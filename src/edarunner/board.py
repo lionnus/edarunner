@@ -95,8 +95,9 @@ def _stage_step(row: Row) -> str:
     return "-" if not stage else stage if row.get("step") is None else f"{stage}/{row['step']}"
 
 
-def _table(head: list[str], body: list[list[Any]]) -> str:
-    rows = [head, *[[_s(c) for c in r] for r in body]]
+def table(head: list[str], body: list[list[Any]]) -> str:
+    """Left-aligned text columns; None prints as '-', and a short row is padded."""
+    rows = [head, *[["-" if c is None else str(c) for c in r] + [""] * (len(head) - len(r)) for r in body]]
     w = [max(len(r[i]) for r in rows) for i in range(len(head))]
     return "\n".join(" ".join(f"{c:<{w[i]}}" for i, c in enumerate(r)).rstrip() for r in rows)
 
@@ -130,7 +131,7 @@ def wide(rows: list[Row], now: float | None = None) -> str:
              hm(_age_s(r, now)), _fd(r), f"{cost(r, now):.1f}"] for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"
-    return _table(["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body)
+    return table(["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body)
 
 
 def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None) -> str:
@@ -151,11 +152,11 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
     if row.get("killed_by"):
         lines.append(f"killed by {row['killed_by']}")
     if stage_rows:
-        lines += ["", "stages", _table(["stage", "task", "attempt", "status", "exit", "started", "ended", "signature"], [
+        lines += ["", "stages", table(["stage", "task", "attempt", "status", "exit", "started", "ended", "signature"], [
             [s.get("stage"), s.get("task"), s.get("attempt"), s.get("status"), s.get("exit"),
              _ts(s.get("started")), _ts(s.get("ended")), s.get("signature")] for s in stage_rows])]
     if metrics:
-        lines += ["", "metrics", _table(["stage", "step", "task", "name", "value", "unit"], [
+        lines += ["", "metrics", table(["stage", "step", "task", "name", "value", "unit"], [
             [m.get("stage"), m.get("step"), m.get("task"), m.get("canonical") or m.get("name"), m.get("value"),
              m.get("unit")] for m in metrics])]
     if tail:
