@@ -10,3 +10,4 @@ data/
 .coverage
 coverage.xml
 coverage.svg
+gmon.out
