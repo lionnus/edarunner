@@ -1,7 +1,7 @@
 """The notifier interface.
 
 The watcher calls `make_notifiers` once and then `send`, `board` and `post`
-on every channel: Telegram, ntfy and mail. docs/notify.md lists what each
+on every channel: Telegram, ntfy and mail. docs/guides/alerts.md lists what each
 channel gets. The channels never import `cli` or `watch` at run time; they
 get their commands through the `cli.Actions` object the CLI hands in.
 """

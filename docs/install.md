@@ -1,11 +1,12 @@
-# Install and first run
+# Get started
 
-This page installs `edr`, runs a real OpenROAD flow with it on one
-machine, and lists what the head node and a compute host need.
+This page installs `edr` and runs a real OpenROAD flow with it on one
+machine. After it you have seen a run go from a commit to the numbers in
+the database, and you know where to go next.
 
-## Install the controller
+## Install
 
-`edr` runs on the head node, the machine you work from. It needs Python
+`edr` runs on the head node, the machine you work on. It needs Python
 3.11 or newer; its only dependency, `rich`, comes with the install.
 
 ```sh
@@ -13,19 +14,25 @@ uv tool install git+https://github.com/lionnus/edarunner
 ```
 
 `pipx install git+https://github.com/lionnus/edarunner` does the same. In
-a checkout, `uv venv --python 3.11 .venv && uv pip install -e '.[dev]'`
-gives you `.venv/bin/edr`.
+a checkout of the repository, `uv venv --python 3.11 .venv && uv pip
+install -e '.[dev]'` gives you `.venv/bin/edr`.
+
+The head node also needs Linux with GNU coreutils and procps-ng 3.3.10 or
+newer, `rsync`, `git` and `python3` on `PATH`, and ssh keys that work
+under `BatchMode=yes` for every host you add later, with no password
+prompt and no host key prompt. The first run below uses the head node
+only, so it needs no ssh at all.
 
 `edr` works from any directory below an `edr.toml`. Without one it stops
 with `no edr.toml in <dir> or above; run edr init`.
 
-## Five minutes on one machine
+## Run the OpenROAD example
 
 `examples/openroad-gcd` takes the GCD design of OpenROAD-flow-scripts
 (ORFS) through Yosys and OpenROAD on the head node. You need `edr`, git,
-and either an ORFS install or the `openroad/orfs` image that CI uses. With
-Docker, start the image in a clone of the repository and install `edr`
-inside it:
+and either an ORFS install or the `openroad/orfs` image that CI uses.
+With Docker, start the image in a clone of the repository and install
+`edr` inside it:
 
 ```sh
 git clone https://github.com/lionnus/edarunner && cd edarunner
@@ -51,26 +58,53 @@ edr watch --once              # collect the reports and extract the metrics
 edr metrics --design <src>    # <src> is the hash that `edr checkout` printed
 ```
 
-Synthesis, floorplan and placement take about half a minute. Once the
-board says `done`, `edr watch --once` collects the reports, and
-`edr metrics` prints the area and the setup slack of each stage.
-`examples/openroad-gcd/README.md` says which report each number comes
-from.
+## What you see
 
-## The complete setup
+Synthesis, floorplan and placement take about half a minute. `edr
+status` draws the board, one line per run, and the run reaches `done`:
+
+```text
+#   label  host   state  phase  stage/step  age  fail/done  cost
+────────────────────────────────────────────────────────────────
+#1  gcd    local  done   done   place        0m      0f/0d   0.0
+```
+
+`edr watch --once` runs one cycle of the watcher. It copies the reports
+from the run tree into `data/results/` and reads the numbers out of
+them. `edr metrics` then prints the area and the setup slack of each
+stage:
+
+```text
+label  design   stage      step  task  metric                  value  unit
+──────────────────────────────────────────────────────────────────────────
+gcd    952ceeb  floorplan     -        area_floorplan_um2     698.25  um2
+gcd    952ceeb  floorplan     -        wns_floorplan_ns    -0.155306  ns
+gcd    952ceeb  place         -        area_place_um2        827.526  um2
+gcd    952ceeb  place         -        wns_place_ns        -0.151547  ns
+gcd    952ceeb  synth         -        area_synth_um2        626.696  um2
+```
+
+The synthesis area comes from the Yosys report, and the other numbers
+come from the metrics JSON that OpenROAD writes at each step.
+`examples/openroad-gcd/README.md` says which report each number comes
+from, and `examples/openroad-gcd/edr.toml` is the whole configuration.
+The design column holds the short hash of the commit that `edr checkout`
+pinned, so every number stays tied to the source it came from.
+
+## Next
+
+[how-it-works.md](how-it-works.md) explains what happened between
+`checkout` and `metrics`, and [guides/project.md](guides/project.md)
+turns your own flow into a project.
 
 [edarunner-example](https://github.com/lionnus/edarunner-example) is a
 complete setup split the way a lab would split it: a site template with
 the hosts, the licences and the bot, and a project that takes the Croc
-SoC from RTL to GDS. Copy the site once per lab and the project once per
-design.
-
-## Without any EDA tool
+SoC from RTL to GDS.
 
 `examples/local-demo` runs a stand-in flow of shell scripts that write
-example reports, so it needs no EDA tool and no licence. The tests use it, and it is the quickest way to
-try a failure, a resume or the seat gate. The commands are the same as
-above with the batch `demo`:
+example reports, so it needs no EDA tool and no licence. It is the
+quickest way to try a failure, a resume or the licence gate:
 
 ```sh
 cd examples/local-demo && bash setup.sh
@@ -78,47 +112,6 @@ edr checkout HEAD && edr launch demo
 ```
 
 The two runs end `done` within a minute. `examples/local-demo/README.md`
-says what each script stands in for, where the files land and how to
-make a run fail. `edr retire --batch demo --why "demo done"` removes the run trees
-at the end.
-
-## What the head node needs
-
-- Linux with GNU coreutils and procps-ng 3.3.10 or newer.
-- Python 3.11 or newer for the controller, with the `rich` package for
-  the tables; `uv tool install` brings it.
-- `ssh` with keys that work under `BatchMode=yes`: no password prompt and
-  no host key prompt for any host.
-- `rsync`, `git` and `python3` on `PATH`, and `nproc`, `df`, `ps`, `awk`,
-  `stat` and `readlink` for the host `local`.
-- The `state_dir` directory of `edr.toml` on a filesystem that every host
-  mounts. The hosts read the driver and the spec from it; the head node
-  reads the heartbeats.
-
-## What a compute host needs
-
-Nothing is installed on a host. The driver is a single file that `edr launch`
-copies into the state directory, and the host runs it with its own
-`python3`. Every host in `[hosts]` of the site file needs:
-
-- Linux with `/proc`. The probe reads `/proc/loadavg` and
-  `/proc/meminfo`; the orphan check reads `/proc/<pid>/cwd`.
-- A POSIX `sh`. Every remote command runs under `sh -c`, so the login
-  shell can be `tcsh` or `csh`.
-- GNU coreutils: `nproc`, `df -Pk`, `stat -c %s`, `readlink`, `nohup`.
-- procps-ng 3.3.10 or newer: `ps -o etimes,pcpu,cputimes` and `ps -o pgid`.
-- util-linux `setsid`. The driver starts in its own session.
-- `python3` 3.6 or newer on the login `PATH`. The driver uses the
-  standard library only.
-- `rsync`, to copy the source tree over and the results back.
-- `awk`, and `kill` from the shell.
-- `nvidia-smi` on `PATH` when the host has GPUs to report; without it the
-  probe reports none.
-
-`edr check` names every tool the head node lacks and every host that does
-not answer its probe. Run it after an install and after a host change.
-
-## Next
-
-[concepts.md](concepts.md) names the parts you just used.
-[configure.md](configure.md) turns your own flow into a project.
+says what each script stands in for and how to make a run fail. At the
+end, `edr watch --once` collects the results and
+`edr retire --batch demo --why "demo done"` removes the run trees.

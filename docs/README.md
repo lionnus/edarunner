@@ -2,20 +2,23 @@
 
 edarunner runs the flow you already have on the machines you already use,
 over ssh or through a batch scheduler, and keeps one database of every
-run. This index tells you which page to open. The same pages are published at <https://lionnus.github.io/edarunner/>.
+run. This index tells you which page to open. The same pages are
+published at <https://lionnus.github.io/edarunner/>.
 
 ## Use the tool
 
 | Page | Read it to |
 |---|---|
-| [install.md](install.md) | install `edr`, run a real OpenROAD flow on one machine, find the complete setup, try the tool-free demo, and see what a host needs |
-| [concepts.md](concepts.md) | know what a project, a stage, a run, a batch, a host, the database, the watcher and a snapshot are |
-| [configure.md](configure.md) | turn your own flow into a project: the project file, the site file, a batch |
-| [run.md](run.md) | launch a batch, read the board, run the watcher, resume, and clear the hosts |
-| [results.md](results.md) | get the numbers out: the database, `edr metrics`, the compare board, `edr export` and what reads a snapshot |
-| [notify.md](notify.md) | set up alerts on any channel: Telegram, ntfy or mail |
-| [telegram.md](telegram.md) | use the Telegram bot: the board, the commands and the buttons |
-| [guarantees.md](guarantees.md) | know what `edr` never does, what a dry run and a guard promise, and how a stop works |
+| [install.md](install.md) | install `edr`, run a real OpenROAD flow on one machine, and see what it prints |
+| [how-it-works.md](how-it-works.md) | follow one run across the head node, the shared filesystem and a host, and learn what edr does on its own and what it never does |
+| [guides/project.md](guides/project.md) | describe your flow: where the configuration lives, stages, metrics, tasks, the environment and the runtime step |
+| [guides/site.md](guides/site.md) | describe your machines: hosts, tools and licence seats, a scheduler, and what a host needs |
+| [guides/run.md](guides/run.md) | write a batch, launch it, read the board, keep a watcher behind it and act on one run |
+| [guides/debug.md](guides/debug.md) | find out why a run failed, died or waits |
+| [guides/results.md](guides/results.md) | get the numbers out: metrics, compare, runtime, export and MLflow |
+| [guides/alerts.md](guides/alerts.md) | get alerts on Telegram, ntfy or mail, and use the bot from the phone |
+| [guides/agents.md](guides/agents.md) | let a Claude session or a script operate the farm through `edr` |
+| [guides/cleanup.md](guides/cleanup.md) | retire runs and batches, prune trees, and keep the large files |
 | [reference/](reference/README.md) | look up a command, a flag, a config key, a placeholder, a run state or a bot command; generated from the code |
 
 ## Improve the tool

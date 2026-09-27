@@ -5,7 +5,7 @@
 This page lists every key of the four TOML files that configure a project, and the placeholders their strings can hold.
 
 `edr.toml` and `tasks.toml` live in the project directory, one `jobs/<batch>.toml` per batch next
-to them, and `site.toml` outside the project with the hosts, the tools and the bot. These rules
+to them, and `site.toml`, wherever `site` points, with the hosts, the tools and the bot. These rules
 hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
@@ -72,7 +72,7 @@ the environment of the stages, and logs it to `log/setup.log`. A failure ends th
 
 ### [safety]
 
-The guard on every delete target; `docs/guarantees.md` explains it.
+The guard on every delete target; `docs/how-it-works.md` explains it.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -81,7 +81,7 @@ The guard on every delete target; `docs/guarantees.md` explains it.
 
 ### [limits]
 
-The clocks and floors of the driver and the watcher; `docs/run.md` says what each
+The clocks and floors of the driver and the watcher; `docs/how-it-works.md` says what each
 one does.
 
 | Key | Meaning | Default |
@@ -151,7 +151,7 @@ A stage without `steps` owns no numbered step.
 A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
 `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
 tasks of a run go through a queue in the state directory, so a second run with the same queue
-takes tasks from the same pool; `docs/run.md` explains the queue and shards.
+takes tasks from the same pool; `docs/guides/run.md` explains the queue and shards.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -231,8 +231,9 @@ parse gives a row with an empty value and the error in `source_file`, never a cr
 
 ## site.toml
 
-`site.toml` lives outside the project: the hosts, the tools and the bot of a site. Every
-remote command runs through `sh -c`, so the login shell of a host may be `csh` or `tcsh`.
+`site.toml` holds the hosts, the tools and the bot of a site; `site` in `edr.toml` names it,
+and `docs/guides/site.md` sets it up. Every remote command runs through `sh -c`, so the login
+shell of a host may be `csh` or `tcsh`.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -247,7 +248,7 @@ remote command runs through `sh -c`, so the login shell of a host may be `csh` o
 
 What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
 `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
-driver writes into its first heartbeat. `docs/configure.md` shows a Slurm site file
+driver writes into its first heartbeat. `docs/guides/site.md` shows a Slurm site file
 and how each setting maps to HTCondor, Slurm and LSF.
 
 | Key | Meaning | Default |
@@ -304,7 +305,7 @@ declares is an error where it appears. The core knows no licence manager;
 
 ### [telegram]
 
-The bot, the one chat it answers, and the custom commands; `docs/telegram.md` explains the setup.
+The bot, the one chat it answers, and the custom commands; `docs/guides/alerts.md` explains the setup.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -319,7 +320,7 @@ One table per custom bot command; `bot.md` lists the keys.
 
 ### [ntfy]
 
-An ntfy topic: one push message per alert, with a priority by alert kind; `docs/notify.md`
+An ntfy topic: one push message per alert, with a priority by alert kind; `docs/guides/alerts.md`
 explains the setup.
 
 | Key | Meaning | Default |
@@ -385,7 +386,7 @@ flow's own variables, so a key the flow ignores passes.
 A job with `reuse` runs on the host and the tree of the reused run, and takes its build tag and
 `{tree_id}`; a glob in `label` is an error. With `restore`, the job takes the source tag, the
 build tag and `{tree_id}` of the reused run but is placed like a new job, so it runs after the
-tree was retired; `docs/run.md` shows the rerun. A task group in a job without `tasks` is a
+tree was retired; `docs/guides/cleanup.md` shows the rerun. A task group in a job without `tasks` is a
 plan problem.
 
 | Key | Meaning | Default |

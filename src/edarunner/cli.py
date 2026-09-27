@@ -1143,7 +1143,7 @@ def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     notifiers = make_notifiers(c.project.site, c.project, c.db, Actions(c))
     if not notifiers:
-        raise Refuse("no notifier is configured; see docs/notify.md")
+        raise Refuse("no notifier is configured; see docs/guides/alerts.md")
     sent = sum(n.post(title, html, a.silent) for n in notifiers)
     c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": untag(html)})
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
@@ -1274,7 +1274,7 @@ def _parser() -> argparse.ArgumentParser:
         with the reason. --json gives either as an object.
 
         A Claude Code SessionStart hook that runs edr brief starts every
-        session with the briefing; docs/run.md shows the hook.
+        session with the briefing; docs/guides/agents.md shows the hook.
         """)
     s.add_argument("--run", metavar="HANDLE", help="the story of one run: " + HANDLE)
     s = command("status", "the board, or one run", """
@@ -1359,7 +1359,7 @@ def _parser() -> argparse.ArgumentParser:
         value and unit. --design or --run is required. --design is the source
         tag exactly as edr checkout printed it, -dirty-... included; --run takes
         one run instead. --csv writes the columns of
-        metrics.csv (docs/results.md) to stdout.
+        metrics.csv (docs/guides/results.md) to stdout.
 
         --run with --over steps prints the metrics along the steps of that run:
         one row per step with its name, one column per metric. With --metric,
@@ -1529,7 +1529,7 @@ def _parser() -> argparse.ArgumentParser:
 
         Once the driver runs, the exit code is the driver's, as the table
         below lists; 2 and 3 then carry the driver's meaning, not the one of
-        the global table. docs/run.md lists the phases.
+        the global table. docs/guides/run.md lists the phases.
         """, write=True, exits={Exit.DONE: "the command ended done", 2: "FAILED:setup, the stage is not in the spec; "
                                 "or FAILED:<stage>, a checkpoint on a stage without resume",
                                 3: "FAILED:<stage>, too little disk for the stage", 4: "FAILED:<stage>, the tool gate timed out",
@@ -1576,7 +1576,7 @@ def _parser() -> argparse.ArgumentParser:
         Writes a snapshot of one design to DIR: manifest.json, runs.csv,
         metrics.csv and the collected files of the newest run per label.
         --design matches the source tag exactly. log/ and *.log stay out unless
-        --with-logs. Refuses a DIR that exists and is not empty. docs/results.md
+        --with-logs. Refuses a DIR that exists and is not empty. docs/guides/results.md
         explains the layout.
 
         --mlflow DIR writes the run database into a local MLflow tracking store
@@ -1650,7 +1650,7 @@ def _parser() -> argparse.ArgumentParser:
         bot as a thread when the site file configures it. --once runs one cycle.
         --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
         reads and classifies every run, prints the states and writes nothing.
-        docs/run.md explains the cycle.
+        docs/how-it-works.md explains the cycle.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
                                               "with --check, watch.json is older than three cycles"})
     s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")

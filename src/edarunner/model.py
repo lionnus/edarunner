@@ -90,7 +90,7 @@ class BotCommand:
 
 @dataclass
 class Telegram:
-    """The bot, the one chat it answers, and the custom commands; `docs/telegram.md` explains the setup."""
+    """The bot, the one chat it answers, and the custom commands; `docs/guides/alerts.md` explains the setup."""
 
     chat_id: int = doc("the one chat the bot answers; a group id is negative")
     token_file: Path = doc("the bot token, mode 600", Path("~/.config/edarunner/telegram.token"))
@@ -103,7 +103,7 @@ class Telegram:
 
 @dataclass
 class Ntfy:
-    """An ntfy topic: one push message per alert, with a priority by alert kind; `docs/notify.md`
+    """An ntfy topic: one push message per alert, with a priority by alert kind; `docs/guides/alerts.md`
     explains the setup."""
 
     topic: str = doc("the topic; anyone who knows the name can read it, so pick a long random one")
@@ -146,7 +146,7 @@ BACKENDS = ("ssh", "local", *SCHEDULERS)
 class Scheduler:
     """What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
     `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
-    driver writes into its first heartbeat. `docs/configure.md` shows a Slurm site file
+    driver writes into its first heartbeat. `docs/guides/site.md` shows a Slurm site file
     and how each setting maps to HTCondor, Slurm and LSF."""
 
     backend: str = doc("`\"ssh\"` on the site hosts, `\"local\"` on the head node only, or `\"condor\"`, "
@@ -165,8 +165,9 @@ class Scheduler:
 
 @dataclass
 class Site:
-    """`site.toml` lives outside the project: the hosts, the tools and the bot of a site. Every
-    remote command runs through `sh -c`, so the login shell of a host may be `csh` or `tcsh`."""
+    """`site.toml` holds the hosts, the tools and the bot of a site; `site` in `edr.toml` names it,
+    and `docs/guides/site.md` sets it up. Every remote command runs through `sh -c`, so the login
+    shell of a host may be `csh` or `tcsh`."""
 
     path: Path
     scratch: list[str] = doc("scratch roots, in order; the largest writable one is the mount")
@@ -246,7 +247,7 @@ class Stage:
     A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
     `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
     tasks of a run go through a queue in the state directory, so a second run with the same queue
-    takes tasks from the same pool; `docs/run.md` explains the queue and shards.
+    takes tasks from the same pool; `docs/guides/run.md` explains the queue and shards.
     """
 
     name: str
@@ -369,7 +370,7 @@ class Runtime:
 
 @dataclass
 class Safety:
-    """The guard on every delete target; `docs/guarantees.md` explains it."""
+    """The guard on every delete target; `docs/how-it-works.md` explains it."""
 
     marker: str = doc("a substring every delete target must hold", "/edr/")
     min_depth: int = doc("the smallest path depth of a delete target", 4)
@@ -377,7 +378,7 @@ class Safety:
 
 @dataclass
 class Limits:
-    """The clocks and floors of the driver and the watcher; `docs/run.md` says what each
+    """The clocks and floors of the driver and the watcher; `docs/how-it-works.md` says what each
     one does."""
 
     stagger_s: int = doc("pause between two launches of one batch", 120)
@@ -450,7 +451,7 @@ class Job:
     A job with `reuse` runs on the host and the tree of the reused run, and takes its build tag and
     `{tree_id}`; a glob in `label` is an error. With `restore`, the job takes the source tag, the
     build tag and `{tree_id}` of the reused run but is placed like a new job, so it runs after the
-    tree was retired; `docs/run.md` shows the rerun. A task group in a job without `tasks` is a
+    tree was retired; `docs/guides/cleanup.md` shows the rerun. A task group in a job without `tasks` is a
     plan problem.
     """
 

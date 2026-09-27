@@ -9,7 +9,7 @@ request.
 
 - Every `rm -rf` and every `rsync --delete` calls `assert_safe_target`
   first, and every path built from a run id calls `assert_run_id`.
-  [guarantees.md](../guarantees.md) lists what the guard refuses.
+  [how-it-works.md](../how-it-works.md#launch) lists what the guard refuses.
 - A dry run writes nothing: no date pin, no spec, no file on a host, no
   database row, no event, not even the database file.
   `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` proves it

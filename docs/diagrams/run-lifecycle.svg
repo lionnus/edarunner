@@ -38,7 +38,7 @@
 
 <rect class="box" x="201" y="64" width="150" height="96" rx="7"/>
 <text class="t" x="276" y="88" text-anchor="middle">edr checkout</text>
-<text class="s" x="276" y="108" text-anchor="middle">worktree per source</text>
+<text class="s" x="276" y="108" text-anchor="middle">clone per source</text>
 <text class="m" x="276" y="126" text-anchor="middle">wt/&lt;src&gt;/</text>
 
 <rect class="box" x="377" y="64" width="150" height="96" rx="7"/>

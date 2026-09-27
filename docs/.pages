@@ -1,14 +1,7 @@
 nav:
   - README.md
-  - Get started:
-      - install.md
-      - concepts.md
-  - Guides:
-      - configure.md
-      - run.md
-      - results.md
-      - notify.md
-      - telegram.md
-      - guarantees.md
+  - install.md
+  - how-it-works.md
+  - guides
   - reference
   - dev

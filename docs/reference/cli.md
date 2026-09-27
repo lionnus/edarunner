@@ -113,7 +113,7 @@ the last value of each metric, and the command the triage proposes
 with the reason. --json gives either as an object.
 
 A Claude Code SessionStart hook that runs edr brief starts every
-session with the briefing; docs/run.md shows the hook.
+session with the briefing; docs/guides/agents.md shows the hook.
 
 | Flag | Meaning |
 |---|---|
@@ -257,7 +257,7 @@ Every metric of one design: label, design, stage, step, task, name,
 value and unit. --design or --run is required. --design is the source
 tag exactly as edr checkout printed it, -dirty-... included; --run takes
 one run instead. --csv writes the columns of
-metrics.csv (docs/results.md) to stdout.
+metrics.csv (docs/guides/results.md) to stdout.
 
 --run with --over steps prints the metrics along the steps of that run:
 one row per step with its name, one column per metric. With --metric,
@@ -557,7 +557,7 @@ nothing.
 
 Once the driver runs, the exit code is the driver's, as the table
 below lists; 2 and 3 then carry the driver's meaning, not the one of
-the global table. docs/run.md lists the phases.
+the global table. docs/guides/run.md lists the phases.
 
 | Flag | Meaning |
 |---|---|
@@ -644,7 +644,7 @@ edr export [--dry-run] [--json] [--design SRC] [--out DIR] [--mlflow DIR] [--lab
 Writes a snapshot of one design to DIR: manifest.json, runs.csv,
 metrics.csv and the collected files of the newest run per label.
 --design matches the source tag exactly. log/ and *.log stay out unless
---with-logs. Refuses a DIR that exists and is not empty. docs/results.md
+--with-logs. Refuses a DIR that exists and is not empty. docs/guides/results.md
 explains the layout.
 
 --mlflow DIR writes the run database into a local MLflow tracking store
@@ -772,7 +772,7 @@ The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
 bot as a thread when the site file configures it. --once runs one cycle.
 --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
 reads and classifies every run, prints the states and writes nothing.
-docs/run.md explains the cycle.
+docs/how-it-works.md explains the cycle.
 
 | Flag | Meaning |
 |---|---|
