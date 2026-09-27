@@ -78,22 +78,29 @@ def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[t
     return out
 
 
+def _stages(hb: dict) -> dict[str, dict]:
+    """The stage entries of a heartbeat; a stage still running in a finished run ended with the run."""
+    stage = hb.get("stage") or ""
+    stages = hb.get("stages") or ({stage: {"log": hb.get("log")}} if stage else {})
+    out = {}
+    for name, s in stages.items():
+        status = s.get("status") or "running"
+        if status == "running" and not board.is_live(hb):
+            status = board.state_of(hb)  # killed, stopped or failed
+        out[name] = {**s, "status": status}
+    return out
+
+
 def ingest(ledger: Ledger, heartbeats: list[tuple[str, dict]]) -> None:
     """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify."""
     for batch, hb in heartbeats:
         ledger.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
-        stage = hb.get("stage") or ""
-        stages = hb.get("stages") or ({stage: {"status": "running", "log": hb.get("log")}} if stage else {})
-        for name, s in stages.items():
-            status = s.get("status") or "running"
-            # A stage still running in a finished run ended with the run: killed, stopped or failed.
-            if status == "running" and not board.is_live(hb):
-                status = board.state_of(hb)
+        for name, s in _stages(hb).items():
             ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
-                                     "status": status, "started": s.get("started"), "ended": s.get("ended"),
+                                     "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
                                      "exit": s.get("exit"), "log": s.get("log")})
         for tid, t in (hb.get("tasks") or {}).items():
-            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
+            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
                                      **{k: t.get(k) for k in _TASK_KEYS}})
 
 
@@ -284,8 +291,12 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
                 done[t] = Task(id=t, fields={"id": t})
             else:
                 ledger.add_event("watch", run["run_id"], "extract", f"unknown task {t}: {e}")
-    rows = metrics.extract(project, run, project.data / "results", done,
-                           stages=set(only) if only else None, task_dirs=task_dirs)
+    # A failed stage can leave a stale report from a copied tree: a one-command stage counts
+    # only with status done, and a task group counts per task with phase done.
+    status = _stages(hb)
+    eligible = {n for n, st in project.stages.items() if (only is None or n in only)
+                and (st.is_group or status.get(n, {}).get("status") == "done")}
+    rows = metrics.extract(project, run, project.data / "results", done, stages=eligible, task_dirs=task_dirs)
     n = sum(ledger.add_metric(r) for r in rows if r["value"] is not None)
     if not rec.get("params"):
         ledger.set_params(run["run_id"], _params(project, run), "spec")
