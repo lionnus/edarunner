@@ -28,8 +28,11 @@ jobs:
 
   driver:
     # The driver runs on the compute hosts with their own python3; 3.6 is the floor.
+    # A container job has no init, so a killed task would stay a zombie in its process group.
     runs-on: ubuntu-latest
-    container: python:3.6
+    container:
+      image: python:3.6
+      options: --init
     steps:
       - uses: actions/checkout@v4
       # tests/helpers_driver.py starts the driver with /usr/bin/python3; the image keeps 3.6 in /usr/local/bin.
