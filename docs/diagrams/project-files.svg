@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="456" viewBox="0 0 960 456" role="img" aria-label="The files of an edarunner project: what you write, what edr writes, and where they live">
+<style>
+  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
+  .gen { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 2; }
+  .priv { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; stroke-dasharray: 6 4; }
+  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
+  .mark { fill: #3b7dd8; }
+  .run { fill: #f28c38; }
+  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
+  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
+  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  @media (prefers-color-scheme: dark) {
+    .box, .priv { fill: #0d1117; }
+    .gen, .frame-fill { fill: #161b22; }
+    .t, .m { fill: #c9d1d9; }
+  }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="#6e7781"/>
+  </marker>
+</defs>
+
+<!-- Project directory, in git -->
+<rect class="frame" x="24" y="24" width="252" height="364" rx="10"/>
+<text class="h" x="40" y="48">PROJECT · IN GIT</text>
+
+<rect class="box" x="40" y="64" width="220" height="52" rx="7"/>
+<text class="t" x="54" y="86">Project config</text>
+<text class="m" x="54" y="104">edr.toml</text>
+
+<rect class="box" x="40" y="128" width="220" height="52" rx="7"/>
+<text class="t" x="54" y="150">Task table</text>
+<text class="s" x="246" y="150" text-anchor="end">optional</text>
+<text class="m" x="54" y="168">tasks.toml</text>
+
+<rect class="box" x="40" y="192" width="220" height="52" rx="7"/>
+<text class="t" x="54" y="214">One batch of jobs</text>
+<text class="m" x="54" y="232">jobs/&lt;batch&gt;.toml</text>
+
+<rect class="box" x="40" y="256" width="220" height="52" rx="7"/>
+<text class="t" x="54" y="278">Hook scripts</text>
+<text class="s" x="246" y="278" text-anchor="end">optional</text>
+<text class="m" x="54" y="296">hooks/</text>
+
+<rect class="gen" x="40" y="320" width="220" height="52" rx="7"/>
+<rect class="mark" x="41" y="330" width="4" height="32"/>
+<text class="t" x="54" y="342">Watcher unit</text>
+<text class="s" x="246" y="342" text-anchor="end">edr init</text>
+<text class="m" x="54" y="360">edr-watch.service</text>
+
+<!-- Project directory, not in git -->
+<rect class="frame" x="300" y="24" width="252" height="364" rx="10"/>
+<text class="h" x="316" y="48">PROJECT · NOT IN GIT</text>
+
+<rect class="gen" x="316" y="64" width="220" height="52" rx="7"/>
+<rect class="mark" x="317" y="74" width="4" height="32"/>
+<text class="t" x="330" y="86">Ledger</text>
+<text class="m" x="330" y="104">data/edr.db</text>
+
+<rect class="gen" x="316" y="128" width="220" height="52" rx="7"/>
+<rect class="mark" x="317" y="138" width="4" height="32"/>
+<text class="t" x="330" y="150">Collected results</text>
+<text class="m" x="330" y="168">data/results/&lt;run_id&gt;/</text>
+
+<rect class="gen" x="316" y="192" width="220" height="52" rx="7"/>
+<rect class="mark" x="317" y="202" width="4" height="32"/>
+<text class="t" x="330" y="214">Boards</text>
+<text class="m" x="330" y="232">data/board/</text>
+
+<rect class="gen" x="316" y="256" width="220" height="52" rx="7"/>
+<rect class="mark" x="317" y="266" width="4" height="32"/>
+<text class="t" x="330" y="278">Staged source</text>
+<text class="m" x="330" y="296">wt/&lt;src&gt;/</text>
+
+<!-- Outside the project -->
+<rect class="frame" x="576" y="24" width="360" height="364" rx="10"/>
+<text class="h" x="592" y="48">OUTSIDE THE PROJECT</text>
+
+<rect class="priv" x="592" y="64" width="328" height="52" rx="7"/>
+<text class="t" x="606" y="86">Site file</text>
+<text class="s" x="906" y="86" text-anchor="end">head node</text>
+<text class="m" x="606" y="104">~/.config/edarunner/site.toml</text>
+
+<rect class="gen" x="592" y="128" width="328" height="52" rx="7"/>
+<rect class="mark" x="593" y="138" width="4" height="32"/>
+<text class="t" x="606" y="150">State directory</text>
+<text class="s" x="906" y="150" text-anchor="end">shared filesystem</text>
+<text class="m" x="606" y="168">~/.edr/&lt;project&gt;/</text>
+
+<rect class="gen" x="592" y="192" width="328" height="52" rx="7"/>
+<rect class="mark" x="593" y="202" width="4" height="32"/>
+<text class="t" x="606" y="214">Run trees</text>
+<text class="s" x="906" y="214" text-anchor="end">each compute host</text>
+<text class="m" x="606" y="232">&lt;scratch&gt;/&lt;user&gt;/edr/&lt;project&gt;/&lt;run_id&gt;/</text>
+
+<!-- Legend -->
+<rect class="box" x="24" y="414" width="28" height="18" rx="4"/>
+<text class="s" x="62" y="428">you write</text>
+<rect class="gen" x="150" y="414" width="28" height="18" rx="4"/>
+<rect class="mark" x="151" y="417" width="3" height="12"/>
+<text class="s" x="188" y="428">edr writes</text>
+<rect class="priv" x="282" y="414" width="28" height="18" rx="4"/>
+<text class="s" x="320" y="428">you write, private to your site</text>
+</svg>

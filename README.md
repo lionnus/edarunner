@@ -95,6 +95,8 @@ hostB   3/32  █░░░░░░░   3.1   98/128  /scratch2    150/1000  �
 
 ## How it works
 
+<p align="center"><img src="docs/diagrams/where-it-runs.svg" alt="Where each part runs: the head node, the shared filesystem, the compute hosts and the phone" width="900"></p>
+
 A project declares its flow in `edr.toml` as stages that run in order. A
 stage is one command, which the driver runs in its own process group. The
 flow's own steps inside it are tracked, not run: a `progress` probe

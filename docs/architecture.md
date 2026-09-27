@@ -43,6 +43,8 @@ A channel never imports `cli` or `watch`; it gets its verbs through the
 
 ## Data flow
 
+![One run, from a commit to a paper](diagrams/run-lifecycle.svg)
+
 1. `config.load_project` reads `edr.toml`, the site file and
    `tasks.toml`; `load_batch` reads one `jobs/<batch>.toml`.
 2. `launch.plan` pins the date, computes the build tag and the run id,

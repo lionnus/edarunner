@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="542" viewBox="0 0 960 542" role="img" aria-label="Where edarunner runs: the head node, the shared filesystem, the compute hosts, the licence server and the phone">
+<style>
+  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
+  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
+  .run { fill: #f28c38; }
+  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
+  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
+  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  .dash { stroke-dasharray: 6 4; }
+  @media (prefers-color-scheme: dark) {
+    .box { fill: #0d1117; }
+    .frame-fill { fill: #161b22; }
+    .t, .m { fill: #c9d1d9; }
+  }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="#6e7781"/>
+  </marker>
+</defs>
+
+<!-- Head node -->
+<rect class="frame-fill" x="24" y="24" width="296" height="364" rx="10"/>
+<text class="h" x="40" y="48">HEAD NODE</text>
+<text class="s" x="304" y="48" text-anchor="end">project directory</text>
+
+<rect class="box" x="40" y="64" width="264" height="52" rx="7"/>
+<text class="t" x="54" y="86">Staged source</text>
+<text class="m" x="54" y="104">wt/&lt;src&gt;/</text>
+
+<rect class="box" x="40" y="128" width="264" height="52" rx="7"/>
+<text class="t" x="54" y="150">Collected results</text>
+<text class="m" x="54" y="168">data/results/</text>
+
+<rect class="box" x="40" y="192" width="264" height="52" rx="7"/>
+<text class="t" x="54" y="214">Controller, runs and exits</text>
+<text class="m" x="54" y="232">edr &lt;verb&gt;</text>
+
+<rect class="box" x="40" y="256" width="264" height="52" rx="7"/>
+<text class="t" x="54" y="278">Ledger</text>
+<text class="m" x="54" y="296">data/edr.db</text>
+
+<rect class="box" x="40" y="320" width="264" height="52" rx="7"/>
+<path class="run" d="M54 330v14l11-7z"/>
+<text class="t" x="72" y="342">Watcher and Telegram bot</text>
+<text class="m" x="72" y="360">edr watch</text>
+
+<!-- Shared filesystem -->
+<rect class="frame-fill" x="340" y="270" width="216" height="186" rx="10"/>
+<text class="h" x="356" y="294">SHARED FILESYSTEM</text>
+<text class="s" x="356" y="310">mounted by every machine</text>
+<rect class="box" x="356" y="320" width="184" height="52" rx="7"/>
+<text class="t" x="370" y="342">State directory</text>
+<text class="m" x="370" y="360">~/.edr/&lt;project&gt;/</text>
+<text class="s" x="370" y="394">driver copy</text>
+<text class="s" x="370" y="410">spec and heartbeat per run</text>
+<text class="s" x="370" y="426">stop and keep files</text>
+<text class="s" x="370" y="442">task queue</text>
+
+<!-- Compute host A -->
+<rect class="frame-fill" x="576" y="24" width="360" height="236" rx="10"/>
+<text class="h" x="592" y="48">COMPUTE HOST</text>
+<text class="s" x="920" y="48" text-anchor="end">hostA</text>
+
+<rect class="box" x="592" y="64" width="328" height="116" rx="7"/>
+<text class="t" x="606" y="116">Run tree</text>
+<text class="m" x="606" y="136">&lt;scratch&gt;/&lt;user&gt;/edr/&lt;project&gt;/&lt;run_id&gt;/</text>
+
+<rect class="box" x="592" y="192" width="140" height="52" rx="7"/>
+<path class="run" d="M606 202v14l11-7z"/>
+<text class="t" x="624" y="214">Driver</text>
+<text class="m" x="624" y="232">edr_driver.py</text>
+
+<rect class="box" x="760" y="192" width="160" height="52" rx="7"/>
+<path class="run" d="M774 211v14l11-7z"/>
+<text class="t" x="792" y="223">Stage processes</text>
+
+<path class="a" d="M732 218H760"/>
+<path class="a" d="M840 192V180"/>
+
+<!-- Licence server -->
+<rect class="box dash" x="776" y="290" width="144" height="44" rx="7"/>
+<text class="t" x="848" y="317" text-anchor="middle">Licence server</text>
+
+<!-- Compute host B -->
+<rect class="frame dash" x="576" y="384" width="360" height="64" rx="10"/>
+<text class="h" x="592" y="408">COMPUTE HOST</text>
+<text class="s" x="920" y="408" text-anchor="end">hostB, …</text>
+<text class="s" x="592" y="432">the same driver, stages and run tree</text>
+
+<!-- Phone -->
+<rect class="box" x="144" y="440" width="56" height="78" rx="10"/>
+<text class="t" x="220" y="483">Phone with Telegram</text>
+<text class="s" x="220" y="501">outbound HTTPS from the head node</text>
+
+<!-- Head node to host -->
+<path class="a" d="M304 90H592"/>
+<text class="al" x="448" y="83" text-anchor="middle">rsync: source tree</text>
+<path class="a" d="M592 154H304"/>
+<text class="al" x="448" y="147" text-anchor="middle">rsync: collect paths</text>
+<path class="a" d="M304 218H592"/>
+<text class="al" x="448" y="211" text-anchor="middle">ssh: start, probe, stop</text>
+
+<!-- Heartbeat and licence -->
+<path class="a" d="M620 244V346H540" style="marker-start: url(#arrow)"/>
+<text class="al" x="564" y="364">spec in, heartbeat out</text>
+<path class="a" d="M710 244V312H776"/>
+<text class="al" x="718" y="280">seats</text>
+<path class="a" d="M356 346H304"/>
+<path class="a" d="M304 240H530V320"/>
+<text class="al" x="522" y="262" text-anchor="end">driver copy, spec</text>
+
+<!-- Telegram -->
+<path class="a" d="M156 372V440"/>
+<text class="al" x="148" y="414" text-anchor="end">alerts, board</text>
+<path class="a" d="M188 440V372"/>
+<text class="al" x="196" y="414">commands, buttons</text>
+
+<!-- Legend -->
+<rect class="frame dash" x="592" y="500" width="28" height="18" rx="4"/>
+<text class="s" x="630" y="514">optional, or one of many</text>
+</svg>

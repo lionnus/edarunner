@@ -50,6 +50,8 @@ fail.
 
 ## A real project
 
+![The files of a project: what you write, what edr writes, and what lives outside](diagrams/project-files.svg)
+
 ### 1. Create the project
 
 ```sh
