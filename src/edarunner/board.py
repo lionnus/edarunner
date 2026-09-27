@@ -389,7 +389,7 @@ _COMPARE = Template("""<!doctype html><html><head><meta charset="utf-8">
 <div id="plots">
 <h3>trajectory</h3><select id="traj"></select><div id="trajp"></div>
 <h3>scatter</h3>x <select id="sx"></select> y <select id="sy"></select> colour <select id="sc"></select><div id="scatp"></div>
-<div id="phases"><h3>phases</h3><div id="phasep"></div></div>
+<div id="phases"><h3>power parts</h3><div id="phasep"></div></div>
 <h3>parallel coordinates</h3><div id="parp"></div>
 </div>
 <script>
@@ -451,13 +451,13 @@ function plots(sel) {
   Plotly.react('scatp', Object.entries(groups).map(([g, rs]) => ({ x: rs.map(r => val(r, sx)), y: rs.map(r => val(r, sy)),
     text: rs.map(r => r.label), name: sc + '=' + g, mode: 'markers', marker: { size: 10 } })),
     { ...LAYOUT, xaxis: { title: sx }, yaxis: { title: sy } });
-  const pk = MKEYS.filter(k => k.startsWith('power.') && !k.startsWith('power.total'));
+  const pk = MKEYS.filter(k => k.startsWith('power__') && !k.startsWith('power__total'));
   q('#phases').hidden = !pk.length;
   if (pk.length) {
     const tasks = [...new Set(pk.map(k => k.includes('[') ? k.slice(k.indexOf('[')) : ''))];
-    const phases = [...new Set(pk.map(k => k.slice(6).split('[')[0]))];
+    const phases = [...new Set(pk.map(k => k.slice(7).split('[')[0]))];
     Plotly.react('phasep', phases.map(p => ({ type: 'bar', name: p, x: sel.flatMap(r => tasks.map(t => r.label + t)),
-      y: sel.flatMap(r => tasks.map(t => FIN[r.run_id]?.['power.' + p + t]?.v ?? 0)) })), { ...LAYOUT, barmode: 'stack' });
+      y: sel.flatMap(r => tasks.map(t => FIN[r.run_id]?.['power__' + p + t]?.v ?? 0)) })), { ...LAYOUT, barmode: 'stack' });
   }
   const dims = [...PKEYS, ...MKEYS].map(d => ({ label: d, values: sel.map(r => num(val(r, d))) }))
     .filter(d => d.values.every(v => v !== null));

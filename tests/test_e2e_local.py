@@ -85,14 +85,14 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "status")
     assert code == 0 and "done" in out and "b_nodw" in out
     code, out, _ = edr(capsys, "status", "a@demo")
-    assert code == 0 and out.startswith(ids["a"]) and "done" in out and "energy" in out and "area.cell" in out
+    assert code == 0 and out.startswith(ids["a"]) and "done" in out and "energy" in out and "design__instance__area" in out
     code, out, _ = edr(capsys, "status", "--narrow")
     assert code == 0 and "nothing live" in out
     code, out, _ = edr(capsys, "metrics", "--design", src, "--csv")
     lines = out.splitlines()
     assert code == 0 and lines[0].startswith("run_id,label,config,design,stage,step,task,metric")
     assert any(",power,,k_small,energy_nj,energy,850.0,nJ," in ln for ln in lines)
-    assert any(f"{ids['b_nodw']},b_nodw,demo,{src},pnr,5,,area_cell_um2,area.cell,1052.5,um2,reports/5/area.rpt" == ln for ln in lines)
+    assert any(f"{ids['b_nodw']},b_nodw,demo,{src},pnr,5,,area_cell_um2,design__instance__area,1052.5,um2,reports/5/area.rpt" == ln for ln in lines)
     with Database(demo / "data" / "edr.db") as db:
         params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM parameters")}
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "src", src) in params

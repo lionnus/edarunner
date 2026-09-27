@@ -39,7 +39,7 @@ def world(tmp_path):
                         "phase": phase, "state": "running", "started": 100, "updated": 200,
                         "counts": {"done": 1, "failed": failed}})
     for run_id, value in ((RUN_A_OLD, 900.0), (RUN_A, 1000.0), (RUN_C, 2000.0)):
-        db.add_metric({"run_id": run_id, "stage": "synth", "step": 3, "name": "area_cell_um2", "canonical": "area.cell",
+        db.add_metric({"run_id": run_id, "stage": "synth", "step": 3, "name": "area_cell_um2", "canonical": "design__instance__area",
                         "value": value, "unit": "um2", "source_file": "reports/3/area.rpt"})
     db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.25, "unit": "W"})
     results = project.data / "results"
@@ -86,7 +86,7 @@ def test_export_one_design(world, tmp_path):
     assert {m["run_id"] for m in metrics} == {RUN_A}
     area = next(m for m in metrics if m["metric"] == "area_cell_um2")
     assert (area["label"], area["stage"], area["step"], area["canonical"], area["value"], area["source"]) == (
-        "a", "synth", "3", "area.cell", "1000.0", "reports/3/area.rpt")
+        "a", "synth", "3", "design__instance__area", "1000.0", "reports/3/area.rpt")
     power = next(m for m in metrics if m["metric"] == "power_w")
     assert (power["task"], power["step"], power["unit"]) == ("k_small", "", "W")
 

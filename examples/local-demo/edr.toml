@@ -80,7 +80,7 @@ step = "*"
 file = "reports/{step}/area.rpt"
 regex = '^i_top\s+(\S+)'
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"
 
 [metrics.wns_ns]
 stage = ["synth", "pnr"]
@@ -88,14 +88,14 @@ step = "*"
 file = "reports/{step}/qor.rpt"
 regex = 'Critical Path Slack:\s+(-?[0-9.]+)'
 unit = "ns"
-canonical = "timing.wns"
+canonical = "timing__setup__ws"
 
 [metrics.power_w]
 stage = "power"
 file = "{task_dir}/power/reports/power.csv"
 csv = { where = { phase = "WHOLE" }, column = "total_w" }
 unit = "W"
-canonical = "power.total"
+canonical = "power__total"
 
 [metrics.window_ns]
 stage = "power"

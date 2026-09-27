@@ -225,7 +225,10 @@ class Metric:
     expr: str = doc("an expression over other metrics of the same run, stage, step and task", "",
                     shown="one of the five")
     unit: str = doc("unit text", "")
-    canonical: str = doc("a name shared across projects, such as `area.cell`", "")
+    canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
+                         "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
+                         "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "
+                         "empty when the schema has no name", "")
 
 
 @dataclass

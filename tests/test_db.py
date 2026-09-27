@@ -96,7 +96,7 @@ def test_metrics_by_design(tmp_path):
         _seed(db)
         for run_id, value in ((RUN_A, 1000.0), (RUN_B, 1010.0), (RUN_C, 2000.0)):
             assert db.add_metric({"run_id": run_id, "stage": "synth", "step": 3, "name": "area_cell_um2",
-                                   "canonical": "area.cell", "value": value, "unit": "um2", "source_file": "reports/3/area.rpt"})
+                                   "canonical": "design__instance__area", "value": value, "unit": "um2", "source_file": "reports/3/area.rpt"})
         assert db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.25})
         assert not db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.99})
         assert not db.add_metric({"run_id": RUN_A, "stage": "synth", "step": 3, "name": "area_cell_um2", "value": 1.0})
@@ -106,7 +106,7 @@ def test_metrics_by_design(tmp_path):
         assert [(r["run_id"], r["name"], r["value"], r["label"]) for r in rows] == [
             (RUN_A, "power_w", 0.25, "a"), (RUN_A, "area_cell_um2", 1000.0, "a"), (RUN_B, "area_cell_um2", 1010.0, "b_nodw")]
         assert [r["value"] for r in db.metrics(design="bbb222")] == [2000.0]
-        assert [r["run_id"] for r in db.metrics(name="area.cell", step=3)] == [RUN_A, RUN_B, RUN_C]
+        assert [r["run_id"] for r in db.metrics(name="design__instance__area", step=3)] == [RUN_A, RUN_B, RUN_C]
         assert [r["run_id"] for r in db.metrics(stage="power")] == [RUN_A]
         assert [r["run_id"] for r in db.metrics(run_ids=[RUN_C])] == [RUN_C]
         assert db.metrics(run_ids=[]) == []

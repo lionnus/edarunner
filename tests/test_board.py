@@ -116,13 +116,13 @@ def test_run_detail():
                "ended": None, "signature": None},
               {"stage": "power", "task": "k_bad", "attempt": 1, "status": "failed", "exit": 1, "started": NOW - 60,
                "ended": NOW - 50, "signature": "boom: kernel bad failed"}]
-    metrics = [{"stage": "synth", "step": 3, "task": "", "name": "area_cell_um2", "canonical": "area.cell",
+    metrics = [{"stage": "synth", "step": 3, "task": "", "name": "area_cell_um2", "canonical": "design__instance__area",
                 "value": 1031.5, "unit": "um2"}]
     text = board.plain(board.run_detail(row, stages, metrics, "line one\nline two\n", now=NOW))
     assert text.startswith(RUN["run1"] + "\nrunning  stage:synth  synth/3  exit -")
     assert "cost 2.0 core-h" in text and "counts done 1 failed 0" in text
     assert "k_bad" in text and "boom: kernel bad failed" in text
-    assert "area.cell" in text and "1031.5" in text
+    assert "design__instance__area" in text and "1031.5" in text
     assert text.endswith("log tail\nline one\nline two")
 
 
@@ -154,7 +154,7 @@ def _compare_input():
     metrics = []
     for i, r in enumerate(rows):
         metrics += [{"run_id": r["run_id"], "stage": "synth", "step": s, "task": "", "name": "area_cell_um2",
-                     "canonical": "area.cell", "value": 1000 + 10 * s + i, "unit": "um2"} for s in (1, 2, 3)]
+                     "canonical": "design__instance__area", "value": 1000 + 10 * s + i, "unit": "um2"} for s in (1, 2, 3)]
         metrics += [{"run_id": r["run_id"], "stage": "power", "step": None, "task": "k_small", "name": f"power_{ph}",
                      "canonical": f"power.{ph}", "value": 0.1 * (i + 1), "unit": "W"} for ph in ("A", "B", "total")]
     return rows, parameters, metrics
@@ -198,10 +198,10 @@ def test_compare_script_runs_without_plotly(tmp_path):
     assert got["plots"] is True
     assert "<th>DW</th>" in got["runs"] and "a&lt;/script&gt;b" in got["runs"] and RUN["fail"] in got["runs"]
     assert got["cmp"].startswith("<tr><th>metric</th><th>c</th><th>b_nodw</th><th>a</th></tr>")
-    assert ('<td>area.cell</td><td>1031</td><td>1032 <small class="up">+0.1%</small></td>'
+    assert ('<td>design__instance__area</td><td>1031</td><td>1032 <small class="up">+0.1%</small></td>'
             '<td>1030 <small class="dn">-0.1%</small></td>') in got["cmp"]
     assert "<td>power.A[k_small]</td><td>0.2000</td><td>0.3000 <small class=\"up\">+50.0%</small>" in got["cmp"]
-    assert got["traj"] == "<option>area.cell</option>"
+    assert got["traj"] == "<option>design__instance__area</option>"
     assert got["sc"].startswith("<option selected>label</option>")
 
 
