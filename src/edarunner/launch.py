@@ -392,6 +392,8 @@ def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dic
             ledger.add_event(actor, run_id, "stop", f"after-task: {why}")
         return True
     pid, pgids = heartbeat.get("driver_pid"), [g for g in heartbeat.get("pgids") or [] if g]
+    if pid is None and not pgids:
+        raise Refuse(f"{run_id}: no driver pid in the heartbeat; nothing to signal")
     print(f"{run_id}: TERM driver {pid} and pgids {pgids} on {host}" + (" (dry)" if dry_run else ""))
     if dry_run:
         return True

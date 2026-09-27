@@ -226,6 +226,20 @@ def test_stop_after_task_now_and_finished(demo: Path, capsys) -> None:
     assert len(texts) == 2 and texts[0] == "after-task: later" and texts[1].startswith("gone [driver")
 
 
+def test_stop_marks_a_queued_run_stopped(demo: Path, capsys) -> None:
+    q = seed(demo, "q", None, tree=False, state="queued")
+    code, out, _ = edr(capsys, "stop", "q@demo", "--why", "t", "--dry-run")
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert code == 0 and "(dry)" in out and led.run(q)["state"] == "queued"
+    code, out, _ = edr(capsys, "--json", "stop", "q@demo", "--why", "t")
+    assert code == 0 and json.loads(out)["data"] == {"run_id": q, "stopped": True}
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert led.run(q)["state"] == "stopped" and led.runs(state="queued") == []
+        assert [(e["kind"], e["text"]) for e in led.events(run_id=q)] == [("stop", "queued: t")]
+    code, _, err = edr(capsys, "stop", "q@demo", "--why", "t")
+    assert code == 1 and "no driver pid" in err
+
+
 def test_actions_for_the_bot(demo: Path, capsys) -> None:
     a, b = seed(demo, "a", "done"), seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
     add_metric(demo, a, "area_cell_um2", 1000.0)
