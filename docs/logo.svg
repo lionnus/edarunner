@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="264" height="64" viewBox="0 0 264 64">
+  <style>
+    .w { fill: #6e7781; font: 700 32px sans-serif; }
+    @media (prefers-color-scheme: dark) { .w { fill: #c9d1d9; } }
+  </style>
+  <path d="M20 3v7M32 3v7M44 3v7M20 54v7M32 54v7M44 54v7M3 20h7M3 32h7M3 44h7M54 20h7M54 32h7M54 44h7" fill="none" stroke="#3b7dd8" stroke-width="3" stroke-linecap="round"/>
+  <rect x="11" y="11" width="42" height="42" rx="7" fill="none" stroke="#3b7dd8" stroke-width="3.5"/>
+  <path d="M27 21v22l17-11z" fill="#f28c38"/>
+  <text class="w" x="76" y="43" textLength="180" lengthAdjust="spacing">edarunner</text>
+</svg>
