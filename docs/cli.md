@@ -108,25 +108,39 @@ Probes every host of the site file and prints one row per host:
 
 | Column | Holds |
 |---|---|
+| `ok` | the worst mark of the host |
 | `host` | the name in the site file |
-| `cores` | cores in use of total, the load average rounded, with a bar |
+| `cores` | a mark, cores in use of total, the load average rounded, with a bar |
 | `load` | the one-minute load average |
-| `ram GB` | RAM free of total |
+| `ram GB` | a mark, RAM free of total |
 | `mount` | the largest writable scratch of the host's list |
-| `scratch GB` | that mount, free of total, with a bar of the used part |
-| `gpu` | GPUs idle of total; idle means under 5 % utilisation and under 5 % memory in use |
+| `scratch GB` | a mark, that mount free of total, with a bar of the used part |
+| `gpu` | a mark, GPUs idle of total; idle means under 5 % utilisation and under 5 % memory in use |
 | `gpu GB` | GPU memory free of total, summed over the GPUs |
 | `tools` | processes that match `tool_procs`, ours and others |
 | `runs` | our driver processes |
 
+A mark tells how full a resource is. It is 🟢 below the first threshold
+of the `[marks]` table, 🟡 from the first, 🟠 from the second and 🔴
+from the third. A value exactly at a threshold takes the colour of that
+threshold. The used fraction is the load over the cores for `cores`, the
+used part of the total for `ram GB` and `scratch GB`, and the busy GPUs
+over all GPUs for `gpu`. A host without GPUs shows `-`, and a host that
+did not answer shows ⚫. `docs/configuration.md` lists the thresholds.
+
+The rows go by the worst mark, ⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by
+host name within one mark.
+
 The GPU columns come from `nvidia-smi`; a host without it shows `-`. A
 bar is green below 70 % used, yellow below 90 %, red above. `--narrow`
-keeps `host`, `cores`, `ram GB`, `scratch GB` and `gpu` in 48 columns.
-A host that did not answer shows its error in the row. `--json` gives the
-numbers: `cores`, `load`, `free_cores`, `free_ram_gb`, `total_ram_gb`,
-`mount`, `free_gb`, `total_gb`, `gpus`, `gpus_idle`, `gpu_used_gb`,
+keeps `ok`, `host`, `cores`, `ram GB`, `scratch GB` and `gpu` in 48
+columns, with no space between a mark and its number. A host that did
+not answer shows its error in the row. `--json` gives the numbers:
+`cores`, `load`, `free_cores`, `free_ram_gb`, `total_ram_gb`, `mount`,
+`free_gb`, `total_gb`, `gpus`, `gpus_idle`, `gpu_used_gb`,
 `gpu_total_gb`, `our_tool_procs`, `other_tool_procs` and `our_runs`.
-Exit 3 when a host did not answer.
+Each host also carries `marks`, an object with the marks of `cores`,
+`ram`, `scratch` and `gpu`. Exit 3 when a host did not answer.
 
 ## lic
 
