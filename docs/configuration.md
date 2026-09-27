@@ -277,14 +277,17 @@ tree with uncommitted changes.
 | `tasks` | the task ids of the task groups | `[]` |
 | `overrides` | `KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens | `{}` |
 | `netlist_stage` | a number the flow needs to find its netlist; `{netlist_stage}` | none |
-| `reuse` | `{ run_id = "..." }` or `{ label = "...", latest = true }`; start on the tree of that run | none |
+| `reuse` | `{ run_id = "..." }` or `{ label = "...", latest = true }`; start on the tree of that run. With `restore = "<name>"`, start on a fresh tree with the `collect_on_request.<name>` files of that run copied back from `data/results/` | none |
 
 `check` and `plan` verify an override key is an identifier, and that a
 stage of the job uses `{overrides}` in `cmd`, `resume` or `prepare`.
 They do not know the flow's own variables, so a key the flow ignores
 passes. A job with `reuse` runs on the host and the tree of the reused
 run, and takes its build tag and `{tree_id}`; a glob in `label` is an
-error. A task group in a job without `tasks` is a plan problem.
+error. With `restore`, the job takes the source tag, the build tag and
+`{tree_id}` of the reused run but is placed like a new job, so it runs
+after the tree was retired; `docs/running.md` shows the rerun. A task
+group in a job without `tasks` is a plan problem.
 
 ## Placeholders
 

@@ -275,3 +275,48 @@ directory, not a one-component path. `retire` also refuses:
 Run `edr watch --once` before a retire, so the results are on the head
 node, and `--dry-run` first, which prints every `rm -rf` target and the
 staged tree.
+
+## Archive, then clear the hosts
+
+At the end of a project the trees leave the hosts and the head node keeps
+what a paper, a review or a rerun needs. `data/results/<run id>/` is that
+archive: the watcher fills it with `collect` while a run goes, and
+`retire --collect` adds the larger files before the tree goes.
+
+Name the larger files once, per stage, under `collect_on_request`:
+
+```toml
+[stages.export]
+collect_on_request = { netlist = ["out/15/"], power_inputs = ["out/15/", "sdc/", "spef/"] }
+```
+
+Then, per batch:
+
+```sh
+edr watch --once                                     # the reports of every finished run
+edr retire --batch sweep2 --collect netlist,power_inputs --why "project done" --dry-run
+edr retire --batch sweep2 --collect netlist,power_inputs --why "project done"
+```
+
+The dry run lists every copy and every `rm -rf`. The real run copies
+first and deletes nothing when a copy failed, so a tree is gone only
+when its files are on the head node. The `artifacts` table records
+every copied file with its class, `always` or the list name, and
+`edr export` takes the small files from the same directory.
+
+A rerun starts from the archive through `restore` on `reuse`:
+
+```toml
+[[job]]
+label = "base"
+config = "base"
+stages = ["power"]
+tasks = ["softmax_197"]
+reuse = { label = "base", latest = true, restore = "power_inputs" }
+```
+
+`edr launch` stages the source tag of the archived run, syncs a fresh
+tree to a host that fits, copies the `power_inputs` files of the
+archived run into it at their old paths, and starts the stage. The new
+run keeps the `tree_id` and the build tag of the archived one, so every
+path in the flow resolves as before.

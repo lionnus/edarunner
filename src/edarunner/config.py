@@ -390,7 +390,7 @@ def _job(raw: object, index: int, project: Project, file: Path) -> Job:
             raise ConfigError(f"{file}: {at}.stages names unknown stage '{s}'")
     reuse = raw.get("reuse")
     if reuse is not None:
-        _table(reuse, {"run_id", "label", "latest"}, file, f"{at}.reuse")
+        _table(reuse, {"run_id", "label", "latest", "restore"}, file, f"{at}.reuse")
         label = reuse.get("label", "")
         if "run_id" not in reuse and not (label and reuse.get("latest")):
             raise ConfigError(f"{file}: {at}.reuse needs run_id, or label with latest = true")

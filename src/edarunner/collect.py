@@ -119,6 +119,27 @@ def collect_on_request(
     return c.result
 
 
+def restore_on_request(
+    project: Project, ssh: Ssh, ledger: Ledger, run: dict, name: str, host: str, root: str, dry_run: bool = False
+) -> CollectResult:
+    """Copy the `collect_on_request` list `name` of `run` from data/results/<run_id>/ into <host>:<root>."""
+    spec = load_spec(project, run)
+    heartbeat = load_json(project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
+    c = _Copier(project, ssh, ledger, {**run, "host": host, "root": root}, {}, dry_run,
+                spec_task_dirs(spec, str(run.get("root") or "")))
+    if c.result.failures:
+        return c.result
+    only = spec_stages(spec)
+    tasks = list(heartbeat.get("tasks") or {})
+    paths = [p for stage in project.stages.values() if only is None or stage.name in only
+             for p in c.render(stage, stage.collect_on_request.get(name, []), tasks)]
+    if not paths and not c.result.failures:
+        c.result.failures.append(f"no stage has collect_on_request.{name}")
+    for entry in dict.fromkeys(paths):
+        c.push(entry)
+    return c.result
+
+
 class _Copier:
     def __init__(
         self, project: Project, ssh: Ssh, ledger: Ledger, run: dict, heartbeat: dict, dry_run: bool,
@@ -205,6 +226,29 @@ class _Copier:
             code, size, name = line.split(" ", 2)
             if code[1:2] == "f":
                 self._record(base + name, int(size), klass)
+
+    def push(self, entry: str) -> None:
+        """Copy `entry` from data/results back to the same path under the tree on the host."""
+        src = f"{self.results}/{entry}"
+        if not Path(src).exists():
+            self.result.failures.append(f"{entry}: not in {self.results}")
+            return
+        dest = posixpath.join(self.root, entry)
+        remote = self.host != "local"
+        if not self.dry_run:
+            rc, _, err = self.ssh.run(self.host, f"mkdir -p {shlex.quote(posixpath.dirname(dest.rstrip('/')))}")
+            if rc != 0:
+                self.result.failures.append(f"{entry}: mkdir rc {rc}: {err.strip()}")
+                return
+        rc, out, err = self._rsync(src, f"{self.host}:{shlex.quote(dest)}" if remote else dest, remote)
+        if rc != 0:
+            first = err.strip().splitlines()[:1]
+            self.result.failures.append(f"{entry}: rsync rc {rc}: {first[0] if first else ''}")
+        for line in out.splitlines():
+            code, _, name = line.split(" ", 2)
+            if code[1:2] == "f":
+                self.result.files += 1
+                self.result.copied.append(name)
 
     def _rsync(self, src: str, dest: str, remote: bool) -> tuple[int, str, str]:
         site = self.project.site
