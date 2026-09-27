@@ -19,8 +19,6 @@ POLL_S = 5
 TICK_S = 0.5
 TAIL_LINES = 80
 GB = 1024.0 ** 3
-LIC_RE = (r"Users of %s:\s*\(Total of (\d+) licen[cs]es? issued;"
-          r"\s*Total of (\d+) licen[cs]es? in use\)")
 
 
 class Fail(Exception):
@@ -275,10 +273,11 @@ class Driver(object):
         return p.returncode
 
     def sh(self, cmd, cwd, timeout=120):
-        # type: (str, str, int) -> tuple
-        """Run a probe; return (rc, output), or (None, "") when it fails."""
+        # type: (object, str, int) -> tuple
+        """Run a probe, a shell string or an argv list; return (rc, output), or (None, "") when it fails."""
+        argv = cmd if isinstance(cmd, list) else [self.shell, "-c", cmd]
         try:
-            r = subprocess.run([self.shell, "-c", cmd], cwd=cwd, env=self.env, stdin=subprocess.DEVNULL,
+            r = subprocess.run(argv, cwd=cwd, env=self.env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                universal_newlines=True, timeout=timeout)
             return r.returncode, r.stdout
@@ -297,34 +296,47 @@ class Driver(object):
 
     # limits
 
-    def probe(self, lic):
+    def free_seats(self, tool):
         # type: (dict) -> int
-        """Return the free seats of a licence, or None when the probe fails."""
-        rc, out = self.sh(lic["probe"], self.root)
-        m = re.search(LIC_RE % re.escape(lic["feature"]), out) if rc == 0 else None
-        with self.lock:
-            self.hb["licence_unknown"] = m is None
-        if not m:
-            sys.stderr.write("licence probe failed for %s: rc=%s\n" % (lic["feature"], rc))
-            return None
-        return int(m.group(1)) - int(m.group(2))
+        """The first number the probe of a tool prints, or None when the probe fails."""
+        rc, out = self.sh(tool["probe"], self.root)
+        try:
+            free = int(out.split("\n", 1)[0].split()[0]) if rc == 0 else None
+        except (IndexError, ValueError):
+            free = None
+        if free is None:
+            sys.stderr.write("tool probe failed for %s: rc=%s %s\n" % (tool["name"], rc, out.strip()[:200]))
+        return free
 
-    def blocked(self, lic):
-        # type: (dict) -> bool
-        free = self.probe(lic)
-        return free is not None and free - int(lic.get("seats_per_task") or 1) < int(lic.get("floor") or 0)
+    def blocked(self, tools):
+        # type: (list) -> str
+        """Why a stage waits: the first tool with fewer free seats than needed, or None."""
+        for t in tools:
+            free, seats = self.free_seats(t), int(t.get("seats") or 1)
+            if free is not None and free < seats:
+                return "%s: %d free, %d needed" % (t["name"], free, seats)
+        return None
 
     def gate(self, st):
-        lic = st.get("licence")
-        if not lic:
+        tools = st.get("tools")
+        if not tools:
             return
-        self.set_phase("gate:" + st["name"], stage=st["name"])
-        t0 = time.time()
+        name = st["name"]
+        self.set_phase("gate:" + name, stage=name)
+        t0, last = time.time(), None
         gate_max = float(self.limits.get("gate_max_s") or 0)
-        while self.blocked(lic):
+        while True:
+            why = self.blocked(tools)
+            if why != last:
+                sys.stderr.write("gate %s: %s\n" % (name, "wait for " + why if why else "open"))
+                last = why
+                with self.lock:
+                    self.hb["gate"] = why
+            if not why:
+                return
             left = gate_max - (time.time() - t0)
             if left <= 0:
-                raise Fail(4, "FAILED:" + st["name"])
+                raise Fail(4, "FAILED:" + name)
             self.wait(min(POLL_S, left))
 
     def host_full(self):
@@ -471,7 +483,7 @@ class Driver(object):
             except FileExistsError:
                 pass
         parallel = max(1, int(st.get("parallel") or 1))
-        lic, budget = st.get("licence"), st.get("budget") or {}
+        tools, budget = st.get("tools") or [], st.get("budget") or {}
         per_task = budget.get("per") == "task"
         running = {}  # id -> (proc, task, started, log)
         skipped = set()
@@ -513,7 +525,7 @@ class Driver(object):
                         self.hb["counts"]["skipped"] += 1
                     self.record_task(tid, "skipped")
                     continue
-                if lic and self.blocked(lic):
+                if self.blocked(task.get("tools") or tools):
                     gate_until = time.time() + POLL_S
                     break
                 try:

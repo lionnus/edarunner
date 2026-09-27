@@ -132,14 +132,39 @@ def test_keep_file_extends_the_budget(tmp_path: Path) -> None:
 
 
 def test_gate_waits_then_fails(tmp_path: Path) -> None:
-    spec = render_spec(tmp_path, stages=("synth",), env={"DEMO_LIC_USED": "9"}, limits={"gate_max_s": 3})
+    spec = render_spec(tmp_path, stages=("synth",), env={"DEMO_SEATS_USED": "10"}, limits={"gate_max_s": 3})
     proc = start(spec)
     t0 = time.time()
-    wait_for(spec, lambda h: h["phase"] == "gate:synth")
+    hb = wait_for(spec, lambda h: h["phase"] == "gate:synth" and h.get("gate"))
+    assert hb["gate"] == "demo: 0 free, 1 needed"
     rc, hb = finish(proc, spec)
     assert time.time() - t0 >= 3
     assert (rc, hb["phase"], hb["exit"]) == (4, "FAILED:synth", 4)
     assert not (Path(spec["root"]) / "log" / "synth.log").exists()
+
+
+def test_gate_waits_then_passes(tmp_path: Path) -> None:
+    seats = tmp_path / "seats"
+    seats.write_text("1 4\n")
+    spec = render_spec(tmp_path, stages=("synth",))
+    spec["stages"][0]["tools"] = [{"name": "sim", "seats": 2, "probe": ["cat", str(seats)]}]
+    proc = start(spec)
+    hb = wait_for(spec, lambda h: h.get("gate"))
+    assert hb["phase"] == "gate:synth" and hb["gate"] == "sim: 1 free, 2 needed" and hb["last_cmd"] is None
+    seats.write_text("2 4\n")
+    rc, hb = finish(proc, spec)
+    assert (rc, hb["phase"], hb["gate"]) == (0, "done", None)
+    log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log").read_text()
+    assert log.splitlines() == ["gate synth: wait for sim: 1 free, 2 needed", "gate synth: open"]
+
+
+def test_gate_lets_a_failed_probe_through(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",))
+    spec["stages"][0]["tools"] = [{"name": "sim", "seats": 1, "probe": ["false"]}]
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"]) == (0, "done") and "gate" not in hb
+    log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log").read_text()
+    assert log.startswith("tool probe failed for sim: rc=1")
 
 
 def test_checkpoint_without_resume_fails_before_the_command(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ tests build on it, and it is the shortest way to see the tool at work.
 |---|---|---|
 | `flow/flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [KEY=VALUE ...]` | synthesis, place and route, export | one step per second; writes `reports/<n>/area.rpt` and `reports/<n>/qor.rpt`; `export` writes `out/11/netlist.v` |
 | `flow/kernel.sh <kernel> <test> [KEY=VALUE ...]` | a gate-level power simulation | sleeps `DEMO_SLEEP` seconds (default 2); writes a 1 MiB `wave.vcd`, `power/reports/power.csv` and `power/phases.json` |
-| `flow/lmstat.sh` | the FlexLM probe | prints one `Users of demo:` line; 10 seats, `DEMO_LIC_USED` in use (default 2) |
+| `flow/seats.sh` | the seat probe of the tool `demo` | prints `free total`; 10 seats, `DEMO_SEATS_USED` in use (default 2) |
 
 The steps are `setup`, `analyze`, `elaborate` and `synth` (stage `synth`),
 then `cts` and `route` (stage `pnr`), then `export`. `FIRST_STAGE` makes a
@@ -29,7 +29,7 @@ Two switches make failures:
 | File | Holds |
 |---|---|
 | `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; five metrics; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
-| `site.toml` | one host, `local`; the scratch `/tmp/edr-demo`; the licence `demo` |
+| `site.toml` | one host, `local`, with the tool `demo` in version `1.0`; the scratch `/tmp/edr-demo`; the tool `demo` with 10 seats and its probe |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
 | `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
 | `setup.sh` | makes `repo/`, a git repository with `flow/`; the source the batch stages |
@@ -77,7 +77,7 @@ A batch name is used once, so each try gets a new job file:
 
 ```sh
 sed 's/^batch = .*/batch = "gate"/' jobs/demo.toml > jobs/gate.toml
-DEMO_LIC_USED=9 edr launch gate      # one free seat, floor 2: the gate blocks
+DEMO_SEATS_USED=10 edr launch gate   # no free seat: the gate blocks
 edr status --triage                  # after 30 s: failed, FAILED:synth, exit 4
 ```
 

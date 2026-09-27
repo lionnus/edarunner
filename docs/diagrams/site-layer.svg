@@ -1,20 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="620" viewBox="0 0 960 620" role="img" aria-label="How a flow plugs into edarunner: the core, the project edr.toml and the private site.toml">
 <style>
-  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
-  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
-  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
-  .run { fill: #f28c38; }
-  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
-  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
-  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
-  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .box { fill: #ffffff; stroke: #0d1117; stroke-width: 2; }
+  .frame { fill: none; stroke: #0d1117; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #0d1117; stroke-width: 1.5; }
+  .run { fill: #008000; }
+  .t { font-family: Helvetica, Arial, sans-serif; font-size: 14px; fill: #0d1117; }
+  .s { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #0d1117; }
   .m.key { fill: #6e7781; }
   .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
-  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  .al { font-family: Helvetica, Arial, sans-serif; font-size: 11px; fill: #6e7781; }
   @media (prefers-color-scheme: dark) {
     .box { fill: #0d1117; }
     .frame-fill { fill: #161b22; }
-    .t, .m { fill: #c9d1d9; }
+    .t, .m { fill: #e6edf3; }
+    .box, .frame, .frame-fill { stroke: #e6edf3; }
   }
 </style>
 <defs>
@@ -25,7 +26,7 @@
 
 <!-- Core -->
 <rect class="frame-fill" x="24" y="24" width="912" height="104" rx="10"/>
-<text class="h" x="40" y="48">CORE · KNOWS NO EDA TOOL</text>
+<text class="h" x="40" y="48">CORE, KNOWS NO EDA TOOL</text>
 <text class="m" x="920" y="48" text-anchor="end">edarunner</text>
 <rect class="box" x="40" y="64" width="160" height="44" rx="7"/>
 <text class="t" x="120" y="91" text-anchor="middle">Stages</text>
@@ -41,7 +42,7 @@
 
 <!-- Project -->
 <rect class="frame" x="24" y="176" width="536" height="240" rx="10"/>
-<text class="h" x="40" y="200">PROJECT · IN GIT</text>
+<text class="h" x="40" y="200">PROJECT, IN GIT</text>
 <text class="m" x="544" y="200" text-anchor="end">edr.toml</text>
 <rect class="box" x="40" y="216" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="238">Each stage</text>
@@ -55,7 +56,7 @@
 
 <!-- Site -->
 <rect class="frame" x="656" y="176" width="280" height="240" rx="10"/>
-<text class="h" x="672" y="200">PRIVATE · NOT IN GIT</text>
+<text class="h" x="672" y="200">PRIVATE, NOT IN GIT</text>
 <text class="m" x="920" y="200" text-anchor="end">site.toml</text>
 <rect class="box" x="672" y="216" width="248" height="52" rx="7"/>
 <text class="t" x="686" y="238">FlexLM licence probes</text>

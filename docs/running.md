@@ -81,9 +81,12 @@ it under `data[].spec`. The driver fills two placeholders itself:
 | `stages` | the stages in run order |
 
 A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
-`steps`, `progress`, `budget`, `retry` and `licence`. A task group holds
-`parallel`, `prepare`, `after_each`, `budget`, `licence` and `tasks`,
-each task with `id`, `cmd`, `dir`, `needs` and `budget`.
+`steps`, `progress`, `budget`, `retry` and `tools`. A task group holds
+`parallel`, `prepare`, `after_each`, `budget`, `tools` and `tasks`, each
+task with `id`, `cmd`, `dir`, `needs`, `budget` and, when its own
+`needs` names tools, `tools`. A `tools` entry is `{"name", "seats",
+"probe"}`: the seats needed and the probe argv, rendered; a tool without
+a probe is not in the list.
 
 ### The heartbeat
 
@@ -103,7 +106,8 @@ a torn file.
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
 | `last_cmd`, `last_log`, `log` | the last command, the last three lines of the current log, its path |
 | `keep_hours` | the hours the keep file adds |
-| `licence_unknown`, `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
+| `gate` | why the run waits at a gate, such as `fc: 0 free, 1 needed`; null when it does not |
+| `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
 
 A heartbeat keeps its last phase after the driver dies. `edr status
 --live` asks the host whether the driver exists; the watcher marks the
@@ -114,14 +118,14 @@ run `dead` after `dead_s`.
 | Phase | Exit | Meaning |
 |---|---|---|
 | `setup` | | the spec is loaded, the first disk check runs |
-| `gate:<stage>` | | the driver waits for licence seats |
+| `gate:<stage>` | | the driver waits for the seats of a tool |
 | `stage:<stage>` | | one command runs |
 | `retry:<stage>:<n>` | | attempt `n` after a failure that matched `retry.match` |
 | `group:<stage>` | | a task group runs |
 | `done` | 0 | every stage ran; no task failed or was skipped |
 | `INCOMPLETE:<n>f<m>s` | 8 | every stage ran; `n` tasks failed, `m` were skipped |
 | `FAILED:<stage>` | 3 | free space at `root` is below `needs.disk_gb` of the first stage |
-| `FAILED:<stage>` | 4 | the licence gate timed out after `gate_max_s` |
+| `FAILED:<stage>` | 4 | the tool gate timed out after `gate_max_s` |
 | `FAILED:<stage>` | 5 | a command or `prepare` failed with no retry left, or the driver hit an error |
 | `FAILED:<stage>` | 2 | a checkpoint on a stage without `resume` |
 | `OVER_BUDGET:<stage>` | 9 | a budget passed; the command ended or was killed |
@@ -137,15 +141,20 @@ On `SIGTERM`, `SIGHUP` or `SIGINT` the driver sets `killed_by`, forwards
 the signal to every process group it started, waits up to 10 s, sends
 `SIGKILL` to what is left, writes a final heartbeat and exits 10.
 
-## Licence gates
+## Tool gates
 
-A stage with `needs.licence` starts with `gate:<stage>`. The driver runs
-the probe of the licence, reads the FlexLM line, and waits while the
-free seats minus the seats it needs are below the `floor`, polling every
-5 s, up to `gate_max_s`; then the stage fails with exit 4. A probe that
-fails counts as unknown: the driver logs it, sets `licence_unknown`, and
-runs the stage. In a task group the check runs before each claim, and a
-short pool delays the next claim by 5 s.
+A stage whose `needs.tools` names a tool with a probe starts with
+`gate:<stage>`. The driver runs the probe argv from the spec in the run
+tree, with the spec `env`. The first number on the first line is the
+free seats. The driver waits while that number is below the seats the
+stage needs. It polls every 5 s, up to `gate_max_s`; then the stage
+fails with exit 4. The reason goes into the driver log as `gate <stage>:
+wait for <tool>: <free> free, <needed> needed`, and into the heartbeat
+as `gate`. A probe that fails or prints no number counts as unknown: the
+driver logs it and runs the stage. In a task group the check runs before
+each claim, with the task's own `tools` when it has them. A short pool
+delays the next claim by 5 s. The driver knows no licence manager; the
+site hook does that work.
 
 ## Retries
 
