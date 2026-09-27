@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -11,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import collect, config, hosts, sync
+from . import __version__, collect, config, hosts, sync
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
 from .db import Database
@@ -286,8 +287,17 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
 # --- launch
 
 def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: bool = False) -> Path:
-    """Write <state_dir>/<batch>/<run_id>.spec.json by a temporary file and rename; the spec records `driver`."""
+    """Write <state_dir>/<batch>/<run_id>.spec.json by a temporary file and rename.
+
+    The spec records `driver` and a `record` of what made the run: the edarunner version, the sha256
+    of the driver, and the version of each tool the site file gives for the host.
+    """
     plan_.spec["driver"] = str(driver)
+    plan_.spec["record"] = {
+        "edarunner": __version__,
+        "driver_sha256": hashlib.sha256(DRIVER_SRC.read_bytes()).hexdigest(),
+        "tools": {k[5:-8]: v for k, v in plan_.values.items() if k.startswith("tool.") and k.endswith(".version") and v},
+    }
     path = Path(state) / batch / f"{plan_.run_id}.spec.json"
     if not dry_run:
         config.save_json(path, plan_.spec)

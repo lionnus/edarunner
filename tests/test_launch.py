@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import edarunner
 from edarunner import config, launch, sync
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
@@ -217,6 +218,7 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     spec = json.loads((state / f"{run_id}.spec.json").read_text())
     assert Path(spec["driver"]).parent == tmp_path / "state" / "bin" and Path(spec["driver"]).is_file()
     assert [s["name"] for s in spec["stages"]] == ["synth"]
+    assert spec["record"]["edarunner"] == edarunner.__version__ and len(spec["record"]["driver_sha256"]) == 64
     assert (Path(row["root"]) / "flow" / "flow.sh").exists()
     assert db.run(run_id)["state"] == "running" and db.batches()[0]["batch"] == "demo"
     assert [e["kind"] for e in db.events(run_id=run_id)] == ["launch"]

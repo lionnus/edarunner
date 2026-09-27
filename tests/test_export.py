@@ -24,7 +24,8 @@ POWER_FLAT = "phase,total_w\nPHASE_A,0.100\nWHOLE,0.250\n"
 
 
 @pytest.fixture
-def world(tmp_path):
+def world(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))  # the state directory is under ~
     root = tmp_path / "demo"
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     project = config.load_project(root)
@@ -65,12 +66,21 @@ def _read_csv(path):
 
 def test_export_one_design(world, tmp_path):
     project, db = world
+    config.save_json(project.state_dir / "demo" / f"{RUN_A}.spec.json",
+                     {"record": {"edarunner": "9.9", "driver_sha256": "ab12", "tools": {"fc": "V-2023.12"}}})
+    db.upsert_stage_run({"run_id": RUN_A, "stage": "synth", "status": "done", "started": 100, "ended": 150})
     out = tmp_path / "paper" / "export"
     manifest = export.export(project, db, "aaa111", out)
 
     assert [r["run_id"] for r in manifest["runs"]] == [RUN_A, RUN_B]
-    assert manifest["runs"][0] == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "src": "aaa111",
+    record = manifest["runs"][0]["record"]
+    assert {k: v for k, v in manifest["runs"][0].items() if k != "record"} == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "src": "aaa111",
                                    "host": "local", "phase": "done"}
+    # The spec of RUN_A names the versions; RUN_B has no spec, so they are empty.
+    assert record == {"host": "local", "started": 100, "ended": 200, "edarunner": "9.9", "driver_sha256": "ab12",
+                      "tools": {"fc": "V-2023.12"}, "stages": [{"stage": "synth", "task": "", "attempt": 1,
+                                                                 "status": "done", "started": 100, "ended": 150}]}
+    assert manifest["runs"][1]["record"]["tools"] == {} and manifest["runs"][1]["record"]["ended"] is None
     assert manifest["source"] == "aaa111" and manifest["project"] == "demo"
     assert manifest["schema"] == 1 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [RUN_B]
