@@ -71,7 +71,7 @@ def test_export_one_design(world, tmp_path):
     assert [r["run_id"] for r in manifest["runs"]] == [RUN_A, RUN_B]
     assert manifest["runs"][0] == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "src": "aaa111",
                                    "host": "local", "phase": "done"}
-    assert manifest["source"] == "aaa111"
+    assert manifest["source"] == "aaa111" and manifest["project"] == "demo"
     assert manifest["schema"] == 1 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [RUN_B]
     assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2}
