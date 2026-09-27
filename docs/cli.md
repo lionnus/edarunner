@@ -31,6 +31,12 @@ A read verb (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
 never creates `data/edr.db`. Without a database it reads an empty ledger
 in memory.
 
+A table on a terminal has colour: a run is green while it runs, cyan
+when queued, yellow when stale, red when dead, hung, over budget, an
+orphan or failed, and dim when done or retired. A pipe or the `NO_COLOR`
+variable gets the same text with no escape code, and `--json` never
+carries any.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -98,10 +104,29 @@ The last `N` events (default 50) in time order: time, actor (`user`,
 edr hosts [--narrow]
 ```
 
-Probes every host of the site file: free cores, free RAM, free scratch,
-the mount it would use, our and other tool processes, and our runs.
-`--narrow` drops the last three columns. Exit 3 when a host did not
-answer.
+Probes every host of the site file and prints one row per host:
+
+| Column | Holds |
+|---|---|
+| `host` | the name in the site file |
+| `cores` | cores in use of total, the load average rounded, with a bar |
+| `load` | the one-minute load average |
+| `ram GB` | RAM free of total |
+| `mount` | the largest writable scratch of the host's list |
+| `scratch GB` | that mount, free of total, with a bar of the used part |
+| `gpu` | GPUs idle of total; idle means under 5 % utilisation and under 5 % memory in use |
+| `gpu GB` | GPU memory used of total, summed over the GPUs |
+| `tools` | processes that match `tool_procs`, ours and others |
+| `runs` | our driver processes |
+
+The GPU columns come from `nvidia-smi`; a host without it shows `-`. A
+bar is green below 70 % used, yellow below 90 %, red above. `--narrow`
+keeps `host`, `cores`, `ram GB`, `scratch GB` and `gpu` in 48 columns.
+A host that did not answer shows its error in the row. `--json` gives the
+numbers: `cores`, `load`, `free_cores`, `free_ram_gb`, `total_ram_gb`,
+`mount`, `free_gb`, `total_gb`, `gpus`, `gpus_idle`, `gpu_used_gb`,
+`gpu_total_gb`, `our_tool_procs`, `other_tool_procs` and `our_runs`.
+Exit 3 when a host did not answer.
 
 ## lic
 

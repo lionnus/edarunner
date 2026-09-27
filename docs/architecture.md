@@ -5,8 +5,8 @@ from `plan` to `export`, and lists the rules every change keeps.
 
 ## Three programs
 
-- `edr`, the controller: Python 3.11 or newer, standard library only, on
-  the head node. `src/edarunner/`.
+- `edr`, the controller: Python 3.11 or newer, the standard library plus
+  `rich`, on the head node. `src/edarunner/`.
 - `edr_driver.py`, the driver: one file, Python 3.6 or newer, standard
   library only, copied to the state directory at launch. It runs one run
   and never imports the package. `src/edarunner/driver/`.
@@ -34,7 +34,7 @@ commands, the report files and the numbers in them.
 | `metrics.py` | the four parsers, `expr`, extraction, the FlexLM line |
 | `ledger.py` | the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
-| `board.py` | the text boards, `status.html`, `compare.html` |
+| `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
 | `notify/__init__.py`, `notify/telegram.py` | the notifier interface and the bot |
 | `cli.py` | the verbs, the exit codes, `--json`, the project lookup |
 
@@ -92,7 +92,8 @@ changes the driver and the tests in the same commit.
   a process pattern.
 - A swallowed failure is worse than a crash: a loop that continues
   counts what it skipped and reports the count at the end.
-- Standard library only, in the controller and the driver.
+- Standard library plus `rich` in the controller; the driver stays
+  standard library only.
 - The driver stays on the Python 3.6 subset and never imports the
   package; a feature that subset cannot express belongs in the
   controller.

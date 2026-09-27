@@ -10,7 +10,8 @@ copies into the state directory.
 The machine that runs `edr` and the watcher.
 
 - Linux with GNU coreutils and procps-ng 3.3.10 or newer.
-- Python 3.11 or newer for the controller.
+- Python 3.11 or newer for the controller, with the `rich` package for
+  the tables; `uv tool install` brings it.
 - `ssh` with keys that work under `BatchMode=yes`: no password prompt and
   no host key prompt for any host.
 - `rsync`, `git` and `python3` on `PATH`, and `nproc`, `df`, `ps`, `awk`,
@@ -29,6 +30,8 @@ Every host in `[hosts]` of the site file, and `local`, the head node.
 - A POSIX `sh`. Every remote command runs under `sh -c`, so the login
   shell can be `tcsh` or `csh`.
 - GNU coreutils: `nproc`, `df -Pk`, `stat -c %s`, `readlink`, `nohup`.
+- `nvidia-smi` on `PATH` when the host has GPUs to report; without it the
+  probe reports none.
 - procps-ng 3.3.10 or newer: `ps -o etimes,pcpu,cputimes` and `ps -o pgid`.
 - util-linux `setsid`. The driver starts in its own session.
 - `python3` 3.6 or newer on the login `PATH`. The driver uses the

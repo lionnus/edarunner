@@ -7,10 +7,11 @@ every change keeps. A change that moves a responsibility updates that
 page in the same commit. The user pages under `docs/` describe the
 behaviour; a change in behaviour changes the page that describes it.
 
-## Standard library only
+## Standard library, plus rich in the controller
 
-The controller needs Python 3.11 or newer and nothing outside the standard
-library. `pytest` is the only development dependency, and `matplotlib` the
+The controller needs Python 3.11 or newer, the standard library and
+`rich` for the tables on a terminal. The driver stays standard library
+only. `pytest` is the only development dependency, and `matplotlib` the
 only optional extra, for plots. A pull request that adds a dependency
 needs a reason the standard library cannot meet.
 

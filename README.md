@@ -65,6 +65,34 @@ two runs end `done` within a minute, and `edr watch --once` after that
 collects everything. `examples/local-demo/README.md` says what the flow
 fakes, where the files land and how to make a run fail.
 
+## See the farm
+
+`edr status` draws the board: one line per run, live runs first and dead
+ones on top. The state has a colour on a terminal and none in a pipe.
+
+```text
+#   label  host   state    phase        stage/step  age  fail/done  cost
+────────────────────────────────────────────────────────────────────────
+#1  wide   hostB  stale    group:power  power/4     12m      1f/3d   9.6
+#2  base   hostA  running  stage:pnr    pnr/4        1m      0f/0d   6.4
+#3  small  hostA  done     done         export      35m      0f/4d   0.0
+```
+
+`edr status --narrow` fits the board in 48 columns for an ssh app on a
+phone. The Telegram bot keeps the same narrow board pinned in the chat
+and rewrites it every watcher cycle.
+
+`edr hosts` shows each machine: cores used of total, RAM and scratch free
+of total, GPUs idle of total with their memory, tool processes ours and
+others, and our runs. A host without `nvidia-smi` shows `-` for the GPUs.
+
+```text
+host   cores            load   ram GB  mount      scratch GB            gpu  gpu GB  tools  runs
+────────────────────────────────────────────────────────────────────────────────────────────────
+hostA  52/64  ██████░░  51.5  120/256  /scratch     800/2000  █████░░░  1/4  30/320    4/2     2
+hostB   3/32  █░░░░░░░   3.1   98/128  /scratch2    150/1000  ███████░    -       -    1/0     1
+```
+
 ## How it works
 
 A project declares its flow in `edr.toml` as stages that run in order. A
@@ -174,8 +202,9 @@ Alpha. One PhD student maintains it as time allows. It has run a
 commercial place-and-route and power flow and an open Yosys and OpenROAD
 flow; `docs/flows.md` shows both configs. Issues and adapters for other
 flows are welcome. `CONTRIBUTING.md` has the rules; the short version is
-standard library only, the driver on the Python 3.6 subset, no site
-strings in the repository, and tests under `tmp_path`.
+the standard library plus `rich` in the controller, the driver on the
+Python 3.6 subset with the standard library only, no site strings in the
+repository, and tests under `tmp_path`.
 
 ## Licence
 

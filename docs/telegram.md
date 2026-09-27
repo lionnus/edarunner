@@ -74,7 +74,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 |---|---|
 | `/status` | the narrow board |
 | `/events [n]` | the last `n` events, default 10 |
-| `/hosts` | free cores, RAM and scratch per host |
+| `/hosts` | cores, RAM, scratch and GPUs per host, used or free of total |
 | `/lic` | free licence seats |
 | `/board` | pin a new board message |
 | `/keep <handle> [hours]` | add hours to the running stage or task, default 12 |
