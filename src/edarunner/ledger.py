@@ -44,10 +44,11 @@ def _text(value: Any) -> Any:
 class Ledger:
     """One SQLite database, WAL mode, head node only. Use as a context manager."""
 
-    def __init__(self, path: str | os.PathLike) -> None:
+    def __init__(self, path: str | os.PathLike, threads: bool = False) -> None:
+        """`threads=True` lets another thread use the connection; the caller serialises the calls."""
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path)
+        self.db = sqlite3.connect(self.path, check_same_thread=not threads)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.init_schema()

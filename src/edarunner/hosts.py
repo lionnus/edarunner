@@ -1,13 +1,15 @@
 """The ssh wrapper, the host probe and the placement. See docs/design.md 3.1, 3.2, 6.
 
-Every remote command is one short shell string. The host `local` runs on
-the head node without ssh.
+Every remote command is one short shell string, run by `sh -c` so the
+login shell of the host (tcsh on many farms) never parses it. The host
+`local` runs on the head node without ssh.
 """
 
 from __future__ import annotations
 
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass, replace
 
@@ -15,6 +17,8 @@ from .guards import Refuse
 from .model import Job, Needs, Placement, Project, Site
 
 TIMEOUT_RC = 255
+# What the head node runs itself: the controller calls the first four, the `local` host the rest.
+HEAD_TOOLS = ("ssh", "rsync", "git", "python3", "nproc", "df", "ps", "awk", "stat", "readlink")
 _SEP = "@@"
 _SIG_RE = re.compile(r"^[A-Z0-9]+$")
 
@@ -158,7 +162,7 @@ class Ssh:
             argv = ["/bin/bash", "-c", cmd] if isinstance(cmd, str) else list(cmd)
         else:
             text = cmd if isinstance(cmd, str) else shlex.join(cmd)
-            argv = ["ssh", *self.site.ssh_options, host, text]
+            argv = ["ssh", *self.site.ssh_options, host, "sh -c " + shlex.quote(text)]
         try:
             p = subprocess.run(
                 argv,
@@ -220,6 +224,19 @@ class Ssh:
             if len(parts) == 5 and rx.search(parts[3]):
                 rows.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3], parts[4]))
         return rows
+
+    def check_local(self) -> list[str]:
+        """The faults of the head node, as `local: ...` lines; see docs/requirements.md."""
+        missing = [t for t in HEAD_TOOLS if shutil.which(t) is None]
+        problems = [f"local: {t} not on PATH" for t in missing]
+        if "local" not in self.site.hosts:  # else the host probe of the caller covers it
+            try:
+                self.probe("local")
+            except HostError as e:
+                problems.append(str(e))
+        if "ps" not in missing and self.run("local", "ps -o etimes=,pcpu=,cputimes= -p $$")[0] != 0:
+            problems.append("local: ps has no etimes, pcpu or cputimes column; procps-ng 3.3.10 or newer")
+        return problems
 
     def scratch_free_gb(self, host: str, path: str) -> float:
         """Free GB of the filesystem under `path` on `host`."""
