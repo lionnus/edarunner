@@ -219,7 +219,7 @@ def config_page() -> str:
 # the run states
 
 def states_page() -> str:
-    row = {"label": "<label>", "batch": "<batch>", "src": "<src>", "stage": "<stage>"}
+    row = {"label": "<label>", "batch": "<batch>", "src": "<src>", "stage": "<stage>", "phase": "<phase>"}
     hb = {"stage": "<stage>", "step_name": "<step>"}
     rows = [[code(s), tgfmt.MARK.get(s, ""), st.test, "yes" if st.alert else "", st.action,
              code(board.triage_cmd(row, s, hb))] for s, st in watch.STATES.items()]

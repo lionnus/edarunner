@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from collections import Counter
@@ -272,7 +273,8 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
         return f"edr stop {h} {STOP_FLAGS[state]}"
     if state == "done":
         return f"edr export --design {row.get('src')} --out exports/{row.get('src')}"
-    return f"edr retire {h} --why {state}"
+    # The reason names what was observed, the phase the run ended with; without one the person writes it.
+    return f"edr retire {h} --why {shlex.quote(str(row.get('phase') or '<why>'))}"
 
 
 def wide(rows: list[Row], now: float | None = None) -> Table | str:

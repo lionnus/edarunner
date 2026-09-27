@@ -242,7 +242,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
     assert "One source is checked out under" in out and ": `abc1234` (batch `demo`)." in out
     assert "One run has not finished:" in out and "`c@demo` is running in stage `synth` at step 2 (elaborate) on `local`" in out
-    assert "`b@demo` (failed): `edr retire b@demo --why failed`" in out
+    assert "`b@demo` (failed): `edr retire b@demo --why FAILED:synth`" in out
     assert "user recorded `launch` on `a@demo`: local /x" in out and f"`{demo / 'AGENTS.md'}`" in out
     code, out, _ = edr(capsys, "brief", "--json")
     data = json.loads(out)["data"]
@@ -278,10 +278,10 @@ def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> No
     assert "  - Step 2 (elaborate) started" in out and "watch recorded `failed` on `b@demo`: synth ended FAILED" in out
     assert "Error: no licence" in out and "line 11\n" in out and "line 10\n" not in out
     assert "`design__instance__area` is 12.5 u at `synth` step 3." in out
-    assert "The triage proposes `edr retire b@demo --why failed`." in out and "the run ended `FAILED`" in out
+    assert "The triage proposes `edr retire b@demo --why FAILED:synth`." in out and "the run ended `FAILED`" in out
     code, out, _ = edr(capsys, "--json", "brief", "--run", "b@demo")
     data = json.loads(out)["data"]
-    assert code == 0 and data["command"] == "edr retire b@demo --why failed" and data["state"] == "failed"
+    assert code == 0 and data["command"] == "edr retire b@demo --why FAILED:synth" and data["state"] == "failed"
     assert {"runtime", "events", "log_tail", "metrics", "reason"} <= data.keys()
     code, _, err = edr(capsys, "brief", "--run", "nope@demo")
     assert code == 1 and "nope" in err

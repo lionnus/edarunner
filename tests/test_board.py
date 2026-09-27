@@ -244,3 +244,9 @@ def test_host_marks_and_worst():
     assert board.host_marks(None, Marks()) == dict.fromkeys(("cores", "ram", "scratch", "gpu"), "⚫")
     assert board.worst_mark(["🟢", "-", "🟡"]) == "🟡" and board.worst_mark(["🔴", "⚫"]) == "⚫"
     assert board.worst_mark(["-"]) == "🟢"
+
+
+def test_the_proposed_retire_names_the_phase_or_asks_for_a_reason() -> None:
+    row = {"label": "a", "batch": "demo", "phase": "KILLED:SIGTERM"}
+    assert board.triage_cmd(row, "killed", {}) == "edr retire a@demo --why KILLED:SIGTERM"
+    assert board.triage_cmd({**row, "phase": None}, "imported", {}) == "edr retire a@demo --why '<why>'"
