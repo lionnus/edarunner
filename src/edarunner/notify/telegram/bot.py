@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+REPLY_DAYS = 7  # how long a reply to an alert still finds its run
+
 
 class TelegramBot(Notifier):
     """One bot, one chat, one poll thread."""
@@ -64,10 +66,29 @@ class TelegramBot(Notifier):
         markup = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]} if (
             buttons and self.project.telegram_poll) else None
         try:
-            return str(self._upsert(f"alert:{kind}:{run_id}", fmt.alert(self.project.project, text, cmd), markup))
+            mid = self._upsert(f"alert:{kind}:{run_id}", fmt.alert(self.project.project, text, cmd), markup)
         except ApiError as e:
             log.warning("telegram: %s", e)
             return None
+        if buttons:
+            self._remember(mid, run_id)
+        return str(mid)
+
+    def _remember(self, msg_id: int, run_id: str) -> None:
+        """Keep the run of an alert for REPLY_DAYS, so a reply to it needs no handle."""
+        now = time.time()
+        with self._lock:
+            runs = {k: v for k, v in self._state.get("replies", {}).items() if now - v[1] < REPLY_DAYS * 86400}
+            runs[str(msg_id)] = [run_id, now]
+            self._state["replies"] = runs
+            self.ledger.set_kv("telegram", self._state)
+
+    def _replied_run(self, msg: dict) -> str | None:
+        """The run id of the alert that `msg` replies to, or None."""
+        target = (msg.get("reply_to_message") or {}).get("message_id")
+        with self._lock:
+            hit = self._state.get("replies", {}).get(str(target))
+        return hit[0] if hit and time.time() - hit[1] < REPLY_DAYS * 86400 else None
 
     def edit(self, msg_id: str, text: str) -> None:
         """Rewrite one message; this drops its buttons."""
@@ -173,7 +194,8 @@ class TelegramBot(Notifier):
             self._callback(q)
         elif msg and msg.get("text", "").startswith("/"):
             parts = msg["text"].split()
-            self._reply(self.commands.run(parts[0][1:].split("@")[0], parts[1:], msg["text"]), thread)
+            name, run = parts[0][1:].split("@")[0], self._replied_run(msg)
+            self._reply(self.commands.run(name, parts[1:], msg["text"], run), thread)
 
     def _in_topic(self, thread: int | None) -> bool:
         """True when the bot obeys a message of forum thread `thread`; the first one of a thread prints its id."""

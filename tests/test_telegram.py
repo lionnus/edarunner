@@ -18,6 +18,7 @@ from edarunner.model import BotCommand, Host, Site, Telegram
 from edarunner.notify import alert_buttons, make_notifiers
 from edarunner.notify.telegram import TelegramBot
 from edarunner.notify.telegram import api as tgapi
+from edarunner.notify.telegram import bot as tgbot
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import BotApi
 from edarunner.notify.telegram.format import LIMIT, fit, pre
@@ -57,6 +58,10 @@ class FakeActions:
 
         return f
 
+    def run_info(self, handle: str) -> dict:
+        self.calls.append(("run_info", (handle,), {}))
+        return {"handle": "a@demo", "run_id": handle, "run_root": "/scratch/edr/demo/" + handle, "host": "hostA"}
+
 
 class FakeLedger:
     def __init__(self) -> None:
@@ -80,6 +85,7 @@ COMMANDS = {
     "bg": BotCommand("bg", "bg", ["sleep", "0"], detach=True, reply="started {project}"),
     "ask": BotCommand("ask", "ask", ["echo", "{question}"], args={"question": "^[\\w ?]{1,40}$"}),
     "slow": BotCommand("slow", "slow", ["sleep", "5"], timeout_s=1),
+    "where": BotCommand("where", "where", ["echo", "{handle} {run_id} {host}:{run_root}"]),
     "same": BotCommand("same", "same", ["echo", "ran {dir}"], args={"dir": "^\\w+$"},
                        skip_if=["test", "{dir}", "=", "{project}"], skip_reply="skipped {dir}"),
 }
@@ -497,3 +503,31 @@ def test_without_a_topic_the_reply_goes_to_the_thread_and_its_id_is_printed(bot,
     assert capsys.readouterr().err.count("set topic_id = 99 in [telegram] of edr.toml") == 1
     bot.handle_update(msg("/status"))
     assert bot.api.of("sendMessage")[-1]["message_thread_id"] is None
+
+
+def reply_to(text: str, msg_id: int) -> dict:
+    """A message that replies to the bot's message `msg_id`."""
+    u = msg(text)
+    u["message"]["reply_to_message"] = {"message_id": msg_id}
+    return u
+
+
+def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
+    mid = int(bot.send("hung", "run1", "hung a@demo\nno progress", alert_buttons("a@demo")))
+    for text, call in (("/keep 24", ("keep", ("run1", 24, "telegram"), {})),
+                       ("/keep run1 6", ("keep", ("run1", 6, "telegram"), {})),
+                       ("/ack", ("ack", ("run1", "telegram"), {})),
+                       ("/stop disk full", ("stop_after_task", ("run1", "telegram", "disk full"), {})),
+                       ("/status", ("status_text", ("run1",), {}))):
+        bot.handle_update(reply_to(text, mid))
+        assert bot.actions.calls[-1] == call, text
+    bot.handle_update(reply_to("/where", mid))
+    assert last_reply(bot) == pre("a@demo run1 hostA:/scratch/edr/demo/run1")
+    bot.handle_update(msg("/where"))
+    assert last_reply(bot) == pre("/where: bad placeholder 'handle'")
+    bot.handle_update(reply_to("/ack", 999))
+    assert last_reply(bot).startswith("error: a handle is")
+    monkeypatch.setattr(tgbot.time, "time", lambda: 1e12)
+    bot.handle_update(reply_to("/ack", mid))
+    assert last_reply(bot).startswith("error: a handle is")
+    assert list(bot.ledger.kv["telegram"]["replies"]) == [str(mid)]

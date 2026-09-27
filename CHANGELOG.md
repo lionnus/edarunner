@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A command sent as a reply to an alert acts on the run of the alert:
+  `/keep 24`, `/ack`, `/stop` and `/status` need no handle, and a custom
+  command gets `{handle}`, `{run_id}`, `{run_root}` and `{host}`.
 - `[telegram] topic_id` puts every message of a project into one topic
   of a forum group; the bot ignores a command from another topic.
 - `/hosts` shows every resource as used of total, in one order:

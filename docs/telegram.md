@@ -191,7 +191,9 @@ reply = "session claude-{project}-{dir} started; open the Claude app"
 
 Placeholders render per argument: `{project}`, `{root}` and
 `{project_root}` (the project directory), `{site_dir}`, `{user}`, and one
-per name in `args`. No shell runs between the bot and `run[0]`. A program
+per name in `args`. A command sent as a reply to an alert also gets
+`{handle}`, `{run_id}`, `{run_root}` and `{host}` of the run of that
+alert. No shell runs between the bot and `run[0]`. A program
 that parses its argument itself, such as `tmux new-session <cmd>`,
 `ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so
 gate every placeholder inside such a token with an exact allowlist regex,
@@ -201,6 +203,38 @@ The regex gate works like this: every value must match its regex in full,
 or the bot replies `refused: <name> must match <regex>`, records the
 refusal in the ledger, and runs nothing. Write the regex as an allowlist
 of the exact values you expect.
+
+## Reply to an alert
+
+A command sent as a reply to an alert acts on the run of that alert, so
+it needs no handle. The bot keeps the message id and the run id of every
+alert of the last 7 days in the ledger's `kv` table, under `telegram`.
+
+| Reply | Same as |
+|---|---|
+| `/keep 24` | `/keep <run> 24` |
+| `/ack` | `/ack <run>` |
+| `/stop disk full` | `/stop <run> disk full` |
+| `/status` | `/status <run>` |
+
+A reply that names the run itself, such as `/keep <run> 6`, keeps its
+arguments. A reply to an older alert, or to a message that is not an
+alert, works like a message without a reply.
+
+A custom command sent as a reply gets four more placeholders from the
+run: `{handle}`, `{run_id}`, `{run_root}` and `{host}`. The values come
+from the ledger, not from the phone. This entry opens a Claude session
+in the tree of the run:
+
+```toml
+[telegram.commands.claude_run]
+help = "as a reply to an alert: a Claude session in the run tree"
+run = ["tmux", "new-session", "-d", "ssh -t {host} 'cd {run_root} && claude remote-control'"]
+reply = "Claude session for {handle} started on {host}"
+```
+
+The same command without a reply answers `bad placeholder 'host'` and
+runs nothing.
 
 ## One chat, or one per project
 

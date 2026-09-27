@@ -20,7 +20,7 @@ from edarunner.notify.telegram import format as fmt
 if TYPE_CHECKING:
     from edarunner.cli import Actions
 
-HANDLE = re.compile(r"^[\w.@#-]{1,64}$")
+HANDLE = re.compile(r"^[\w.@#-]{1,128}$")
 
 
 @dataclass(frozen=True)
@@ -33,17 +33,18 @@ class Builtin:
     group: str
     kind: str = "text"  # "html" as it is, "pre" in a <pre> block, "text" escaped
     self_logged: bool = False  # the action writes its own ledger event
+    on_run: bool = False  # the first argument is a handle; a reply to an alert fills it
 
 
 BUILTINS = {b.name: b for b in (
-    Builtin("status", "[handle]", "the board, or one run", "Look", "html"),
+    Builtin("status", "[handle]", "the board, or one run", "Look", "html", on_run=True),
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
     Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html"),
     Builtin("lic", "", "licence seats, used of total", "Look", "html"),
     Builtin("board", "", "pin a new board message", "Look"),
-    Builtin("keep", "<handle> [hours]", "add hours, default 12", "Act on a run", self_logged=True),
-    Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True),
-    Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True),
+    Builtin("keep", "<handle> [hours]", "add hours, default 12", "Act on a run", self_logged=True, on_run=True),
+    Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True, on_run=True),
+    Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
     Builtin("compare", "<handle>...", "metrics side by side", "Compare", "pre"),
     Builtin("metric", "<name> [--design H]", "one metric per run", "Compare", "pre"),
     Builtin("help", "", "this list", "Compare", "html"),
@@ -84,14 +85,21 @@ class Commands:
                for b in BUILTINS.values()]
         return out + [{"command": n, "description": (c.help or n)[:256]} for n, c in self.tg.commands.items()]
 
-    def run(self, name: str, args: list[str], text: str) -> Reply:
-        """Answer one command; an unknown name gets the help. Every command lands in the ledger."""
+    def run(self, name: str, args: list[str], text: str, run: str | None = None) -> Reply:
+        """Answer one command; an unknown name gets the help. Every command lands in the ledger.
+
+        `run` is the run of the alert the message replies to: it fills the handle of a built-in
+        and the run placeholders of a custom command.
+        """
         if name not in self.tg.commands and name not in BUILTINS:
             name = "help"
         try:
             if name in self.tg.commands:
-                return Reply(name, self.custom(self.tg.commands[name], args), "pre")
+                extra = self.actions.run_info(run) if run else {}
+                return Reply(name, self.custom(self.tg.commands[name], args, extra), "pre")
             b = BUILTINS[name]
+            if run and b.on_run and args[:1] != [run]:
+                args = [run, *args]
             body = getattr(self, "cmd_" + name)(args)
             if not b.self_logged:
                 self.event("command", text[:200])
@@ -169,8 +177,11 @@ class Commands:
 
     # custom commands
 
-    def custom(self, c: BotCommand, args: list[str]) -> str:
-        """Run one `[telegram.commands.*]` entry: gate every argument, render the argv, run it without a shell."""
+    def custom(self, c: BotCommand, args: list[str], extra: dict[str, str] | None = None) -> str:
+        """Run one `[telegram.commands.*]` entry: gate every argument, render the argv, run it without a shell.
+
+        `extra` holds more placeholders, such as the run of the alert the command replies to.
+        """
         names = list(c.args)
         if names and len(args) >= len(names):
             values = args[: len(names) - 1] + [" ".join(args[len(names) - 1 :])]  # the last argument takes the rest
@@ -181,7 +192,7 @@ class Commands:
         project = self.project()
         root = str(project.root)
         env = {"project": project.project, "root": root, "project_root": root,
-               "site_dir": str(project.site.path.parent), "user": getpass.getuser()}
+               "site_dir": str(project.site.path.parent), "user": getpass.getuser(), **(extra or {})}
         for n, v in zip(names, values):
             if not re.fullmatch(c.args[n], v):
                 self.event("refused", f"/{c.name} {n}={v!r} does not match {c.args[n]}")

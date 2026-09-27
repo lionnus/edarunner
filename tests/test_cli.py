@@ -327,6 +327,8 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
     assert acts.hosts_text().startswith("<b>local</b> · ")
     assert acts.lic_text() == "<b>demo</b> · 2/10 seats used"
+    info = acts.run_info("a@demo")
+    assert info["handle"] == "a@demo" and info["run_id"] == a and info["host"] == "local" and info["run_root"].endswith(a)
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
