@@ -12,7 +12,6 @@ import contextlib
 import csv
 import functools
 import getpass
-import http.server
 import io
 import json
 import logging
@@ -21,7 +20,6 @@ import posixpath
 import shlex
 import shutil
 import sys
-import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -786,8 +784,6 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     notifiers = _notifiers(c)
     if a.check:
         return watch.check(project, notifiers)
-    if a.serve:
-        _serve(project.data / "board", a.serve)
     return watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
 
 
@@ -798,14 +794,6 @@ def _notifiers(c: Ctx) -> list:
     # The bot polls in its own thread.
     bot._ledger = Ledger(project.data / "edr.db", threads=True)
     return make_notifiers(project.site, project, bot.ledger, Actions(bot))
-
-
-def _serve(directory: Path, port: int) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"board on http://127.0.0.1:{server.server_address[1]}/status.html")
 
 
 # --- parser and main
@@ -903,7 +891,6 @@ def _parser() -> argparse.ArgumentParser:
     s = verb("watch", "the watcher", write=True)
     s.add_argument("--once", action="store_true")
     s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")
-    s.add_argument("--serve", type=int, metavar="PORT", help="serve data/board over http on 127.0.0.1")
     return p
 
 
