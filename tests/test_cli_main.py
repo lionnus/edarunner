@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-from test_cli import demo, edr  # noqa: F401 - the fixture and the runner of test_cli
+from helpers_cli import edr
 
 from edarunner import checkout, cli, launch
 from edarunner.hosts import HostProbe, Ssh

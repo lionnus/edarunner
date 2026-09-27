@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from test_watch import NOW, Env, env, rid  # noqa: F401  (the fixture of test_watch)
+from helpers_watch import NOW, Env, rid
 
 from edarunner import watch
 from edarunner.notify import untag

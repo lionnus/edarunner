@@ -7,8 +7,7 @@ import pytest
 
 from edarunner import config
 from edarunner.config import ConfigError
-
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
+from helpers_driver import DEMO
 
 
 def demo_copy(tmp_path: Path, old: str = "", new: str = "") -> Path:

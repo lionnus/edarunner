@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from test_telegram import FakeActions, FakeApi, FakeDatabase, make_project, make_site
+from helpers_telegram import FakeActions, FakeApi, FakeDatabase, make_project, make_site
 
 from edarunner import cli, config
 from edarunner.config import ConfigError
@@ -22,8 +22,8 @@ from edarunner.notify import BUTTON_CMDS, alert_buttons, make_notifiers, untag
 from edarunner.notify.mail import MailNotifier
 from edarunner.notify.ntfy import NtfyNotifier
 from edarunner.notify.telegram import TelegramBot
+from helpers_driver import DEMO
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 PROJECT = SimpleNamespace(project="demo")
 
 

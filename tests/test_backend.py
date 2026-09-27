@@ -16,8 +16,7 @@ from edarunner import config
 from edarunner.backend import Handle, Live, LocalBackend, Request, SshBackend, make_backend, run_handle
 from edarunner.guards import Refuse
 from edarunner.hosts import Ssh
-
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
+from helpers_driver import DEMO
 
 
 class CannedSsh(Ssh):

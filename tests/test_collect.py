@@ -14,8 +14,8 @@ from edarunner import collect
 from edarunner.config import load_project
 from edarunner.db import Database
 from edarunner.hosts import Ssh
+from helpers_driver import DEMO
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 RUN_ID = "20260926_1200_a_demo_gabc1234"
 TESTS = ("GEMM_M64_N64", "SOFTMAX_R197")
 

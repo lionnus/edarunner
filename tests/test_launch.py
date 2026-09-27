@@ -22,9 +22,8 @@ from edarunner.db import Database
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.model import Needs
-from helpers_driver import wait_for
+from helpers_driver import DEMO, wait_for
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
 SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "vars", "host", "root", "state_file",
              "queue_dir", "shell", "env", "limits", "start_at", "stages"}

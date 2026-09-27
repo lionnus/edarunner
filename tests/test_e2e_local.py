@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from test_cli import demo, edr  # noqa: F401  (the fixture and the runner of test_cli)
+from helpers_cli import edr
 
 from edarunner import board, cli, config
 from edarunner.db import Database

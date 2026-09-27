@@ -16,8 +16,8 @@ from edarunner.db import Database
 from edarunner.hosts import HostError, Ssh
 from edarunner.model import Scheduler
 from edarunner.schedulers import CondorBackend, LsfBackend, SlurmBackend, condor_submit, lsf_argv, slurm_script
+from helpers_driver import DEMO
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 GOLDEN = Path(__file__).resolve().parent / "golden"
 FULL = Request(run_id="r1", spec=Path("/s/b/r1.spec.json"), driver=Path("/s/bin/edr_driver-ab.py"),
                log=Path("/s/b/r1.driver.log"), host="node7", project="demo", cores=4, ram_gb=8, disk_gb=1.5,

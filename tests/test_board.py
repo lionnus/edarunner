@@ -7,59 +7,27 @@ import subprocess
 import time
 
 import pytest
+from helpers_board import NOW, RUN, board_row, board_rows
 
 from edarunner import board
 from edarunner.db import Database
 from edarunner.hosts import HostProbe
 from edarunner.model import Marks
 
-NOW = 1_800_000_000
-SRC = "gaaa111"
-RUN = {
-    "dead": "20261002_1130_a_demo_" + SRC,
-    "stale": "20261002_1130_b_nodw_demo_" + SRC,
-    "run1": "20261002_1130_c_demo_" + SRC,
-    "run2": "20261002_1130_d_demo_" + SRC,
-    "done": "20261001_0900_a_demo_" + SRC,
-    "fail": "20261001_0900_b_nodw_demo_" + SRC,
-}
-
-
-def _row(key, label, phase, state=None, age=10, **extra):
-    row = {"run_id": RUN[key], "batch": "demo", "label": label, "config": "demo", "build_tag": "demo", "src": SRC,
-           "dirty": 0, "host": "local", "root": "/tmp/edr-demo/x/edr/demo/" + RUN[key], "created": NOW - 7200,
-           "phase": phase, "state": state, "stage": "synth", "step": 3, "exit": None, "killed_by": None,
-           "started": NOW - 7200, "updated": NOW - age, "disk_free_gb": 100.0, "tree_gb": 1.5,
-           "counts": json.dumps({"done": 1, "failed": 0, "skipped": 0, "running": 1, "queued": 0})}
-    row.update(extra)
-    return row
-
-
-def _rows():
-    return [
-        _row("done", "a", "done", "running", age=3600, exit=0, counts={"done": 2, "failed": 0}),
-        _row("run1", "c", "stage:synth", "running"),
-        _row("fail", "b_nodw", "INCOMPLETE:1f0s", "running", age=7000, exit=8, stage="power", step=None,
-             counts=json.dumps({"done": 1, "failed": 1})),
-        _row("run2", "d" * 40, "group:power_" * 3, None, host="hostB-long-name", batch="sweep10_long_name"),
-        _row("stale", "b_nodw", "stage:pnr", "stale", age=900),
-        _row("dead", "a", "stage:synth", "dead", age=5000),
-    ]
-
 
 def test_order_and_state():
-    ordered = [r["run_id"] for r in board.order(_rows())]
+    ordered = [r["run_id"] for r in board.order(board_rows())]
     assert ordered[:3] == [RUN["dead"], RUN["stale"], RUN["run1"]]
     assert ordered[3] == RUN["run2"]
     assert ordered[4:] == [RUN["fail"], RUN["done"]]
-    assert board.state_of(_row("fail", "b", "INCOMPLETE:1f0s", "running")) == "incomplete"
-    assert board.state_of(_row("run1", "c", None, None)) == "running"
-    assert board.is_live(_row("done", "a", "KILLED:SIGTERM")) is False
+    assert board.state_of(board_row("fail", "b", "INCOMPLETE:1f0s", "running")) == "incomplete"
+    assert board.state_of(board_row("run1", "c", None, None)) == "running"
+    assert board.is_live(board_row("done", "a", "KILLED:SIGTERM")) is False
 
 
 @pytest.mark.parametrize("width", [48, 40])
 def test_narrow_width_and_order(width):
-    text = board.narrow(_rows(), width=width, now=NOW)
+    text = board.narrow(board_rows(), width=width, now=NOW)
     lines = text.splitlines()
     assert all(len(line) <= width for line in lines), text
     assert lines[0].startswith(time.strftime("%d.%m %H:%M", time.localtime(NOW)) + " DEAD:1 INC:1")
@@ -73,11 +41,11 @@ def test_narrow_width_and_order(width):
         assert body[1] == "    demo           1h ago synth/3    0f/1d"
         assert body[7] == "    10_long_name   0m ago synth/3    0f/1d"
     assert board.narrow([], now=NOW).splitlines()[-1] == "nothing live"
-    assert board.narrow([_row("done", "a", "done")], now=NOW).endswith("nothing live")
+    assert board.narrow([board_row("done", "a", "done")], now=NOW).endswith("nothing live")
 
 
 def test_wide_all_states():
-    text = board.plain(board.wide(_rows(), now=NOW))
+    text = board.plain(board.wide(board_rows(), now=NOW))
     lines = text.splitlines()
     assert lines[0].split() == ["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"]
     assert len(lines) == 8 and "\x1b" not in text
@@ -88,14 +56,14 @@ def test_wide_all_states():
 
 
 def test_narrow_text_colours_the_state():
-    text = board.narrow_text(_rows(), now=NOW)
-    assert text.plain == board.narrow(_rows(), now=NOW)
+    text = board.narrow_text(board_rows(), now=NOW)
+    assert text.plain == board.narrow(board_rows(), now=NOW)
     styled = {text.plain[s.start:s.end]: str(s.style) for s in text.spans}
     assert styled == {"DEAD": "red", "stale": "yellow", "RUN": "green"}
 
 
 def test_plain_and_console_have_no_escape_codes(monkeypatch, capsys):
-    table = board.wide(_rows(), now=NOW)
+    table = board.wide(board_rows(), now=NOW)
     assert "\x1b" not in board.plain(table)
     monkeypatch.setenv("NO_COLOR", "1")
     board.console().print(table)
@@ -103,15 +71,15 @@ def test_plain_and_console_have_no_escape_codes(monkeypatch, capsys):
 
 
 def test_cost():
-    live = _row("run1", "c", "stage:synth", "running", cores=4)
+    live = board_row("run1", "c", "stage:synth", "running", cores=4)
     assert board.cost(live, now=NOW) == pytest.approx(2.0 * 4)
-    ended = _row("done", "a", "done", age=3600)
+    ended = board_row("done", "a", "done", age=3600)
     assert board.cost(ended) == pytest.approx(1.0)
     assert board.cost({"run_id": "x", "phase": "done"}) == 0.0
 
 
 def test_run_detail():
-    row = _row("run1", "c", "stage:synth", "running", killed_by=None)
+    row = board_row("run1", "c", "stage:synth", "running", killed_by=None)
     stages = [{"stage": "synth", "task": "", "attempt": 1, "status": "running", "exit": None, "started": NOW - 7200,
                "ended": None, "signature": None},
               {"stage": "power", "task": "k_bad", "attempt": 1, "status": "failed", "exit": 1, "started": NOW - 60,
@@ -127,7 +95,7 @@ def test_run_detail():
 
 
 def test_status_html():
-    rows = _rows()
+    rows = board_rows()
     events = [{"id": i, "ts": NOW - i, "actor": "watch", "run_id": RUN["dead"], "kind": "dead", "text": f"event {i}"}
               for i in range(60)]
     hosts = {"local": {"free_cores": 3, "free_ram_gb": 6.5}, "hostB": {"free_cores": 100, "free_gb": 700}}
@@ -148,7 +116,7 @@ def _json_blocks(page):
 
 
 def _compare_input():
-    rows = _rows()[:3]
+    rows = board_rows()[:3]
     parameters = [{"run_id": r["run_id"], "key": k, "value": v, "source": "config"}
               for r in rows for k, v in (("DW", "0"), ("LANES", "8"), ("note", "a</script>b"))]
     metrics = []
@@ -218,7 +186,7 @@ def test_compare_script_runs_without_plotly(tmp_path):
 
 def test_rows_from_db(tmp_path):
     with Database(tmp_path / "edr.db") as db:
-        for r in _rows():
+        for r in board_rows():
             db.upsert_run(r)
         raw = [dict(r) for r in db.conn.execute("SELECT * FROM runs")]
     assert all(isinstance(r["counts"], str) for r in raw)

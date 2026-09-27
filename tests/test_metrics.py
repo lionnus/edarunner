@@ -9,8 +9,8 @@ from pathlib import Path
 
 from edarunner.metrics import extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
+from helpers_driver import DEMO
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 RUN_ID = "20260926_1200_a_demo_gabc1234"
 RUN = {"run_id": RUN_ID, "batch": "demo", "label": "a", "config": "demo", "host": "local", "tasks": {}}
 COLUMNS = {"run_id", "stage", "step", "task", "name", "canonical", "value", "unit", "source_file", "extracted_at"}
