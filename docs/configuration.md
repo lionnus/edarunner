@@ -81,7 +81,7 @@ that calls `python` from the venv of its own tree.
 | `host_free_min_gb` | free space below which the driver starts nothing new | `100.0` |
 | `streak` | equal failure signatures in a row that stop a task group | `3` |
 | `heartbeat_s` | period of the heartbeat and of the watcher cycle | `60` |
-| `gate_max_s` | longest wait at a licence gate | `14400` |
+| `gate_max_s` | longest wait at a tool gate | `14400` |
 | `kill_hung` | the watcher kills a hung run after `grace_s` | `false` |
 | `kill_orphan` | the watcher kills an orphan tool process after `grace_s` | `false` |
 
@@ -98,7 +98,9 @@ that calls `python` from the venv of its own tree.
 A job with `host = "auto"` goes to the first host, preferred ones first
 and then the one with the most free cores, that is not avoided, runs
 fewer than `max_per_host`, has the free cores, RAM and disk the job's
-first stage needs. No such host means the job is queued.
+first stage needs, and has every tool the job's stages need. No such
+host means the job is queued. When no host of the site has a tool the
+job needs, `plan` reports it as a problem.
 
 ### [telegram]
 
@@ -128,7 +130,7 @@ same order.
 | `cwd` | the working directory, relative to the run tree | `"."` |
 | `steps` | the step names the flow passes, indexed by step number | `[]` |
 | `progress` | a command that prints the current step number | `""` |
-| `needs` | `{ cores, disk_gb, licence }`; `licence` is a name or `{ name = seats }` from the site | `{ cores = 1, disk_gb = 0.0 }` |
+| `needs` | `{ cores, disk_gb, tools }`; `tools` is a list of names or `{ name = seats }` from the site `[tools]` | `{ cores = 1, disk_gb = 0.0, tools = [] }` |
 | `budget` | `{ hours, disk_gb, kill, per }`; `per` is `"stage"` or `"task"` | `{ kill = false, per = "stage" }` |
 | `retry` | `{ match, wait_s, max }`; `match` is a regex over the last 80 log lines | none; `wait_s = 900`, `max = 3` |
 | `collect` | paths under the run tree the watcher copies when the stage ends | `[]` |
@@ -208,23 +210,31 @@ may be `csh` or `tcsh`.
 | `cores` | cores | required |
 | `ram_gb` | RAM | required |
 | `scratch` | scratch roots of this host | the site `scratch` |
+| `tools` | the tools the host has: a list of names, or `{ name = version }` | every tool of `[tools]` |
 
 The host `local` is the head node itself, reached without ssh. A job that
-names a host outside this table is a `check` problem.
+names a host outside this table is a `check` problem. A tool in `tools`
+must be declared under `[tools]`. The version is text the flow may use
+as `{tool.<name>.version}`, for an install path per host.
 
-### [licences.<name>]
+### [tools.<name>]
 
 | Key | Meaning | Default |
 |---|---|---|
-| `feature` | the FlexLM feature name | required |
-| `floor` | free seats to leave for others | required |
-| `probe` | a command that prints `lmstat` output; `{root}` allowed | required |
-| `seats_per_task` | seats one task takes | `1` |
+| `seats` | the seat total, for `edr tools` | none |
+| `probe` | an argv list that prints the free seats; it runs on the host with the run placeholders filled | none |
 
-The driver reads the line `Users of <feature>: (Total of N licenses
-issued; Total of M licenses in use)` and waits while `N - M - seats` is
-below `floor`. A probe that fails counts as unknown and lets the stage
-run.
+A stage that needs a tool with a probe starts with a gate. The driver runs
+the probe on the host and reads the first line it prints: `free`, or
+`free total`. It waits while `free` is below the seats the stage needs.
+A probe that fails or prints no number counts as unknown and lets the
+stage run. A hook that keeps a reserve for others subtracts it before it
+prints.
+
+A tool without a probe is present or not, with no gate. A name that no
+`[tools]` table declares is an error where it appears. The core knows no
+licence manager. `examples/site/hooks/flexlm_free.sh` turns `lmutil
+lmstat` output into the `free total` line.
 
 ### [telegram]
 
@@ -259,7 +269,7 @@ task is a placeholder `{task.<key>}` in the strings of a task group.
 | Key | Meaning | Default |
 |---|---|---|
 | `tasks.<id>.<key>` | any key; `{task.<key>}` in the stage strings | none |
-| `tasks.<id>.needs` | `{ cores, disk_gb, licence }`; replaces the stage's | none |
+| `tasks.<id>.needs` | `{ cores, disk_gb, tools }`; replaces the stage's | none |
 | `tasks.<id>.budget` | `{ hours, disk_gb, kill, per }`; replaces the stage's | none |
 | `pattern.resolver` | a hook `id -> table` for ids the file does not list | `""` |
 
@@ -317,6 +327,7 @@ group in a job without `tasks` is a plan problem.
 | `{run_id}`, `{host}`, `{mount}`, `{root}` | the run, its host, the scratch mount, the run tree | the stage strings, `[env]`, `sync.after` |
 | `{tree_id}` | the run id of the tree the flow writes in: the reused run's id under `reuse`, else `{run_id}` | the stage strings |
 | `{cores}` | `needs.cores` of the stage or task | the stage strings |
+| `{tool.<name>.version}` | the version the host lists for the tool; `""` without one | the stage strings, a tool `probe` |
 | `{checkpoint}` | the step name a resume starts from | `resume` |
 | `{task_dir}`, `{task.<key>}` | the task directory and the task's keys | a task group's strings, `collect`, metric files |
 | `{step}` | the step number | a metric `file` with `step = "*"` |

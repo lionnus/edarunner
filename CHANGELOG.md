@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Breaking: the site table `[licences.<name>]` is now `[tools.<name>]`,
+  with `seats` and a `probe` argv that prints `free` or `free total`.
+  The stage and task key `needs.licence` is now `needs.tools`: a list of
+  names, or `{ name = seats }`. An old key stops the load with an error
+  that names the new one. The core no longer reads `lmstat` output;
+  `examples/site/hooks/flexlm_free.sh` does that as a site hook.
+- `[hosts.<name>] tools` lists the tools a host has, with an optional
+  version. A stage reads the version as `{tool.<name>.version}`.
+  Placement skips a host that lacks a tool of the job, and `plan` names
+  the missing tool.
+- `edr tools` replaces `edr lic`: free and total seats per tool, and the
+  hosts that have it. `lic` and `/lic` still answer for one release. The
+  heartbeat field `licence_unknown` is gone; `gate` says why a run waits.
+
 ## 0.1.1 (2026-09-27)
 
 - Every Telegram reply fits 40 columns and names the project in its first

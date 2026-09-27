@@ -27,7 +27,7 @@ host, no ledger row, no event, not even an empty database.
 `--why <text>` is required on `stop` and `retire`, and optional on
 `import`. The text lands in the events table with the actor.
 
-A read verb (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
+A read verb (`status`, `events`, `hosts`, `tools`, `metrics`, `check`)
 never creates `data/edr.db`. Without a database it reads an empty ledger
 in memory.
 
@@ -128,15 +128,21 @@ numbers: `cores`, `load`, `free_cores`, `free_ram_gb`, `total_ram_gb`,
 `gpu_total_gb`, `our_tool_procs`, `other_tool_procs` and `our_runs`.
 Exit 3 when a host did not answer.
 
-## lic
+## tools
 
 ```
-edr lic
+edr tools
 ```
 
-Runs every licence probe from the head node and prints pool, used, free,
-ours, others and the floor. Exit 3 when a probe failed or the feature
-line is missing.
+One row per tool of the site file. `free` and `total` are the seats the
+probe reports; the probe runs on the head node with the project
+directory as `{root}`. `hosts` lists the hosts that have the tool, with
+their versions. A tool without a probe shows `-` for the seats. `--json`
+gives `tool`, `free`, `total`, `hosts` (host to version) and `note`.
+Exit 3 when a probe failed or printed no number.
+
+`edr lic` prints the same and a deprecation line on stderr; it goes in
+the next release.
 
 ## metrics
 
