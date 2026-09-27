@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from edarunner import board, cli, config, launch
+from edarunner import db as db_mod
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.db import Database
@@ -136,6 +137,15 @@ def test_check_reports_problems(demo: Path, capsys) -> None:
     jobs.write_text(jobs.read_text().replace('host = "mars"', 'host = "local"'))
     code, out, _ = edr(capsys, "check")
     assert code == 1 and "demo/a: unknown placeholder {nope}" in out
+
+
+def test_check_warns_about_a_database_on_nfs(demo: Path, capsys, monkeypatch) -> None:
+    code, out, _ = edr(capsys, "check")
+    assert "warning" not in out
+    monkeypatch.setattr(db_mod, "fs_magic", lambda path: 0x6969)
+    code, out, _ = edr(capsys, "--json", "check")
+    data = json.loads(out)["data"]
+    assert data["warnings"] == [f"{demo / 'data' / 'edr.db'} is on a network filesystem (nfs); journal_mode DELETE, not WAL"]
 
 
 # status, events, handles
@@ -645,6 +655,10 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
     hb_path.write_text(json.dumps(hb))
     row = {r["run_id"]: r for r in json.loads(edr(capsys, "--json", "status")[1])["data"]["runs"]}[b]
     assert row["state"] == "dead"
+    hb.update(phase="gate:synth", gate="demo: 0 free, 1 held by others, 1 needed", updated=now)
+    hb_path.write_text(json.dumps(hb))
+    code, out, _ = edr(capsys, "status", "b_nodw@demo")
+    assert code == 0 and "gate waits for demo: 0 free, 1 held by others, 1 needed" in out
     hb.update(phase="INCOMPLETE:1f0s", exit=8, updated=now, counts={"done": 0, "failed": 1})
     hb_path.write_text(json.dumps(hb))
     code, out, _ = edr(capsys, "status")

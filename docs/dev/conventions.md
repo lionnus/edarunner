@@ -15,8 +15,8 @@ request.
   `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` proves it
   for the whole flow.
 - A read command creates nothing.
-- The watcher never deletes. A budget stops or kills; it never removes
-  a file.
+- The watcher never deletes a tree. A budget stops or kills; the only
+  file the watcher removes is a stale seat lease.
 - A stop signals the pids the driver recorded, never a session name or
   a process pattern.
 - A loop that continues after a failure counts what it skipped and

@@ -95,7 +95,8 @@ every action with its reason lands there. Only the head node opens it.
 `edr watch` is one process per project on the head node. Every cycle it
 reads the heartbeats, classifies each run, collects the results,
 extracts the metrics, starts queued jobs, writes the boards and sends the
-alerts. It never deletes a file. The Telegram bot is a thread inside it.
+alerts. It never deletes a tree, and removes no file but a stale seat
+lease. The Telegram bot is a thread inside it.
 
 ## Snapshot
 

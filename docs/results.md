@@ -27,6 +27,12 @@ Read the tables with `sqlite3 data/edr.db` when a command does not answer
 the question. Only the head node opens the file; a read command without
 the file reads an empty database in memory and creates nothing.
 
+The journal mode follows the filesystem of `data/`. On a local disk it is
+WAL, so `edr status` reads while the watcher writes. On NFS, SMB, 9p or
+FUSE it is DELETE with `synchronous=FULL`, because WAL needs shared memory
+that a network filesystem does not give. `edr check` prints a warning line
+with the path and the mode. `Database.journal_mode` holds the mode in use.
+
 ## edr metrics
 
 ```sh

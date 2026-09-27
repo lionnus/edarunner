@@ -35,7 +35,7 @@ from . import __version__, board, checkout, collect, config, export, launch, met
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
-from .db import Database
+from .db import Database, network_fs
 from .model import Batch, Job, Project
 from .notify import make_notifiers
 from .notify.digest import Digest
@@ -118,7 +118,7 @@ class Ctx:
         name = name or os.environ.get("EDR_BATCH")
         if name:
             return name
-        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name != "bin"]
+        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name not in ("bin", "leases")]
         if not dirs:
             raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name
@@ -433,7 +433,7 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         stages = [dict(r) for r in c.db.conn.execute(
             "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
         mets = c.db.metrics(run_ids=[run_id])
-        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or "")),
+        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate")),
                {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets})
         return Exit.DONE
     code = Exit.DONE
@@ -596,7 +596,12 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
                 problems += [f"{b.batch}/{p.label}: {x}" for x in p.problems]
     text = Text("\n").join(Text.assemble(("problem", "red"), f": {p}") for p in problems) if problems else Text.assemble(
         ("ok", "green"), f": {len(hosts)} hosts, {len(project.stages)} stages, {len(project.metrics)} metrics, {len(batches)} batches")
-    c.emit(text, {"problems": problems, "hosts": hosts, "batches": [b.batch for b in batches]})
+    warnings = []
+    db_path = project.data / "edr.db"
+    if fs := network_fs(db_path.parent):
+        warnings.append(f"{db_path} is on a network filesystem ({fs}); journal_mode DELETE, not WAL")
+    text = Text("\n").join([*(Text.assemble(("warning", "yellow"), f": {w}") for w in warnings), text])
+    c.emit(text, {"problems": problems, "warnings": warnings, "hosts": hosts, "batches": [b.batch for b in batches]})
     return Exit.REFUSED if problems else Exit.DONE
 
 
