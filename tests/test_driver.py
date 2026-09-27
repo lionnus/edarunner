@@ -1,4 +1,9 @@
-"""edr_driver.py under helpers_driver.PY36 against the demo flow."""
+"""edr_driver.py under helpers_driver.PY36 against the demo flow.
+
+The tests that call `_load_driver` import the driver into the pytest interpreter, which is not
+PY36. The paths they test, the leases and the usage samples, also run under PY36 in every test
+that starts a driver with `start`.
+"""
 
 from __future__ import annotations
 
@@ -342,6 +347,7 @@ def test_sighup_kills_the_group_and_reports(tmp_path: Path) -> None:
 # seat leases
 
 def _load_driver():
+    """The driver module in this interpreter, for the tests that patch its functions."""
     spec = importlib.util.spec_from_file_location("edr_driver_under_test", DRIVER)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
