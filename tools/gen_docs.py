@@ -12,7 +12,7 @@ import inspect
 import os
 import sys
 from collections.abc import Iterable
-from dataclasses import MISSING, Field, fields
+from dataclasses import MISSING, Field, asdict, fields, is_dataclass
 from pathlib import Path
 from unittest import mock
 
@@ -140,6 +140,8 @@ def _default(f: Field) -> str:
 def _toml(value: object) -> str:
     if value is None:
         return "none"
+    if is_dataclass(value) and not isinstance(value, type):
+        return _toml({k: v for k, v in asdict(value).items() if v is not None})
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (str, Path)):
@@ -177,7 +179,7 @@ def config_page() -> str:
         rows = fields_table(*parts)
         if rows:
             out.append(rows + "\n")
-    out += ["## Placeholders\n\n", doc(config.render) + "\n\n",
+    out += ["## Placeholders\n\n", "\n\n".join(doc(config.render).split("\n\n")[1:]) + "\n\n",
             table(["Placeholder", "Value", "Where"], [[code("{" + k + "}"), v, w] for k, (v, w) in config.PLACEHOLDERS.items()])]
     return "".join(out).rstrip() + "\n"
 
