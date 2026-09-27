@@ -9,7 +9,7 @@ run_prefix = "{user}/edr/{project}"
 
 [source]
 repo = "../rtl"                 # one git repository
-worktrees = "../rtl-wt"         # `edr stage` adds worktrees here
+worktrees = "../rtl-wt"         # `edr checkout` adds worktrees here
 ref = "HEAD"
 nested = []
 run_id = "{date}_{label}_{build_tag}_g{src}"

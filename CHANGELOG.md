@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The SQLite ledger is now the run database: `ledger.py` is `db.py`,
+  `Ledger` is `Database`, and every page says database. The file stays
+  `data/edr.db`; no config key changes.
+- Breaking: `edr stage` is now `edr checkout`, so the word stage means
+  a stage of the flow only. `stage` still answers for one release, with
+  a deprecation line on stderr. The module `stagectl.py` is
+  `checkout.py`.
 - A daily digest at `[limits] digest_at`: the runs that ended, the live
   and queued runs, the hosts with the least free scratch, and the open
   alerts. `/digest` and `edr status --digest` show it on demand.

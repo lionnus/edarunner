@@ -36,7 +36,7 @@ class Builtin:
     help: str
     group: str
     kind: str = "text"  # "html" as it is, "pre" in a <pre> block, "text" escaped
-    self_logged: bool = False  # the action writes its own ledger event
+    self_logged: bool = False  # the action writes its own database event
     on_run: bool = False  # the first argument is a handle; a reply to an alert fills it
     slow: bool = False  # it can take more than a second, so its message gets a reaction first
 
@@ -101,12 +101,12 @@ def keyboard_word(text: str) -> str | None:
 
 
 class Commands:
-    """The built-in and custom commands of one bot, on the verbs of `Actions`."""
+    """The built-in and custom commands of one bot, on the commands of `Actions`."""
 
-    def __init__(self, actions: Actions, ledger: Any, tg: Telegram, project: Callable[[], Project],
+    def __init__(self, actions: Actions, db: Any, tg: Telegram, project: Callable[[], Project],
                  repin: Callable[[], None]) -> None:
         self.actions = actions
-        self.ledger = ledger
+        self.db = db
         self.tg = tg
         self.project = project
         self.repin = repin
@@ -122,7 +122,7 @@ class Commands:
         return name in self.tg.commands or (name in BUILTINS and BUILTINS[name].slow)
 
     def run(self, name: str, args: list[str], text: str, run: str | None = None) -> Reply:
-        """Answer one command; an unknown name gets the help. Every command lands in the ledger.
+        """Answer one command; an unknown name gets the help. Every command lands in the database.
 
         `run` is the run of the alert the message replies to: it fills the handle of a built-in
         and the run placeholders of a custom command.
@@ -154,8 +154,8 @@ class Commands:
         return Reply(c.name, text, "pre", ok)
 
     def event(self, kind: str, text: str) -> None:
-        """One ledger event with the actor telegram."""
-        self.ledger.add_event(actor="telegram", run_id="", kind=kind, text=text)
+        """One database event with the actor telegram."""
+        self.db.add_event(actor="telegram", run_id="", kind=kind, text=text)
 
     # built-in commands
 
@@ -213,7 +213,7 @@ class Commands:
     def cmd_ack(self, args: list[str]) -> str:
         """Cancel the pending kill of a run."""
         h = handle(args)
-        return self.actions.ack(h, "telegram") or f"acked {h}"
+        return self.actions.ack(h, "telegram") or f"acknowledged {h}"
 
     def cmd_stop(self, args: list[str]) -> str:
         """Stop a run after its running task."""

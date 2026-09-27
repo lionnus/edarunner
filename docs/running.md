@@ -7,8 +7,8 @@ does on the host, what it writes, and how to act on a run that stopped.
 
 `edr launch` copies `edr_driver.py` to `<state>/bin/edr_driver-<hash>.py`,
 where `<hash>` is the first 8 hex digits of the sha256 of the file, writes
-one spec per run and starts the driver on the host with the host's own
-`python3`:
+one spec per run, the JSON file the driver reads, and starts the driver
+on the host with the host's own `python3`:
 
 ```sh
 setsid nohup python3 <state>/bin/edr_driver-<hash>.py <state>/<batch>/<run_id>.spec.json
@@ -31,7 +31,7 @@ the run with that copy. Publish the driver only through `edr launch` or
 ## The run tree
 
 The tree is `<mount>/<run_prefix>/<run_id>/` on the host, a copy of the
-staged worktree made by `rsync --delete`. The flow writes into it. The
+checked-out worktree made by `rsync --delete`. The flow writes into it. The
 driver adds `log/`:
 
 | File | Holds |
@@ -115,6 +115,12 @@ run `dead` after `dead_s`.
 
 ## Phases and exit codes
 
+A run has a phase and a state. The phase is the driver's word for where
+the run is or how it ended, and the heartbeat carries it. The state is
+the watcher's verdict on the run: `running`, `stale`, `dead` and the
+others in `docs/reference/states.md`. A finished run gets its state from
+the class of its phase.
+
 | Phase | Exit | Meaning |
 |---|---|---|
 | `setup` | | the spec is loaded, the first disk check runs |
@@ -175,8 +181,9 @@ heartbeat.
 | `limits.host_free_min_gb` | the driver between stages and before each claim | below it nothing new starts and `host_full` is set |
 | `limits.streak` | the driver per group | that many equal failure signatures in a row set `looping`; the group claims nothing more |
 
-`edr keep <handle> --hours N` adds `N` hours to the running stage or
-task. The driver reads the keep file at every heartbeat; a keep file
+`edr keep <handle> --hours N`, with the handle `label@batch`, a run id
+prefix or `#n` from the last board, adds `N` hours to the running stage
+or task. The driver reads the keep file at every heartbeat; a keep file
 older than the start of the current stage or task does not count.
 `docs/watcher.md` says what the watcher does at `host_full` and `hung`.
 Nothing here deletes a file.
@@ -264,7 +271,7 @@ import time as `started` and `ended`.
 names in the stages, such as a library or a build directory, and keeps
 the tree. `--batch <B>` retires every run of a batch and writes
 `RETIRED`, so the watcher skips it and the board drops it. It then
-removes the staged tree of the batch's source under `source.worktrees`
+removes the checked-out tree of the batch's source under `source.worktrees`
 when no other batch that is not retired has the same source: a worktree
 with `git worktree remove --force`, a dirty snapshot with a plain
 delete, both on the head node. The source repository is never a target.
@@ -276,7 +283,7 @@ directory, not a one-component path. `docs/reference/cli.md` lists what
 
 Run `edr watch --once` before a retire, so the results are on the head
 node, and `--dry-run` first, which prints every `rm -rf` target and the
-staged tree.
+checked-out tree.
 
 ## Archive, then clear the hosts
 

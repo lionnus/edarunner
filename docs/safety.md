@@ -47,29 +47,29 @@ because `kill -TERM -- -0` would signal every process of the user.
 `retire` refuses a run whose driver is alive, a live run with no
 heartbeat yet, a root another live run uses, and a root shared with an
 uncollected run. `docs/running.md` lists them with the way out. The
-staged tree that `retire --batch` removes passes `assert_safe_target`
+checked-out tree that `retire --batch` removes passes `assert_safe_target`
 too, and `source.repo` is never a target.
 
-A guard raises `Refuse`. The verb prints `edr: <reason>` to stderr, exits
+A guard raises `Refuse`. The command prints `edr: <reason>` to stderr, exits
 1, and runs nothing after the refusal. The events table gets no row,
 because nothing happened.
 
 ## Dry runs
 
-Every verb that writes takes `--dry-run`; `docs/reference/cli.md` marks
+Every command that writes takes `--dry-run`; `docs/reference/cli.md` marks
 them. A dry run prints every path and every command with the mark `(dry)` or
 the prefix `dry:`, and writes nothing:
 
 - no date pin in `<state>/<batch>/RUN_DATE`
 - no spec, no driver copy, no stop file, no keep file
-- no ledger row, no event, no database
+- no database row, no event, not even the database file
 - no `data/board/` and no `data/results/`
 
 `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` runs the whole
 flow dry, then checks that the state directory does not exist, the scratch
 is empty, and the worktree is the same byte for byte.
 
-Run the dry twin first. Read every target path. Then run the verb.
+Do the dry run first. Read every target path. Then run the command.
 
 ## Limits
 

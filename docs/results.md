@@ -1,10 +1,10 @@
 # Results
 
-The ledger is one SQLite file, `data/edr.db`, on the head node. Every
+The run database is one SQLite file, `data/edr.db`, on the head node. Every
 run, every number and every action lands there. `edr export` writes a
 frozen snapshot of one design from it for a paper.
 
-## The ledger
+## The tables
 
 | Table | One row per | Holds |
 |---|---|---|
@@ -15,14 +15,14 @@ frozen snapshot of one design from it for a paper.
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
-| `kv` | key | a JSON value: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and the `telegram` message ids |
+| `kv` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and the `telegram` message ids |
 
 `data/results/<run_id>/` holds the collected files in the layout of the
 run tree, so a metric's `source_file` is a path under it.
 
-Read the tables with `sqlite3 data/edr.db` when a verb does not answer
-the question. Only the head node opens the file; a read verb without a
-database reads an empty ledger in memory and creates nothing.
+Read the tables with `sqlite3 data/edr.db` when a command does not answer
+the question. Only the head node opens the file; a read command without a
+the file reads an empty database in memory and creates nothing.
 
 ## edr metrics
 
@@ -32,7 +32,7 @@ edr metrics --design 3f9a2c1 --stage pnr --step 12
 edr metrics --design 3f9a2c1 --csv > metrics.csv
 ```
 
-One design per table. `--design` is the source tag exactly as `edr stage`
+One design per table. `--design` is the source tag exactly as `edr checkout`
 printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs that full tag.
 The text form shows label, design, stage, step, task, metric, value and
 unit; `--csv` writes the columns of `metrics.csv` below. Every row
@@ -71,7 +71,7 @@ empty is refused. `--dry-run` lists the files.
 
 ## A paper reads snapshots
 
-A paper repository never reads the ledger. It keeps one snapshot per
+A paper repository never reads the database. It keeps one snapshot per
 design under its own `data/`, pinned by the source tag, and builds every
 table and figure from `runs.csv` and `metrics.csv`:
 
@@ -91,7 +91,7 @@ tag stays true.
 ## What goes in git
 
 In the project repository: `edr.toml`, `tasks.toml`, `jobs/`, `hooks/`,
-and `edr-watch.service`. Not in git: `data/` (the ledger, the results,
+and `edr-watch.service`. Not in git: `data/` (the database, the results,
 the boards), the state directory, the worktrees, the run trees on the
 hosts, `site.toml` and the Telegram token. Put `data/` in the project's
 `.gitignore`.

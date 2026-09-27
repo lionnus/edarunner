@@ -44,27 +44,27 @@ class Buttons:
 
     def press(self, q: dict) -> Press:
         """Act on one callback query; a stop asks first and acts on the second tap."""
-        verb, _, handle = q.get("data", "").partition(":")
+        action, _, handle = q.get("data", "").partition(":")
         m = q.get("message") or {}
         text, keys = m.get("text", ""), m.get("reply_markup")
         question = f"Stop {handle}?"
         base = text.rpartition("\n")[0] if text.endswith("\n" + question) else text
         alert = markup(alert_buttons(handle))
-        if verb == "stop" and HANDLE.match(handle):
+        if action == "stop" and HANDLE.match(handle):
             return Press("tap Yes to stop", base + "\n" + question,
                          markup([("Yes, stop", f"stopyes:{handle}"), ("No", f"stopno:{handle}")]))
-        if verb == "stopno":
+        if action == "stopno":
             return Press("not stopped", base, alert)
-        if verb == "stopyes" and time.time() - m.get("edit_date", 0) > CONFIRM_S:
+        if action == "stopyes" and time.time() - m.get("edit_date", 0) > CONFIRM_S:
             return Press("the question expired; press stop again", base, alert)
         try:
             if not HANDLE.match(handle):
                 note = "unknown button"
-            elif verb == "keep12":
+            elif action == "keep12":
                 note = self.actions.keep(handle, 12, "telegram") or f"kept {handle} for 12 h"
-            elif verb == "ack":
-                note = self.actions.ack(handle, "telegram") or f"acked {handle}"
-            elif verb == "stopyes":
+            elif action == "ack":
+                note = self.actions.ack(handle, "telegram") or f"acknowledged {handle}"
+            elif action == "stopyes":
                 note = self.actions.stop_after_task(handle, "telegram", "stopped from a telegram button")
                 keys = alert
             else:

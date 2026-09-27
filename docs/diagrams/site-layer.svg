@@ -35,7 +35,7 @@
 <rect class="box" x="400" y="64" width="160" height="44" rx="7"/>
 <text class="t" x="480" y="91" text-anchor="middle">Watcher</text>
 <rect class="box" x="580" y="64" width="160" height="44" rx="7"/>
-<text class="t" x="660" y="91" text-anchor="middle">Ledger</text>
+<text class="t" x="660" y="91" text-anchor="middle">Run database</text>
 <rect class="box" x="760" y="64" width="160" height="44" rx="7"/>
 <text class="t" x="840" y="91" text-anchor="middle">Export</text>
 <path class="run" d="M270 79v14l11-7z"/>
@@ -59,8 +59,8 @@
 <text class="h" x="672" y="200">PRIVATE, NOT IN GIT</text>
 <text class="m" x="920" y="200" text-anchor="end">site.toml</text>
 <rect class="box" x="672" y="216" width="248" height="52" rx="7"/>
-<text class="t" x="686" y="238">FlexLM licence probes</text>
-<text class="m" x="686" y="256">[licences.&lt;name&gt;]</text>
+<text class="t" x="686" y="238">Tools, seats and probes</text>
+<text class="m" x="686" y="256">[tools.&lt;name&gt;]</text>
 <rect class="box" x="672" y="280" width="248" height="52" rx="7"/>
 <text class="t" x="686" y="302">Hosts and scratch</text>
 <text class="m" x="686" y="320" xml:space="preserve">scratch  [hosts.&lt;name&gt;]</text>
@@ -74,7 +74,7 @@
 <path class="a" d="M750 176V128"/>
 <text class="al" x="758" y="157">the machines</text>
 <path class="a" d="M544 242H672"/>
-<text class="al" x="608" y="235" text-anchor="middle">needs.licence</text>
+<text class="al" x="608" y="235" text-anchor="middle">needs.tools</text>
 
 <!-- Examples -->
 <rect class="frame" x="24" y="440" width="912" height="156" rx="10"/>
@@ -87,8 +87,8 @@
 <text class="m key" x="40" y="536">cmd</text>
 <text class="m" x="220" y="536">make … pnr</text>
 <text class="m" x="580" y="536">oseda ./run_synthesis.sh</text>
-<text class="m key" x="40" y="554">needs.licence</text>
-<text class="m" x="220" y="554">"fc"</text>
+<text class="m key" x="40" y="554">needs.tools</text>
+<text class="m" x="220" y="554">["fc"]</text>
 <text class="s" x="580" y="554">none</text>
 <text class="m key" x="40" y="572">metric file</text>
 <text class="m" x="220" y="572">area_hier.rpt</text>

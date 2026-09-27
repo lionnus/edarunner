@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from edarunner import board, cli, config
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 from test_cli import demo, edr  # noqa: F401  (the fixture and the runner of test_cli)
 
 
@@ -51,7 +51,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     monkeypatch.chdir(demo)
     code, out, _ = edr(capsys, "check")
     assert code == 0 and out.startswith("ok:")
-    code, out, _ = edr(capsys, "--json", "stage", "HEAD")
+    code, out, _ = edr(capsys, "--json", "checkout", "HEAD")
     src = json.loads(out)["data"]["src"]
     assert code == 0 and re.fullmatch(r"[0-9a-f]{7,}", src) and (demo / "wt" / src / "flow" / "flow.sh").is_file()
     state = tmp_path / ".edr" / "demo"
@@ -93,8 +93,8 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert code == 0 and lines[0].startswith("run_id,label,config,design,stage,step,task,metric")
     assert any(",power,,k_small,energy_nj,energy,850.0,nJ," in ln for ln in lines)
     assert any(f"{ids['b_nodw']},b_nodw,demo,{src},pnr,5,,area_cell_um2,area.cell,1052.5,um2,reports/5/area.rpt" == ln for ln in lines)
-    with Ledger(demo / "data" / "edr.db") as led:
-        params = {tuple(r) for r in led.db.execute("SELECT run_id, key, value FROM params")}
+    with Database(demo / "data" / "edr.db") as db:
+        params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM params")}
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "src", src) in params
 
     exp = tmp_path / "exp"
@@ -135,16 +135,16 @@ def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeyp
     monkeypatch.chdir(fresh)
     assert edr(capsys, "init", "--site", str(demo), "--dry-run")[0] == 0 and list(fresh.iterdir()) == []
     monkeypatch.chdir(demo)
-    assert edr(capsys, "stage", "HEAD", "--dry-run")[0] == 0 and not (demo / "wt").exists()
-    src = json.loads(edr(capsys, "--json", "stage", "HEAD")[1])["data"]["src"]  # the fixture worktree
+    assert edr(capsys, "checkout", "HEAD", "--dry-run")[0] == 0 and not (demo / "wt").exists()
+    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]  # the fixture worktree
     state, scratch = tmp_path / ".edr", tmp_path / "scratch"
     wt = listing(demo / "wt")
-    assert edr(capsys, "stage", "HEAD", "--dry-run")[0] == 0
+    assert edr(capsys, "checkout", "HEAD", "--dry-run")[0] == 0
     assert edr(capsys, "plan", "demo", "--dry-run")[0] == 0
     code, out, _ = edr(capsys, "launch", "demo", "--dry-run")
     assert code == 0 and "(dry)" in out and "rsync -a --delete" in out
     assert edr(capsys, "watch", "--once", "--dry-run")[0] == 0
-    assert not (demo / "data").exists()  # a dry run opens no ledger file
+    assert not (demo / "data").exists()  # a dry run opens no database file
     assert edr(capsys, "check")[0] == 0
     assert edr(capsys, "status")[1] == "no runs\n"
     assert edr(capsys, "metrics", "--design", src, "--csv")[0] == 2
@@ -153,5 +153,5 @@ def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeyp
     assert not state.exists() and list(scratch.iterdir()) == [] and listing(demo / "wt") == wt
     assert not (tmp_path / "exp").exists() and not (demo / "data" / "board").exists()
     assert not (demo / "data" / "results").exists()
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert led.runs() == [] and led.events() == [] and led.batches() == []
+    with Database(demo / "data" / "edr.db") as db:
+        assert db.runs() == [] and db.events() == [] and db.batches() == []

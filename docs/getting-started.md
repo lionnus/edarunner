@@ -1,7 +1,7 @@
 # Getting started
 
 edarunner runs a flow you already have, a Makefile or a script, on hosts
-you reach over ssh, and keeps one ledger of every run. This page goes from
+you reach over ssh, and keeps one database of every run. This page goes from
 an empty head node to a first batch with a watcher behind it.
 
 ## Install
@@ -35,13 +35,13 @@ needs no tool, no licence and no second host.
 ```sh
 git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
 bash setup.sh                 # a small git repository with the fake flow
-edr stage HEAD                # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned worktree of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan demo                 # run ids, hosts, every path; writes nothing
 edr launch demo               # one driver per run on the host `local`
 edr status                    # the board
 edr watch --once              # collect, extract metrics, classify
-edr metrics --design <src> --csv   # <src> is the hash that `edr stage` printed
+edr metrics --design <src> --csv   # <src> is the hash that `edr checkout` printed
 ```
 
 The two runs end `done` within a minute. `examples/local-demo/README.md`
@@ -92,7 +92,7 @@ to wait for seats, and `[telegram]` when you want alerts on your phone.
 
 Edit `edr.toml`: the repository under `[source]`, one `[stages.<name>]`
 per command of the flow, and the `[metrics.<name>]` you want in the
-ledger. Stages run in file order. `docs/flows.md` shows two real flows,
+database. Stages run in file order. `docs/flows.md` shows two real flows,
 and `docs/reference/configuration.md` explains stages, steps, task
 groups and metrics.
 
@@ -102,21 +102,22 @@ groups and metrics.
 edr check
 ```
 
-`check` loads every file, imports the hooks, probes every host, names
+`check` loads every file, imports the hooks, probes every host (asks it
+over ssh for its cores, load, RAM and scratch), names
 every tool the head node lacks, and plans every batch under `jobs/`. It
 prints one `problem:` line per fault and exits 1, or `ok: 2 hosts, 3
 stages, 5 metrics, 1 batches` and exits 0.
 
-### 5. Stage the source
+### 5. Check out the source
 
 ```sh
-edr stage origin/main
+edr checkout origin/main
 ```
 
 This prints `<src> <path>`: the short hash of the commit and a detached
 worktree at `<worktrees>/<src>`. Every run of that source works on a copy
 of this tree, so a later commit never changes a running flow. A tree
-with uncommitted changes goes in with `edr stage --dirty <dir>`; its tag
+with uncommitted changes goes in with `edr checkout --dirty <dir>`; its tag
 is `<hash>-dirty-<8 hex>`, and `launch` needs `--allow-dirty` for it.
 
 ### 6. Write a batch
@@ -136,7 +137,7 @@ config = "base"
 overrides = { DW = 0 }
 ```
 
-`source` is the tag that `edr stage` printed. A job is one run: a label,
+`source` is the tag that `edr checkout` printed. A job is one run: a label,
 a configuration name the flow understands, optional overrides that
 become `KEY=VALUE` tokens in the command, and optional `stages` and
 `tasks` lists. The run id is `<date>_<label>_<build_tag>_g<src>`.
@@ -150,8 +151,9 @@ edr launch sweep1
 ```
 
 Read every path of the dry run before the real launch. `launch` copies
-the driver into the state directory, syncs the staged tree to each host,
-writes one spec per run and starts one driver per run. A job that no host
+the driver into the state directory, syncs the checked-out tree to each host,
+writes one spec per run, the JSON file the driver reads, and starts one
+driver per run. A job that no host
 fits is queued, and the watcher starts it when a host frees up. Confirm
 within a minute that `edr status` shows a phase past `setup`.
 
@@ -163,6 +165,10 @@ edr status --live             # asks each host whether the driver exists
 edr status base@sweep1        # one run: stages, metrics, log tail
 edr status --triage           # every run not running, with one proposed command
 ```
+
+`base@sweep1` is a handle. A handle names one run: `label@batch`, a run
+id prefix, or `#n` from the last board that `edr status` printed. Every
+command that acts on one run takes a handle.
 
 ### 9. Run the watcher
 
@@ -195,7 +201,7 @@ edr export --design 3f9a2c1 --out exports/3f9a2c1
 ```
 
 One table holds one design, so `--design` has no default. `docs/results.md`
-explains the ledger and the snapshot.
+explains the database and the snapshot.
 
 ### 11. Clean up
 
@@ -205,7 +211,7 @@ edr retire --batch sweep1 --why "exported"
 ```
 
 `retire` removes the run trees on the hosts after a guard on every path,
-and refuses a tree whose results are not collected. The ledger keeps the
+and refuses a tree whose results are not collected. The database keeps the
 runs, the metrics and the events. `--collect netlist` copies the larger
 files of a `collect_on_request` list to the head node first; the section
 "Archive, then clear the hosts" in `docs/running.md` shows the whole
@@ -214,7 +220,7 @@ sequence and the rerun from the archive.
 ### 12. A second project
 
 One project is one directory with an `edr.toml`. A second flow, on
-another repository, gets its own directory, and with it its own ledger
+another repository, gets its own directory, and with it its own database
 and results under `data/`, its own state directory `~/.edr/<project>`,
 its own trees under `<scratch>/<user>/edr/<project>/` and its own
 watcher unit. The site file is shared. Nothing of one project appears in

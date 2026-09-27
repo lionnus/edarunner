@@ -3,10 +3,10 @@
 # The edr command
 
 ```
-edr [--json] [--version] verb ...
+edr [--json] [--version] command ...
 ```
 
-Run flows on hosts, keep a ledger, watch, export.
+Run flows on hosts, keep a run database, watch, export.
 
 | Flag | Meaning |
 |---|---|
@@ -16,21 +16,21 @@ Run flows on hosts, keep a ledger, watch, export.
 edr finds edr.toml in the current directory or a parent, so it works from
 anywhere below the project. Without one it refuses.
 
---json on any verb prints one object instead of the text:
+--json on any command prints one object instead of the text:
 {"code": 0, "data": {}, "output": "the text a person would see"}.
-code is the exit code, data the verb's result as structured data, and
+code is the exit code, data the command's result as structured data, and
 output the text.
 
---dry-run exists on every verb that writes. A dry run prints every path
+--dry-run exists on every command that writes. A dry run prints every path
 and every command with the mark (dry) or the prefix dry: and writes
-nothing: no date pin, no spec, no file on a host, no ledger row, no
+nothing: no date pin, no spec, no file on a host, no database row, no
 event, not even an empty database.
 
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read verb (check, events, hosts, lic, metrics, notify, status, tools) never creates
-data/edr.db. Without a database it reads an empty ledger in memory.
+A read command (check, events, hosts, lic, metrics, notify, status, tools) never creates
+data/edr.db. Without the file it reads an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
 queued, yellow when stale, red when dead, hung, over budget, an orphan or
@@ -55,7 +55,7 @@ to the newest batch directory in the state.
 | 3 | a host did not answer, or a host command failed |
 | 130 | interrupted |
 
-A verb below says where it refines a code.
+A command below says where it refines a code.
 
 ## status
 
@@ -173,7 +173,7 @@ edr metrics --design SRC [--stage S] [--step N] [--csv]
 ```
 
 Every metric of one design: label, design, stage, step, task, name,
-value and unit. --design is the source tag exactly as edr stage printed
+value and unit. --design is the source tag exactly as edr checkout printed
 it, -dirty-... included. It has no default, because one table holds one
 design. --csv writes the columns of metrics.csv (docs/results.md) to
 stdout.
@@ -220,10 +220,10 @@ problem: line per fault, or an ok: line with the counts.
 |---|---|
 | 1 | a problem was found |
 
-## stage
+## checkout
 
 ```
-edr stage [--dry-run] [--dirty DIR] [ref]
+edr checkout [--dry-run] [--dirty DIR] [ref]
 ```
 
 Fetches, then adds a detached worktree of ref (default source.ref) at
@@ -232,7 +232,7 @@ it at the HEAD the repository copy has. Prints <src> <path>.
 
 --dirty DIR copies a working tree instead, with its diff in source.diff;
 the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
-under --dirty is staged as a worktree.
+under --dirty is checked out as a worktree.
 
 | Flag | Meaning |
 |---|---|
@@ -267,7 +267,7 @@ edr launch [--dry-run] [--only L] [--allow-dirty] [batch]
 ```
 
 Pins the date of the batch, publishes the driver into the state
-directory, syncs the staged tree to each host, writes one spec per run
+directory, syncs the checked-out tree to each host, writes one spec per run
 and starts one driver per run, stagger_s apart. Prints
 <n> started, <n> queued, <n> with problems. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec

@@ -76,7 +76,7 @@ class FakeActions:
         return {"handle": "a@demo", "run_id": handle, "run_root": "/scratch/edr/demo/" + handle, "host": "hostA"}
 
 
-class FakeLedger:
+class FakeDatabase:
     def __init__(self) -> None:
         self.events: list[dict] = []
         self.kv: dict = {}
@@ -124,7 +124,7 @@ def make_project(tmp_path: Path) -> SimpleNamespace:
 @pytest.fixture
 def bot(tmp_path, monkeypatch) -> TelegramBot:
     site = make_site(tmp_path)
-    bots = make_notifiers(site, make_project(tmp_path), FakeLedger(), FakeActions())
+    bots = make_notifiers(site, make_project(tmp_path), FakeDatabase(), FakeActions())
     assert len(bots) == 1 and isinstance(bots[0], TelegramBot)
     monkeypatch.setattr(bots[0], "api", FakeApi())
     return bots[0]
@@ -143,9 +143,9 @@ def last_reply(bot: TelegramBot) -> str:
 
 def test_make_notifiers_needs_a_private_token(tmp_path):
     site = make_site(tmp_path, mode=0o644)
-    assert make_notifiers(site, make_project(tmp_path), FakeLedger(), FakeActions()) == []
+    assert make_notifiers(site, make_project(tmp_path), FakeDatabase(), FakeActions()) == []
     site.telegram.token_file.unlink()
-    assert make_notifiers(site, make_project(tmp_path), FakeLedger(), FakeActions()) == []
+    assert make_notifiers(site, make_project(tmp_path), FakeDatabase(), FakeActions()) == []
     assert make_notifiers(SimpleNamespace(telegram=None), None, None, None) == []
 
 
@@ -193,14 +193,14 @@ def test_help_groups_builtins_and_custom(bot):
 def test_custom_good_argument_runs_argv(bot):
     bot.handle_update(msg("/echo backend"))
     assert last_reply(bot) == pre("demo/backend")
-    assert bot.ledger.events[-1]["kind"] == "command"
-    assert bot.ledger.events[-1]["actor"] == "telegram"
+    assert bot.db.events[-1]["kind"] == "command"
+    assert bot.db.events[-1]["actor"] == "telegram"
 
 
 def test_custom_bad_argument_is_refused(bot):
     bot.handle_update(msg("/echo backend;rm"))
     assert last_reply(bot).startswith("<pre>refused: dir must match")
-    assert [e["kind"] for e in bot.ledger.events] == ["refused"]
+    assert [e["kind"] for e in bot.db.events] == ["refused"]
 
 
 def test_custom_last_argument_takes_the_rest(bot):
@@ -213,7 +213,7 @@ def test_custom_last_argument_takes_the_rest(bot):
 def test_custom_without_args_refuses_extra_words(bot):
     bot.handle_update(msg("/skip extra"))
     assert last_reply(bot).startswith("<pre>usage: /skip")
-    assert bot.ledger.events == []
+    assert bot.db.events == []
 
 
 def test_custom_skip_if_renders_placeholders(bot):
@@ -227,7 +227,7 @@ def test_keep_refuses_a_unicode_digit(bot):
     bot.handle_update(msg("/keep x \u00b2"))
     assert bot.actions.calls == []
     assert last_reply(bot).startswith("error: ")
-    assert [e["kind"] for e in bot.ledger.events] == ["refused"]
+    assert [e["kind"] for e in bot.db.events] == ["refused"]
 
 
 def test_custom_dry_run_skip_detach_timeout(bot, monkeypatch):
@@ -253,13 +253,13 @@ def test_allowlist_is_silent_with_one_event(bot):
     bot.handle_update(msg("/status", chat=7))
     bot.handle_update(msg("/status", chat=7))
     assert bot.api.calls == [] and bot.actions.calls == []
-    assert [e["kind"] for e in bot.ledger.events] == ["rejected"]
-    assert "chat 7" in bot.ledger.events[0]["text"]
+    assert [e["kind"] for e in bot.db.events] == ["rejected"]
+    assert "chat 7" in bot.db.events[0]["text"]
 
 
 def test_chat_id_zero_prints_the_chat_id(tmp_path, monkeypatch, capsys):
     site = make_site(tmp_path, chat_id=0)
-    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
+    b = TelegramBot(site, make_project(tmp_path), FakeDatabase(), FakeActions(), str(site.telegram.token_file))
     monkeypatch.setattr(b, "api", FakeApi())
     b.handle_update(msg("/status", chat=99))
     assert "chat_id = 99" in capsys.readouterr().err
@@ -286,10 +286,10 @@ def test_callback_buttons(bot):
     assert edits[-1]["message_id"] == 5 and edits[-1]["text"] == "hung a@demo\nack ok"
     assert edits[-1]["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]  # the bold title stays
     assert edits[-1]["reply_markup"]["inline_keyboard"]  # the buttons stay
-    assert bot.ledger.events == []  # the action records its own event
+    assert bot.db.events == []  # the action records its own event
     bot.handle_update(callback("retire:a@demo"))
     assert bot.api.of("answerCallbackQuery")[-1]["text"] == "unknown button"
-    assert [e["kind"] for e in bot.ledger.events] == ["refused"]
+    assert [e["kind"] for e in bot.db.events] == ["refused"]
     assert len(bot.actions.calls) == 2
     bot.handle_update(callback("ack:a@demo", chat=7))
     assert len(bot.actions.calls) == 2
@@ -311,7 +311,7 @@ def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
     site = make_site(tmp_path)
     project = make_project(tmp_path)
     project.telegram_poll = False
-    b = TelegramBot(site, project, FakeLedger(), FakeActions(), str(site.telegram.token_file))
+    b = TelegramBot(site, project, FakeDatabase(), FakeActions(), str(site.telegram.token_file))
     monkeypatch.setattr(b, "api", FakeApi())
     b.start()
     b.stop()
@@ -322,7 +322,7 @@ def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
 
 def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
     site = make_site(tmp_path, user_id=777)
-    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
+    b = TelegramBot(site, make_project(tmp_path), FakeDatabase(), FakeActions(), str(site.telegram.token_file))
     monkeypatch.setattr(b, "api", FakeApi())
     b._stop.set()
     with caplog.at_level(logging.WARNING):
@@ -333,7 +333,7 @@ def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
     b.handle_update(callback("ack:a@demo", user=USER))
     b.handle_update(msg("/stop a@demo", user=USER))
     assert b.api.of("sendMessage") == [] and b.api.of("answerCallbackQuery") == [] and b.actions.calls == []
-    assert [e["kind"] for e in b.ledger.events] == ["rejected"] and "user 12345 in chat 42" in b.ledger.events[0]["text"]
+    assert [e["kind"] for e in b.db.events] == ["rejected"] and "user 12345 in chat 42" in b.db.events[0]["text"]
     b.handle_update(msg("/status", user=777))
     b.handle_update(callback("ack:a@demo", user=777))
     assert [c[0] for c in b.actions.calls] == ["status_text", "ack"]
@@ -359,14 +359,14 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     sent = bot.api.of("sendMessage")
     assert len(sent) == 1 and sent[0]["disable_notification"] is True
     assert bot.api.of("pinChatMessage")[0]["message_id"] == 1
-    assert bot.ledger.kv["telegram"]["board"] == 1 and not (tmp_path / "data").exists()
+    assert bot.db.kv["telegram"]["board"] == 1 and not (tmp_path / "data").exists()
     bot.board("board v2")
     assert len(bot.api.of("sendMessage")) == 1
     edit = bot.api.of("editMessageText")[-1]
     assert edit["message_id"] == 1 and edit["reply_markup"] is None
     assert re.fullmatch(r"<b>demo: board \d\d:\d\d</b>\nboard v2", edit["text"])
-    # A new bot on the same ledger edits the same message.
-    again = TelegramBot(bot.site, bot.project, bot.ledger, bot.actions, str(bot.tg.token_file))
+    # A new bot on the same db edits the same message.
+    again = TelegramBot(bot.site, bot.project, bot.db, bot.actions, str(bot.tg.token_file))
     again.api = FakeApi()
     again.board("board v3")
     assert again.api.of("sendMessage") == [] and again.api.of("editMessageText")[-1]["message_id"] == 1
@@ -428,7 +428,7 @@ def test_builtin_commands_land_in_events(bot):
     bot.handle_update(msg("/pin"))
     bot.handle_update(msg("/keep 'a;rm' 3"))
     bot.handle_update(msg("/ack a@demo"))  # the action records its own event
-    assert [(e["kind"], e["text"][:6]) for e in bot.ledger.events] == [("command", "/pin"), ("refused", "/keep ")]
+    assert [(e["kind"], e["text"][:6]) for e in bot.db.events] == [("command", "/pin"), ("refused", "/keep ")]
 
 
 def test_poll_survives_a_bad_response(bot, monkeypatch):
@@ -509,7 +509,7 @@ def test_a_topic_routes_every_message_and_ignores_other_threads(bot, capsys):
     bot.handle_update(in_topic(msg("/status"), 99))
     bot.handle_update(in_topic(callback("ack:a@demo"), 99))
     bot.handle_update(msg("/status"))
-    assert bot.api.calls == [] and bot.actions.calls == [] and bot.ledger.events == []
+    assert bot.api.calls == [] and bot.actions.calls == [] and bot.db.events == []
     bot.handle_update(in_topic(msg("/status"), 17))
     assert bot.api.of("sendMessage")[-1]["message_thread_id"] == 17
     bot.send("dead", "run1", "dead a@demo\nno heartbeat", alert_buttons("a@demo"))
@@ -553,7 +553,7 @@ def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
     monkeypatch.setattr(tgbot.time, "time", lambda: 1e12)
     bot.handle_update(reply_to("/ack", mid))
     assert last_reply(bot).startswith("error: a handle is")
-    assert list(bot.ledger.kv["telegram"]["replies"]) == [str(mid)]
+    assert list(bot.db.kv["telegram"]["replies"]) == [str(mid)]
 
 
 def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
@@ -655,7 +655,7 @@ def test_the_reply_keyboard_sends_plain_words(bot):
     assert bot.api.of("sendMessage")[-1]["reply_markup"] == {"remove_keyboard": True}
     bot.handle_update(msg("/keyboard"))
     assert last_reply(bot) == "keyboard on" and "keyboard" in bot.api.of("sendMessage")[-1]["reply_markup"]
-    assert [e["text"] for e in bot.ledger.events][:2] == ["/start", "/status"]
+    assert [e["text"] for e in bot.db.events][:2] == ["/start", "/status"]
 
 
 def reactions(bot) -> list[str]:

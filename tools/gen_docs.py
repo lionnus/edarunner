@@ -1,6 +1,6 @@
 """Write docs/reference/ from the code: the CLI, the configuration, the run states and the bot.
 
-Run `uv run tools/gen_docs.py` after a change to a verb, a flag, a config key, a state or a
+Run `uv run tools/gen_docs.py` after a change to a command, a flag, a config key, a state or a
 bot command. `--check` exits 1 with a diff summary when a committed page differs.
 """
 
@@ -84,8 +84,8 @@ def doc(obj: object) -> str:
 
 # the CLI
 
-def verbs() -> dict[str, argparse.ArgumentParser]:
-    """Every verb's parser, in the order of the definitions."""
+def commands() -> dict[str, argparse.ArgumentParser]:
+    """Every command's parser, in the order of the definitions."""
     p = cli._parser()
     sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
     return {name: s for name, s in sub.choices.items() if name in cli.EXITS}  # an alias without help stays out
@@ -118,8 +118,8 @@ def cli_page() -> str:
     out = [HEAD, "# The edr command\n\n", f"```\n{_usage(p)}\n```\n\n", p.description + "\n\n", _flags(p), "\n",
            p.epilog + "\n\n", "## Exit codes\n\n",
            table(["Code", "Meaning"], [[int(c), t] for c, t in cli.EXIT.items()]),
-           "\nA verb below says where it refines a code.\n\n"]
-    for name, s in verbs().items():
+           "\nA command below says where it refines a code.\n\n"]
+    for name, s in commands().items():
         out += [f"## {name}\n\n", f"```\n{_usage(s)}\n```\n\n", s.description + "\n\n", _flags(s)]
         if cli.EXITS[name]:
             out += ["\n", table(["Exit", "Meaning"], [[int(c), t] for c, t in sorted(cli.EXITS[name].items())])]
@@ -217,7 +217,7 @@ def bot_page() -> str:
 # the index
 
 def index_page() -> str:
-    rows = [["[cli.md](cli.md)", "every verb with its flags, description and exit codes", "the argparse definitions in `src/edarunner/cli.py`"],
+    rows = [["[cli.md](cli.md)", "every command with its flags, description and exit codes", "the argparse definitions in `src/edarunner/cli.py`"],
             ["[configuration.md](configuration.md)", "every key of the four TOML files, and the placeholders",
              "the dataclasses in `src/edarunner/model.py`, `PLACEHOLDERS` in `src/edarunner/config.py`"],
             ["[states.md](states.md)", "every run state: test, action, mark, proposed command",

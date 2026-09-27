@@ -15,7 +15,7 @@ from typing import Any
 from . import __version__
 from .board import is_live
 from .guards import Refuse
-from .ledger import Ledger
+from .db import Database
 from .model import Project
 
 Row = dict[str, Any]
@@ -26,7 +26,7 @@ METRIC_COLUMNS = ["run_id", "label", "config", "design", "stage", "step", "task"
 
 def export(
     project: Project,
-    ledger: Ledger,
+    db: Database,
     design: str,
     out: Path,
     labels: list[str] | None = None,
@@ -42,11 +42,11 @@ def export(
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise Refuse(f"'{out}' exists and is not empty")
-    runs = _select(ledger, design, labels)
+    runs = _select(db, design, labels)
     if not runs:
         raise Refuse(f"no run has the source '{design}'" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
-    metrics = ledger.metrics(run_ids=ids)
+    metrics = db.metrics(run_ids=ids)
 
     plan: list[tuple[str, Path | bytes]] = [
         ("runs.csv", _csv(RUN_COLUMNS, [_run_row(r) for r in runs])),
@@ -93,10 +93,10 @@ def export(
     return manifest
 
 
-def _select(ledger: Ledger, design: str, labels: list[str] | None) -> list[Row]:
+def _select(db: Database, design: str, labels: list[str] | None) -> list[Row]:
     """The newest run per label with the exact source tag `design`, in label order."""
     newest: dict[str, Row] = {}
-    for r in ledger.runs():
+    for r in db.runs():
         if r.get("src") == design and (labels is None or r["label"] in labels):
             newest[r["label"]] = r
     return [newest[k] for k in sorted(newest)]

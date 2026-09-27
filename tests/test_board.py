@@ -1,4 +1,4 @@
-"""Tests of edarunner.board on rows shaped like the ledger `runs` table."""
+"""Tests of edarunner.board on rows shaped like the database `runs` table."""
 
 import json
 import re
@@ -10,7 +10,7 @@ import pytest
 
 from edarunner import board
 from edarunner.hosts import HostProbe
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 from edarunner.model import Marks
 
 NOW = 1_800_000_000
@@ -205,11 +205,11 @@ def test_compare_script_runs_without_plotly(tmp_path):
     assert got["sc"].startswith("<option selected>label</option>")
 
 
-def test_rows_from_ledger(tmp_path):
-    with Ledger(tmp_path / "edr.db") as led:
+def test_rows_from_db(tmp_path):
+    with Database(tmp_path / "edr.db") as db:
         for r in _rows():
-            led.upsert_run(r)
-        raw = [dict(r) for r in led.db.execute("SELECT * FROM runs")]
+            db.upsert_run(r)
+        raw = [dict(r) for r in db.conn.execute("SELECT * FROM runs")]
     assert all(isinstance(r["counts"], str) for r in raw)
     text = board.narrow(raw, now=NOW)
     assert all(len(line) <= 48 for line in text.splitlines())

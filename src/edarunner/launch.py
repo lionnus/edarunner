@@ -14,7 +14,7 @@ from typing import Any
 from . import collect, config, hosts, sync
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
-from .ledger import Ledger
+from .db import Database
 from .model import Batch, Budget, Job, Project, Stage, Task
 
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
@@ -168,14 +168,14 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
 
 # --- plan
 
-def _reuse_row(ledger: Ledger, reuse: dict[str, object], need_tree: bool = True) -> dict[str, Any]:
+def _reuse_row(db: Database, reuse: dict[str, object], need_tree: bool = True) -> dict[str, Any]:
     if "run_id" in reuse:
-        row = ledger.run(ledger.resolve(str(reuse["run_id"])))
+        row = db.run(db.resolve(str(reuse["run_id"])))
     else:
-        rows = [r for r in ledger.runs() if r["label"] == reuse["label"]]
+        rows = [r for r in db.runs() if r["label"] == reuse["label"]]
         row = rows[-1] if rows else None
     if row is None or (need_tree and not (row.get("root") and row.get("host"))):
-        raise KeyError(f"reuse {reuse}: no run{' with a host and a root' if need_tree else ''} in the ledger")
+        raise KeyError(f"reuse {reuse}: no run{' with a host and a root' if need_tree else ''} in the database")
     return row
 
 
@@ -193,7 +193,7 @@ def _check_overrides(project: Project, job: Job, names: list[str]) -> list[str]:
     return problems
 
 
-def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: str,
+def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
               probes: dict[str, hosts.HostProbe], errors: dict[str, str], placed: dict[str, str | None]) -> RunPlan:
     names = job.stages or list(project.stages)
     problems = _check_overrides(project, job, names)
@@ -201,7 +201,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
     restore = str(job.reuse.get("restore") or "") if job.reuse else ""
     if job.reuse:
         try:
-            row = _reuse_row(ledger, job.reuse, need_tree=not restore)
+            row = _reuse_row(db, job.reuse, need_tree=not restore)
             src, reused = row["src"], row["run_id"]
             # The tag and the tree id belong to the tree, through any chain of reuse.
             tag = row.get("build_tag") or ""
@@ -258,7 +258,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
                    reuse=reused, restore=restore, values=v)
 
 
-def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: str | None = None,
+def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
          only: list[str] | None = None, probes: dict[str, hosts.HostProbe] | None = None) -> list[RunPlan]:
     """Render every job of a batch into a RunPlan; a problem is reported in the plan, not raised.
 
@@ -280,7 +280,7 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, date: s
         errors = {h: "no probe of the host" for h in names if h not in probes}
     auto = [j for j in jobs if j.host == "auto" and _fresh(j)]
     placed = hosts.place(project, auto, probes, {h: p.our_runs for h, p in probes.items()}) if auto else {}
-    return [_plan_job(project, batch, j, ledger, date, probes, errors, placed) for j in jobs]
+    return [_plan_job(project, batch, j, db, date, probes, errors, placed) for j in jobs]
 
 
 # --- launch
@@ -320,13 +320,13 @@ def _src_dir(project: Project, src: str, src_dir: Path | None) -> Path:
     if src_dir is not None:
         return Path(src_dir)
     try:
-        from . import stagectl
+        from . import checkout
     except ImportError:
-        raise Refuse("no src_dir given and stagectl is missing") from None
-    return Path(stagectl.find(project, src))
+        raise Refuse("no src_dir given and checkout is missing") from None
+    return Path(checkout.find(project, src))
 
 
-def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_run: bool = False,
+def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run: bool = False,
            only: list[str] | None = None, allow_dirty: bool = False, stagger_s: int | None = None,
            src_dir: Path | None = None) -> list[dict[str, Any]]:
     """Pin the date, publish the driver, sync, write the specs and start one driver per run."""
@@ -334,10 +334,10 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
         raise Refuse(f"source {batch.source} is dirty; pass --allow-dirty")
     state = project.state
     date = pin_date(state, batch.batch, dry_run)
-    plans = plan(project, batch, ssh, ledger, date=date, only=only)
+    plans = plan(project, batch, ssh, db, date=date, only=only)
     driver = sync.publish_driver(state, DRIVER_SRC, dry_run)
     if not dry_run:
-        ledger.upsert_batch({"batch": batch.batch, "project": project.project, "source": batch.source, "run_date": date})
+        db.upsert_batch({"batch": batch.batch, "project": project.project, "source": batch.source, "run_date": date})
     stagger = project.limits.stagger_s if stagger_s is None else stagger_s
     out: list[dict[str, Any]] = []
     started = 0
@@ -349,7 +349,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
         if p.host and not p.problems and spec_path.exists():
             p.problems.append(f"already launched: {spec_path} exists")
         if p.queued and not dry_run:
-            ledger.upsert_run({**_run_row(p, batch), "state": "queued"})
+            db.upsert_run({**_run_row(p, batch), "state": "queued"})
         if p.queued or p.problems:
             print(f"{p.run_id}: " + ("queued" if p.queued else "; ".join(p.problems)))
             continue
@@ -359,7 +359,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
             ok = sync.sync_tree(ssh, p.host, _src_dir(project, p.src, src_dir), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
             if ok and p.restore:
-                res = collect.restore_on_request(project, ssh, ledger, ledger.run(p.reuse) or {}, p.restore,
+                res = collect.restore_on_request(project, ssh, db, db.run(p.reuse) or {}, p.restore,
                                                  p.host, p.root, dry_run)
                 print(f"{p.run_id}: restore {p.restore} of {p.reuse}: {res.files} files" + (" (dry)" if dry_run else ""))
                 for f in res.failures:
@@ -375,8 +375,8 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
         print(f"{p.run_id}: {p.host} {p.root}" + (" (dry)" if dry_run else ""))
         if dry_run:
             continue
-        ledger.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
-        ledger.add_event("user", p.run_id, "launch", f"{p.host} {p.root}")
+        db.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
+        db.add_event("user", p.run_id, "launch", f"{p.host} {p.root}")
         row["pid"] = start_driver(ssh, p.host, driver, path, log, project.site.env)
         row["started"] = True
         started += 1
@@ -391,7 +391,7 @@ def _run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
 
 # --- stop
 
-def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dict[str, Any], after_task: bool = False,
+def stop(ssh: hosts.Ssh, db: Database, run_row: dict[str, Any], heartbeat: dict[str, Any], after_task: bool = False,
          now: bool = False, grace_s: int = 30, dry_run: bool = False, why: str = "", state: Path | None = None,
          actor: str = "user") -> bool:
     """Stop one run: the stop file with `after_task`, else TERM to the driver and every pgid, KILL with `now`."""
@@ -403,7 +403,7 @@ def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dic
         print(f"{run_id}: write {path}" + (" (dry)" if dry_run else ""))
         if not dry_run:
             path.write_text("after-task\n")
-            ledger.add_event(actor, run_id, "stop", f"after-task: {why}")
+            db.add_event(actor, run_id, "stop", f"after-task: {why}")
         return True
     pid, pgids = heartbeat.get("driver_pid"), [g for g in heartbeat.get("pgids") or [] if g]
     if pid is None and not pgids:
@@ -421,7 +421,7 @@ def stop(ssh: hosts.Ssh, ledger: Ledger, run_row: dict[str, Any], heartbeat: dic
     if alive and now:
         _signal(ssh, host, pid, pgids, "KILL")
         alive = ssh.pid_alive(host, pid)
-    ledger.add_event(actor, run_id, "stop", f"{why} [driver {pid}, pgids {pgids}, {'killed' if now else 'term'}, "
+    db.add_event(actor, run_id, "stop", f"{why} [driver {pid}, pgids {pgids}, {'killed' if now else 'term'}, "
                      f"{'alive' if alive else 'ended'}]")
     return not alive
 

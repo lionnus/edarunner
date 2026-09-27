@@ -4,7 +4,9 @@
 
 One run state: the test that finds it, whether it alerts, and what the watcher does after `grace_s`.
 
-A live run gets its state from the heartbeat and the ledger; a finished run from its phase.
+The state is the watcher's verdict on a run; the phase is the driver's word in the heartbeat for
+where the run is or how it ended. A live run gets its state from the heartbeat and the database;
+a finished run from its phase.
 Every change of state writes an event. A state that alerts sends one alert per run and reason,
 and a new reason edits that alert in place. `edr keep --ack` cancels the pending kill of `hung`
 and the stop of `host_full`; any keep file holds off the stop of `superseded`.

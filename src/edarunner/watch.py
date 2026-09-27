@@ -2,7 +2,7 @@
 
 The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a file or a tree. Its memory between cycles
-is two rows of the ledger's kv table: progress (what each run looked
+is two rows of the database's kv table: progress (what each run looked
 like last time) and notified (states, alerts, grace clocks).
 """
 
@@ -18,7 +18,7 @@ from typing import Any
 from . import board, collect, config, launch, metrics
 from .guards import Refuse
 from .hosts import HostError, Ssh
-from .ledger import Ledger
+from .db import Database
 from .model import Project, Task
 from .notify import Notifier, alert_buttons
 from .notify.digest import Digest
@@ -37,7 +37,9 @@ _BUSY = ("stage:", "group:", "retry:")
 class State:
     """One run state: the test that finds it, whether it alerts, and what the watcher does after `grace_s`.
 
-    A live run gets its state from the heartbeat and the ledger; a finished run from its phase.
+    The state is the watcher's verdict on a run; the phase is the driver's word in the heartbeat for
+    where the run is or how it ended. A live run gets its state from the heartbeat and the database;
+    a finished run from its phase.
     Every change of state writes an event. A state that alerts sends one alert per run and reason,
     and a new reason edits that alert in place. `edr keep --ack` cancels the pending kill of `hung`
     and the stop of `host_full`; any keep file holds off the stop of `superseded`.
@@ -116,16 +118,16 @@ def _stages(hb: dict) -> dict[str, dict]:
     return out
 
 
-def ingest(ledger: Ledger, heartbeats: list[tuple[str, dict]]) -> None:
+def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
     """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify."""
     for batch, hb in heartbeats:
-        ledger.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
+        db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
         for name, s in _stages(hb).items():
-            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
+            db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
                                      "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
                                      "exit": s.get("exit"), "log": s.get("log")})
         for tid, t in (hb.get("tasks") or {}).items():
-            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
+            db.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
                                      **{k: t.get(k) for k in _TASK_KEYS}})
 
 
@@ -146,7 +148,7 @@ def _signature(ssh: Ssh, hb: dict) -> list:
     return sig
 
 
-def classify(project: Project, ssh: Ssh, ledger: Ledger, run: Row, heartbeat: dict, now: float,
+def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict, now: float,
              progress: dict | None = None) -> tuple[str, list[str]]:
     """The state of one run (running, stale, dead, hung, looping, over_budget, host_full or superseded) and every reason found."""
     hb, lim = heartbeat, project.limits
@@ -178,7 +180,7 @@ def classify(project: Project, ssh: Ssh, ledger: Ledger, run: Row, heartbeat: di
             rec.update(sig=sig, since=now)
         elif now - rec["since"] >= lim.hung_s:
             found.append(("hung", "no progress since " + time.strftime("%d.%m %H:%M", time.localtime(rec["since"]))))
-    newer = [r["run_id"] for r in ledger.runs() if r["label"] == run.get("label") and r["batch"] != run.get("batch")
+    newer = [r["run_id"] for r in db.runs() if r["label"] == run.get("label") and r["batch"] != run.get("batch")
              and r["run_id"] > run["run_id"] and r.get("src") != run.get("src") and r.get("phase") and board.is_live(r)]
     if newer:
         found.append(("superseded", f"by {max(newer)}"))
@@ -189,40 +191,40 @@ def classify(project: Project, ssh: Ssh, ledger: Ledger, run: Row, heartbeat: di
 
 # actions
 
-def _newest_on(ledger: Ledger, host: str) -> Row | None:
-    live = [r for r in ledger.runs() if r.get("host") == host and r.get("phase") and board.is_live(r)]
+def _newest_on(db: Database, host: str) -> Row | None:
+    live = [r for r in db.runs() if r.get("host") == host and r.get("phase") and board.is_live(r)]
     return max(live, key=lambda r: r["run_id"], default=None)
 
 
-def _act(project: Project, ssh: Ssh, ledger: Ledger, run: Row, state: str, reasons: list[str], text: str,
+def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons: list[str], text: str,
          now: float, notes: dict) -> bool:
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
     lim, host, run_id = project.limits, run.get("host"), run["run_id"]
     if any(r.startswith("superseded:") for r in reasons):
         stop_path = project.state / str(run.get("batch")) / f"{run_id}.stop"
         if not _keep(project, run) and not stop_path.exists():
-            launch.stop(ssh, ledger, run, {}, after_task=True, why=text, state=project.state, actor="watch")
+            launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state, actor="watch")
         if state == "superseded":
             return True
     if state == "host_full":
-        clocks, target = notes.setdefault("_hosts", {}), _newest_on(ledger, host)
+        clocks, target = notes.setdefault("_hosts", {}), _newest_on(db, host)
         if target is None or now - clocks.get(host, 0) < lim.grace_s or _keep(project, target).get("ack"):
             return False
         clocks[host] = now
-        launch.stop(ssh, ledger, target, _hb(project, target), now=True, why=f"{host} full: {text}", actor="watch")
+        launch.stop(ssh, db, target, _hb(project, target), now=True, why=f"{host} full: {text}", actor="watch")
         return True
     if state == "hung" and lim.kill_hung and not _keep(project, run).get("ack"):
         pgids = _hb(project, run).get("pgids") or []
         for pgid in pgids:
             ssh.kill_pgid(host, pgid, "TERM")
-        ledger.add_event("watch", run_id, "kill", f"hung: TERM pgids {pgids} on {host}")
+        db.add_event("watch", run_id, "kill", f"hung: TERM pgids {pgids} on {host}")
     if state == "orphan" and lim.kill_orphan:
         ssh.run(host, f"kill -TERM {int(run['pid'])}")
-        ledger.add_event("watch", run_id, "kill", f"orphan: TERM pid {run['pid']} on {host}")
+        db.add_event("watch", run_id, "kill", f"orphan: TERM pid {run['pid']} on {host}")
     return True
 
 
-def actions(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier], run: Row, state: str,
+def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], run: Row, state: str,
             reasons: list[str], now: float, notes: dict | None = None) -> None:
     """An event per (run, state) transition, one alert per (run, kind), and the kills after grace_s."""
     notes = {} if notes is None else notes
@@ -230,7 +232,7 @@ def actions(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     rec = notes.setdefault(run.get("key") or run_id, {})
     if rec.get("state") != state:
         if not (rec.get("state") is None and state == "running"):
-            ledger.add_event("watch", run_id, state, text)
+            db.add_event("watch", run_id, state, text)
         rec.update(state=state, since=now, acted=False)
     if state in _NOTIFY:
         msgs = rec.setdefault("msgs", {})
@@ -245,18 +247,18 @@ def actions(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
     try:
-        rec["acted"] = _act(project, ssh, ledger, run, state, reasons, text, now, notes)
+        rec["acted"] = _act(project, ssh, db, run, state, reasons, text, now, notes)
     except (HostError, Refuse, OSError, ValueError) as e:
-        ledger.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
+        db.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
         rec["acted"] = True
 
 
-def orphans(project: Project, ssh: Ssh, ledger: Ledger) -> list[Row]:
+def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
     """Our tool processes on every site host that no live run root owns."""
     if not project.site.tool_procs:
         return []
     roots: dict[str, list[str]] = {}
-    for r in ledger.runs():
+    for r in db.runs():
         if r.get("root") and r.get("phase") and board.is_live(r):
             roots.setdefault(str(r.get("host")), []).append(r["root"])
     out = []
@@ -289,7 +291,7 @@ def _params(project: Project, run: Row) -> dict[str, Any]:
     return out
 
 
-def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, progress: dict) -> None:
+def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict) -> None:
     spec = collect.load_spec(project, run)
     only = collect.spec_stages(spec)
     finished, running = collect.stage_state(project, hb, only)
@@ -299,9 +301,9 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
     if rec.get("collected") == key or not (finished or tasks or running):
         return
     rec["collected"] = key
-    res = collect.collect_run(project, ssh, ledger, run, hb)
+    res = collect.collect_run(project, ssh, db, run, hb)
     if res.failures:
-        ledger.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
+        db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
     # No new file does not mean no new metric: a broad collect path copies a stage's reports while it
     # runs, and the stage becomes eligible only when it ends. Extraction is idempotent, so run it.
     task_dirs = collect.spec_task_dirs(spec, str(run.get("root") or hb.get("root") or ""))
@@ -316,21 +318,21 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
             if t in task_dirs:
                 done[t] = Task(id=t, fields={"id": t})
             else:
-                ledger.add_event("watch", run["run_id"], "extract", f"unknown task {t}: {e}")
+                db.add_event("watch", run["run_id"], "extract", f"unknown task {t}: {e}")
     # A failed stage can leave a stale report from a copied tree: a one-command stage counts
     # only with status done, and a task group counts per task with phase done.
     status = _stages(hb)
     eligible = {n for n, st in project.stages.items() if (only is None or n in only)
                 and (st.is_group or status.get(n, {}).get("status") == "done")}
     rows = metrics.extract(project, run, project.data / "results", done, stages=eligible, task_dirs=task_dirs)
-    n = sum(ledger.add_metric(r) for r in rows if r["value"] is not None)
+    n = sum(db.add_metric(r) for r in rows if r["value"] is not None)
     if not rec.get("params"):
-        ledger.set_params(run["run_id"], _params(project, run), "spec")
+        db.set_params(run["run_id"], _params(project, run), "spec")
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
 
 
-def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, progress: dict, now: float) -> None:
+def _resume(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, now: float) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
     spec_path = project.state / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
@@ -344,7 +346,7 @@ def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, prog
         # The tool outlived its driver; a resume now would write the same tree twice.
         if not rec.get("resume_wait"):
             rec["resume_wait"] = True
-            ledger.add_event("watch", run_id, "resume", f"deferred: pgids {alive} alive on {host}")
+            db.add_event("watch", run_id, "resume", f"deferred: pgids {alive} alive on {host}")
         return
     rec["resumed"] = True
     checkpoint = hb.get("step_name") if hb.get("step") else None
@@ -354,20 +356,20 @@ def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, prog
     try:
         pid = launch.start_driver(ssh, host, driver, spec_path, logf, project.site.env)
     except (HostError, OSError) as e:
-        ledger.add_event("watch", run_id, "resume", f"failed: {e}")
+        db.add_event("watch", run_id, "resume", f"failed: {e}")
         return
-    ledger.upsert_stage_run({"run_id": run_id, "stage": stage["name"], "attempt": 2, "started": int(now),
+    db.upsert_stage_run({"run_id": run_id, "stage": stage["name"], "attempt": 2, "started": int(now),
                              "status": "resumed", "log": str(logf)})
-    ledger.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {pid}")
+    db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {pid}")
 
 
-def _launch_queued(project: Project, ssh: Ssh, ledger: Ledger) -> None:
+def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
     queued: dict[str, list[str]] = {}
-    for r in ledger.runs(state="queued"):
+    for r in db.runs(state="queued"):
         queued.setdefault(str(r["batch"]), []).append(str(r["label"]))
     for name, labels in queued.items():
         try:
-            launch.launch(project, config.load_batch(project, name), ssh, ledger, only=labels[:1], stagger_s=0,
+            launch.launch(project, config.load_batch(project, name), ssh, db, only=labels[:1], stagger_s=0,
                           allow_dirty=True)
         except Exception:  # one bad batch must not end the watcher
             log.exception("queued batch %s", name)
@@ -375,7 +377,7 @@ def _launch_queued(project: Project, ssh: Ssh, ledger: Ledger) -> None:
 
 # boards and the cycle
 
-def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier], now: float) -> None:
+def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float) -> None:
     probes: dict[str, Any] = {}
     for host in project.site.hosts:
         try:
@@ -383,63 +385,63 @@ def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
         except HostError as e:
             probes[host] = {"error": str(e)}
     bdir = project.data / "board"
-    ledger.write_board_json(bdir / "board.json", probes)
-    retired = {b["batch"] for b in ledger.batches() if b.get("retired")}
-    rows = [r for r in ledger.runs() if r["batch"] not in retired]
-    config.save_text(bdir / "status.html", board.status_html(rows, ledger.events(n=50), probes, now))
-    params = [dict(r) for r in ledger.db.execute("SELECT run_id, key, value, source FROM params")]
+    db.write_board_json(bdir / "board.json", probes)
+    retired = {b["batch"] for b in db.batches() if b.get("retired")}
+    rows = [r for r in db.runs() if r["batch"] not in retired]
+    config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now))
+    params = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM params")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
-    config.save_text(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly))
+    config.save_text(bdir / "compare.html", board.compare_html(rows, params, db.metrics(), plotly))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)
 
 
-def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier], now: float | None = None,
+def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
           dry_run: bool = False) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing."""
     now = time.time() if now is None else now
-    progress, notes = ledger.get_kv("progress", {}), ledger.get_kv("notified", {})
+    progress, notes = db.get_kv("progress", {}), db.get_kv("notified", {})
     heartbeats = read_heartbeats(project)
     if not dry_run:
-        ingest(ledger, heartbeats)
+        ingest(db, heartbeats)
     states: dict[str, str] = {}
     for batch, hb in heartbeats:
-        run = ledger.run(hb["run_id"]) or {**hb, "batch": batch}
-        state, reasons = classify(project, ssh, ledger, run, hb, now, progress)
+        run = db.run(hb["run_id"]) or {**hb, "batch": batch}
+        state, reasons = classify(project, ssh, db, run, hb, now, progress)
         states[hb["run_id"]] = state
         if dry_run:
             print(f"{hb['run_id']}: {state} {'; '.join(reasons)}".rstrip())
             continue
-        ledger.upsert_run({"run_id": hb["run_id"], "state": state})
-        actions(project, ssh, ledger, notifiers, run, state, reasons, now, notes)
-        _collect(project, ssh, ledger, run, hb, progress)
+        db.upsert_run({"run_id": hb["run_id"], "state": state})
+        actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
+        _collect(project, ssh, db, run, hb, progress)
         if state == "dead":
-            _resume(project, ssh, ledger, run, hb, progress, now)
-    for o in orphans(project, ssh, ledger):
+            _resume(project, ssh, db, run, hb, progress, now)
+    for o in orphans(project, ssh, db):
         states[o["key"]] = "orphan"
         if dry_run:
             print(f"{o['key']}: orphan {o['phase']} ({o['etimes']} s)")
         else:
-            actions(project, ssh, ledger, notifiers, o, "orphan", [o["phase"]], now, notes)
+            actions(project, ssh, db, notifiers, o, "orphan", [o["phase"]], now, notes)
     if dry_run:
         return states
-    _launch_queued(project, ssh, ledger)
-    _boards(project, ssh, ledger, notifiers, now)
-    digest = Digest(project, ledger)
+    _launch_queued(project, ssh, db)
+    _boards(project, ssh, db, notifiers, now)
+    digest = Digest(project, db)
     if digest.due(now):
         text = digest.text(now)
         for n in notifiers:
             n.post("digest", text)
         digest.mark_sent(now)
-    ledger.set_kv("progress", progress)
-    ledger.set_kv("notified", notes)
+    db.set_kv("progress", progress)
+    db.set_kv("notified", notes)
     n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1
     config.save_json(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states
 
 
-def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier], once: bool = False) -> int:
+def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], once: bool = False) -> int:
     """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed."""
     for n in notifiers:
         n.start()
@@ -454,7 +456,7 @@ def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Noti
                 for n in notifiers:
                     if hasattr(n, "project"):
                         n.project = project
-                cycle(project, ssh, ledger, notifiers)
+                cycle(project, ssh, db, notifiers)
             except config.ConfigError as e:  # a config edit mid-way: skip this cycle, keep the service
                 log.error("config not loadable, cycle skipped: %s", e)
                 failed = True

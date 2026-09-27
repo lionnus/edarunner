@@ -128,7 +128,7 @@ canonical = "timing.wns"
 ```
 
 The source of this flow keeps its PDK in a directory that git ignores, so
-`edr stage --dirty <tree>` snapshots the working tree instead of adding a
+`edr checkout --dirty <tree>` snapshots the working tree instead of adding a
 worktree. The run id then carries `-dirty-<hash of the diff>`.
 
 `examples/openroad-gcd/` runs this shape on an open flow in CI: the GCD design

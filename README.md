@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.svg" alt="edarunner" width="300"></p>
 
-<p align="center">Run the EDA flow you already have on the ssh hosts you already reach, and keep one ledger of every run.</p>
+<p align="center">Run the EDA flow you already have on the ssh hosts you already reach, and keep one database of every run.</p>
 
 <p align="center">
 <a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
@@ -14,7 +14,7 @@ edarunner runs, tracks and analyzes an EDA flow on shared ssh hosts.
 
 - Run: it starts the flow you already have as stages on the hosts. It
   queues jobs, applies budgets, and a watcher finds a dead or stuck run.
-- Track: one SQLite ledger holds every run with its source hashes, host,
+- Track: one SQLite database holds every run with its source hashes, host,
   events, metrics and artifacts. The board and a Telegram bot show it.
 - Analyze: it gives the metrics of one design, compares runs, and exports
   a snapshot that a paper reads.
@@ -38,13 +38,13 @@ installed there.
 ```sh
 git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
 bash setup.sh                 # a fake flow in a small git repository
-edr stage HEAD                # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned worktree of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan demo                 # run ids, hosts, every path; writes nothing
 edr launch demo               # one driver per run on the `local` host
 edr status                    # the board
 edr watch --once              # collect, extract metrics, classify
-edr metrics --design <src> --csv   # <src> is the hash that `edr stage` printed
+edr metrics --design <src> --csv   # <src> is the hash that `edr checkout` printed
 ```
 
 The flow is fake and needs no EDA tool or licence. The two runs end
