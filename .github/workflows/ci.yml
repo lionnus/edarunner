@@ -19,7 +19,13 @@ jobs:
       # The demo flow computes its fake area with bc.
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq bc rsync
       - run: uv sync --extra dev
-      - run: uv run pytest -q
+      - run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
+      - run: uv run coverage-badge -o coverage.svg
+      - uses: actions/upload-artifact@v4
+        if: matrix.python == '3.11'
+        with:
+          name: coverage-badge
+          path: coverage.svg
 
   driver:
     # The driver runs on the compute hosts with their own python3; 3.6 is the floor.
@@ -34,3 +40,79 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv run --no-project --with pytest pytest tests/test_driver.py -q
+
+  openroad:
+    # The GCD design of ORFS on nangate45 through synth, floorplan and place. CTS in this
+    # image crashes on a CPU without AVX-512, and a runner may lack it.
+    runs-on: ubuntu-latest
+    container: openroad/orfs:26Q3-657-gb74a7293e
+    steps:
+      - uses: actions/checkout@v4
+      # Probe: which tools the image has, where ORFS writes, and which keys the metrics carry.
+      - run: |
+          mkdir -p openroad
+          for t in rsync git make python3 curl; do command -v $t || echo "no $t"; done > openroad/tools.txt
+          python3 --version >> openroad/tools.txt
+          nproc >> openroad/tools.txt
+          grep -c avx512f /proc/cpuinfo >> openroad/tools.txt || true
+          echo "HOME=$HOME USER=$(id -un) PWD=$PWD" >> openroad/tools.txt
+          . /OpenROAD-flow-scripts/env.sh
+          cd "$FLOW_HOME"
+          for s in synth floorplan place; do
+            t0=$SECONDS
+            make DESIGN_CONFIG=./designs/nangate45/gcd/config.mk WORK_HOME=$GITHUB_WORKSPACE/work $s > $GITHUB_WORKSPACE/openroad/$s.log 2>&1
+            echo "$s $((SECONDS - t0)) s" | tee -a $GITHUB_WORKSPACE/openroad/time.txt
+          done
+          cd $GITHUB_WORKSPACE/work
+          find . -type f | sort > ../openroad/find.txt
+          python3 - > ../openroad/keys.txt <<'EOF'
+          import glob, json
+          for f in sorted(glob.glob("logs/**/*.json", recursive=True)):
+              for k, v in json.load(open(f)).items():
+                  print(f, k, v)
+          EOF
+          cp reports/nangate45/gcd/base/synth_stat.txt ../openroad/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openroad
+          path: openroad
+
+  status:
+    # Writes the outcome of every job into the orphan branch ci-status; see docs/ci.md.
+    needs: [tests, driver, openroad]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: _status
+          merge-multiple: true
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          mkdir -p _status
+          python3 - <<'EOF'
+          import datetime, json, os
+          jobs = {k: v["result"] for k, v in json.loads(os.environ["NEEDS"]).items()}
+          run = os.environ["GITHUB_RUN_ID"]
+          url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run}"
+          status = {"sha": os.environ["GITHUB_SHA"], "ref": os.environ["GITHUB_REF_NAME"], "run_id": int(run),
+                    "run_url": url, "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                    "jobs": jobs, "conclusion": "success" if set(jobs.values()) == {"success"} else "failure"}
+          json.dump(status, open("_status/status.json", "w"), indent=1)
+          EOF
+          cat _status/status.json
+      - run: |
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git checkout -q --orphan ci-status
+          git rm -rfq --cached .
+          cd _status
+          git --git-dir=../.git add -A .
+          git --git-dir=../.git commit -qm "status of $GITHUB_SHA"
+          git --git-dir=../.git push -qf origin ci-status

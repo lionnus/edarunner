@@ -7,3 +7,6 @@ build/
 *.egg-info/
 .edr-test/
 data/
+.coverage
+coverage.xml
+coverage.svg
