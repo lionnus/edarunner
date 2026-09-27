@@ -45,8 +45,8 @@ def test_check_names_the_missing_head_node_tools(demo: Path, capsys, monkeypatch
     monkeypatch.setenv("PATH", str(thin))
     code, out, _ = edr(capsys, "--json", "check")
     problems = json.loads(out)["data"]["problems"]
-    assert code == 1 and "local: rsync not on PATH" in problems and "local: ssh not on PATH" in problems
-    assert "local: git not on PATH" not in problems
+    assert code == 1 and "local: rsync not on PATH" in problems and "local: python3 not on PATH" in problems
+    assert "local: git not on PATH" not in problems and "local: ssh not on PATH" not in problems
 
 
 def test_check_probes_each_host_once_and_resolves_the_source(demo: Path, capsys, monkeypatch) -> None:
