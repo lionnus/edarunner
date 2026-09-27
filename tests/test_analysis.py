@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import board, config, metrics
+from edarunner import analysis, board, config, metrics
 from edarunner.db import Database
 from test_cli import demo, edr, seed  # noqa: F401  (the fixture and the helpers of test_cli)
 
@@ -115,6 +115,10 @@ def test_area_rows_filter_and_compare(demo: Path, capsys) -> None:
     data = json.loads(out)["data"]
     assert [r["instance"] for r in data["rows"]] == ["i_top"] and data["rows"][0]["delta"] == {b: 0.0}
     assert edr(capsys, "compare", a, b, "--area", "--depth", "5")[0] == 2
+    with Database(demo / "data" / "edr.db") as db:
+        last = analysis.last_areas(db, [a, b, "nothing"], max_depth=1)
+    assert set(last) == {a, b} and (last[a]["step"], last[b]["step"]) == (3, 2)
+    assert last[a]["rows"] == [["<top>", 0, 1000.0], ["i_top", 1, 990.0]]
 
 
 def test_area_hier_takes_a_depth_from_one(demo: Path) -> None:

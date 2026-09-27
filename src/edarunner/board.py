@@ -408,12 +408,18 @@ def status_html(rows: list[Row], events: list[Row], hosts: dict[str, Any], now: 
                               charts=charts)
 
 
-def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plotly_src: str | None) -> str:
-    """A self-contained page over the three lists; the plots need `plotly_src`, the tables do not."""
+def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plotly_src: str | None,
+                 areas: dict[str, Row] | None = None, step_names: dict[int, str] | None = None) -> str:
+    """A self-contained page over the lists; the plots need `plotly_src`, the tables do not.
+
+    `areas` maps a run id to its last area report, {stage, step, source_file, rows: [[instance, depth, area]]};
+    `step_names` maps a step number to its name.
+    """
     enriched = [{**r, "state": state_of(r), "cost": round(cost(r), 2)} for r in order(runs)]
     script = f'<script src="{_h(plotly_src)}"></script>' if plotly_src else ""
     return _COMPARE.substitute(plotly=script, runs=_json_block(enriched), parameters=_json_block(parameters),
-                               metrics=_json_block(metrics))
+                               metrics=_json_block(metrics), areas=_json_block(areas or {}),
+                               steps=_json_block({str(k): v for k, v in (step_names or {}).items()}))
 
 
 # templates
@@ -444,21 +450,31 @@ $charts
 
 _COMPARE = Template("""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>edr compare</title>
-<style>""" + _CSS + """</style>$plotly</head><body>
+<style>""" + _CSS + """
+input.f{width:100%;box-sizing:border-box;font:inherit;font-size:13px}.tw{overflow-x:auto}
+button{font:inherit;margin:0 8px 8px 0}</style>$plotly</head><body>
 <script type="application/json" id="edr-runs">$runs</script>
 <script type="application/json" id="edr-parameters">$parameters</script>
 <script type="application/json" id="edr-metrics">$metrics</script>
-<h3>runs</h3><table id="runs"></table>
-<h3>compare</h3><table id="cmp"></table>
+<script type="application/json" id="edr-areas">$areas</script>
+<script type="application/json" id="edr-steps">$steps</script>
+<h3>runs</h3>
+<p><small>A filter keeps the rows whose cell holds its text; &gt;n and &lt;n compare numbers. Tick the runs to compare.</small></p>
+<button id="tickall">tick the shown runs</button><button id="untick">untick all</button>
+<div class="tw"><table id="runs"></table></div>
+<h3>compare</h3><div class="tw"><table id="cmp"></table></div>
+<div id="area"><h3>area delta</h3>A <select id="aa"></select> B <select id="ab"></select> depth <select id="ad"></select>
+<div class="tw"><table id="areat"></table></div><small id="areas"></small></div>
 <div id="plots">
-<h3>trajectory</h3><select id="traj"></select><div id="trajp"></div>
+<h3>metric over steps</h3><select id="traj"></select><div id="trajp"></div>
 <h3>scatter</h3>x <select id="sx"></select> y <select id="sy"></select> colour <select id="sc"></select><div id="scatp"></div>
 <div id="phases"><h3>power parts</h3><div id="phasep"></div></div>
-<h3>parallel coordinates</h3><div id="parp"></div>
+<h3>parallel coordinates</h3><small>every shown run: the parameters that differ, and</small> <select id="pm"></select><div id="parp"></div>
 </div>
 <script>
 const q = s => document.querySelector(s), get = id => JSON.parse(document.getElementById(id).textContent);
 const RUNS = get('edr-runs'), PARAMETERS = get('edr-parameters'), METRICS = get('edr-metrics');
+const AREAS = get('edr-areas'), STEPS = get('edr-steps');
 const PAR = {}, PKEYS = [];
 for (const p of PARAMETERS) { (PAR[p.run_id] ??= {})[p.key] = p.value; if (!PKEYS.includes(p.key)) PKEYS.push(p.key); }
 PKEYS.sort();
@@ -474,42 +490,94 @@ const num = v => { const n = Number(v); return v === null || v === undefined || 
 const val = (r, d) => d in (FIN[r.run_id] || {}) ? FIN[r.run_id][d].v
   : d in (PAR[r.run_id] || {}) ? (num(PAR[r.run_id][d]) ?? PAR[r.run_id][d]) : r[d] ?? null;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmt = v => v == null ? '' : typeof v === 'number' && !Number.isInteger(v) ? v.toPrecision(4) : String(v);
-const checked = () => RUNS.filter(r => document.getElementById('c-' + r.run_id)?.checked);
+const fmt = v => v == null ? '' : typeof v === 'number' && !Number.isInteger(v)
+  ? (Math.abs(v) >= 1000 ? v.toFixed(1) : v.toPrecision(4)) : String(v);
+const pct = (v, b) => v == null || b == null || b === 0 || v * b < 0 ? '' : (v > b ? '+' : '') + ((v - b) / Math.abs(b) * 100).toFixed(1) + '%';
 const HAVE_PLOTLY = typeof Plotly !== 'undefined';
 const DARK = matchMedia('(prefers-color-scheme: dark)').matches;
 const LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: DARK ? '#eee' : '#111' },
   margin: { t: 30, r: 10, b: 40, l: 50 }, height: 320 };
 const tr = (cells, tag = 'td') => '<tr>' + cells.map(c => '<' + tag + '>' + c + '</' + tag + '>').join('') + '</tr>';
 
+const COLS = ['label', 'src', 'batch', 'host', 'state', 'phase', 'cost', ...PKEYS];
+const cell = (r, c) => PKEYS.includes(c) && !(c in r) ? PAR[r.run_id]?.[c] : r[c];
+const TICK = new Set(RUNS.slice(0, 2).map(r => r.run_id));
+const FILTER = {};
+function keep(r) {
+  return COLS.every(c => {
+    const f = (FILTER[c] || '').trim(), v = cell(r, c);
+    if (!f) return true;
+    const m = f.match(/^([<>])\\s*(-?[0-9.eE+-]+)$$/);
+    if (m && num(v) !== null) return m[1] === '>' ? num(v) > Number(m[2]) : num(v) < Number(m[2]);
+    return String(v ?? '').toLowerCase().includes(f.toLowerCase());
+  });
+}
+const shown = () => RUNS.filter(keep);
+const checked = () => RUNS.filter(r => TICK.has(r.run_id));
+function runsBody() {
+  return shown().map(r => tr(['<input type="checkbox" data-run="' + esc(r.run_id) + '"' + (TICK.has(r.run_id) ? ' checked' : '') + '>',
+    ...COLS.map((c, i) => i ? esc(cell(r, c)) : '<span title="' + esc(r.run_id) + '">' + esc(r.label) + '</span>')])).join('');
+}
 function runsTable() {
-  const rows = RUNS.map((r, i) => tr(['<input type="checkbox" id="c-' + esc(r.run_id) + '"' + (i < 2 ? ' checked' : '') + '>',
-    '<span title="' + esc(r.run_id) + '">' + esc(r.label) + '</span>', esc(r.host), esc(r.state), esc(r.phase),
-    ...PKEYS.map(k => esc(PAR[r.run_id]?.[k]))]));
-  q('#runs').innerHTML = tr(['', 'label', 'host', 'state', 'phase', ...PKEYS].map(esc), 'th') + rows.join('');
-  q('#runs').addEventListener('change', draw);
+  const head = tr(['', ...COLS.map(c => esc(c === 'src' ? 'design' : c))], 'th')
+    + tr(['', ...COLS.map(c => '<input class="f" data-col="' + esc(c) + '" placeholder="filter">')], 'th');
+  q('#runs').innerHTML = '<thead>' + head + '</thead><tbody id="rb">' + runsBody() + '</tbody>';
+  q('#runs').addEventListener('input', e => { if (e.target.dataset?.col) { FILTER[e.target.dataset.col] = e.target.value;
+    document.getElementById('rb').innerHTML = runsBody(); draw(); } });
+  q('#runs').addEventListener('change', e => { const id = e.target.dataset?.run; if (!id) return;
+    e.target.checked ? TICK.add(id) : TICK.delete(id); draw(); });
+  q('#tickall').addEventListener('click', () => { shown().forEach(r => TICK.add(r.run_id)); runsTable(); draw(); });
+  q('#untick').addEventListener('click', () => { TICK.clear(); runsTable(); draw(); });
 }
 function compareTable(sel) {
   if (!sel.length) { q('#cmp').innerHTML = tr(['tick a run']); return; }
   const base = FIN[sel[0].run_id] || {};
-  const rows = MKEYS.map(k => tr([esc(k), ...sel.map((r, i) => {
-    const v = FIN[r.run_id]?.[k]?.v, b = base[k]?.v;
-    if (!i || v == null || b == null || b === 0) return fmt(v);
-    const p = (v - b) / Math.abs(b) * 100;
-    return fmt(v) + ' <small class="' + (p > 0 ? 'up' : 'dn') + '">' + (p > 0 ? '+' : '') + p.toFixed(1) + '%</small>';
+  const rows = MKEYS.filter(k => sel.some(r => FIN[r.run_id]?.[k] != null)).map(k => tr([esc(k), ...sel.map((r, i) => {
+    const v = FIN[r.run_id]?.[k]?.v, b = base[k]?.v, p = i ? pct(v, b) : '';
+    return fmt(v) + (p ? ' <small class="' + (v > b ? 'up' : 'dn') + '">' + p + '</small>' : '');
   })]));
   q('#cmp').innerHTML = tr(['metric', ...sel.map(r => esc(r.label))], 'th') + rows.join('');
 }
-function fill(id, opts, pick) {
-  q(id).innerHTML = opts.map(o => '<option' + (o === pick ? ' selected' : '') + '>' + esc(o) + '</option>').join('');
-  q(id).addEventListener('change', draw);
+const ARUNS = RUNS.filter(r => r.run_id in AREAS);
+function areaTable() {
+  const a = AREAS[q('#aa').value], b = AREAS[q('#ab').value], d = Number(q('#ad').value);
+  if (!a || !b) { q('#areat').innerHTML = ''; return; }
+  const at = d => Object.fromEntries(d.rows.map(x => [x[0], x])), A = at(a), B = at(b);
+  const names = [...new Set([...Object.keys(A), ...Object.keys(B)])].filter(n => (A[n] || B[n])[1] === d)
+    .sort((x, y) => (A[y]?.[2] ?? 0) - (A[x]?.[2] ?? 0));
+  const line = (n, va, vb) => tr([esc(n), fmt(va), fmt(vb), va == null || vb == null ? '' : fmt(vb - va), pct(vb, va)]);
+  const top = x => x.rows.find(r => r[1] === 0)?.[2];
+  q('#areat').innerHTML = tr(['instance', 'A', 'B', 'Δ', 'Δ %'], 'th') + names.map(n => line(n, A[n]?.[2], B[n]?.[2])).join('')
+    + line('<top>', top(a), top(b));
+  q('#areas').textContent = 'A: ' + a.stage + ' step ' + a.step + ', ' + a.source_file + '; B: ' + b.stage + ' step ' + b.step + ', ' + b.source_file;
+}
+function fill(id, opts, pick, labels) {
+  q(id).innerHTML = opts.map((o, i) => '<option value="' + esc(o) + '"' + (o === pick ? ' selected' : '') + '>' + esc(labels ? labels[i] : o) + '</option>').join('');
+  q(id).value = pick ?? opts[0] ?? '';
+}
+function parcoords(runs) {
+  const mk = q('#pm').value, rs = runs.filter(r => num(FIN[r.run_id]?.[mk]?.v) !== null);
+  const dims = [];
+  for (const k of PKEYS) {
+    const vs = rs.map(r => PAR[r.run_id]?.[k] ?? '');
+    const uniq = [...new Set(vs)];
+    if (uniq.length < 2) continue;
+    if (vs.every(v => num(v) !== null)) { dims.push({ label: k, values: vs.map(Number) }); continue; }
+    uniq.sort();
+    dims.push({ label: k, values: vs.map(v => uniq.indexOf(v)), tickvals: uniq.map((_, i) => i), ticktext: uniq });
+  }
+  const mv = rs.map(r => FIN[r.run_id][mk].v);
+  dims.push({ label: mk, values: mv });
+  Plotly.react('parp', [{ type: 'parcoords', line: { color: mv, colorscale: 'Viridis', showscale: true }, dimensions: dims }],
+    { ...LAYOUT, height: 380, margin: { t: 50, r: 60, b: 30, l: 60 } });
 }
 function plots(sel) {
-  const tk = q('#traj').value;
+  const tk = q('#traj').value, steps = [];
   Plotly.react('trajp', sel.map(r => {
     const pts = METRICS.filter(m => m.run_id === r.run_id && mkey(m) === tk && m.step != null).sort((a, b) => a.step - b.step);
+    steps.push(...pts.map(p => p.step));
     return { x: pts.map(p => p.step), y: pts.map(p => p.value), name: r.label, mode: 'lines+markers' };
-  }), { ...LAYOUT, title: tk, xaxis: { title: 'step' } });
+  }), { ...LAYOUT, title: tk, xaxis: { title: 'step', tickvals: [...new Set(steps)], ticktext: [...new Set(steps)].map(s => STEPS[s] ?? s) } });
   const sx = q('#sx').value, sy = q('#sy').value, sc = q('#sc').value, groups = {};
   for (const r of sel) (groups[fmt(val(r, sc))] ??= []).push(r);
   Plotly.react('scatp', Object.entries(groups).map(([g, rs]) => ({ x: rs.map(r => val(r, sx)), y: rs.map(r => val(r, sy)),
@@ -523,17 +591,27 @@ function plots(sel) {
     Plotly.react('phasep', phases.map(p => ({ type: 'bar', name: p, x: sel.flatMap(r => tasks.map(t => r.label + t)),
       y: sel.flatMap(r => tasks.map(t => FIN[r.run_id]?.['power__' + p + t]?.v ?? 0)) })), { ...LAYOUT, barmode: 'stack' });
   }
-  const dims = [...PKEYS, ...MKEYS].map(d => ({ label: d, values: sel.map(r => num(val(r, d))) }))
-    .filter(d => d.values.every(v => v !== null));
-  if (dims.length) Plotly.react('parp', [{ type: 'parcoords', line: { color: sel.map((_, i) => i) }, dimensions: dims }],
-    { ...LAYOUT, height: 360 });
+  parcoords(shown());
 }
-function draw() { const sel = checked(); compareTable(sel); if (HAVE_PLOTLY) plots(sel); }
+function draw() {
+  const sel = checked();
+  compareTable(sel);
+  if (HAVE_PLOTLY) plots(sel);
+}
 runsTable();
 const dims = [...PKEYS, ...MKEYS];
 fill('#traj', MKEYS.filter(k => METRICS.some(m => mkey(m) === k && m.step != null)), null);
-fill('#sx', dims, dims[0]); fill('#sy', dims, dims[1] ?? dims[0]); fill('#sc', ['label', 'host', ...PKEYS], 'label');
+fill('#sx', dims, dims[0]); fill('#sy', dims, dims[1] ?? dims[0]); fill('#sc', ['label', 'host', 'src', ...PKEYS], 'label');
+fill('#pm', MKEYS, MKEYS.find(k => !k.includes('[')) ?? MKEYS[0]);
+const aids = ARUNS.map(r => r.run_id), alab = ARUNS.map(r => r.label + ' ' + r.src);
+fill('#aa', aids, aids[0], alab); fill('#ab', aids, aids[1] ?? aids[0], alab);
+const depths = [...new Set(Object.values(AREAS).flatMap(a => a.rows.map(r => r[1])))].filter(d => d > 0).sort((a, b) => a - b);
+fill('#ad', depths.map(String), String(depths[0] ?? 1));
+q('#area').hidden = !ARUNS.length;
+for (const id of ['#traj', '#sx', '#sy', '#sc', '#pm']) q(id).addEventListener('change', draw);
+for (const id of ['#aa', '#ab', '#ad']) q(id).addEventListener('change', areaTable);
 q('#plots').hidden = !HAVE_PLOTLY;
+areaTable();
 draw();
 </script></body></html>
 """)

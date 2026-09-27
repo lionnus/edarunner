@@ -74,6 +74,30 @@ def area_delta(db: Database, runs: list[Row], depth: int, instance: str | None =
     return picked, rows
 
 
+def last_areas(db: Database, run_ids: list[str], max_depth: int = 3) -> dict[str, Row]:
+    """The last area report of each run for compare.html: {run id: {stage, step, source_file, rows}}.
+
+    A row is [instance, depth, area], down to `max_depth`, so the page stays small.
+    """
+    out = {}
+    for rid in run_ids:
+        tops = db.area(run_ids=[rid], depth=0)
+        if not tops:
+            continue
+        top = max(tops, key=_step_key)
+        rows = [[a["instance"], a["depth"], a["area"]]
+                for a in db.area(run_ids=[rid], stage=top["stage"], step=top["step"])
+                if a["name"] == top["name"] and a["depth"] <= max_depth]
+        out[rid] = {"stage": top["stage"], "step": top["step"], "source_file": top.get("source_file"), "rows": rows}
+    return out
+
+
+def step_names(project: Project) -> dict[int, str]:
+    """Step number to step name over every stage with steps."""
+    return {n: project.stages[stage].steps[n] for stage, rng in owned_steps(project).items() for n in rng
+            if n < len(project.stages[stage].steps)}
+
+
 def area_view(picked: list[Row], rows: list[Row], depth: int) -> RenderableType:
     """Instance, one area column per run, and the delta of each run to the first; the sources below."""
     if not picked or not rows:

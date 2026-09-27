@@ -15,7 +15,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import board, collect, config, launch, metrics
+from . import analysis, board, collect, config, launch, metrics
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .db import Database
@@ -396,7 +396,9 @@ def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
                                                            db.host_samples(int(now) - 86400)))
     parameters = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM parameters")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
-    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly))
+    areas = analysis.last_areas(db, [r["run_id"] for r in rows])
+    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly, areas,
+                                                                analysis.step_names(project)))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)
