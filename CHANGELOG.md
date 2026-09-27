@@ -31,6 +31,10 @@
 - `/hosts` shows every resource as used of total, in one order:
   `cores 21/32, ram 93/376 GB, scratch 195/1538 GB, gpu 0/1`. `/tools`
   shows the seats used of the total and the hosts of each tool.
+- `docs/reference/` is generated from the code by `tools/gen_docs.py`:
+  every verb with its flags and exit codes, every config key and
+  placeholder, every run state, the bot commands. `docs/cli.md` and
+  `docs/configuration.md` are gone. CI refuses a stale page.
 - Breaking: the site table `[licences.<name>]` is now `[tools.<name>]`,
   with `seats` and a `probe` argv that prints `free` or `free total`.
   The stage and task key `needs.licence` is now `needs.tools`: a list of

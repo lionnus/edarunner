@@ -15,6 +15,8 @@ def fill(e: Env) -> None:
     """Five runs, one of them before the last digest, a keep file with ack, and four host probes."""
     led = e.ledger
     led.set_kv("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
+    alert = {"state": "hung", "msgs": {"hung": {"text": "no progress", "ids": ["1"]}}}
+    led.set_kv("notified", {rid("h"): alert, rid("k"): alert, rid("c"): {"state": "running"}})
     rows = [("a", "done", None, NOW - 600), ("f", "FAILED:3", None, NOW - 2 * 86400),
             ("c", "stage:synth", "running", NOW - 60), ("h", "stage:pnr", "hung", NOW - 60),
             ("k", "stage:pnr", "hung", NOW - 60), ("q", None, "queued", None)]

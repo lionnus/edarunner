@@ -32,7 +32,8 @@ class Digest:
         rows = board.order([r for r in self.ledger.runs() if r["batch"] not in retired])
         live = [r for r in rows if board.is_live(r)]
         ended = [r for r in rows if not board.is_live(r) and (r.get("updated") or 0) >= since]
-        alerts = [r for r in live if r.get("state") in board.ALERT_STATES and not self._acked(r)]
+        notes = self.ledger.get_kv("notified", {})
+        alerts = [r for r in live if self._alerted(notes.get(r["run_id"]) or {}) and not self._acked(r)]
         probes = config.load_json(self.project.data / "board" / "board.json").get("hosts") or {}
         hosts = sorted((p for p in probes.values() if "error" not in p and p.get("total_gb")),
                        key=lambda p: p["free_gb"])[:HOSTS]
@@ -49,6 +50,11 @@ class Digest:
     def mark_sent(self, now: float) -> None:
         """Record today as sent, and `now` as the start of the next digest."""
         self.ledger.set_kv("digest", {"day": time.strftime("%Y-%m-%d", time.localtime(now)), "ts": now})
+
+    @staticmethod
+    def _alerted(note: dict) -> bool:
+        """True when the watcher sent an alert for the state the run is in now."""
+        return note.get("state") in (note.get("msgs") or {})
 
     def _acked(self, row: dict) -> bool:
         keep = config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.keep.json")

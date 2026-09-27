@@ -41,46 +41,21 @@ the time of the last digest.
 
 ## Run states
 
-| State | Test | Action |
-|---|---|---|
-| `running` | heartbeat younger than `stale_s` | none |
-| `stale` | heartbeat older than `stale_s`; or older than `dead_s` but the driver is alive or the host did not answer | event |
-| `dead` | heartbeat older than `dead_s` and no driver process on the host | event, alert; one resume from the last step |
-| `hung` | heartbeat fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, tree size, log tail, task counts, log size, CPU time of the process groups | event, alert; `SIGTERM` to the groups after `grace_s` only with `kill_hung` and no `ack` |
-| `looping` | the driver set `looping` | event, alert |
-| `over_budget` | the driver set `over_budget` | event, alert |
-| `host_full` | the driver set `host_full` | alert; after `grace_s`, `stop --now` on the newest run of that host, unless that run has `ack` |
-| `superseded` | a newer batch runs the same label at another source | alert; after `grace_s`, `stop --after-task`, unless the run has a keep file |
-| `orphan` | a process of ours that matches `tool_procs`, outside every live run tree | event, alert; `SIGTERM` after `grace_s` only with `kill_orphan` |
-
-A finished run takes its state from the phase: `done`, `incomplete`,
-`failed`, `over_budget`, `stopped` or `killed`; the last three of these
-also alert once. A job without a host is `queued`, and a `queued` run
-that `edr stop` marked `stopped` never starts.
+`docs/reference/states.md` lists every state: the test that finds it,
+whether it alerts, what the watcher does after `grace_s`, its mark, and
+the command `edr status --triage` proposes. A live run gets its state
+from the heartbeat and the ledger; a finished run from its phase. A job
+without a host is `queued`, and a `queued` run that `edr stop` marked
+`stopped` never starts.
 
 `edr keep <handle> --ack` writes the keep file with `ack`, which cancels
 the pending kill of `hung` and the stop of `host_full`. Any keep file
 holds off the `superseded` stop.
 
-`edr status --triage` lists every run that is not `running` with one
-proposed command:
-
-| State | Proposed command |
-|---|---|
-| `queued` | `edr launch <batch> --only <label>` |
-| `stale` | `edr status <handle> --live` |
-| `dead` | `edr run <handle> --stage <S> --from <step>` |
-| `hung`, `looping`, `over_budget` | `edr stop <handle> --why <state>` |
-| `host_full` | `edr stop <handle> --now --why host-full` |
-| `superseded` | `edr stop <handle> --after-task --why superseded` |
-| `done` | `edr export --design <src> --out exports/<src>` |
-| other finished | `edr retire <handle> --why <state>` |
-
 ## Notifications
 
-The watcher sends one alert per run and state: `dead`, `hung`,
-`looping`, `over_budget`, `host_full`, `superseded`, `orphan`,
-`incomplete`, `failed` and `killed`. A repeat with a new reason edits the
+The watcher sends one alert per run and state for the states that
+`docs/reference/states.md` marks. A repeat with a new reason edits the
 earlier message in place, so an alert never repeats. An alert carries
 two buttons, keep 12 h and ack. The only channel today is Telegram;
 `docs/telegram.md` explains it.
