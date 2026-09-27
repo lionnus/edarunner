@@ -130,9 +130,15 @@ class Ctx:
             raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name
 
-    def batch(self, name: str | None) -> Batch:
-        """Load a batch with its source resolved."""
-        return self.resolve_source(config.load_batch(self.project, self.batch_name(name)))
+    def batch(self, name: str | None, dry_run: bool = False) -> Batch:
+        """Load a batch, check its source out when it is missing, and resolve the source to its tag."""
+        b = config.load_batch(self.project, self.batch_name(name))
+        got = checkout.ensure(self.project, b.source, dry_run)
+        if got:
+            print(f"checkout {got.src} {got.path}" + (" (dry)" if dry_run else ""))
+            if not checkout.SRC_RE.match(b.source):
+                b.source = got.src
+        return self.resolve_source(b)
 
     def resolve_source(self, b: Batch) -> Batch:
         """A ref as source becomes the src tag of its checked-out tree; CheckoutError when it is not checked out."""
@@ -584,6 +590,41 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.DONE if rows else Exit.NOTHING
 
 
+def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
+    """Extract every configured metric again from the collected files of runs, as the watcher does."""
+    if sum(map(bool, (a.handle, a.batch, a.design))) != 1:
+        raise Refuse("extract needs one of a handle, --batch or --design")
+    if a.handle:
+        runs = [c.resolve(a.handle)]
+    else:
+        runs = [r for r in c.db.runs(batch=a.batch) if not a.design or r["src"] == a.design]
+    out, lines = [], []
+    for run in runs:
+        old = {(m["stage"], m["step"], m["task"], m["name"]): m for m in c.db.metrics(run_ids=[run["run_id"]])}
+        areas: dict[tuple, set] = {}
+        for x in c.db.area(run_ids=[run["run_id"]]):
+            areas.setdefault((x["stage"], x["step"], x["name"]), set()).add(
+                (x["instance"], x["depth"], x["area"], x["local_area"], x["cells"]))
+        n = {"run_id": run["run_id"], "new": 0, "changed": 0, "unchanged": 0, "failed": 0}
+        rows = watch.extract_run(c.project, c.db, run, c.heartbeat(run), actor=None if a.dry_run else "user")
+        for r in rows:
+            m = old.get((r["stage"], r["step"], r["task"], r["name"]))
+            area = {(i["instance"], i["depth"], i["area"], i["local_area"], i["cells"]) for i in r.get("instances") or []}
+            same = (m is not None and (m["value"], m["canonical"], m["unit"]) == (r["value"], r["canonical"], r["unit"])
+                    and area <= areas.get((r["stage"], r["step"], r["name"]), set()))
+            kind = "failed" if r["value"] is None else "new" if m is None else "unchanged" if same else "changed"
+            n[kind] += 1
+            if not a.dry_run and kind in ("new", "changed"):
+                c.db.add_metric(r, replace=True)
+        text = f"{n['new']} new, {n['changed']} changed, {n['unchanged']} unchanged, {n['failed']} failed"
+        if not a.dry_run:
+            c.db.add_event("user", run["run_id"], "extract", text)
+        out.append(n)
+        lines.append(f"{run['run_id']}: {text}" + (" (dry)" if a.dry_run else ""))
+    c.emit("\n".join(lines) or "no runs", out)
+    return Exit.DONE if runs else Exit.NOTHING
+
+
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     """Two or more runs side by side."""
     runs = [c.resolve(h) for h in a.handles]
@@ -705,7 +746,7 @@ def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     """Render every job of a batch; writes nothing."""
-    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db, backend=c.backend)
+    plans = launch.plan(c.project, c.batch(a.batch, a.dry_run), c.ssh, c.db, backend=c.backend)
     lines = [Text.assemble((p.run_id, "bold"), ": ",
                            (p.host or ("queued" if p.queued else c.project.site.scheduler.backend), "cyan" if p.queued else ""), " ", (str(p.root), "dim"),
                            *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
@@ -718,7 +759,7 @@ def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     """Start one driver per job of a batch."""
     only = a.only.split(",") if a.only else None
-    rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.db, dry_run=a.dry_run, only=only,
+    rows = launch.launch(c.project, c.batch(a.batch, a.dry_run), c.ssh, c.db, dry_run=a.dry_run, only=only,
                          allow_dirty=a.allow_dirty, backend=c.backend)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
@@ -1031,7 +1072,10 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def _worktree_target(c: Ctx, batch: str) -> Path | None:
-    """The checked-out tree of the batch's source, when no other batch that is not retired has it; guarded."""
+    """The checked-out tree of the batch's source, when no other batch that is not retired has it.
+
+    A tree that fails the guard is kept with one line on stdout, so the run trees still go.
+    """
     rows = {b["batch"]: b for b in c.db.batches()}
     src = str((rows.get(batch) or {}).get("source") or "")
     if not src or any(b["batch"] != batch and not b.get("retired") and b.get("source") == src for b in rows.values()):
@@ -1041,7 +1085,12 @@ def _worktree_target(c: Ctx, batch: str) -> Path | None:
         return None
     if path.resolve() == c.project.source.repo.resolve():
         raise Refuse(f"{path} is the source repository")
-    return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
+    try:
+        return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
+    except Refuse as e:
+        how = "git worktree remove" if (path / ".git").exists() else "rm -rf"
+        print(f"{batch}: worktree kept: {e}; remove it with {how}")
+        return None
 
 
 def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[str], prune: bool) -> None:
@@ -1333,6 +1382,24 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
     s.add_argument("--instance", metavar="PATH", help="the area rows of this instance and every instance below it")
     s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
+    s = command("extract", "extract the metrics of runs again from their collected files", """
+        Extracts every metric in edr.toml again from the files collected for
+        each run under data/results. It uses the same function as the watcher,
+        so it reads the tasks that finished and the stages that ended done. A
+        run without a heartbeat, such as an imported one, is read for every
+        stage. New rows are added. A row is replaced when its value, canonical
+        name or unit has changed, or when its area_hier metric has no area
+        rows yet. Rows that the new extraction does not find are kept.
+
+        Pass exactly one of a handle, --batch or --design. For each run,
+        extract prints how many rows are new, changed, unchanged and failed,
+        where a failed row is a file that did not parse, and it writes an
+        extract event with the same counts. With --json, data holds run_id,
+        new, changed, unchanged and failed for each run.
+        """, write=True, exits={Exit.NOTHING: "no run matches"})
+    s.add_argument("handle", nargs="?", help=HANDLE)
+    s.add_argument("--batch", metavar="B", help="every run of the batch")
+    s.add_argument("--design", metavar="SRC", help="every run of the exact source tag")
     s = command("compare", "two or more runs side by side", """
         Puts two or more runs side by side. Without --area, one row per stage,
         step, task and metric: the step name, the value of each run, and the
@@ -1393,16 +1460,24 @@ def _parser() -> argparse.ArgumentParser:
     for each in (s, old):
         each.add_argument("ref", nargs="?", help="default: source.ref")
         each.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
-    command("plan", "render the run specs of a batch; writes nothing", """
+    command("plan", "render the run specs of a batch; writes no spec", """
         Renders every job of the batch into a run spec and prints
         <run id>: <host or queued> <root> per job, with problem: lines under a
-        job that cannot run. Writes nothing, with or without --dry-run. With
-        --json, data[].spec is the full spec of each job.
+        job that cannot run. With --json, data[].spec is the full spec of each
+        job.
+
+        If the batch's source is a clean ref that has not been checked out
+        yet, plan checks it out first, the same way edr checkout does, and
+        prints a checkout <src> <path> line. With --dry-run it prints that line
+        and the git commands but checks nothing out. Apart from that checkout,
+        plan writes nothing. A dirty source that has not been checked out is
+        refused; add it with edr checkout --dirty DIR.
         """, write=True, exits={Exit.REFUSED: "a job has a problem"}).add_argument(
         "batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s = command("launch", "start one driver per job of a batch", """
-        Pins the date of the batch, publishes the driver into the state
-        directory, syncs the checked-out tree to each host, writes one spec per run
+        Checks out a missing clean source the way plan does, then pins the date
+        of the batch, publishes the driver into the state directory, syncs the
+        checked-out tree to each host, writes one spec per run
         and starts one driver per run, stagger_s apart. Prints
         <n> started, <n> queued, <n> with problems. A job that no host fits is
         queued; the watcher starts it when a host frees up. A job whose spec

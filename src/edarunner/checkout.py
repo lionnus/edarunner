@@ -54,6 +54,21 @@ def find(project: Project, src: str) -> Path:
     raise CheckoutError(f"'{src}' is not checked out; run: edr checkout {src}")
 
 
+def ensure(project: Project, src: str, dry_run: bool = False) -> CheckoutResult | None:
+    """Check out a clean source that is not checked out yet; None when it is. A dirty tag is refused."""
+    try:
+        find(project, src)
+        return None
+    except CheckoutError:
+        if "-dirty-" in src:
+            raise CheckoutError(f"'{src}' is a dirty snapshot that is not checked out; "
+                                f"run: edr checkout --dirty <tree>") from None
+    try:
+        return checkout(project, src, dry_run=dry_run)
+    except runid.GitError as e:
+        raise CheckoutError(f"'{src}' is not checked out and does not resolve: {e}") from None
+
+
 # --- internals
 
 

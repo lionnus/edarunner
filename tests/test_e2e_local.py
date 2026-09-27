@@ -155,3 +155,30 @@ def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeyp
     assert not (demo / "data" / "results").exists()
     with Database(demo / "data" / "edr.db") as db:
         assert db.runs() == [] and db.events() == [] and db.batches() == []
+
+
+def test_plan_and_launch_check_out_a_missing_source(demo: Path, capsys, tmp_path: Path) -> None:
+    setup_repo(demo)
+    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=demo / "repo", check=True,
+                          capture_output=True, text=True).stdout.strip()
+    code, out, _ = edr(capsys, "plan", "demo", "--dry-run")
+    assert code == 0 and f"worktree add --detach {demo / 'wt' / head} {head}" in out
+    assert f"checkout {head} {demo / 'wt' / head} (dry)" in out and not (demo / "wt").exists()
+    code, out, err = edr(capsys, "launch", "demo", "--dry-run")
+    assert code == 0, out + err
+    assert f"checkout {head} {demo / 'wt' / head} (dry)" in out and not (demo / "wt").exists()
+    code, out, _ = edr(capsys, "plan", "demo")
+    assert code == 0 and f"checkout {head} {demo / 'wt' / head}\n" in out and f"_a_demo_g{head}: local " in out
+    assert (demo / "wt" / head / "flow" / "flow.sh").is_file()
+    code, out, _ = edr(capsys, "plan", "demo")
+    assert code == 0 and "checkout " not in out
+
+
+def test_plan_refuses_a_dirty_source_that_is_not_checked_out(demo: Path, capsys) -> None:
+    setup_repo(demo)
+    (demo / "jobs" / "demo.toml").write_text(
+        (demo / "jobs" / "demo.toml").read_text().replace('source = "HEAD"', 'source = "abc1234-dirty-0123abcd"'))
+    for cmd in (["plan", "demo"], ["launch", "demo", "--dry-run", "--allow-dirty"]):
+        code, out, err = edr(capsys, *cmd)
+        assert code == 1 and "not checked out" in err and "edr checkout --dirty" in err and "checkout " not in out
+    assert not (demo / "wt").exists()

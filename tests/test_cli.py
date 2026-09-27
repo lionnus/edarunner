@@ -318,7 +318,7 @@ def test_launch_exit_codes(demo: Path, capsys, monkeypatch) -> None:
         return {"run_id": "r", "label": "l", "host": "local", "root": "", "started": started, "queued": queued,
                 "problems": list(problems), "pid": None}
     old, sync_failed = row(False, False, "already launched: x exists"), row(False, False, "sync failed")
-    monkeypatch.setattr(cli.Ctx, "batch", lambda self, name: name)
+    monkeypatch.setattr(cli.Ctx, "batch", lambda self, name, dry_run=False: name)
     cases = [([row(True), old], 0), ([row(False, True), old], 0), ([row(True), sync_failed], 0),
              ([old, old], 2), ([], 2), ([sync_failed, old], 1), ([sync_failed], 1)]
     for rows, code in cases:
@@ -515,6 +515,29 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
     assert code == 1 and "not empty" in err
     with Database(demo / "data" / "edr.db") as db:
         assert [e["kind"] for e in db.events()] == ["export"]
+
+
+def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    add_metric(demo, a, "area_cell_um2", 1000.0)  # unit u, the config says um2
+    reports = demo / "data" / "results" / a / "reports" / "3"
+    reports.mkdir(parents=True)
+    (reports / "area.rpt").write_text("i_top 1000.0\n")
+    (reports / "qor.rpt").write_text("Critical Path Slack: -0.25\n")
+    assert edr(capsys, "extract")[0] == 1 and edr(capsys, "extract", "a@demo", "--batch", "demo")[0] == 1
+    code, out, _ = edr(capsys, "extract", "a@demo", "--dry-run")
+    assert code == 0 and out == f"{a}: 1 new, 1 changed, 0 unchanged, 0 failed (dry)\n"
+    with Database(demo / "data" / "edr.db") as db:
+        assert [m["unit"] for m in db.metrics(run_ids=[a])] == ["u"] and db.events() == []
+    code, out, _ = edr(capsys, "--json", "extract", "--design", "abc1234")
+    assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 1, "changed": 1, "unchanged": 0, "failed": 0}]
+    with Database(demo / "data" / "edr.db") as db:
+        assert {(m["name"], m["value"], m["unit"]) for m in db.metrics(run_ids=[a])} == {
+            ("area_cell_um2", 1000.0, "um2"), ("wns_ns", -0.25, "ns")}
+        assert [(e["kind"], e["text"]) for e in db.events()] == [("extract", "1 new, 1 changed, 0 unchanged, 0 failed")]
+    code, out, _ = edr(capsys, "extract", "--batch", "demo")
+    assert code == 0 and out == f"{a}: 0 new, 0 changed, 2 unchanged, 0 failed\n"
+    assert edr(capsys, "extract", "--design", "0000000")[0] == 2
 
 
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
@@ -842,6 +865,24 @@ def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Pat
     assert code == 0 and f"rm -rf {snap}" in out and not snap.exists() and (repo / "flow").is_dir()
     with Database(demo / "data" / "edr.db") as db:
         assert [e["text"] for e in db.events() if e["run_id"] == ""] == [f"x: worktree {wt}", f"y: worktree {snap}"]
+
+
+def test_retire_batch_keeps_a_worktree_without_the_marker(demo: Path, capsys, tmp_path: Path) -> None:
+    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text().replace('worktrees = "wt"', f'worktrees = "{tmp_path / "rtl-wt"}"'))
+    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]
+    wt = tmp_path / "rtl-wt" / src
+    a = seed(demo, "a", "done", src=src)
+    with Database(demo / "data" / "edr.db") as db:
+        root = Path(db.run(a)["root"])
+    code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
+    assert code == 0 and f"demo: worktree kept: '{wt}' does not contain the marker '/edr/'; " \
+        "remove it with git worktree remove" in out
+    assert (wt / ".git").is_file() and not root.exists() and f"rm -rf {root}" in out
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["kind"] for e in db.events(run_id=a)] == ["retire"] and db.batches()[0]["retired"]
+        assert not [e for e in db.events() if e["run_id"] == ""]  # no worktree event
 
 
 def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -> None:

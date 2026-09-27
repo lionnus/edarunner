@@ -176,23 +176,29 @@ class Database:
         )
         self.conn.commit()
 
-    def add_metric(self, row: Row) -> bool:
+    def add_metric(self, row: Row, replace: bool = False) -> bool:
         """Insert one metric, and its `instances` into the area table. Returns False when the metric was present.
 
         The instance rows go in even when the metric was present, so a new area metric fills an old run.
+        `replace` overwrites a present metric and its instance rows with the new values.
         """
         r = {"task": "", "step": None, "canonical": "", "unit": "", "source_file": "", "extracted_at": _now(), **row}
+        key = (r["run_id"], r["stage"], r["step"], r["task"], r["name"])
         # An `IS` match sees a NULL step; the primary key does not.
+        if replace:
+            self.conn.execute(
+                "UPDATE metrics SET canonical=?, value=?, unit=?, source_file=?, extracted_at=? "
+                "WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?",
+                (r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key))
         cur = self.conn.execute(
             "INSERT INTO metrics(run_id, stage, step, task, name, canonical, value, unit, source_file, extracted_at) "
             "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS "
             "(SELECT 1 FROM metrics WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?)",
-            (r["run_id"], r["stage"], r["step"], r["task"], r["name"], r["canonical"], r["value"], r["unit"],
-             r["source_file"], r["extracted_at"], r["run_id"], r["stage"], r["step"], r["task"], r["name"]),
+            (*key, r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key),
         )
         self.conn.executemany(
-            "INSERT OR IGNORE INTO area(run_id, stage, step, name, instance, depth, area, local_area, cells) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT OR {'REPLACE' if replace else 'IGNORE'} INTO area(run_id, stage, step, name, instance, depth, area, "
+            "local_area, cells) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(r["run_id"], r["stage"], r["step"], r["name"], i["instance"], i["depth"], i["area"], i["local_area"],
               i["cells"]) for i in r.get("instances") or []])
         self.conn.commit()

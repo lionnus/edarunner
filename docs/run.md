@@ -18,10 +18,16 @@ of this tree, so a later commit never changes a running flow. A tree
 with uncommitted changes goes in with `edr checkout --dirty <dir>`; its tag
 is `<hash>-dirty-<8 hex>`, and `launch` needs `--allow-dirty` for it.
 
+If the batch's source has not been checked out yet, `plan` and `launch`
+check it out for you and print a `checkout <src> <path>` line. With
+`--dry-run`, they print the git commands instead of running them. This
+only works for a clean ref. A dirty snapshot has to be added with
+`edr checkout --dirty <dir>` before you plan or launch it.
+
 ## Plan and launch
 
 ```sh
-edr plan sweep1               # run id, host and root per job; writes nothing
+edr plan sweep1               # run id, host and root per job; writes no spec
 edr launch sweep1 --dry-run   # every path and command, nothing written
 edr launch sweep1
 ```
@@ -381,7 +387,10 @@ the tree. `--batch <B>` retires every run of a batch and writes
 removes the checked-out tree of the batch's source under
 `source.worktrees`, unless another batch that is not retired has the
 same source. A worktree goes with `git worktree remove --force`, a dirty
-snapshot with a plain delete, both on the head node.
+snapshot with a plain delete, both on the head node. If the worktree does
+not pass the guard, for example because `source.worktrees` lies outside
+the marker path, `retire` keeps it, prints a `worktree kept` line and
+still removes the run trees. You can then remove the worktree by hand.
 
 Every target passes the guard of [guarantees.md](guarantees.md) first.
 `retire` refuses a tree whose results are not collected, a tree a live

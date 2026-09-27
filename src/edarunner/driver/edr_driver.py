@@ -30,21 +30,26 @@ def identity(spec, env):
     return {"host": spec.get("host") or socket.gethostname(), "sched_id": sched or None}
 
 
-def cpu_seconds(pgids):
-    # type: (list) -> float
-    """The CPU time of every process in `pgids`, with its reaped children, from /proc, else from ps."""
+def usage(pgids):
+    # type: (list) -> tuple
+    """(CPU seconds, RSS in GB) of every process in `pgids`, from /proc, else from ps; (None, None) when ps fails.
+
+    The CPU seconds from /proc include the reaped children.
+    """
     if not pgids:
-        return 0.0
+        return 0.0, 0.0
     want = set(pgids)
     if not os.path.isdir("/proc/self"):
         try:
-            out = subprocess.run(["ps", "-e", "-o", "pgid=,cputimes="], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, universal_newlines=True, timeout=30).stdout
-            return float(sum(int(t) for g, t in (ln.split() for ln in out.splitlines() if ln.strip())
-                             if int(g) in want))
+            out = subprocess.run(["ps", "-e", "-o", "pgid=,cputimes=,rss="], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True,
+                                 timeout=30).stdout
+            rows = [[int(x) for x in ln.split()] for ln in out.splitlines() if len(ln.split()) == 3]
         except (OSError, ValueError, subprocess.SubprocessError):
-            return None
-    ticks, hz = 0, float(os.sysconf("SC_CLK_TCK"))
+            return None, None
+        rows = [r for r in rows if r[0] in want]
+        return float(sum(r[1] for r in rows)), round(sum(r[2] for r in rows) / (1024.0 * 1024.0), 3)
+    ticks, pages, hz, page = 0, 0, float(os.sysconf("SC_CLK_TCK")), os.sysconf("SC_PAGE_SIZE")
     for name in os.listdir("/proc"):
         if not name.isdigit():
             continue
@@ -53,10 +58,11 @@ def cpu_seconds(pgids):
                 fields = f.read().rsplit(")", 1)[1].split()
         except (OSError, IndexError):
             continue
-        # After the comm: state, ppid, pgrp, ..., utime, stime, cutime, cstime at 11 to 14.
+        # After the comm: state, ppid, pgrp, ..., utime, stime, cutime, cstime at 11 to 14, rss at 21.
         if int(fields[2]) in want:
             ticks += sum(int(x) for x in fields[11:15])
-    return round(ticks / hz, 2)
+            pages += int(fields[21])
+    return round(ticks / hz, 2), round(pages * page / GB, 3)
 
 
 def log_size(path):
@@ -92,24 +98,6 @@ def du_gb(path):
         return round(int(out.split()[0]) / (1024.0 * 1024.0), 3)
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None
-
-
-def group_usage(pgids):
-    # type: (list) -> tuple
-    """(CPU seconds, RSS in GB) summed over the processes of `pgids`, or (None, None) when ps fails."""
-    try:
-        out = subprocess.run(["ps", "-e", "-o", "pgid=,cputimes=,rss="], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True,
-                             timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None, None
-    want, cpu, rss = set(pgids), 0, 0
-    for line in out.splitlines():
-        f = line.split()
-        if len(f) == 3 and f[0].isdigit() and int(f[0]) in want:
-            cpu += int(f[1]) if f[1].isdigit() else 0
-            rss += int(f[2]) if f[2].isdigit() else 0
-    return cpu, round(rss / (1024.0 * 1024.0), 3)
 
 
 def tail(path, n, size=65536):
@@ -201,23 +189,6 @@ class Driver(object):
 
     # heartbeat
 
-    def sample(self):
-        # type: () -> None
-        """Put the CPU use since the last sample and the RSS of the process groups into the heartbeat."""
-        with self.lock:
-            pgids = sorted(self.procs)
-        cpu, rss = group_usage(pgids) if pgids else (0, 0.0)
-        now = time.time()
-        with self.lock:
-            if cpu is None:
-                self.hb["cpu_pct"], self.hb["rss_gb"] = None, None
-                return
-            last, self.last_cpu = self.last_cpu, (now, cpu)
-            # A process that ended takes its CPU seconds with it, so a drop reads as zero.
-            pct = max(0.0, (cpu - last[1]) / (now - last[0]) * 100) if last and now > last[0] else None
-            self.hb["cpu_pct"] = None if pct is None else round(pct, 1)
-            self.hb["rss_gb"] = rss
-
     def beat(self, tree=False):
         # type: (bool) -> None
         """Write the heartbeat by an atomic rename; `tree` also runs du."""
@@ -250,16 +221,29 @@ class Driver(object):
 
     def samples(self):
         # type: () -> dict
-        """What the watcher's hung check compares: the CPU time of the process groups and the size of the current log."""
+        """The CPU time and RSS of the process groups, the CPU use since the last sample, and the size of the log.
+
+        `cpu_s` and `log_bytes` are what the watcher's hung check compares.
+        """
         with self.lock:
             pgids, log = sorted(self.procs), self.hb["log"]
-        return {"cpu_s": cpu_seconds(pgids), "log_bytes": log_size(log)}
+        cpu, rss = usage(pgids)
+        now = time.time()
+        out = {"cpu_s": cpu, "rss_gb": rss, "log_bytes": log_size(log)}
+        with self.lock:
+            last = self.last_cpu
+            if cpu is None:
+                out["cpu_pct"], self.last_cpu = None, None
+            elif not last or now - last[0] >= 1:
+                # A process group that ended takes its CPU seconds with it, so a drop reads as zero.
+                out["cpu_pct"] = round(max(0.0, (cpu - last[1]) / (now - last[0]) * 100), 1) if last else None
+                self.last_cpu = (now, cpu)
+        return out
 
     def beat_loop(self):
         period = float(self.limits.get("heartbeat_s") or 60)
         last_du = 0.0
         while not self.stop_evt.wait(period):
-            self.sample()
             du = time.time() - last_du >= DU_EVERY_S
             if du:
                 last_du = time.time()
@@ -369,6 +353,7 @@ class Driver(object):
             self.hb["last_cmd"] = cmd
         with open(log, "ab") as fh:
             fh.write(("# edr: %s\n" % cmd).encode())
+            fh.flush()  # the header goes before the output of the command
             p = subprocess.Popen([self.shell, "-c", cmd], cwd=cwd, env=self.env,
                                  stdin=subprocess.DEVNULL, stdout=fh,
                                  stderr=subprocess.STDOUT, start_new_session=True)
