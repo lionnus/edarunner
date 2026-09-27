@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import signal
@@ -54,6 +55,7 @@ def test_group_runs_parallel_and_counts_a_failure(tmp_path: Path) -> None:
     q = Path(spec["queue_dir"]) / "power"
     assert sorted(os.listdir(q / "done")) == ["k_bad", "k_big", "k_small"]
     assert os.listdir(q / "pending") == [] and os.listdir(q / "claimed") == []
+    assert os.listdir(spec["stages"][0]["tools"][0]["leases"]) == []
     root = Path(spec["root"])
     assert (root / "simulation/tests/demo/GEMM_M64_N64/power/reports/power.csv").exists()
     assert not (root / "simulation/tests/demo/GEMM_M64_N64/wave.vcd").exists()
@@ -78,7 +80,7 @@ def test_sigterm_kills_the_group_and_reports(tmp_path: Path) -> None:
     proc.send_signal(signal.SIGTERM)
     rc, hb = finish(proc, spec)
     assert (rc, hb["phase"], hb["killed_by"], hb["exit"]) == (10, "KILLED:SIGTERM", "SIGTERM", 10)
-    assert hb["pgids"] == []
+    assert hb["pgids"] == [] and os.listdir(spec["stages"][0]["tools"][0]["leases"]) == []
     for _ in range(100):
         try:
             os.killpg(pgid, 0)
@@ -139,7 +141,7 @@ def test_gate_waits_then_fails(tmp_path: Path) -> None:
     proc = start(spec)
     t0 = time.time()
     hb = wait_for(spec, lambda h: h["phase"] == "gate:synth" and h.get("gate"))
-    assert hb["gate"] == "demo: 0 free, 1 needed"
+    assert hb["gate"] == "demo: 0 free, 0 held by others, 1 needed"
     rc, hb = finish(proc, spec)
     assert time.time() - t0 >= 3
     assert (rc, hb["phase"], hb["exit"]) == (4, "FAILED:synth", 4)
@@ -153,12 +155,12 @@ def test_gate_waits_then_passes(tmp_path: Path) -> None:
     spec["stages"][0]["tools"] = [{"name": "sim", "seats": 2, "probe": ["cat", str(seats)]}]
     proc = start(spec)
     hb = wait_for(spec, lambda h: h.get("gate"))
-    assert hb["phase"] == "gate:synth" and hb["gate"] == "sim: 1 free, 2 needed" and hb["last_cmd"] is None
+    assert hb["phase"] == "gate:synth" and hb["gate"] == "sim: 1 free, 0 held by others, 2 needed" and hb["last_cmd"] is None
     seats.write_text("2 4\n")
     rc, hb = finish(proc, spec)
     assert (rc, hb["phase"], hb["gate"]) == (0, "done", None)
     log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log").read_text()
-    assert log.splitlines() == ["gate synth: wait for sim: 1 free, 2 needed", "gate synth: open"]
+    assert log.splitlines() == ["gate synth: wait for sim: 1 free, 0 held by others, 2 needed", "gate synth: open"]
 
 
 def test_gate_lets_a_failed_probe_through(tmp_path: Path) -> None:
@@ -294,3 +296,78 @@ def test_sighup_kills_the_group_and_reports(tmp_path: Path) -> None:
     else:
         pytest.fail("process group %d still alive" % pgid)
     assert os.listdir(Path(spec["queue_dir"]) / "power" / "claimed") == ["k_small." + RUN_ID]
+
+
+# seat leases
+
+def _load_driver():
+    spec = importlib.util.spec_from_file_location("edr_driver_under_test", DRIVER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _two_drivers(tmp_path: Path, free: int):
+    """Two drivers of two runs that share one probe value and one lease directory."""
+    mod = _load_driver()
+    seats = tmp_path / "seats"
+    seats.write_text(f"{free} 10\n")
+    tool = {"name": "sim", "seats": 1, "probe": ["cat", str(seats)], "leases": str(tmp_path / "state" / "leases" / "sim")}
+    out = []
+    for run_id in (RUN_ID, RUN_ID + "_b"):
+        spec = render_spec(tmp_path, stages=("synth",))
+        spec["run_id"] = run_id
+        spec["state_file"] = str(Path(spec["state_file"]).with_name(run_id + ".json"))
+        path = Path(spec["state_file"]).with_suffix(".spec.json")
+        path.write_text(json.dumps(spec))
+        d = mod.Driver(str(path))
+        d.hb["stage"] = "synth"
+        out.append(d)
+    return out, [tool], Path(tool["leases"])
+
+
+def test_second_driver_waits_for_a_seat_the_first_leased(tmp_path: Path) -> None:
+    (a, b), tools, leases = _two_drivers(tmp_path, free=1)
+    assert a.take(tools, a.run_id + ".synth", {"hours": 2}) is None
+    lease = json.loads((leases / f"{RUN_ID}.synth.0").read_text())
+    assert (lease["run_id"], lease["stage"], lease["pid"], lease["host"], lease["budget_s"]) == (
+        RUN_ID, "synth", os.getpid(), "local", 7200.0)
+    assert b.take(tools, b.run_id + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
+    assert os.listdir(leases) == [f"{RUN_ID}.synth.0"]
+    a.release()
+    assert b.take(tools, b.run_id + ".synth", {}) is None and os.listdir(leases) == [f"{RUN_ID}_b.synth.0"]
+
+
+def test_the_later_of_two_drivers_that_saw_one_seat_backs_off(tmp_path: Path) -> None:
+    (a, b), tools, leases = _two_drivers(tmp_path, free=1)
+    assert a.take(tools, a.run_id + ".synth", {}) is None
+    real, calls = b.others, []
+
+    def blind(tool, key, now):
+        # b counted before a's rename landed.
+        calls.append(key)
+        return [] if len(calls) == 1 else real(tool, key, now)
+
+    b.others = blind
+    assert b.take(tools, b.run_id + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
+    assert os.listdir(leases) == [f"{RUN_ID}.synth.0"] and b.leases == {}
+
+
+def test_a_lease_older_than_lease_s_no_longer_counts(tmp_path: Path) -> None:
+    (a, b), tools, leases = _two_drivers(tmp_path, free=1)
+    a.take(tools, a.run_id + ".synth", {})
+    path = leases / f"{RUN_ID}.synth.0"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), ts=time.time() - 601)))
+    assert b.take(tools, b.run_id + ".synth", {}) is None
+
+
+def test_leases_vanish_at_stage_end(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth", "export"))
+    leases = Path(spec["stages"][0]["tools"][0]["leases"])
+    proc = start(spec)
+    wait_for(spec, lambda h: h["phase"] == "stage:synth")
+    assert os.listdir(leases) == [f"{RUN_ID}.synth.0"]
+    wait_for(spec, lambda h: h["phase"] == "stage:export")
+    assert os.listdir(leases) == []
+    assert finish(proc, spec)[0] == 0
+

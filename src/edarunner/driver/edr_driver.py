@@ -79,6 +79,27 @@ def tail(path, n, size=65536):
     return "\n".join(lines[-n:])
 
 
+def read_leases(d):
+    # type: (str) -> list
+    """Every lease in a lease directory as (file name, content); a temporary file is skipped."""
+    out = []
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return out
+    for n in names:
+        if n.startswith("."):
+            continue
+        try:
+            with open(os.path.join(d, n)) as f:
+                out.append((n, json.load(f)))
+        except OSError:
+            pass  # released since the listing
+        except ValueError:
+            out.append((n, {}))
+    return out
+
+
 def signature(path):
     # type: (str) -> str
     """Return the last log line with digits removed."""
@@ -117,6 +138,7 @@ class Driver(object):
         self.stop_mode = None
         self.over_budget = None
         self.sigs = []
+        self.leases = {}  # key -> [lease path]
         self.stop_evt = threading.Event()
         self.last_cpu = None  # (time, CPU seconds) of the last sample
         now = int(time.time())
@@ -348,16 +370,68 @@ class Driver(object):
             sys.stderr.write("tool probe failed for %s: rc=%s %s\n" % (tool["name"], rc, out.strip()[:200]))
         return free
 
-    def blocked(self, tools):
-        # type: (list) -> str
-        """Why a stage waits: the first tool with fewer free seats than needed, or None."""
+    def others(self, tool, key, now):
+        # type: (dict, str, float) -> list
+        """The leases of a tool that count against `key`: those of another key, younger than lease_s.
+
+        After lease_s the tool holds its seat, and the probe no longer reports it free."""
+        lease_s = float(self.limits.get("lease_s") or 600)
+        return [(float(c.get("ts") or 0), n) for n, c in read_leases(tool["leases"])
+                if n.rsplit(".", 1)[0] != key and now - float(c.get("ts") or 0) < lease_s]
+
+    def take(self, tools, key, budget):
+        # type: (list, str, dict) -> str
+        """Lease the seats of every tool under `key`; return why the caller waits, or None.
+
+        One file per seat, <key>.<n>, made by a rename. After the rename the driver counts again and
+        backs off when an older lease of another run leaves too few seats, so of two drivers that
+        saw the same free seat, the later one waits."""
+        hours = budget.get("hours")
         for t in tools:
-            free, seats = self.free_seats(t), int(t.get("seats") or 1)
-            if free is not None and free < seats:
-                return "%s: %d free, %d needed" % (t["name"], free, seats)
+            seats, free = int(t.get("seats") or 1), self.free_seats(t)
+            if not t.get("leases"):
+                if free is not None and free < seats:
+                    return "%s: %d free, 0 held by others, %d needed" % (t["name"], free, seats)
+                continue
+            held = self.others(t, key, time.time())
+            if free is None or free - len(held) >= seats:
+                ts = self.lease(t, key, seats, hours)
+                held = [h for h in self.others(t, key, time.time()) if h < (ts, key)]
+            if free is not None and free - len(held) < seats:
+                self.release(key)
+                return "%s: %d free, %d held by others, %d needed" % (t["name"], free, len(held), seats)
         return None
 
+    def lease(self, tool, key, seats, hours):
+        # type: (dict, str, int, object) -> float
+        """Write `seats` lease files <key>.<n> by a temporary file and a rename; return their time."""
+        ts = time.time()
+        body = json.dumps({"run_id": self.run_id, "key": key, "stage": self.hb.get("stage"), "pid": os.getpid(),
+                           "host": self.spec.get("host"), "ts": ts,
+                           "budget_s": float(hours) * 3600 if hours is not None else None})
+        d = tool["leases"]
+        os.makedirs(d, exist_ok=True)
+        for n in range(seats):
+            path = os.path.join(d, "%s.%d" % (key, n))
+            tmp = os.path.join(d, ".%s.%d.tmp" % (key, n))
+            with open(tmp, "w") as f:
+                f.write(body)
+            os.rename(tmp, path)
+            self.leases.setdefault(key, []).append(path)
+        return ts
+
+    def release(self, key=None):
+        # type: (str) -> None
+        """Remove the lease files of `key`, or of every key."""
+        for k in [key] if key else list(self.leases):
+            for path in self.leases.pop(k, []):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
     def gate(self, st):
+        """Wait until the stage's tools have the seats, and lease them under <run_id>.<stage>."""
         tools = st.get("tools")
         if not tools:
             return
@@ -366,7 +440,7 @@ class Driver(object):
         t0, last = time.time(), None
         gate_max = float(self.limits.get("gate_max_s") or 0)
         while True:
-            why = self.blocked(tools)
+            why = self.take(tools, self.run_id + "." + name, st.get("budget") or {})
             if why != last:
                 sys.stderr.write("gate %s: %s\n" % (name, "wait for " + why if why else "open"))
                 last = why
@@ -486,6 +560,7 @@ class Driver(object):
             sys.stderr.write("after_each skipped for %s: no dir\n" % tid)
         elif after:
             self.run_wait(after.replace("{task_dir}", task.get("dir") or ""), cwd, log)
+        self.release("%s.%s.%s" % (self.run_id, st["name"], tid))
         streak = int(self.limits.get("streak") or 0)
         with self.lock:
             c = self.hb["counts"]
@@ -567,12 +642,17 @@ class Driver(object):
                         self.hb["counts"]["skipped"] += 1
                     self.record_task(tid, "skipped")
                     continue
-                if self.blocked(task.get("tools") or tools):
+                key = "%s.%s.%s" % (self.run_id, name, tid)
+                why = self.take(task.get("tools") or tools, key, task.get("budget") or budget)
+                with self.lock:
+                    self.hb["gate"] = why
+                if why:
                     gate_until = time.time() + POLL_S
                     break
                 try:
                     os.rename(os.path.join(q, "pending", tid), os.path.join(q, "claimed", tid + "." + self.run_id))
                 except OSError:
+                    self.release(key)
                     continue
                 log = self.log_path("%s.%s" % (name, tid))
                 p = self.spawn(task["cmd"], cwd, log)
@@ -601,12 +681,17 @@ class Driver(object):
             while self.host_full():
                 self.wait(POLL_S)
             self.gate(st)
-            if "tasks" in st:
-                self.record_stage(st["name"], "running", attempt=1, started=int(time.time()), ended=None, exit=None)
-                self.run_group(st)
-                self.record_stage(st["name"], "done", ended=int(time.time()), exit=0)
-            else:
-                self.run_stage(st, start_at.get("checkpoint") if i == 0 else None)
+            try:
+                if "tasks" in st:
+                    # A task takes its own lease; the stage lease only opened the gate.
+                    self.release(self.run_id + "." + st["name"])
+                    self.record_stage(st["name"], "running", attempt=1, started=int(time.time()), ended=None, exit=None)
+                    self.run_group(st)
+                    self.record_stage(st["name"], "done", ended=int(time.time()), exit=0)
+                else:
+                    self.run_stage(st, start_at.get("checkpoint") if i == 0 else None)
+            finally:
+                self.release()
             if self.over_budget:
                 raise Fail(9, "OVER_BUDGET:" + st["name"])
             if self.stop_mode:
@@ -639,6 +724,7 @@ class Driver(object):
             self.kill_all(signal.SIGTERM)
             code, phase = 5, "FAILED:" + str(self.hb.get("stage") or "setup")
         self.reap(10)
+        self.release()
         self.stop_evt.set()
         t.join(30)
         with self.lock:

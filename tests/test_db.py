@@ -6,6 +6,7 @@ import sqlite3
 
 import pytest
 
+from edarunner import db as db_mod
 from edarunner.db import Database
 
 RUN_A = "20261002_1130_a_demo_gaaa111"
@@ -31,6 +32,17 @@ def test_schema_twice(tmp_path):
         tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"batches", "runs", "stage_runs", "parameters", "metrics", "artifacts", "events", "store"} <= tables
         assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_journal_mode_follows_the_filesystem(tmp_path, monkeypatch):
+    with Database(tmp_path / "local.db") as db:
+        assert (db.journal_mode, db.network_fs) == ("wal", None)
+    monkeypatch.setattr(db_mod, "fs_magic", lambda path: 0x6969)
+    with Database(tmp_path / "nfs.db") as db:
+        assert (db.journal_mode, db.network_fs) == ("delete", "nfs")
+        assert db.conn.execute("PRAGMA synchronous").fetchone()[0] == 2
+    monkeypatch.setattr(db_mod, "fs_magic", lambda path: 0x12345678)
+    assert db_mod.network_fs(tmp_path / "no" / "such" / "dir") is None
 
 
 def test_upsert_then_update(tmp_path):

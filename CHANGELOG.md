@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- The database uses the DELETE journal with `synchronous=FULL` when
+  `data/` is on NFS, SMB, 9p or FUSE, and WAL elsewhere. WAL does not
+  work on a network filesystem. `edr check` prints a warning line with
+  the path and the mode, and `Database.journal_mode` holds the mode.
+- The tool gate leases its seats. Two drivers that read the same free
+  seat from the probe both started before, and a licence error hid the
+  race. Now the driver writes one lease file per seat in
+  `<state_dir>/leases/<tool>/` by a rename, and counts the free seats
+  less the seats other runs leased in the last `lease_s` (new limit,
+  default 600 s). The later of two drivers backs off. The driver removes
+  its leases when the stage or task ends; the watcher sweeps the leases
+  of dead, finished and retired runs and those older than the stage
+  budget, with a `lease` event. The heartbeat `gate` and `edr status
+  <handle>` read `<tool>: <free> free, <held> held by others, <needed>
+  needed`.
 - The canonical metric names follow METRICS2.1, the schema of the
   OpenROAD metrics JSON, without the stage prefix: `design__instance__area`,
   `timing__setup__ws`, `timing__setup__tns`, `power__total` and more. The

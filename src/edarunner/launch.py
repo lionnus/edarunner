@@ -21,7 +21,7 @@ from .model import Batch, Budget, Job, Project, Stage, Task
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
 DATE_FMT = "%Y%m%d_%H%M"
 _ID_RE = re.compile(r"^[A-Za-z_]\w*$")
-_SPEC_LIMITS = ("host_free_min_gb", "streak", "heartbeat_s", "gate_max_s")
+_SPEC_LIMITS = ("host_free_min_gb", "streak", "heartbeat_s", "gate_max_s", "lease_s")
 
 
 @dataclass
@@ -96,9 +96,15 @@ def _budget(base: Budget, over: Budget | None) -> dict[str, Any]:
 
 
 def _tools(project: Project, needs: dict[str, int], values: dict[str, object]) -> list[dict[str, Any]]:
-    """The gate of a stage or task: name, seats and the rendered probe argv of each needed tool with a probe."""
-    return [{"name": n, "seats": seats, "probe": [config.render(a, values) for a in project.site.tools[n].probe]}
+    """The gate of a stage or task: name, seats, the rendered probe argv and the lease directory of each needed tool with a probe."""
+    return [{"name": n, "seats": seats, "probe": [config.render(a, values) for a in project.site.tools[n].probe],
+             "leases": str(lease_dir(project.state_dir, n))}
             for n, seats in needs.items() if project.site.tools[n].probe]
+
+
+def lease_dir(state: Path, tool: str) -> Path:
+    """The directory of the seat leases of one tool, shared by every run of the project."""
+    return Path(state) / "leases" / tool
 
 
 def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:
@@ -300,6 +306,9 @@ def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: b
     }
     path = Path(state) / batch / f"{plan_.run_id}.spec.json"
     if not dry_run:
+        for st in plan_.spec.get("stages") or []:
+            for t in [*(st.get("tools") or []), *(x for task in st.get("tasks") or [] for x in task.get("tools") or [])]:
+                Path(t["leases"]).mkdir(parents=True, exist_ok=True)
         config.save_json(path, plan_.spec)
     return path
 
