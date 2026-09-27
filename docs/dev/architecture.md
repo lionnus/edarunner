@@ -1,21 +1,21 @@
 # Architecture
 
-After this page you can find the module that owns a behaviour, and follow
+This page helps you find the module that owns a behaviour, and follows
 one run through the code from `plan` to `export`.
 
 ## Three programs
 
 - `edr`, the controller: Python 3.11 or newer, the standard library plus
   `rich`, on the head node. `src/edarunner/`.
-- `edr_driver.py`, the driver: one file, Python 3.6 or newer, standard
-  library only, copied to the state directory at launch. It runs one run
+- `edr_driver.py`, the driver: a single file for Python 3.6 or newer,
+  standard library only, copied to the state directory at launch. It runs one run
   and never imports the package. `src/edarunner/driver/`; [driver.md](driver.md)
   has the protocol.
 - `edr watch`, the controller as a long-running process on the head
   node, with the Telegram bot as a thread inside it.
 
-Nothing in the core knows an EDA tool. The project config names the
-commands, the report files and the numbers in them.
+No module knows an EDA tool. The project config names the commands, the
+report files and the numbers in them.
 
 ## Modules
 
@@ -25,11 +25,12 @@ commands, the report files and the numbers in them.
 | `config.py` | loading and validation of the four TOML files, the type check against the model, placeholders, hooks |
 | `guards.py` | `assert_safe_target`, `assert_run_id` and `Refuse` |
 | `runid.py` | the git calls, the source tag, the run id template |
-| `checkout.py` | `edr checkout`: worktrees, nested repositories, the dirty snapshot |
+| `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe, placement, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
 | `launch.py` | spec rendering, `plan`, `launch`, `stop` |
-| `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`, picked by `[scheduler] backend` |
+| `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`; `[scheduler] backend` picks one of these or a scheduler backend |
+| `schedulers.py` | the HTCondor, Slurm and LSF backends: the submit file, the state query, the stop |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
@@ -49,6 +50,7 @@ commands, the report files and the numbers in them.
 | `notify/telegram/custom.py` | the custom argv commands of `[telegram.commands.*]` |
 | `notify/telegram/buttons.py` | the inline buttons of an alert, the action of a press, the confirmation of a stop |
 | `notify/telegram/bot.py` | `TelegramBot`: the poll thread, the router, the allowlist, the alerts and the pinned board |
+| `brief.py` | `edr brief`: the Markdown briefing of the project or of one run |
 | `cli.py` | the commands, the exit codes, `--json`, the project lookup |
 | `tools/gen_docs.py` | the pages under `docs/reference/`, from the parser, the model, `STATES`, the marks and the bot table |
 
@@ -63,8 +65,8 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    `tasks.toml`; `load_batch` reads one `jobs/<batch>.toml`.
 2. `launch.plan` pins the date, computes the build tag and the run id,
    places each job on a host, and renders every string of the job into
-   a spec, the JSON file the driver reads. A problem lands in the plan,
-   not in an exception.
+   a spec, the JSON file the driver reads. A problem is recorded in the
+   plan instead of raising an exception.
 3. `launch.launch` publishes the driver, syncs the checked-out tree with
    `rsync --delete` behind the guard, writes the spec by rename, records
    the run and an event, and starts the driver through the backend,

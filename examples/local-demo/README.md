@@ -1,15 +1,16 @@
 # The local demo
 
-This project runs a scripted stand-in for an EDA flow on the head node.
-It needs no EDA tool, no licence and no second host. The unit tests,
+This project runs a stand-in flow of shell scripts that write example
+reports, on the head node alone. It needs no EDA tool, no licence and no
+second host. The unit tests,
 `tests/test_e2e_local.py` and the condor and slurm CI jobs run it. For a first
 run with real tools, take `examples/openroad-gcd` instead.
 
-## What the flow fakes
+## What the scripts stand in for
 
 | Script | Stands in for | Does |
 |---|---|---|
-| `flow/flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [NETLIST_STAGE=n] [KEY=VALUE ...]` | synthesis, place and route, export | one step per second; writes `reports/<n>/area.rpt` and `reports/<n>/qor.rpt`; `export` writes `out/<n>/netlist.v`, 11 by default |
+| `flow/flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [NETLIST_STAGE=n] [KEY=VALUE ...]` | synthesis, place and route, export | one step per second; writes `reports/<n>/area.rpt` and `reports/<n>/qor.rpt`; `export` writes `out/<NETLIST_STAGE>/netlist.v` (`NETLIST_STAGE` defaults to 11) |
 | `flow/kernel.sh <kernel> <test> [KEY=VALUE ...]` | a gate-level power simulation | sleeps `DEMO_SLEEP` seconds (default 2); writes a 1 MiB `wave.vcd`, `power/reports/power.csv` and `power/phases.json` |
 | `flow/seats.sh` | the seat probe of the tool `demo` | prints `free total`; 10 seats, `DEMO_SEATS_USED` in use (default 2) |
 
@@ -34,7 +35,7 @@ Two switches make failures:
 | `hooks/energy.py` | the metric hook of `energy_nj`: the power times the window of one task |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
 | `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`, and `vars = { netlist_stage = 11 }` for `export`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
-| `setup.sh` | makes `repo/`, a git repository with `flow/`; the source the batch stages |
+| `setup.sh` | creates `repo/`, a git repository that holds `flow/`; the batch checks out its source from it |
 
 The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 
@@ -43,8 +44,8 @@ The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 ```sh
 cd examples/local-demo
 bash setup.sh                 # repo/ with one commit
-edr check                     # ok: 1 hosts, 4 stages, 5 metrics, 1 batches
-edr checkout HEAD             # <src> and the path of the pinned worktree
+edr checkout HEAD             # <src> and the path of the pinned clone
+edr check                     # load the config, probe the host, check the hooks
 edr plan demo                 # one run id, host and root per job; writes nothing
 edr launch demo               # 2 started, 0 queued, 0 with problems
 edr status --watch            # redraws every 5 s; Ctrl-C to leave
@@ -67,10 +68,10 @@ Where things land:
 
 | Path | Holds |
 |---|---|
-| `wt/<src>/` | the checked-out worktree |
+| `wt/<src>/` | the checked-out clone |
 | `/tmp/edr-demo/<user>/edr/demo/<run_id>/` | the run tree; `log/` holds one file per stage and task |
 | `~/.edr/demo/demo/` | `RUN_DATE`, the specs, the heartbeats, the queues, the driver log |
-| `~/.edr/demo/bin/demo/edr_driver.py` | the driver copy of the batch |
+| `~/.edr/demo/bin/edr_driver-<hash>.py` | the driver, one copy per driver version |
 | `data/edr.db`, `data/results/`, `data/board/` | the run database, the collected files, `status.html` and `compare.html` |
 
 ## Try a failure
@@ -83,16 +84,33 @@ DEMO_SEATS_USED=10 edr launch gate   # no free seat: the gate blocks
 edr status --triage                  # after 30 s: failed, FAILED:synth, exit 4
 ```
 
-Add `"k_bad"` to the `tasks` of job `a` in a copy and launch it. The run
-ends `INCOMPLETE:1f0s` with exit 8, and `edr status a@<batch>` shows the
-signature `boom: kernel bad failed`.
+To make a task fail, add `k_bad` to the tasks of job `a` in another copy:
+
+```sh
+sed -e 's/^batch = .*/batch = "bad"/' -e 's/"k_big"]/"k_big", "k_bad"]/' jobs/demo.toml > jobs/bad.toml
+edr launch bad
+```
+
+The run `a@bad` ends `INCOMPLETE:1f0s` with exit 8, and `edr status a@bad`
+shows the signature `boom: kernel bad failed`.
 
 ## Clean up
 
-`edr retire --batch demo --why "demo done"` removes the run trees and
-marks the batch `RETIRED`. The state, the database, the source and the
-worktrees stay:
+`edr retire --batch <batch>` removes the run trees of a batch and marks
+it `RETIRED`. Collect the results first, then retire every batch you
+launched, including the ones from "Try a failure":
+
+```sh
+edr watch --once
+edr retire --batch demo --why "demo done"
+edr retire --batch gate --why "demo done"
+edr retire --batch bad --why "demo done"
+```
+
+The state, the database, the source, the clones and the extra job
+files stay. Remove them by hand:
 
 ```sh
 rm -rf ~/.edr/demo data repo wt
+rm -f jobs/gate.toml jobs/bad.toml
 ```

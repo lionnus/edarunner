@@ -44,6 +44,7 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "env"])], ""),
     ("### [source]", [model.Source], ""),
     ("### [sync]", [model.Sync], ""),
+    ("### [runtime]", [model.Runtime], ""),
     ("### [safety]", [model.Safety], ""),
     ("### [limits]", [model.Limits], ""),
     ("### [placement]", [model.Placement], ""),

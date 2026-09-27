@@ -49,6 +49,7 @@ from .model import (
     Placement,
     Project,
     Retry,
+    Runtime,
     Safety,
     Scheduler,
     Site,
@@ -67,7 +68,7 @@ PathLike = str | os.PathLike[str]
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "telegram",
-    "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
+    "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "ntfy",
               "mail", "marks", "scheduler"}
@@ -426,6 +427,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         telegram_poll=_flag(raw, "telegram_poll", file),
         source=source,
         sync=_build(Sync, raw.get("sync", {}), file, "sync"),
+        runtime=_build(Runtime, raw.get("runtime", {}), file, "runtime"),
         safety=_build(Safety, raw.get("safety", {}), file, "safety"),
         limits=_limits(raw.get("limits", {}), file),
         placement=_build(Placement, raw.get("placement", {}), file, "placement"),

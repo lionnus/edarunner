@@ -59,6 +59,7 @@ def test_stage_head_twice_is_idempotent(project):
     assert a == checkout.checkout(project, "HEAD")
     assert a.path == project.source.worktrees / head and a.src == head and not a.dirty
     assert git("rev-parse", "HEAD", cwd=a.path) == git("rev-parse", "HEAD", cwd=repo)
+    assert (a.path / ".git").is_dir() and git("describe", "--always", "--dirty", cwd=a.path) == head
     assert (a.path / "flow" / "flow.sh").exists() and (a.path / "README").exists()
     assert a.nested == {"sub": nested_head}
     assert (a.path / "sub" / "secret.txt").read_text() == "42\n"
@@ -83,8 +84,11 @@ def test_dirty_snapshot_tag_is_stable(project):
     assert re.fullmatch(rf"{head}-dirty-[0-9a-f]{{8}}", a.src)
     assert a.path == project.source.worktrees / a.src
     assert (a.path / "README").read_text() == "changed\n"
-    assert (a.path / "notes.txt").exists() and not (a.path / ".git").exists()
-    assert (a.path / "sub" / "secret.txt").exists() and not (a.path / "sub" / ".git").exists()
+    assert (a.path / "notes.txt").exists() and (a.path / ".git").is_dir()
+    assert (a.path / "sub" / "secret.txt").exists() and (a.path / "sub" / ".git").is_dir()
+    # git on the copy sees the change, as it would on a host.
+    assert git("rev-parse", "--short", "HEAD", cwd=a.path) == head
+    assert git("describe", "--always", "--dirty", cwd=a.path).endswith("-dirty")
     assert "+changed" in (a.path / "source.diff").read_text()
     meta = json.loads((a.path / "source.json").read_text())
     assert meta["src"] == a.src and meta["base"] == head and meta["nested"] == a.nested and meta["dirty"]
@@ -96,6 +100,21 @@ def test_dirty_snapshot_tag_is_stable(project):
 
 
 
+
+def test_snapshot_drops_a_file_the_tree_deleted(project):
+    repo = project.source.repo
+    (repo / "README").unlink()
+    a = checkout.checkout(project, dirty_dir=repo)
+    assert not (a.path / "README").exists() and (a.path / "flow").is_dir()
+    assert "D README" in [ln.strip() for ln in git("status", "--porcelain", cwd=a.path).splitlines()]
+
+
+def test_an_old_worktree_stays(project):
+    repo = project.source.repo
+    head = git("rev-parse", "--short", "HEAD", cwd=repo)
+    old = project.source.worktrees / head
+    git("worktree", "add", "-q", "--detach", str(old), head, cwd=repo)
+    assert checkout.checkout(project, "HEAD").path == old and (old / ".git").is_file()
 
 
 def test_dry_run_writes_nothing(project, tmp_path, capsys):
@@ -110,4 +129,4 @@ def test_dry_run_writes_nothing(project, tmp_path, capsys):
     assert not old.path.exists() and old.nested == {"sub": a.nested["sub"]}
     assert "-dirty-" in dirty.src and not dirty.path.exists() and dirty.dirty
     out = capsys.readouterr().out
-    assert "worktree add" in out and "git clone" in out and "rsync -a" in out
+    assert "git clone --local --no-checkout" in out and "rsync -a" in out

@@ -3,6 +3,7 @@
 
 Python 3.6, standard library only, no import of the package.
 """
+import hashlib
 import json
 import os
 import re
@@ -141,6 +142,19 @@ def read_leases(d):
             pass  # released since the listing
         except ValueError:
             out.append((n, {}))
+    return out
+
+
+def digest(root, names):
+    # type: (str, list) -> dict
+    """The sha256 of each named file under `root`; None for a file that does not exist."""
+    out = {}
+    for n in names:
+        try:
+            with open(os.path.join(root, n), "rb") as f:
+                out[n] = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            out[n] = None
     return out
 
 
@@ -552,6 +566,32 @@ class Driver(object):
             self.hb["step"] = step
             self.hb["step_name"] = steps[min(step, len(steps) - 1)] if steps else None
 
+    # the runtime step
+
+    def setup_runtime(self):
+        """Run `[runtime] setup` in the tree root; skip it when the stamp of the last setup still holds."""
+        rt = self.spec.get("runtime") or {}
+        cmd = rt.get("setup")
+        if not cmd:
+            return
+        watched = rt.get("when_changed") or []
+        stamp_file = os.path.join(self.root, ".edr-runtime")
+        stamp = {"setup": cmd, "files": digest(self.root, watched)}
+        if watched:
+            try:
+                with open(stamp_file) as f:
+                    if json.load(f) == stamp:
+                        sys.stderr.write("runtime: %s unchanged, setup skipped\n" % ", ".join(watched))
+                        return
+            except (OSError, ValueError):
+                pass
+        log = self.log_path("setup")
+        self.set_phase("setup", log=log)
+        if self.run_wait(cmd, self.root, log):
+            raise Fail(5, "FAILED:runtime")
+        with open(stamp_file, "w") as f:
+            json.dump(stamp, f)
+
     # stages
 
     def run_stage(self, st, checkpoint):
@@ -738,6 +778,7 @@ class Driver(object):
         if free is not None and free < need:
             sys.stderr.write("%.1f GB free, %s needs %.1f\n" % (free, todo[0]["name"], need))
             raise Fail(3, "FAILED:" + todo[0]["name"])
+        self.setup_runtime()
         for i, st in enumerate(todo):
             while self.host_full():
                 self.wait(POLL_S)

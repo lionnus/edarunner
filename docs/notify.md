@@ -1,8 +1,8 @@
 # Notifications
 
-After this page the alerts of a project reach you by Telegram, ntfy or
-mail. Each channel is a table in `site.toml`, and `edr watch` uses every
-table it finds. [reference/configuration.md](reference/configuration.md)
+edarunner sends its alerts to Telegram, ntfy and mail. Each channel is a
+table in `site.toml`, and `edr watch` sends every alert to every channel
+it finds there. [reference/configuration.md](reference/configuration.md)
 lists the keys.
 
 | Channel | Alerts | Buttons | Board | Commands |
@@ -29,7 +29,7 @@ The title is `<project>: <kind>`, and an alert title adds the run handle.
 | `board` | the watcher every cycle | one pinned message, edited in place | none | none |
 | `board` on request | `edr notify --board` | one new message | one low push | one mail |
 | `note` | `edr notify TEXT` | one message | one push, the lowest priority with `--silent` | one mail |
-| a command reply, the result of a detached command, a button answer | the bot, for a command from the chat | a reply in the chat | none, a command comes from Telegram only | none |
+| a command reply, the result of a detached command, a button answer | the bot, for a command from the chat | a reply in the chat | none; ntfy takes no commands | none; mail takes no commands |
 | a collect failure, a lease sweep, a resume | the watcher | an event only, in `edr events` and `/events` | an event only | an event only |
 
 ntfy and mail have no callback buttons. The alert text carries each
@@ -38,8 +38,9 @@ button as a line `<label>: <command>`, for example
 command on the clipboard. A server without copy buttons refuses the
 push with a 400, and the channel sends it again without the buttons.
 
-The board changes every cycle, so the watcher keeps it on Telegram only.
-Send it, or the digest, to every channel on request:
+The board changes every cycle, so the watcher keeps a live copy of it
+only as the pinned Telegram message. You can send it, or the digest, to
+every channel on request:
 
 ```sh
 edr notify --board            # the board of edr status
@@ -49,7 +50,7 @@ edr notify --digest           # the digest now; the watcher still sends its own
 A cron line mails the board every morning:
 
 ```sh
-0 7 * * * cd ~/work/backend && edr notify --board
+0 7 * * * cd ~/myflow && edr notify --board
 ```
 
 ## Telegram

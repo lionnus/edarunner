@@ -1,27 +1,25 @@
 # Guarantees
 
-After this page you know what `edr` never does, what a dry run and a
-guard promise, what the watcher does on its own, and how a stop works.
-Each guarantee names the code that holds it, so you can read it.
+This page lists what `edr` never does, what a dry run and a guard
+promise, what the watcher does on its own, and how a stop works. Each
+guarantee names the code that enforces it, so you can check it yourself.
 
 ## What edr never does
 
-| edr never | Held by |
-|---|---|
-| deletes on its own. Only `edr retire` removes a tree, after `--why`, a guard on every target and a check that the results are on the head node. The watcher stops or kills a run; it removes no file but a stale seat lease. | `cli.cmd_retire`, `cli._retire_targets`, `watch._act`, `watch.sweep_leases` |
-| signals by a session name or a process pattern. A stop signals the `driver_pid` and the `pgids` the heartbeat recorded, and refuses a pid or a group id of 1 or lower. | `launch.stop`, `backend.check_pid`, `hosts.Ssh.kill_pgid` |
-| runs an `rm -rf` or an `rsync --delete` without the guard below. | `guards.assert_safe_target`, `sync.sync_tree`, `cli._retire_targets`, `cli._worktree_target` |
-| deletes the source repository, or a tree another run uses. `retire` refuses a root a live run uses, and a root shared with a run whose results are not collected. | `cli._worktree_target`, `cli._refuse_shared_root` |
-| overwrites a driver that runs. A new driver version gets a new file name with the hash of its text, written by a temporary file and a rename. | `sync.publish_driver` |
-| writes a torn heartbeat or spec. Both go to disk by a temporary file and a rename. | `Driver.beat`, `config.save_json` |
-| starts a stage in your shell's session. The driver starts in its own session, and every stage command in a new one, so a signal to a tool's group never reaches the shell you stand in. | `backend.SshBackend.submit`, `Driver.spawn` |
-| hides a failed task. A task group counts every failure, and the run ends `INCOMPLETE:<n>f<m>s` with exit 8, never `done`. `streak` equal failures in a row stop the group. | `Driver.end_task`, `Driver.main` |
-| takes a heartbeat as proof of life. A run is `stale` after `stale_s` and `dead` after `dead_s` with no driver on the host; `edr status --live` asks the hosts. | `watch.classify`, `cli._mark_live` |
-| mixes two designs in one table. `metrics` and `export` take `--design` with no default, and the tag matches exactly. | `cli.cmd_metrics`, `export._select` |
-| creates a file on a read. A read command without a database reads an empty one in memory. | `cli.Ctx`, `cli._READ_COMMANDS` |
-| reads a retired batch. `RETIRED` in the batch directory keeps the watcher and the board off it. | `cli.cmd_retire`, `watch.read_heartbeats` |
-| starts two stages on one free seat. The tool gate leases each seat by a rename, and the later of two drivers that read the same free seat backs off. | `Driver.take`, `Driver.release`, `watch.sweep_leases` |
-| launches a batch twice. A job whose spec exists is already launched; a new sweep needs a new batch name. | `launch.launch` |
+- Nothing is deleted unless you ask for it. Only `edr retire` removes a run tree, and only with `--why`, after the guard has passed every target and the results are on the head node. The watcher can stop or kill a run, but the only files it removes are expired seat leases. (`cli.cmd_retire`, `cli._retire_targets`, `watch._act`, `watch.sweep_leases`)
+- A stop never selects processes by a session name or a pattern. A stop signals the `driver_pid` and the `pgids` that the heartbeat recorded, and refuses a pid or a group id of 1 or lower. (`launch.stop`, `backend.check_pid`, `hosts.Ssh.kill_pgid`)
+- Every `rm -rf` and every `rsync --delete` passes the guard described below first. (`guards.assert_safe_target`, `sync.sync_tree`, `cli._retire_targets`, `cli._worktree_target`)
+- The source repository is never a delete target, and neither is a tree that another run uses. `retire` refuses a root that a live run uses, and a root shared with a run whose results are not collected yet. (`cli._worktree_target`, `cli._refuse_shared_root`)
+- A running driver is never overwritten. Each driver version gets a new file name with the hash of its text, written through a temporary file and a rename. (`sync.publish_driver`)
+- A heartbeat or spec is never half-written. Both go to disk through a temporary file and a rename. (`Driver.beat`, `config.save_json`)
+- A stage never runs in your shell's session. The driver starts in its own session and every stage command in a new one, so a signal to a tool's process group never reaches your shell. (`backend.SshBackend.submit`, `Driver.spawn`)
+- A failed task is never hidden. A task group counts every failure, and the run ends `INCOMPLETE:<n>f<m>s` with exit 8, never `done`. After `streak` equal failures in a row, the group stops. (`Driver.end_task`, `Driver.main`)
+- A heartbeat file alone does not prove that a run is alive. A run is `stale` after `stale_s`, and `dead` after `dead_s` when no driver runs on the host; `edr status --live` asks the hosts directly. (`watch.classify`, `cli._mark_live`)
+- Two designs never end up in one table. `metrics` and `export` require `--design`, and the tag must match exactly. (`cli.cmd_metrics`, `export._select`)
+- A read command creates no file. A read command without a database reads an empty one in memory. (`cli.Ctx`, `cli._READ_COMMANDS`)
+- A retired batch is left alone. The `RETIRED` file in the batch directory keeps the watcher and the board away from it. (`cli.cmd_retire`, `watch.read_heartbeats`)
+- Two stages never start on the same free licence seat. The tool gate leases each seat by a rename, and of two drivers that read the same free seat, the later one backs off. (`Driver.take`, `Driver.release`, `watch.sweep_leases`)
+- A batch is never launched twice. A job whose spec exists counts as launched, so a new sweep needs a new batch name. (`launch.launch`)
 
 ## Dry runs
 
@@ -37,7 +35,7 @@ writes nothing:
 
 `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` runs the whole
 flow dry, then checks that the state directory does not exist, the scratch
-is empty, and the worktree is the same byte for byte.
+is empty, and the checked-out tree is the same byte for byte.
 
 Do the dry run first. Read every target path. Then run the command.
 
@@ -59,8 +57,9 @@ start with `YYYYMMDD_HHMM_`.
 
 `hosts.Ssh.kill_pgid(host, pgid, sig)` refuses a group id of 1 or lower,
 and a signal name with characters other than capital letters and digits.
-`kill -TERM -- -0` would signal every process of the user.
-`backend.check_pid` refuses a driver pid of 1 or lower for the same reason.
+A group id of 0 would signal the caller's own process group, and -1
+would signal every process the user owns. `backend.check_pid` refuses a
+driver pid of 1 or lower for the same reason.
 
 `retire` refuses a run whose driver is alive and a live run with no
 heartbeat yet. It refuses a root another live run uses, a root shared
@@ -88,9 +87,10 @@ The watcher acts on its own only after `grace_s` and only as
 - It launches a queued job when a host fits, one per batch per cycle.
 - It removes a stale seat lease, with a `lease` event that says why.
 
-It never deletes a tree or any file but a stale seat lease, never reads a batch with `RETIRED`,
-never downloads anything, and never resumes a run twice
-(`watch.cycle`, `watch._act`, `watch._resume`, `watch.sweep_leases`).
+The watcher never deletes a run tree; the only files it removes are
+expired seat leases. It never reads a batch with `RETIRED`, never
+downloads anything, and never resumes a run twice (`watch.cycle`,
+`watch._act`, `watch._resume`, `watch.sweep_leases`).
 
 ## The database
 
@@ -113,9 +113,9 @@ finish its running tasks; then the run ends `STOPPED`.
 `edr stop <handle>` sends `SIGTERM` to the driver and to every process
 group in the heartbeat, then waits up to 60 s. The driver's own handler
 forwards the signal to its groups, waits 10 s, sends `SIGKILL` to what
-is left, writes a final heartbeat and exits 10. A driver still alive
-after the wait gives exit 3, and `--now` is the next step: `SIGTERM`,
-then `SIGKILL` after 30 s (`launch.stop`, `Driver.on_signal`).
+is left, writes a final heartbeat and exits 10. If the driver is still
+alive after the wait, `edr stop` exits 3, and `--now` is the next step:
+`SIGTERM`, then `SIGKILL` after 30 s (`launch.stop`, `Driver.on_signal`).
 
 A stop takes one handle. A queued run is marked `stopped` and never
 starts. The stop button of an alert asks first and then runs the
@@ -136,4 +136,4 @@ phone must match its allowlist regex in full
 runs `retire`, `prune`, `launch` or `rm`. `/stop` writes the
 `after-task` stop file, and `/keep` and `/ack` write the keep file,
 through the same commands as the CLI. Every command, action and refusal
-lands in `events` with the actor `telegram`.
+goes into `events` with the actor `telegram`.

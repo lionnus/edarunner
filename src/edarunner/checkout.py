@@ -1,4 +1,6 @@
-"""`edr checkout`: a detached worktree per ref, or a snapshot of a dirty tree.
+"""`edr checkout`: a detached local clone per ref, or a snapshot of a dirty tree.
+
+A clone has a real `.git` directory, so git works on the copy of the tree on a host.
 
 A dry run prints and writes nothing.
 """
@@ -36,10 +38,10 @@ class CheckoutResult:
 def checkout(
     project: Project, ref: str | None = None, dirty_dir: Path | None = None, dry_run: bool = False
 ) -> CheckoutResult:
-    """Check out a ref as a worktree, or copy a dirty directory as a snapshot."""
+    """Check out a ref as a clone, or copy a dirty directory as a snapshot."""
     if dirty_dir is not None:
         return _snapshot(project, Path(os.path.abspath(Path(dirty_dir).expanduser())), dry_run)
-    return _worktree(project, ref or project.source.ref, dry_run)
+    return _pinned(project, ref or project.source.ref, dry_run)
 
 
 def find(project: Project, src: str) -> Path:
@@ -78,7 +80,23 @@ def _short(repo: Path, ref: str) -> str:
     return runid.git("rev-parse", "--short", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=repo)
 
 
-def _worktree(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
+def _clone(src: Path, dst: Path, commit: str, dry_run: bool) -> None:
+    """Clone `src` into `dst` at `commit`, detached; `--local` hardlinks the objects."""
+    if dry_run:
+        print(f"dry: git clone --local --no-checkout {src} {dst} && git -C {dst} checkout --detach {commit}")
+        return
+    runid.git("clone", "-q", "--local", "--no-checkout", str(src), str(dst))
+    runid.git("checkout", "-q", "--detach", commit, cwd=dst)
+    # The clone of a clone would fetch from the repo copy; point it at the upstream instead.
+    try:
+        upstream = runid.git("remote", "get-url", "origin", cwd=src)
+    except runid.GitError:
+        upstream = ""
+    if upstream:
+        runid.git("remote", "set-url", "origin", upstream, cwd=dst)
+
+
+def _pinned(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
     repo, wts = project.source.repo, project.source.worktrees
     if runid.git("remote", cwd=repo):
         if dry_run:
@@ -87,46 +105,34 @@ def _worktree(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
             runid.git("fetch", "-q", cwd=repo)
     src = _short(repo, ref)
     path = wts / src
+    # A tree that exists stays, also a git worktree an older edr made.
     if not (path / ".git").exists():
-        if dry_run:
-            print(f"dry: git -C {repo} worktree add --detach {path} {src}")
-        else:
+        if not dry_run:
             wts.mkdir(parents=True, exist_ok=True)
-            # A registered worktree whose directory is gone blocks `add`.
-            runid.git("worktree", "prune", cwd=repo)
-            runid.git("worktree", "add", "-q", "--detach", str(path), src, cwd=repo)
+        _clone(repo, path, src, dry_run)
     nested = {n: _nested(repo / n, path / n, dry_run) for n in project.source.nested}
     return CheckoutResult(path, src, {k: v for k, v in nested.items() if v}, False)
 
 
 def _nested(src: Path, dst: Path, dry_run: bool) -> str:
-    """Clone <repo>/<name> into the worktree at the HEAD the repo copy has; '' when absent."""
+    """Clone <repo>/<name> into the clone at the HEAD the repo copy has; '' when absent."""
     if not (src / ".git").exists():
         return ""
     if (dst / ".git").exists():
         return runid.git("rev-parse", "--short", "HEAD", cwd=dst)
     head = runid.git("rev-parse", "--short", "HEAD", cwd=src)
-    if dry_run:
-        print(f"dry: git clone {src} {dst} && git -C {dst} checkout --detach {head}")
-        return head
-    runid.git("clone", "-q", str(src), str(dst))
-    runid.git("checkout", "-q", "--detach", head, cwd=dst)
-    # The clone of a clone would fetch from the repo copy; point it at the upstream instead.
-    try:
-        upstream = runid.git("remote", "get-url", "origin", cwd=src)
-    except runid.GitError:
-        upstream = ""
-    if upstream:
-        runid.git("remote", "set-url", "origin", upstream, cwd=dst)
+    _clone(src, dst, head, dry_run)
     return head
 
 
 def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
+    """A clone at the HEAD of `tree` with the files of `tree` copied over it, so git on the copy sees the changes."""
     src = runid.src_tag(tree)
     if "-dirty-" not in src:
-        # A clean tree pins its commit; a snapshot would collide with that worktree.
-        return _worktree(project, src, dry_run)
+        # A clean tree pins its commit; a snapshot would collide with that clone.
+        return _pinned(project, src, dry_run)
     path = project.source.worktrees / src
+    base = src.split("-dirty-")[0]
     nested = {
         n: runid.git("rev-parse", "--short", "HEAD", cwd=tree / n)
         for n in project.source.nested
@@ -134,16 +140,26 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     }
     excludes = [a for e in [".git", *project.sync.exclude] for a in ("--exclude", e)]
     cmd = ["rsync", "-a", *excludes, f"{tree}/", f"{path}/"]
+    fresh = not (path / ".git").exists()
+    if fresh and not dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    if fresh:
+        _clone(tree, path, base, dry_run)
+        for n in nested:
+            _nested(tree / n, path / n, dry_run)
     if dry_run:
         print(f"dry: {' '.join(cmd)}")
         return CheckoutResult(path, src, nested, True)
-    path.parent.mkdir(parents=True, exist_ok=True)
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     if r.returncode:
         raise CheckoutError(f"{' '.join(cmd)}: {r.stdout.strip()}")
+    # rsync adds and changes files; a file the tree deleted goes here, one path at a time.
+    for rel in runid.git("ls-files", "--deleted", "-z", cwd=tree).split("\0"):
+        if rel and (path / rel).is_file():
+            (path / rel).unlink()
     meta = {
         "src": src,
-        "base": src.split("-dirty-")[0],
+        "base": base,
         "dirty": True,
         "nested": nested,
         "origin": str(tree),

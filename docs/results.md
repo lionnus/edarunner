@@ -1,13 +1,13 @@
 # Results and analysis
 
-After this page you can get every number of a design out of the run
-database and compare runs on the board or the phone. You can hand a
-frozen snapshot to a report, a notebook or a dashboard.
+This page shows how to get the numbers of a design out of the run
+database, compare runs on the board or the phone, and hand a frozen
+snapshot to any analysis.
 
 ## The database
 
-The run database is one SQLite file, `data/edr.db`, on the head node.
-Every run, every number and every action lands there.
+The run database is one SQLite file, `data/edr.db`, on the head node. It
+holds every run, every number and every action.
 
 | Table | One row per | Holds |
 |---|---|---|
@@ -35,7 +35,7 @@ The journal mode follows the filesystem of `data/`. On a local disk it is
 WAL, so `edr status` reads while the watcher writes. On NFS, SMB, 9p or
 FUSE it is DELETE with `synchronous=FULL`, because WAL needs shared memory
 that a network filesystem does not give. `edr check` prints a warning line
-with the path and the mode. `Database.journal_mode` holds the mode in use.
+with the path and the mode.
 
 ## Canonical names
 
@@ -65,12 +65,12 @@ edr metrics --design 3f9a2c1 --stage pnr --step 12
 edr metrics --design 3f9a2c1 --csv > metrics.csv
 ```
 
-One design per table. `--design` is the source tag exactly as `edr checkout`
-printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs that full tag.
+Each table holds one design. `--design` is the source tag exactly as
+`edr checkout` printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs that full tag.
 The text form shows label, design, stage, step, task, metric, value and
 unit; `--csv` writes the columns of `metrics.csv` below. Every row
-carries its source file. Read the source of a number before it goes in a
-table.
+carries its source file, so you can check where a number came from
+before you put it in a table.
 
 ## Extract again
 
@@ -144,8 +144,8 @@ A metric with `area_hier = <depth>` reads a hierarchical area report,
 Synopsys `report_area -hierarchy` or the OpenROAD area by hierarchy. Its
 value is the top area. Each instance down to that depth becomes a row of
 the `area` table: the top is `<top>` at depth 0, and a child is its path
-from the top. Depth 3 or 4 keeps the blocks a paper compares; the leaf
-levels of a large design add millions of rows.
+from the top. A depth of 3 or 4 is usually enough to compare the main
+blocks; the leaf levels of a large design add millions of rows.
 
 ```toml
 [metrics.area_hier_um2]
@@ -333,7 +333,7 @@ Those stay with `edr compare`, `edr runtime` and the board.
 
 ## An analysis reads snapshots
 
-A report, a notebook, a dashboard or a paper never reads the database.
+An analysis should never read the live database.
 The database changes with every watcher cycle, and a number you quote
 must stay the number you read. So the analysis keeps one snapshot per
 design under its own `data/`, pinned by the source tag. Every table and

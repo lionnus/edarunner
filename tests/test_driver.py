@@ -470,3 +470,44 @@ def test_cpu_pct_comes_from_two_cpu_s_values(monkeypatch) -> None:
     assert "cpu_pct" not in d.samples() and d.last_cpu == (160.0, 40.0)  # 0.5 s later keeps the last value
     assert d.samples()["cpu_pct"] == 0.0  # a group that ended takes its CPU seconds along
     assert d.samples()["cpu_pct"] is None and d.last_cpu is None
+
+
+def test_runtime_setup_runs_in_the_root_before_the_first_stage(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("export",), env={"FLOW_ENV": "seen"})
+    spec["runtime"] = {"setup": "echo $FLOW_ENV > setup.out", "when_changed": []}
+    rc, hb = finish(start(spec), spec)
+    root = Path(spec["root"])
+    assert (rc, hb["phase"]) == (0, "done"), hb
+    assert (root / "setup.out").read_text() == "seen\n"
+    assert "# edr: echo $FLOW_ENV" in (root / "log" / "setup.log").read_text()
+    stamp = json.loads((root / ".edr-runtime").read_text())
+    assert stamp == {"setup": "echo $FLOW_ENV > setup.out", "files": {}}
+
+
+def test_runtime_failure_ends_the_run_before_a_seat(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",))
+    spec["runtime"] = {"setup": "echo broken; exit 3", "when_changed": []}
+    rc, hb = finish(start(spec), spec)
+    root = Path(spec["root"])
+    assert (rc, hb["phase"], hb["exit"]) == (5, "FAILED:runtime", 5)
+    assert hb["stages"] == {} and not (root / "log" / "synth.log").exists()
+    assert not (tmp_path / "state" / "leases" / "demo").exists()
+    assert "broken" in (root / "log" / "setup.log").read_text() and not (root / ".edr-runtime").exists()
+
+
+def test_runtime_setup_runs_again_only_when_a_watched_file_changed(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("export",))
+    root = Path(spec["root"])
+    (root / "uv.lock").write_text("a\n")
+    spec["runtime"] = {"setup": "echo ran >> setup.count", "when_changed": ["uv.lock"]}
+
+    def runs() -> int:
+        assert finish(start(spec), spec)[0] == 0
+        return len((root / "setup.count").read_text().splitlines())
+
+    assert runs() == 1
+    assert runs() == 1  # a continued tree with the same lock
+    (root / "uv.lock").write_text("b\n")
+    assert runs() == 2
+    spec["runtime"]["when_changed"] = []
+    assert runs() == 3  # nothing watched: every run

@@ -43,7 +43,7 @@ The git repository of the flow, and how `edr checkout` pins a version of it.
 | Key | Meaning | Default |
 |---|---|---|
 | `repo` | the git repository of the flow | required |
-| `worktrees` | where `edr checkout` adds a worktree per commit | required |
+| `worktrees` | where `edr checkout` puts a local clone per commit | required |
 | `ref` | the ref `edr checkout` takes without an argument | `"HEAD"` |
 | `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has | `[]` |
 | `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{src}"` |
@@ -55,8 +55,20 @@ The copy of the checked-out tree to the host, by `rsync --delete` behind the gua
 
 | Key | Meaning | Default |
 |---|---|---|
-| `exclude` | rsync exclude patterns for the copy of the tree; `.git` is always excluded, because the `.git` file of a worktree points at the head node | `[]` |
+| `exclude` | rsync exclude patterns for the copy of the tree; `.git` goes along unless the list names it | `[]` |
 | `after` | a command on the head node after each sync, with the run placeholders | `""` |
+
+### [runtime]
+
+One command that prepares the run tree on the host, such as `uv sync --frozen` for a Python
+environment. The driver runs it in the tree root after the sync and before the first stage, with
+the environment of the stages, and logs it to `log/setup.log`. A failure ends the run
+`FAILED:runtime` before any stage takes a tool seat.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `setup` | the command; it takes the run placeholders | none |
+| `when_changed` | files relative to the tree root; on a tree that ran the same `setup` before, such as under `edr continue`, the command runs again only when one of them changed. Empty runs it every time | `[]` |
 
 ### [safety]
 

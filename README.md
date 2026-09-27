@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.svg" alt="edarunner" width="300"></p>
 
-<p align="center">Run the EDA flow you already have on the ssh hosts you already reach, and keep one database of every run.</p>
+<p align="center">Run the EDA flow you already have on the machines you already use, and keep one database of every run.</p>
 
 <p align="center">
 <a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
@@ -10,23 +10,26 @@
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-008000" alt="Apache-2.0"></a>
 </p>
 
-edarunner runs, tracks and analyzes an EDA flow on shared ssh hosts.
-
-- Run: it starts the flow you already have as stages on the hosts. It
-  queues jobs, applies budgets, and a watcher finds a dead or stuck run.
-- Track: one SQLite database holds every run with its source hashes, host,
-  events, metrics and artifacts. The board and a Telegram bot show it.
-- Analyze: it gives the metrics of one design, compares runs, and exports
-  a snapshot that a report, a notebook or a dashboard reads.
+edarunner is for hardware engineers and researchers who run synthesis and
+place-and-route sweeps on a few shared Linux machines or on an HTCondor,
+Slurm or LSF cluster. It starts each run of your flow on a host, watches it
+through a heartbeat file, collects the reports and puts the numbers into
+one SQLite database. From there you compare runs on the board, on your
+phone or in an exported snapshot.
 
 A project is a few TOML files: `edr.toml`, `tasks.toml`,
-`jobs/<batch>.toml` and a private `site.toml`. The core knows no EDA tool.
-`AGENTS.md` lets an agent set up a project and operate it.
+`jobs/<batch>.toml` and a private `site.toml`. edarunner knows no EDA tool
+itself; your flow scripts stay as they are. [AGENTS.md](AGENTS.md) lets an
+agent set up a project and operate it.
+
+edarunner is alpha software. It is in daily use with a commercial synthesis
+and place-and-route flow, and CI runs it end to end on the OpenROAD GCD
+example.
 
 ## Install
 
 ```sh
-uv tool install git+https://github.com/lionnus/edarunner   # the controller, Python 3.11 or newer; PyPI follows the first release
+uv tool install git+https://github.com/lionnus/edarunner   # Python 3.11 or newer; edarunner is not on PyPI yet
 ```
 
 A compute host needs ssh, `rsync` and `python3` 3.6 or newer. Nothing is
@@ -48,13 +51,13 @@ uv tool install /edarunner
 ```
 
 With ORFS installed on the machine, skip the container and set `ORFS` to
-your checkout. `examples/openroad-gcd/README.md` shows the same run with
+your checkout. [examples/openroad-gcd/README.md](examples/openroad-gcd/README.md) shows the same run with
 Singularity. Then run the flow:
 
 ```sh
 cd examples/openroad-gcd
 bash setup.sh                 # a small git repository with the design config
-edr checkout HEAD             # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned clone of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan gcd                  # run ids, hosts, every path; writes nothing
 edr launch gcd                # one driver on the `local` host
@@ -111,8 +114,8 @@ ok  host      cores            load      ram GB  mount       scratch GB         
 
 ## From your phone
 
-`edr watch` sends an alert when a run dies, hangs, fails or runs over its
-budget. On Telegram the alert carries the next command and three buttons
+`edr watch` sends an alert to every channel you configure when a run
+dies, hangs, fails or runs over its budget. On Telegram the alert carries the next command and three buttons
 to keep, acknowledge or stop the run. ntfy and mail get the same alerts,
 with the commands written out. The bot also answers `/status`, `/hosts`,
 `/events`, `/tools` and `/digest`. A site can add its own commands, such
@@ -126,7 +129,7 @@ and hooks send their own messages with `edr notify`. See
 Every command takes `--json` and prints one object with the exit code,
 the data and the text a person would see. Every command that writes takes
 `--dry-run`. `edr stop` and `edr retire` refuse to act without `--why`, and
-the reason lands in the events table with the actor. `edr status --triage`
+the reason goes into the event log together with who acted. `edr status --triage`
 lists each run that needs attention with one proposed command.
 [AGENTS.md](AGENTS.md) is the operating guide for an agent. The example
 repository keeps a Claude Code setup next to the flow: a contract per
@@ -140,21 +143,21 @@ directory, a session-start hook and a skill.
 copies a one-file driver to the host and starts it. The driver runs the
 stages and writes a heartbeat file every minute. `edr watch` on the head
 node reads the heartbeats, collects the reports, extracts the metrics
-and sends the alerts. It never deletes a tree, and removes no file but a
-stale seat lease.
+and sends the alerts. The watcher never deletes a run tree; the only files
+it removes are expired licence-seat leases.
 
-## Documents
+## Documentation
 
-`docs/README.md` is the index: one path for a user, from the install to
-the results, and one for a contributor. The same pages are published at
-<https://lionnus.github.io/edarunner/>. `AGENTS.md` tells an agent how to
-operate the farm through `edr`.
+[docs/README.md](docs/README.md) is the index. It leads a user from the
+install to the results, and a contributor through the code. The same pages
+are published at <https://lionnus.github.io/edarunner/>.
+[AGENTS.md](AGENTS.md) tells an agent how to operate the farm through
+`edr`.
 
 ## Contributing
 
-edarunner is alpha. It runs a commercial flow and an open OpenROAD flow.
-Read `CONTRIBUTING.md` before you open a pull request.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
 
 ## Licence
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. See [LICENSE](LICENSE).

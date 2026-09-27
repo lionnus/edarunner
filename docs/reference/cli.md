@@ -75,7 +75,7 @@ A command below says where it refines a code.
 | [runtime](#runtime) | stage, step and task times |
 | [init](#init) | write edr.toml and the watch unit here |
 | [check](#check) | load everything, probe the hosts, check the hooks |
-| [checkout](#checkout) | check out a ref as a worktree, or a dirty tree as a snapshot |
+| [checkout](#checkout) | check out a ref as a clone, or a dirty tree as a snapshot |
 | [plan](#plan) | render the run specs of a batch; writes no spec |
 | [launch](#launch) | start one driver per job of a batch |
 | [continue](#continue) | more work on the tree of an existing run |
@@ -397,13 +397,15 @@ problem: line per fault, or an ok: line with the counts.
 edr checkout [--dry-run] [--dirty DIR] [ref]
 ```
 
-Fetches, then adds a detached worktree of ref (default source.ref) at
+Fetches, then makes a detached local clone of ref (default source.ref) at
 &lt;worktrees&gt;/&lt;short hash&gt;, and clones each source.nested repository into
-it at the HEAD the repository copy has. Prints &lt;src&gt; &lt;path&gt;.
+it at the HEAD the repository copy has. A local clone shares the git
+objects of the repository by hard links. Prints &lt;src&gt; &lt;path&gt;.
 
---dirty DIR copies a working tree instead, with its diff in source.diff;
-the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt; and prints with (dirty). A clean tree
-under --dirty is checked out as a worktree.
+--dirty DIR clones the HEAD of a working tree and copies its files over
+the clone, with the diff in source.diff; the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt;
+and prints with (dirty). A clean tree under --dirty is checked out as a
+clone.
 
 | Flag | Meaning |
 |---|---|

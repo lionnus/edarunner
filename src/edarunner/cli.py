@@ -723,7 +723,7 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
-    """Check out a ref as a worktree, or copy a dirty tree as a snapshot."""
+    """Check out a ref as a clone, or copy a dirty tree as a snapshot."""
     res = checkout.checkout(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
     c.emit(Text.assemble((res.src, "bold"), " ", (str(res.path), "dim"), (" (dirty)" if res.dirty else "", "yellow")),
            {"src": res.src, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
@@ -837,6 +837,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     # The command runs as given; only the stage's steps, progress, budget, retry and tools come from edr.toml.
     spec = launch._spec(project, batch, job, [], [], v, stages=[replace(stage, cmd="", resume="")])
     spec["stages"][0]["cmd"] = shlex.join(argv)
+    spec.pop("runtime", None)  # the tree of a tracked command is the caller's, as it is
     spec["collect"] = a.collect
     plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, src=src)
     spec_path = project.state_dir / a.batch / f"{run_id}.spec.json"
@@ -1035,7 +1036,8 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         (project.state_dir / a.batch / "RETIRED").touch()
         c.db.mark_batch_retired(a.batch)
     if worktree is not None:
-        real = (worktree / ".git").exists()
+        # A git worktree of an older edr has a `.git` file; a clone and a snapshot go by a plain delete.
+        real = (worktree / ".git").is_file()
         print(f"{a.batch}: {'git worktree remove --force' if real else 'rm -rf'} {worktree}{dry}")
         if not a.dry_run:
             try:
@@ -1068,7 +1070,7 @@ def _worktree_target(c: Ctx, batch: str) -> Path | None:
     try:
         return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
     except Refuse as e:
-        how = "git worktree remove" if (path / ".git").exists() else "rm -rf"
+        how = "git worktree remove" if (path / ".git").is_file() else "rm -rf"
         print(f"{batch}: worktree kept: {e}; remove it with {how}")
         return None
 
@@ -1431,14 +1433,16 @@ def _parser() -> argparse.ArgumentParser:
         the head node lacks, and plans every batch with those probes. Prints one
         problem: line per fault, or an ok: line with the counts.
         """, exits={Exit.REFUSED: "a problem was found"})
-    s = command("checkout", "check out a ref as a worktree, or a dirty tree as a snapshot", """
-        Fetches, then adds a detached worktree of ref (default source.ref) at
+    s = command("checkout", "check out a ref as a clone, or a dirty tree as a snapshot", """
+        Fetches, then makes a detached local clone of ref (default source.ref) at
         <worktrees>/<short hash>, and clones each source.nested repository into
-        it at the HEAD the repository copy has. Prints <src> <path>.
+        it at the HEAD the repository copy has. A local clone shares the git
+        objects of the repository by hard links. Prints <src> <path>.
 
-        --dirty DIR copies a working tree instead, with its diff in source.diff;
-        the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
-        under --dirty is checked out as a worktree.
+        --dirty DIR clones the HEAD of a working tree and copies its files over
+        the clone, with the diff in source.diff; the tag is <hash>-dirty-<8 hex>
+        and prints with (dirty). A clean tree under --dirty is checked out as a
+        clone.
         """, write=True)
     s.add_argument("ref", nargs="?", help="the git ref to check out; default source.ref")
     s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")

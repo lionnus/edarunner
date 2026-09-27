@@ -1,12 +1,12 @@
 # Install and first run
 
-After this page `edr` is on your head node, a real OpenROAD flow ran
-under it on one machine, and you know what a compute host needs.
+This page installs `edr`, runs a real OpenROAD flow with it on one
+machine, and lists what the head node and a compute host need.
 
 ## Install the controller
 
 `edr` runs on the head node, the machine you work from. It needs Python
-3.11 or newer; `rich`, its one dependency, comes with the install.
+3.11 or newer; its only dependency, `rich`, comes with the install.
 
 ```sh
 uv tool install git+https://github.com/lionnus/edarunner
@@ -42,7 +42,7 @@ Singularity. Then run the flow:
 ```sh
 cd examples/openroad-gcd
 bash setup.sh                 # a small git repository with the design config
-edr checkout HEAD             # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned clone of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan gcd                  # run ids, hosts, every path; writes nothing
 edr launch gcd                # one driver on the host `local`
@@ -67,8 +67,8 @@ design.
 
 ## Without any EDA tool
 
-`examples/local-demo` runs a scripted stand-in for a flow, so it needs no
-EDA tool and no licence. The tests use it, and it is the quickest way to
+`examples/local-demo` runs a stand-in flow of shell scripts that write
+example reports, so it needs no EDA tool and no licence. The tests use it, and it is the quickest way to
 try a failure, a resume or the seat gate. The commands are the same as
 above with the batch `demo`:
 
@@ -78,8 +78,8 @@ edr checkout HEAD && edr launch demo
 ```
 
 The two runs end `done` within a minute. `examples/local-demo/README.md`
-says what the flow fakes, where the files land and how to make a run
-fail. `edr retire --batch demo --why "demo done"` removes the run trees
+says what each script stands in for, where the files land and how to
+make a run fail. `edr retire --batch demo --why "demo done"` removes the run trees
 at the end.
 
 ## What the head node needs
@@ -97,7 +97,7 @@ at the end.
 
 ## What a compute host needs
 
-Nothing is installed on a host. The driver is one file that `edr launch`
+Nothing is installed on a host. The driver is a single file that `edr launch`
 copies into the state directory, and the host runs it with its own
 `python3`. Every host in `[hosts]` of the site file needs:
 
@@ -110,7 +110,7 @@ copies into the state directory, and the host runs it with its own
 - util-linux `setsid`. The driver starts in its own session.
 - `python3` 3.6 or newer on the login `PATH`. The driver uses the
   standard library only.
-- `rsync` for the copy of the source tree and the collect of the results.
+- `rsync`, to copy the source tree over and the results back.
 - `awk`, and `kill` from the shell.
 - `nvidia-smi` on `PATH` when the host has GPUs to report; without it the
   probe reports none.

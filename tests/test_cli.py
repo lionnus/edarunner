@@ -809,18 +809,16 @@ def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Pat
     seed(demo, "a", "done", src=src)
     seed(demo, "b", "done", src=src, batch="other")
     assert edr(capsys, "retire", "--batch", "other", "--uncollected", "--why", "x")[0] == 0
-    assert (wt / ".git").is_file()  # demo still has the source
+    assert (wt / ".git").is_dir()  # demo still has the source
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x", "--dry-run")
-    assert code == 0 and f"git worktree remove --force {wt} (dry)" in out and (wt / ".git").is_file()
+    assert code == 0 and f"rm -rf {wt} (dry)" in out and (wt / ".git").is_dir()
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
     assert code == 0 and not wt.exists() and repo.is_dir()
-    listed = subprocess.run(["git", "-C", str(repo), "worktree", "list"], capture_output=True, text=True, check=True).stdout
-    assert str(wt) not in listed
     with open(repo / "flow" / "flow.sh", "a") as f:
         f.write("# dirty\n")
     dirty = json.loads(edr(capsys, "--json", "checkout", "--dirty", str(repo))[1])["data"]["src"]
     snap = demo / "wt" / dirty
-    assert "-dirty-" in dirty and snap.is_dir() and not (snap / ".git").exists()
+    assert "-dirty-" in dirty and snap.is_dir() and (snap / ".git").is_dir()
     seed(demo, "c", "done", src=dirty, batch="snap")
     code, out, _ = edr(capsys, "retire", "--batch", "snap", "--uncollected", "--why", "y")
     assert code == 0 and f"rm -rf {snap}" in out and not snap.exists() and (repo / "flow").is_dir()
@@ -839,8 +837,8 @@ def test_retire_batch_keeps_a_worktree_without_the_marker(demo: Path, capsys, tm
         root = Path(db.run(a)["root"])
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
     assert code == 0 and f"demo: worktree kept: '{wt}' does not contain the marker '/edr/'; " \
-        "remove it with git worktree remove" in out
-    assert (wt / ".git").is_file() and not root.exists() and f"rm -rf {root}" in out
+        "remove it with rm -rf" in out
+    assert (wt / ".git").is_dir() and not root.exists() and f"rm -rf {root}" in out
     with Database(demo / "data" / "edr.db") as db:
         assert [e["kind"] for e in db.events(run_id=a)] == ["retire"] and db.batches()[0]["retired"]
         assert not [e for e in db.events() if e["run_id"] == ""]  # no worktree event

@@ -1,13 +1,13 @@
 # The driver protocol
 
-After this page you can change the driver, the spec it reads or the
-heartbeat it writes, and you know which tests and pages change with it.
+This page describes the driver, the spec it reads and the heartbeat it
+writes, and which tests and pages must change along with them.
 
 ## One file, one run
 
-`edr_driver.py` is one file, Python 3.6 or newer, standard library only.
-It reads one spec and nothing else, runs the stages in order, and writes
-one heartbeat. It never imports the package; a feature the 3.6 subset
+`edr_driver.py` is a single file for Python 3.6 or newer that uses only
+the standard library. It reads one spec and nothing else, runs the stages
+in order, and writes one heartbeat. It never imports the package; a feature the 3.6 subset
 cannot express belongs in the controller.
 
 `edr launch` copies the file to `<state_dir>/bin/edr_driver-<hash>.py`, where
@@ -70,10 +70,11 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `driver` | the driver copy the run started with; a resume uses it |
 | `record` | `edarunner` (the version that launched), `driver_sha256`, and `tools` with the version the site file gives per tool of the host; the export manifest copies it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
-| `shell`, `env` | every command runs through `shell -c` with `env` added |
+| `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID` |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
 | `stages` | the stages in run order |
+| `runtime` | `{"setup": cmd, "when_changed": [files]}`, only when `[runtime] setup` is set; the driver runs `cmd` in `root` before the first stage and keeps the sha256 of each file in `<root>/.edr-runtime` |
 | `collect` | `false` for a run of `edr track` without `--collect`: the watcher collects nothing; the driver does not read it |
 
 A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
