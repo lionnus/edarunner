@@ -17,8 +17,8 @@ only.
    umask 077; echo '123456:ABC...' > ~/.config/edarunner/telegram.token
    ```
 
-   The bot does not start when the file is missing or readable by the
-   group or by others. `edr watch` logs the reason.
+   The bot does not start when the file is missing or when the group or
+   others can read it. `edr watch` logs the reason.
 3. Add the section to `site.toml`:
 
    ```toml
@@ -28,8 +28,8 @@ only.
    ```
 
 4. Open the new bot on the phone and send `/start`. Start `edr watch`.
-   With `chat_id = 0` the bot obeys nobody. It prints the chat id of the
-   first message it receives to stderr:
+   With `chat_id = 0` the bot obeys nobody, but it prints the chat id of
+   the first message it receives to stderr:
 
    ```
    telegram: the first message came from chat 987654321; set chat_id = 987654321 in site.toml
@@ -118,26 +118,26 @@ Placeholders render per argument: `{project}`, `{root}` and
 `{project_root}` (the project directory), `{site_dir}`, `{user}`, and one
 per name in `args`. No shell runs between the bot and `run[0]`. A program
 that parses its argument itself, such as `tmux new-session <cmd>`,
-`ssh host <cmd>` or `sh -c`, does run a shell on the rendered value. Gate
-every placeholder inside such a token with an exact allowlist regex, as
-the `claude` example does.
+`ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so
+gate every placeholder inside such a token with an exact allowlist regex,
+as the `claude` example does.
 
-The regex gate: every value must match its regex in full, or the bot
-replies `refused: <name> must match <regex>`, records the refusal in the
-ledger, and runs nothing. Write the regex as an allowlist of the exact
-values you expect.
+The regex gate works like this: every value must match its regex in full,
+or the bot replies `refused: <name> must match <regex>`, records the
+refusal in the ledger, and runs nothing. Write the regex as an allowlist
+of the exact values you expect.
 
 ## Security
 
-- The token is one secret. Keep it in a file with mode 600; the bot
+- The token is the one secret. Keep it in a file with mode 600; the bot
   refuses any other mode.
 - The bot obeys one `chat_id`. Every other chat gets no answer, and the
   first message from it makes one ledger event `rejected`.
 - The command set, the argument shapes and the working directory come
   from `site.toml` on the head node. The phone chooses among those
-  entries and fills gated slots.
-- Every command, button press and refusal lands in `events` with actor
-  `telegram`.
+  entries and fills the gated slots.
+- Every command, button press and refusal lands in `events` with the
+  actor `telegram`.
 - A 429 from Telegram makes the bot wait `retry_after` seconds.
 
 ## What the bot never does

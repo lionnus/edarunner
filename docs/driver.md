@@ -10,12 +10,13 @@ python3 <state>/bin/<batch>/edr_driver.py <state>/<batch>/<run_id>.spec.json
 ```
 
 The driver reads nothing else. Section 5 of `docs/design.md` is the
-contract. This file says how to read the driver and how to drive it.
+contract; this file explains how to read what the driver writes and how to
+drive it by hand.
 
 ## The run spec
 
-`edr plan` renders every string of a job. `edr launch` writes the result to
-`<state>/<batch>/<run_id>.spec.json`.
+`edr plan` renders every string of a job, and `edr launch` writes the
+result to `<state>/<batch>/<run_id>.spec.json`.
 
 | Key | Meaning |
 |---|---|
@@ -28,10 +29,11 @@ contract. This file says how to read the driver and how to drive it.
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume`; a stage without `resume` fails with 2 |
 | `stages` | the list below, in run order |
 
-A stage entry holds `name`, `cwd`, `needs`, and one of two shapes. One
-command: `cmd`, `resume`, `steps`, `progress`, `budget`, `retry`,
-`licence`. A task group: `parallel`, `prepare`, `after_each`, `budget`,
-`licence`, `tasks`. Each task holds `id`, `cmd`, `dir`, `needs`, `budget`.
+A stage entry holds `name`, `cwd` and `needs`, plus one of two shapes. A
+one-command stage has `cmd`, `resume`, `steps`, `progress`, `budget`,
+`retry` and `licence`. A task group has `parallel`, `prepare`,
+`after_each`, `budget`, `licence` and `tasks`, where each task holds `id`,
+`cmd`, `dir`, `needs` and `budget`.
 
 The driver fills two placeholders itself: `{checkpoint}` in `resume` and
 `{task_dir}` in `after_each`. Every other placeholder is rendered before
@@ -39,9 +41,9 @@ the driver sees the spec.
 
 ## The heartbeat
 
-The driver writes `state_file` by a temporary file and a rename, every
-`heartbeat_s` seconds and at every phase change. A reader never sees a
-torn file.
+The driver writes `state_file` through a temporary file and a rename,
+every `heartbeat_s` seconds and at every phase change, so a reader never
+sees a torn file.
 
 | Field | Meaning |
 |---|---|
@@ -94,8 +96,9 @@ terminal phase as finished.
 A task group runs its tasks through
 `<queue_dir>/<stage>/{pending,claimed,done}/`.
 
-1. Before the group, the driver creates `pending/<id>` for each task with
-   `O_EXCL`. A task with `done/<id>` is not created again.
+1. Before the group starts, the driver creates `pending/<id>` for each
+   task with `O_EXCL`. A task that already has `done/<id>` is not created
+   again.
 2. To claim a task, the driver renames `pending/<id>` to
    `claimed/<id>.<run_id>`. A rename that fails means another driver took
    the task.
@@ -103,22 +106,23 @@ A task group runs its tasks through
 
 The rename is atomic on one filesystem, so two drivers with the same
 `queue_dir` share one queue. A spec written by hand with the same
-`queue_dir` adds a shard; `edr run` gives its run a queue of its own. The
-group ends when `pending` is empty and nothing runs.
+`queue_dir` adds a shard, while `edr run` gives its run a queue of its
+own. The group ends when `pending` is empty and nothing runs.
 
-Before each claim the driver checks three things. Free space against the
-task's `needs.disk_gb`: short means `skipped`. The host floor
-`host_free_min_gb`: below means wait. The licence seats: short means wait
-5 s.
+Before each claim the driver checks three things: the free space against
+the task's `needs.disk_gb` (a task that does not fit is `skipped`), the
+host floor `host_free_min_gb` (below it the driver waits), and the licence
+seats (when they are short, the driver waits 5 s).
 
-A task that fails gets a `signature`: the last log line with every digit
+A task that fails gets a `signature`, the last log line with every digit
 removed. `limits.streak` equal signatures in a row set `looping`, and the
 group claims nothing more.
 
 ## The stop file
 
-`<run_id>.stop` next to the spec. `edr stop --after-task` writes it with
-the content `after-task`. The driver reads it every 0.5 s.
+The stop file is `<run_id>.stop`, next to the spec. `edr stop
+--after-task` writes it with the content `after-task`, and the driver
+reads it every 0.5 s.
 
 | Content | Effect |
 |---|---|
@@ -127,20 +131,22 @@ the content `after-task`. The driver reads it every 0.5 s.
 
 ## The keep file
 
-`<run_id>.keep.json` next to the spec, `{"hours": N, "ack": true}`. `edr
-keep` writes it. At every heartbeat the driver reads `hours` and adds it to
-`budget.hours` of the running stage or task. A keep file older than the
-start of the current stage or task does not count.
+The keep file is `<run_id>.keep.json`, next to the spec, with the content
+`{"hours": N, "ack": true}`. `edr keep` writes it. At every heartbeat the
+driver reads `hours` and adds it to `budget.hours` of the running stage
+or task. A keep file older than the start of the current stage or task
+does not count.
 
 `ack` is for the watcher. It cancels a pending kill and the `host_full`
 stop.
 
 ## Signals
 
-`SIGTERM`, `SIGHUP` and `SIGINT` set `killed_by`, forward the same signal
-to every recorded process group, write a final heartbeat, and exit 10. The
-phase is `KILLED:<signal>`, or `STOPPED` when a stop file exists. The
-driver waits up to 10 s for the groups, then sends `SIGKILL`.
+On `SIGTERM`, `SIGHUP` or `SIGINT` the driver sets `killed_by`, forwards
+the same signal to every recorded process group, writes a final heartbeat
+and exits 10. The phase is `KILLED:<signal>`, or `STOPPED` when a stop
+file exists. The driver waits up to 10 s for the groups, then sends
+`SIGKILL`.
 
 `edr stop <handle>` sends `SIGTERM` to `driver_pid` and to every pgid,
 waits `grace_s`, and with `--now` sends `SIGKILL` after 30 s.
@@ -160,7 +166,7 @@ Every command starts with a line `# edr: <cmd>` in its log.
 
 The normal way is `edr launch`, or `edr run <handle> --stage <S> --from
 <checkpoint>` for more work on an existing tree. Both write the spec,
-publish the driver by rename, and start it in its own session. Run the
+publish the driver by rename and start it in its own session. Run the
 driver by hand only when you debug the driver or a flow.
 
 1. Get a spec. After a launch it exists at
@@ -178,15 +184,15 @@ driver by hand only when you debug the driver or a flow.
 
    On the head node, `python3 src/edarunner/driver/edr_driver.py <spec>`
    in a terminal works too. `Ctrl-C` then ends the run as `KILLED:SIGINT`.
-4. Read the heartbeat: `cat <state_file>`. Follow a stage:
+4. Read the heartbeat with `cat <state_file>`. Follow a stage with
    `tail -f <root>/log/<stage>.log`.
-5. Stop it: `kill -TERM <driver_pid>`, or write `after-task` to
+5. Stop it with `kill -TERM <driver_pid>`, or write `after-task` to
    `<run_id>.stop` next to the spec.
 
 The driver looks for the stop file and the keep file next to the spec you
-passed, not next to `state_file`. Keep the spec in `<state>/<batch>/`, or
-`edr stop --after-task` and `edr keep` write where the driver does not
-look.
+passed, not next to `state_file`. Keep the spec in `<state>/<batch>/`;
+otherwise `edr stop --after-task` and `edr keep` write where the driver
+does not look.
 
 `tests/helpers_driver.py` builds a spec for the demo flow under `tmp_path`
 and starts the driver with `/usr/bin/python3`. It is the shortest example

@@ -1,12 +1,26 @@
-# edarunner
+<p align="center"><img src="docs/logo.svg" alt="edarunner" width="300"></p>
 
-Run a flow you already have on hosts you already reach over ssh. Keep one
-ledger of every run: source versions, host, stages, tasks, metrics,
-artifacts, events. Watch the runs without an agent, apply declared
-limits, and get told on your phone. Export a frozen snapshot for a paper.
+<p align="center">Run the EDA flow you already have on the ssh hosts you already reach, and keep one ledger of every run.</p>
 
-Nothing in the core knows an EDA tool. Your project config names the
-commands, the report files and the numbers in them.
+<p align="center">
+<a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+<img src="https://github.com/lionnus/edarunner/blob/ci-status/coverage.svg?raw=true" alt="coverage">
+<img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0"></a>
+</p>
+
+## Why
+
+A place-and-route flow on a few shared ssh hosts fails in ways a Makefile
+cannot see: a run dies overnight, a batch fills a disk, a kill by session
+name takes a colleague's work with it, and the numbers for a paper end up
+in a spreadsheet with no record of the commit that made them. edarunner
+starts the flow you already have and records every run in one SQLite
+file: source versions, host, stages, tasks, metrics, artifacts and events.
+A watcher applies the limits you declare without throwing a result away,
+and a Telegram bot puts the alerts on your phone. Nothing in the core
+knows an EDA tool; the project config names the commands, the report
+files and the numbers in them.
 
 ## Install
 
@@ -15,46 +29,12 @@ uv tool install edarunner        # the controller, Python 3.11 or newer
 ```
 
 A compute host needs only ssh, `rsync` and its own `python3` (3.6 or
-newer). Nothing is installed there; the driver is one file copied at
-launch.
+newer). Nothing is installed there; the driver is one file that
+`edr launch` copies over.
 
-## Five minutes on one machine
-
-```sh
-git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
-bash setup.sh                 # a fake flow in a small git repository
-edr stage HEAD                # a pinned worktree of the source
-edr check                     # config, hosts, hooks, guards
-edr plan demo                 # run ids, hosts, every path; writes nothing
-edr launch demo               # one driver per run on the `local` host
-edr status                    # the board
-edr watch --once              # collect, extract metrics, classify
-edr metrics --design HEAD --csv
-```
-
-The demo flow sleeps for seconds and writes fake reports and a fake
-`power.csv`, so every command runs without an EDA tool or a licence.
-
-## What a project declares
-
-| File | Holds |
-|---|---|
-| `edr.toml` | the stages (one command each, or a task group), their needs, budgets and retry rules, the metrics and where to read them |
-| `tasks.toml` | the task table: a kernel, a test pattern, an argument string |
-| `jobs/<batch>.toml` | one batch: the source commit and one job per run |
-| `site.toml` | the hosts, the scratch layout, the licence probes, the Telegram bot; private, outside the project |
-
-A stage is a command the driver runs in its own process group. Inside
-it, the flow's own steps are tracked, not run: a `progress` probe says
-where the flow is, and metrics are extracted per step. A task group runs
-its tasks in parallel on the host, each with its own directory, budget
-and result, and shards claim tasks from one queue.
-
-## Run the watcher as a service
-
-`edr init` writes `edr-watch.service` next to `edr.toml`. On a head node
-with `loginctl enable-linger`, the watcher then survives a logout and a
-reboot without root:
+The watcher runs on the head node. `edr init` writes `edr-watch.service`
+next to `edr.toml`, and with `loginctl enable-linger` the service survives
+a logout and a reboot without root:
 
 ```sh
 cp edr-watch.service ~/.config/systemd/user/edr-<project>.service
@@ -63,39 +43,104 @@ systemctl --user enable --now edr-<project>
 ```
 
 Without a user service, `edr watch` in a tmux session does the same job,
-and a cron line with `edr watch --check` tells you when it stopped.
+and `edr watch --check` from cron tells you when it stopped.
 
-## What you get back
+## Five minutes on one machine
 
-- `edr status`, on 48 columns if you ask, so it reads in an ssh app on a
-  phone; `edr status <run>` for one run.
-- `edr events`: every action with who did it and why.
-- `edr metrics --design <hash> --csv`: every number, never two hashes in
-  one table unless you say so.
-- `edr export`: a snapshot with a manifest, `runs.csv`, `metrics.csv`
-  and the small report files, for a paper that reads snapshots only.
-- The Telegram bot: alerts with buttons, a pinned board, `/keep`, `/ack`,
-  `/stop`, and custom commands you declare.
+```sh
+git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
+bash setup.sh                 # a fake flow in a small git repository
+edr stage HEAD                # a pinned worktree of the source; prints its short hash
+edr check                     # load the config, probe the hosts, check the hooks
+edr plan demo                 # run ids, hosts, every path; writes nothing
+edr launch demo               # one driver per run on the `local` host
+edr status                    # the board
+edr watch --once              # collect, extract metrics, classify
+edr metrics --design <src> --csv   # <src> is the hash that `edr stage` printed
+```
+
+The flow sleeps for seconds and writes fake reports and a fake
+`power.csv`, so every command runs without an EDA tool or a licence. The
+two runs end `done` within a minute, and `edr watch --once` after that
+collects everything. `examples/local-demo/README.md` says what the flow
+fakes, where the files land and how to make a run fail.
+
+## How it works
+
+A project declares its flow in `edr.toml` as stages that run in order. A
+stage is one command, which the driver runs in its own process group. The
+flow's own steps inside it are tracked, not run: a `progress` probe
+reports the current step, and metrics are read per step from the report
+files. A stage with `foreach = "tasks"` is a task group. Its command runs
+once per task, the tasks run in parallel on the host, each with its own
+directory, budget and result, and shards claim tasks from one queue.
+
+`edr launch` renders one spec per job, copies the one-file driver to the
+host and starts it. The driver runs the stages, waits for licence seats,
+applies budgets and retries, and writes a heartbeat file every minute.
+
+`edr watch` on the head node reads the heartbeats, classifies every run
+(running, stale, dead, hung, over budget, host full, superseded),
+collects the report files, extracts the metrics, launches queued jobs
+when a host fits, and notifies. It never deletes anything.
+
+The ledger is one SQLite file, `data/edr.db`, with the batches, runs,
+stages, params, metrics, artifacts and events. Every verb that changes
+something writes an event with the actor and the reason. `docs/config.md`
+lists every key of the four config files: `edr.toml`, `tasks.toml`,
+`jobs/<batch>.toml`, and the private `site.toml` with the hosts and the
+bot.
+
+## What you get
+
+- `edr status` draws the board, or one run with `edr status <run>`.
+  `--narrow` fits 48 columns for an ssh app on a phone, `--live` asks the
+  hosts whether the drivers exist, and `--triage` proposes one command for
+  each run that is not running.
+- `edr events` lists every action, with who did it and why.
+- `edr metrics --design <hash> --csv` gives every number of one design.
+  One table holds one design, so the flag has no default.
+- `edr export` writes a snapshot with a manifest, `runs.csv`,
+  `metrics.csv` and the small report files, for a paper that reads
+  snapshots only.
+- The Telegram bot sends alerts with buttons, keeps a pinned board, and
+  answers `/keep`, `/ack`, `/stop` and the custom commands you declare.
 
 ## Safety
 
-Every delete and every `rsync --delete` runs through a guard that
-refuses an empty path, a root, a home directory and a path without the
-project marker. Every verb that writes has `--dry-run`, and a dry run
-writes nothing. `stop` and `retire` need `--why`. No guard deletes a
-result; a killed run keeps its tree until you retire it. See
-`docs/safety.md`.
+Every `rm -rf` and every `rsync --delete` passes a guard that refuses an
+empty path, a root, a home directory and a path without the project
+marker. Every verb that writes takes `--dry-run`, and a dry run writes
+nothing. `stop` and `retire` need `--why`, and the reason lands in the
+events table. A stop signals the pids the driver recorded, never a
+session name or a `pgrep` pattern. Nothing deletes on its own: a killed
+run keeps its tree until you retire it, and `docs/safety.md` names the
+incident behind each rule.
 
 ## Documents
 
-- `docs/design.md`: the contract between the modules, the file formats,
-  the driver protocol, the CLI.
-- `docs/config.md`: every key of the four TOML files.
-- `docs/flows.md`: two real flows declared, one tool session with steps and one command per step.
-- `docs/telegram.md`: the bot, from BotFather to custom commands.
-- `AGENTS.md`: how an agent operates the farm through `edr`.
+- `docs/design.md`, the contract between the modules: the file formats,
+  the driver protocol and the CLI.
+- `docs/config.md`, every key of the four TOML files.
+- `docs/flows.md`, two real flows declared: one tool session with steps
+  inside, and one command per step.
+- `docs/driver.md`, the driver: the spec, the heartbeat, the phases and
+  exit codes, the task queue, and how to run it by hand.
+- `docs/safety.md`, the rules, the incident behind each one, and the code
+  that holds it.
+- `docs/telegram.md`, the bot, from BotFather to custom commands.
+- `AGENTS.md`, how an agent operates the farm through `edr`.
+- `examples/local-demo/README.md`, the demo project.
 
-## Status
+## Status and contributing
 
-Alpha. Maintained as time allows by one PhD student. Issues and adapters
-welcome. Apache-2.0.
+Alpha. One PhD student maintains it as time allows. It has run a
+commercial place-and-route and power flow and an open Yosys and OpenROAD
+flow; `docs/flows.md` shows both configs. Issues and adapters for other
+flows are welcome. `CONTRIBUTING.md` has the rules; the short version is
+standard library only, the driver on the Python 3.6 subset, no site
+strings in the repository, and tests under `tmp_path`.
+
+## Licence
+
+Apache-2.0. See `LICENSE`.

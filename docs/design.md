@@ -1,23 +1,24 @@
 # Design contract
 
 This file is the contract between the modules. A module that needs a
-different shape changes this file first. Version 1.
+different shape changes this file first. This is version 1.
 
 ## 1. What edarunner does
 
-It runs a flow you already have (a Makefile, a script) on hosts you
+edarunner runs a flow you already have (a Makefile, a script) on hosts you
 already reach over ssh. It keeps one ledger of every run: identity,
-source versions, host, stages, tasks, metrics, artifacts, events. It
-watches the runs without an agent, applies declared limits, and notifies
-a phone. It exports a frozen snapshot for a paper. Nothing in the core
-knows an EDA tool; the project config and the parsers do.
+source versions, host, stages, tasks, metrics, artifacts and events. It
+watches the runs without an agent on the hosts, applies the limits the
+config declares, and notifies a phone. It exports a frozen snapshot for a
+paper. Nothing in the core knows an EDA tool; the project config and the
+parsers do.
 
-Three programs:
+There are three programs:
 
-- `edr`, the controller, Python 3.11 or newer, standard library only, on
+- `edr`, the controller: Python 3.11 or newer, standard library only, on
   the head node.
-- `edr_driver.py`, the driver, one file, Python 3.6 or newer, standard
-  library only, copied to a host at launch. It runs one run. It never
+- `edr_driver.py`, the driver: one file, Python 3.6 or newer, standard
+  library only, copied to a host at launch. It runs one run, and it never
   imports the package.
 - `edr watch`, the controller as a long-running service on the head node,
   with the Telegram bot as a thread inside it.
@@ -43,15 +44,15 @@ Three programs:
   log/<stage>.log          stdout and stderr of a stage or task
 ```
 
-The site config lives outside the project, default
-`~/.config/edarunner/site.toml`, and the Telegram token in
+The site config lives outside the project, by default at
+`~/.config/edarunner/site.toml`, and the Telegram token at
 `~/.config/edarunner/telegram.token` with mode 600.
 
 ## 3. Configuration files
 
-TOML, read with `tomllib`. Unknown keys are an error. Every path is
-absolute or relative to the file that names it. `~` expands. Every
-string value may use `{placeholders}` from the set in section 3.5.
+The files are TOML, read with `tomllib`. An unknown key is an error. Every
+path is absolute or relative to the file that names it, and `~` expands.
+Every string value may use `{placeholders}` from the set in section 3.5.
 
 ### 3.1 edr.toml
 
@@ -146,17 +147,18 @@ expr = "power_w * window_ns"
 unit = "nJ"
 ```
 
-Stage keys: `after`, `cmd`, `resume`, `cwd`, `steps`, `progress`,
+The stage keys are `after`, `cmd`, `resume`, `cwd`, `steps`, `progress`,
 `needs`, `budget`, `retry`, `collect`, `collect_on_request`, `prune`,
-`foreach`, `parallel`, `prepare`, `task_dir`, `after_each`. A stage
+`foreach`, `parallel`, `prepare`, `task_dir` and `after_each`. A stage
 without `foreach` is one command. A stage with `foreach = "tasks"` is a
-task group; its `cmd` runs once per task of the job.
+task group, and its `cmd` runs once per task of the job.
 
-Metric keys: `stage` (name or list), `step` (`"*"`, a number, or
-absent), `file`, one of `regex` (group 1), `csv` (`where`, `column`),
-`json` (a dotted path), `python` (`module.py:function`, gets the file
-path, returns a float) or `expr` (over other metric names of the same
-run, stage, step and task), `unit`, `canonical`.
+The metric keys are `stage` (a name or a list), `step` (`"*"`, a number,
+or absent), `file`, one extractor, `unit` and `canonical`. The extractor
+is one of `regex` (group 1), `csv` (`where`, `column`), `json` (a dotted
+path), `python` (`module.py:function`, which gets the file path and
+returns a float) or `expr` (an expression over other metric names of the
+same run, stage, step and task).
 
 A numbered step belongs to one stage. A stage's `steps` list is indexed
 by the step number and continues the previous stage's list, so the demo's
@@ -212,11 +214,11 @@ run = ["tmux", "new-session", "-d", "-s", "claude-{project}-{dir}", "-c", "{root
 reply = "session claude-{project}-{dir} started; open the Claude app"
 ```
 
-The host `local` runs on the head node without ssh. A host missing from
-`[hosts]` is an error at `check`. The licence probe output is parsed
+The host `local` runs on the head node without ssh. A host that `[hosts]`
+does not list is an error at `check`. The licence probe output is parsed
 with the FlexLM line `Users of <feature>: (Total of N licenses issued;
-Total of M licenses in use)`; free is N minus M. A probe that fails
-counts as "unknown" and is an event, never a pass.
+Total of M licenses in use)`, and the free count is N minus M. A probe
+that fails counts as unknown; that is an event, never a pass.
 
 ### 3.3 tasks.toml
 
@@ -252,25 +254,25 @@ netlist_stage = 11
 reuse = { label = "gwaihir64_l8", latest = true }   # start on the tree of an existing run
 ```
 
-Two jobs must not share a label. `overrides` keys must exist in the
-resolved configuration or `check` refuses. `reuse` names a run id or a
-label with `latest`; a label glob is an error.
+Two jobs must not share a label. Every key in `overrides` must exist in
+the resolved configuration, or `check` refuses the batch. `reuse` names a
+run id, or a label with `latest`; a label glob is an error.
 
 ### 3.5 Placeholders
 
-`{project} {project_root} {site_dir} {user} {date} {batch} {label}
-{config} {build_tag} {src} {run_id} {tree_id} {root} {host} {mount} {cores}
-{overrides} {checkpoint} {step} {task_dir} {task.<key>} {netlist_stage}`.
-`{tree_id}` is the run id of the tree the flow writes in: the `tree_id` of the
-reused run for a job with `reuse` (so a chain of reuse keeps the first tree's
-id), else `{run_id}`. The ledger stores it per run. A flow that names its run
-directory after the run uses `{tree_id}` there. `{overrides}` renders as
-`KEY=VALUE` tokens separated by spaces. A placeholder without a value
-is an error at `plan`.
+The set is `{project} {project_root} {site_dir} {user} {date} {batch}
+{label} {config} {build_tag} {src} {run_id} {tree_id} {root} {host}
+{mount} {cores} {overrides} {checkpoint} {step} {task_dir} {task.<key>}
+{netlist_stage}`. `{tree_id}` is the run id of the tree the flow writes
+in: for a job with `reuse` it is the `tree_id` of the reused run, so a
+chain of reuse keeps the first tree's id; otherwise it is `{run_id}`. The
+ledger stores it per run. A flow that names its run directory after the
+run uses `{tree_id}` there. `{overrides}` renders as `KEY=VALUE` tokens
+separated by spaces. A placeholder without a value is an error at `plan`.
 
 ## 4. Run spec and heartbeat
 
-`edr plan` renders every string of a job into a run spec; `edr launch`
+`edr plan` renders every string of a job into a run spec. `edr launch`
 writes it to `<state>/<batch>/<run_id>.spec.json` and starts the driver
 with that path as its only argument. The driver reads nothing else.
 
@@ -296,8 +298,8 @@ with that path as its only argument. The driver reads nothing else.
  ]}
 ```
 
-The heartbeat, `<state>/<batch>/<run_id>.json`, written by an atomic
-rename every `heartbeat_s` and at every phase change:
+The driver writes the heartbeat, `<state>/<batch>/<run_id>.json`, by an
+atomic rename every `heartbeat_s` seconds and at every phase change:
 
 ```json
 {"schema": 1, "run_id": "...", "batch": "...", "label": "...", "config": "...", "host": "hostB", "root": "...",
@@ -311,72 +313,78 @@ rename every `heartbeat_s` and at every phase change:
  "exit": null, "killed_by": null, "last_cmd": "make pnr ...", "last_log": "...", "log": "/scratch2/.../log/synth.log"}
 ```
 
-Phases: `setup`, `gate:<stage>`, `stage:<stage>`, `retry:<stage>:<n>`,
-`group:<stage>`, and the terminal ones `done`, `INCOMPLETE:<n>f<m>s`,
-`FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED`, `KILLED:<signal>`.
-`stages` holds one entry per stage the driver started: `status`
-(`running`, `done`, `failed`, `over_budget`), `attempt`, `started`,
-`ended`, `exit`, `log`; a retry adds an attempt. A terminal phase sets
-`exit` to a number. `counts.failed` and
+The phases are `setup`, `gate:<stage>`, `stage:<stage>`,
+`retry:<stage>:<n>` and `group:<stage>`, and the terminal ones are `done`,
+`INCOMPLETE:<n>f<m>s`, `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED`
+and `KILLED:<signal>`. `stages` holds one entry per stage the driver
+started, with `status` (`running`, `done`, `failed`, `over_budget`),
+`attempt`, `started`, `ended`, `exit` and `log`; a retry adds an attempt.
+A terminal phase sets `exit` to a number. `counts.failed` and
 `counts.skipped` count across every task group of the run.
 
 ## 5. The driver
 
-`python3 edr_driver.py <spec.json>`. Written in the Python 3.6 subset:
-no walrus, no dataclasses, no f-string `=`, `subprocess.run` with
-`stdout=PIPE`. Standard library only. Exit codes: 0 done, 8 incomplete,
-9 over budget, 10 stopped, 5 failed stage, 3 disk, 4 gate, 2 bad spec.
+The driver starts as `python3 edr_driver.py <spec.json>`. It is written in
+the Python 3.6 subset (no walrus, no dataclasses, no f-string `=`,
+`subprocess.run` with `stdout=PIPE`) and uses the standard library only.
+The exit codes are 0 done, 8 incomplete, 9 over budget, 10 stopped, 5
+failed stage, 3 disk, 4 gate and 2 bad spec.
 
-Behaviour, in order:
+The driver behaves as follows, in order:
 
-1. Load the spec. Set `phase = setup`. Start the heartbeat thread. Check
-   `needs.disk_gb` of the first stage against the free space of `root`;
-   refuse with 3.
+1. It loads the spec, sets `phase = setup` and starts the heartbeat
+   thread. It checks `needs.disk_gb` of the first stage against the free
+   space of `root` and refuses with exit 3 when the space is short.
 2. For each stage from `start_at.stage`:
-   - `gate`: if the stage has a licence, run the probe, parse free seats,
-     wait while free minus the seats it needs is below `floor`, up to
-     `gate_max_s`, then fail with 4. A probe that fails counts as unknown:
-     log it, record `licence_unknown` in the heartbeat, and go on.
-   - one command: run `cmd` (or `resume` with `{checkpoint}` filled when
-     `start_at.checkpoint` is set and this is the first stage; a checkpoint
-     on a stage without `resume` is a bad spec, exit 2) through
-     `shell -c`, in `cwd`, with `env`, in a new session
-     (`start_new_session=True`), stdin from `/dev/null`, stdout and stderr
-     appended to `log/<stage>.log`. Record the pgid. Poll every 5 s: run
-     `progress` and update `step`; on failure with `retry.match` in the
-     last 80 log lines, wait `retry.wait_s` and run again up to
-     `retry.max`; after `budget.hours`, if `budget.kill` kill the group
-     else let it end but mark `OVER_BUDGET:<stage>` and stop after it;
-     if `tree_gb` passes `budget.disk_gb`, same rule.
-   - task group: run `prepare` once. Create `queue/<stage>/pending/<id>`
-     for each task with `O_EXCL` (a file that exists or a `done/<id>` that
-     exists is skipped). Loop: while running tasks are fewer than
-     `parallel`, claim one by renaming `pending/<id>` to
-     `claimed/<id>.<run_id>`; before the start, check the task's
-     `needs.disk_gb` against free space (skip and count `skipped` when
-     short), and the licence seats. Start it as a command above, in its
-     own session, log `log/<stage>.<id>.log`. On end: record exit, move
-     the claim to `done/<id>`, run `after_each` with `{task_dir}`, count
-     `done` or `failed`; a failure gets a `signature`, the last log line
-     with digits removed; `streak` equal signatures in a row stop the
-     group (`looping`). Per-task `budget.hours` kills that task only. The
-     group ends when `pending` is empty and nothing runs.
-3. Between stages and inside a group, check the host free space against
-   `limits.host_free_min_gb`; below it, start nothing new and record
-   `host_full` in the heartbeat.
-4. End: `done` when every stage ran and `counts.failed` and
-   `counts.skipped` are zero; else `INCOMPLETE:<n>f<m>s`.
+   - `gate`: if the stage has a licence, it runs the probe, parses the
+     free seats, and waits while the free seats minus the seats it needs
+     are below `floor`, up to `gate_max_s`; then it fails with 4. A probe
+     that fails counts as unknown: it logs the failure, records
+     `licence_unknown` in the heartbeat, and goes on.
+   - one command: it runs `cmd` through `shell -c`, in `cwd`, with `env`,
+     in a new session (`start_new_session=True`), with stdin from
+     `/dev/null` and stdout and stderr appended to `log/<stage>.log`. When
+     `start_at.checkpoint` is set and this is the first stage, it runs
+     `resume` with `{checkpoint}` filled instead; a checkpoint on a stage
+     without `resume` is a bad spec, exit 2. It records the pgid and polls
+     every 5 s: it runs `progress` and updates `step`. On a failure with
+     `retry.match` in the last 80 log lines, it waits `retry.wait_s` and
+     runs the command again, up to `retry.max` times. After `budget.hours`
+     it kills the group if `budget.kill` is set; otherwise it lets the
+     command end, but marks `OVER_BUDGET:<stage>` and stops after it. When
+     `tree_gb` passes `budget.disk_gb`, the same rule applies.
+   - task group: it runs `prepare` once and creates
+     `queue/<stage>/pending/<id>` for each task with `O_EXCL`; a file that
+     exists, or a `done/<id>` that exists, is skipped. Then it loops:
+     while fewer tasks run than `parallel`, it claims one by renaming
+     `pending/<id>` to `claimed/<id>.<run_id>`. Before the start, it
+     checks the task's `needs.disk_gb` against the free space (it skips
+     the task and counts it as `skipped` when the space is short) and the
+     licence seats. It starts the task as a command as above, in its own
+     session, with the log `log/<stage>.<id>.log`. At the end it records
+     the exit, moves the claim to `done/<id>`, runs `after_each` with
+     `{task_dir}`, and counts `done` or `failed`. A failure gets a
+     `signature`, the last log line with the digits removed; `streak`
+     equal signatures in a row stop the group (`looping`). A per-task
+     `budget.hours` kills that task only. The group ends when `pending` is
+     empty and nothing runs.
+3. Between stages and inside a group, it checks the host free space
+   against `limits.host_free_min_gb`. Below that floor it starts nothing
+   new and records `host_full` in the heartbeat.
+4. At the end, the phase is `done` when every stage ran and
+   `counts.failed` and `counts.skipped` are both zero; otherwise it is
+   `INCOMPLETE:<n>f<m>s`.
 
 `edr keep` writes `<run_id>.keep.json` next to the spec, `{"hours": N,
 "ack": true}`. The driver reads it at every heartbeat and adds the hours
 to the budget of the current stage or task. The watcher reads `ack` and
 cancels a pending kill.
 
-Signals: `SIGTERM`, `SIGHUP` and `SIGINT` set `killed_by`, kill every
-recorded pgid with the same signal, write a final heartbeat with phase
-`KILLED:<signal>` (or `STOPPED` when a `stop` file exists next to the
-spec) and exit 10. A `stop` file with content `after-task` makes a group
-finish the running tasks and claim nothing more.
+On `SIGTERM`, `SIGHUP` or `SIGINT` the driver sets `killed_by`, kills
+every recorded pgid with the same signal, writes a final heartbeat with
+the phase `KILLED:<signal>` (or `STOPPED` when a `stop` file exists next
+to the spec) and exits 10. A `stop` file with the content `after-task`
+makes a group finish the running tasks and claim nothing more.
 
 The heartbeat thread also computes `tree_gb` (a `du -s` of `root` every
 10 cycles), `disk_free_gb`, and the log tail.
@@ -385,27 +393,30 @@ The heartbeat thread also computes `tree_gb` (a `du -s` of `root` every
 
 `edr launch` starts the driver on a host with the host's own `python3`,
 resolved from the login `PATH` before the site `env` is applied; the site
-`env` reaches the driver's children through the spec:
+`env` reaches the driver's children through the spec.
 
-- `local`: `Popen([python3, driver, spec], start_new_session=True,
-  stdin=DEVNULL, stdout/stderr to <state>/<batch>/<run_id>.driver.log)`.
-- ssh: `ssh <opts> <host> "setsid nohup python3 <driver> <spec> >
-  <driver.log> 2>&1 < /dev/null &"`. The driver path is the copy in
-  `<state>/bin/<batch>/`, readable from the host over the shared
-  filesystem. `python3` is the host's own.
+- On `local`, it calls `Popen([python3, driver, spec],
+  start_new_session=True, stdin=DEVNULL, stdout/stderr to
+  <state>/<batch>/<run_id>.driver.log)`.
+- Over ssh, it runs `ssh <opts> <host> "setsid nohup python3 <driver>
+  <spec> > <driver.log> 2>&1 < /dev/null &"`. The driver path is the copy
+  in `<state>/bin/<batch>/`, which the host reads over the shared
+  filesystem, and `python3` is the host's own.
 
 `edr stop` reads `pgids` and `driver_pid` from the heartbeat and signals
-them on the host with `kill -TERM -- -<pgid>`, waits `grace_s` (or
-`--now` for `SIGKILL` after 30 s), and never uses `pgrep` or a session
+them on the host with `kill -TERM -- -<pgid>`. It waits `grace_s`, or with
+`--now` sends `SIGKILL` after 30 s. It never uses `pgrep` or a session
 name. `--after-task` writes the `stop` file instead.
 
 ## 7. The watcher
 
-`edr watch` runs a cycle every `heartbeat_s`, and once with `--once`:
+`edr watch` runs one cycle every `heartbeat_s` seconds, or a single cycle
+with `--once`. A cycle does the following:
 
-1. Read every heartbeat of every batch without `RETIRED`. Upsert `runs`
-   and `stage_runs`. Write `watch.json` with its own timestamp.
-2. Classify each run that is not terminal:
+1. It reads every heartbeat of every batch that has no `RETIRED` file,
+   upserts `runs` and `stage_runs`, and writes `watch.json` with its own
+   timestamp.
+2. It classifies each run that is not terminal:
 
 | State | Test | Action |
 |---|---|---|
@@ -419,20 +430,22 @@ name. `--after-task` writes the `stop` file instead.
 | host_full | the host free space below `host_free_min_gb` | notify, then after `grace_s` `stop --now` our newest task there; never delete |
 | superseded | a newer batch runs the same label at another `src` | notify; `stop --after-task` unless `--keep` was given |
 
-3. Collect: for each run, `rsync` the stage `collect` paths of every
-   finished stage or task into `data/results/<run_id>/`, and the passed
-   steps of a running stage (a step directory older than 10 min is
-   final). Count failures. Fall back to the NFS export path of the host
-   when ssh fails and `site.nfs_export` is set.
-4. Extract every metric whose file arrived and is not in `metrics` yet.
-   Write `params` from the resolved configuration once.
-5. Retry a dead run's last stage from its last step through `resume`,
-   once, when the spec has `resume` and no recorded pgid of the run is
-   alive on the host; while one is, log one event and wait.
-6. Launch queued jobs whose host now fits, one per batch per cycle.
-7. Notify through every configured channel: one message per event class
-   per run, edited on change where the channel allows it.
-8. Write `data/board/board.json`, `data/board/status.html` and
+3. It collects: for each run, it `rsync`s the `collect` paths of every
+   finished stage or task into `data/results/<run_id>/`, plus the passed
+   steps of a running stage (a step directory older than 10 min counts as
+   final). It counts the failures. When ssh fails and `site.nfs_export`
+   is set, it falls back to the NFS export path of the host.
+4. It extracts every metric whose file has arrived and is not in
+   `metrics` yet, and writes `params` from the resolved configuration
+   once.
+5. It resumes a dead run's last stage from its last step through
+   `resume`, once, when the spec has `resume` and no recorded pgid of the
+   run is alive on the host. While one is alive, it logs one event and
+   waits.
+6. It launches queued jobs whose host now fits, one per batch per cycle.
+7. It notifies through every configured channel, one message per event
+   class per run, edited on change where the channel allows it.
+8. It writes `data/board/board.json`, `data/board/status.html` and
    `data/board/compare.html`.
 
 `edr watch --check` exits non-zero and notifies when `watch.json` is
@@ -440,7 +453,8 @@ older than three cycles; a cron line runs it.
 
 ## 8. Ledger
 
-SQLite, `data/edr.db`, opened by the head node only. WAL mode.
+The ledger is SQLite in `data/edr.db`, in WAL mode, and only the head
+node opens it.
 
 ```sql
 CREATE TABLE batches(batch TEXT PRIMARY KEY, project TEXT, source TEXT, created INTEGER, retired INTEGER, run_date TEXT);
@@ -472,11 +486,11 @@ directory is written under a temporary name and renamed at the end.
 
 ## 10. CLI
 
-Seventeen verbs. Every verb takes `--json`. Every verb that writes takes
-`--dry-run`. `stop` and `retire` take `--why`. `--batch` defaults to
-`EDR_BATCH` or the newest batch. Exit codes: 0 done, 1 refused by a
-guard or bad input, 2 nothing to do, 3 some hosts failed. A handle is
-`label@batch`, a run id prefix, or `#n` from the last board.
+The CLI has seventeen verbs. Every verb takes `--json`, and every verb
+that writes takes `--dry-run`. `stop` and `retire` take `--why`. `--batch`
+defaults to `EDR_BATCH` or the newest batch. The exit codes are 0 done, 1
+refused by a guard or bad input, 2 nothing to do, and 3 some hosts failed.
+A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 
 `status [handle] [--batch B] [--narrow] [--watch] [--live] [--triage]`,
 `events [--since T] [--run R] [-n N]`, `hosts [--narrow]`, `lic`,
@@ -495,18 +509,19 @@ The narrow board fits 48 columns: two lines per live run, dead first.
 
 ## 11. Telegram
 
-A thread of `edr watch`, started only when `[telegram]` has a readable
-token file. Long polls `getUpdates` with `timeout=60`. Obeys one
-`chat_id`; every other chat gets no answer and one event. Built-in
-commands: `/status`, `/events`, `/hosts`, `/lic`, `/board`, `/keep
-<handle> [hours]`, `/ack <handle>`, `/stop <handle>` (after task only),
-`/compare <handle>...`, `/metric <name> [--design H]`. Custom commands
-from `[telegram.commands.*]`: `run` is a list, never a shell string;
-each argument must match its regex; `skip_if` and `detach` as in the
-site example. Alerts carry two inline buttons, `keep 12h` and `ack`,
-with `callback_data` `keep12:<handle>` and `ack:<handle>`. The board is
-one pinned message edited in place each cycle, in an HTML `<pre>` block,
-silent. Every action lands in `events` with actor `telegram`.
+The bot is a thread of `edr watch`, started only when `[telegram]` names
+a readable token file. It long-polls `getUpdates` with `timeout=60`. It
+obeys one `chat_id`; every other chat gets no answer and one event. The
+built-in commands are `/status`, `/events`, `/hosts`, `/lic`, `/board`,
+`/keep <handle> [hours]`, `/ack <handle>`, `/stop <handle>` (after the
+task only), `/compare <handle>...` and `/metric <name> [--design H]`.
+Custom commands come from `[telegram.commands.*]`: `run` is a list, never
+a shell string, each argument must match its regex, and `skip_if` and
+`detach` work as in the site example. Alerts carry two inline buttons,
+`keep 12h` and `ack`, with the `callback_data` `keep12:<handle>` and
+`ack:<handle>`. The board is one pinned message in an HTML `<pre>` block,
+edited in place each cycle without a notification. Every action lands in
+`events` with the actor `telegram`.
 
 ## 12. Guards
 
@@ -519,15 +534,15 @@ nothing, not even the date pin.
 
 ## 13. Tests
 
-`pytest` in `tests/`, standard library plus pytest. The driver tests run
-the driver as a subprocess with `/usr/bin/python3` (3.6 on the
-development host) against `examples/local-demo`, whose flow is shell
-scripts that sleep for seconds and write fake reports and a fake
-`power.csv`. End to end on the `local` host: `init`, `check`, `plan`,
-`launch`, two `watch --once` cycles, `status`, `metrics`, `export`,
-`stop`, `retire`. A guard test proves that a dry run leaves the state
-directory byte-identical. CI runs the tests on 3.11 and 3.12, and the
-driver tests in a `python:3.6` container.
+The tests are `pytest` in `tests/`, with the standard library plus pytest.
+The driver tests run the driver as a subprocess with `/usr/bin/python3`
+(3.6 on the development host) against `examples/local-demo`, whose flow is
+a set of shell scripts that sleep for seconds and write fake reports and a
+fake `power.csv`. The end-to-end test on the `local` host runs `init`,
+`check`, `plan`, `launch`, two `watch --once` cycles, `status`, `metrics`,
+`export`, `stop` and `retire`. A guard test proves that a dry run leaves
+the state directory byte-identical. CI runs the tests on 3.11 and 3.12,
+and the driver tests in a `python:3.6` container.
 
 ## 14. Module ownership
 
