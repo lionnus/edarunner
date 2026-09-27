@@ -638,7 +638,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
     if a.batch and not rows and not (project.state / a.batch).is_dir():
         c.emit(f"no runs in batch {a.batch}")
         return 2
-    checked = []
+    checked, retiring = [], {r["run_id"] for r in rows}
     for row in rows:
         run_id, hb = row["run_id"], c.heartbeat(row)
         host, root = row.get("host") or hb.get("host"), row.get("root") or hb.get("root")
@@ -646,6 +646,8 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         pid = hb.get("driver_pid")
         if root and board.is_live(hb) and pid and c.ssh.pid_alive(str(host), int(pid)):
             raise Refuse(f"{run_id}: driver {pid} is alive on {host}; stop it first")
+        if root:
+            _refuse_shared_root(c, row, str(host), str(root), retiring, bool(a.prune))
         checked.append((row, hb, host, root, targets))
     failed, done = 0, []
     for row, hb, host, root, targets in checked:
@@ -674,6 +676,25 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         c.ledger.mark_batch_retired(a.batch)
     c.data = {"retired": done, "failed": failed}
     return 3 if failed else 0
+
+
+def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[str], prune: bool) -> None:
+    """A tree that another run still uses is never a delete target of this call.
+
+    Every power run on a reused tree has that tree as its root. Removing it for one
+    run would take the netlist of the others, and of a live driver among them.
+    """
+    others = [r for r in c.ledger.runs() if r["run_id"] not in retiring and r.get("root") == root
+              and (r.get("host") or "") == host and r.get("state") != "retired"]
+    if not others:
+        return
+    live = [r["run_id"] for r in others if board.is_live(c.heartbeat(r) or r)]
+    if prune and not live:
+        return
+    what = "a live run" if live else "another run"
+    names = ", ".join((live or [r["run_id"] for r in others])[:3])
+    raise Refuse(f"{row['run_id']}: root {root} is shared with {what} ({names}); "
+                 "retire them together with --batch, or stop the live run first")
 
 
 def _retire_targets(c: Ctx, row: Row, hb: dict, root: str, a: argparse.Namespace) -> list[str]:
