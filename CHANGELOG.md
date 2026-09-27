@@ -10,6 +10,12 @@
 - `/hosts` shows every resource as used of total, in one order:
   `cores 21/32 · ram 93/376 GB · scratch 195/1538 GB · gpu 0/1`. `/lic`
   shows the seats used of the pool.
+- `edr hosts` marks each resource from 🟢 to 🔴 by the thresholds of a
+  new `[marks]` table in `site.toml`, which `edr.toml` may override. A
+  new first column `ok` holds the worst mark, and the rows go by it.
+  `--json` gives the marks of each host in `marks`.
+- The `/hosts` reply of the bot puts the mark of each resource in front
+  of it, and lists the hosts by their worst mark.
 
 ## 0.1.1 (2026-09-27)
 

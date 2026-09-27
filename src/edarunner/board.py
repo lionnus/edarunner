@@ -14,13 +14,19 @@ import re
 import sys
 import time
 from collections import Counter
+from collections.abc import Iterable
 from string import Template
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich import box
 from rich.console import Console, Group, RenderableType
 from rich.table import Table
 from rich.text import Text
+
+from .model import Marks
+
+if TYPE_CHECKING:
+    from .hosts import HostProbe
 
 Row = dict[str, Any]
 
@@ -38,6 +44,10 @@ STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "
          "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
          "imported": "dim", "abandoned": "dim", "resumed": "cyan"}
+# Resource marks from green to red, then black for a host that did not answer.
+RESOURCE_MARKS = ("🟢", "🟡", "🟠", "🔴")
+NO_ANSWER = "⚫"
+SEVERITY = (NO_ANSWER, *reversed(RESOURCE_MARKS))
 # No markup: a task in a metric key looks like a tag, `power_w[k_small]`.
 _OPTS = {"markup": False, "highlight": False, "emoji": False}
 
@@ -69,6 +79,33 @@ def bar(used: float, total: float, width: int = 8) -> Text:
     frac = min(1.0, max(0.0, used / total)) if total else 0.0
     n = round(frac * width)
     return Text("\u2588" * n + "\u2591" * (width - n), style="green" if frac < 0.7 else "yellow" if frac < 0.9 else "red")
+
+
+def resource_mark(used_fraction: float, thresholds: list[float]) -> str:
+    """The mark of a resource: green, then yellow, orange and red from each threshold on."""
+    return RESOURCE_MARKS[sum(used_fraction >= t for t in thresholds)]
+
+
+def host_marks(probe: HostProbe | None, marks: Marks) -> dict[str, str]:
+    """One mark each for cores, ram, scratch and gpu; gpu is '-' without GPUs, all black for None (no answer)."""
+    if probe is None:
+        return dict.fromkeys(("cores", "ram", "scratch", "gpu"), NO_ANSWER)
+    p = probe
+
+    def frac(used: float, total: float) -> float:
+        return used / total if total else 0.0
+
+    return {
+        "cores": resource_mark(frac(p.load, p.cores), marks.cores),
+        "ram": resource_mark(frac(p.total_ram_gb - p.free_ram_gb, p.total_ram_gb), marks.ram),
+        "scratch": resource_mark(frac(p.total_gb - p.free_gb, p.total_gb), marks.scratch),
+        "gpu": resource_mark(frac(p.gpus - p.gpus_idle, p.gpus), marks.gpu) if p.gpus else "-",
+    }
+
+
+def worst_mark(marks: Iterable[str]) -> str:
+    """The most severe of `marks` by SEVERITY; '-' counts as green."""
+    return min((m for m in marks if m in SEVERITY), key=SEVERITY.index, default=RESOURCE_MARKS[0])
 
 
 # row helpers

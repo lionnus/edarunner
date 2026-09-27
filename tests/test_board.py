@@ -9,7 +9,9 @@ import time
 import pytest
 
 from edarunner import board
+from edarunner.hosts import HostProbe
 from edarunner.ledger import Ledger
+from edarunner.model import Marks
 
 NOW = 1_800_000_000
 SRC = "gaaa111"
@@ -213,3 +215,21 @@ def test_rows_from_ledger(tmp_path):
     assert all(len(line) <= 48 for line in text.splitlines())
     assert text.splitlines()[2].startswith(" #1 DEAD")
     assert RUN["dead"] in board.status_html(raw, [], {"local": {"cores": 4}}, now=NOW)
+
+
+def test_resource_mark_boundaries():
+    t = [0.6, 0.8, 0.9]
+    assert [board.resource_mark(f, t) for f in (0.0, 0.59, 0.6, 0.79, 0.8, 0.89, 0.9, 1.0, 1.5)] == \
+        ["🟢", "🟢", "🟡", "🟡", "🟠", "🟠", "🔴", "🔴", "🔴"]
+
+
+def test_host_marks_and_worst():
+    p = HostProbe("h", 2.0, 64.0, "/s", 100.0, cores=64, load=57.6, total_ram_gb=256.0, total_gb=1000.0,
+                  gpus=4, gpus_idle=2)
+    m = board.host_marks(p, Marks())
+    assert m == {"cores": "🔴", "ram": "🟡", "scratch": "🟠", "gpu": "🟢"}
+    assert board.worst_mark(m.values()) == "🔴"
+    assert board.host_marks(HostProbe("h", 8, 8, "/s", 10, cores=8, total_ram_gb=8, total_gb=10), Marks())["gpu"] == "-"
+    assert board.host_marks(None, Marks()) == dict.fromkeys(("cores", "ram", "scratch", "gpu"), "⚫")
+    assert board.worst_mark(["🟢", "-", "🟡"]) == "🟡" and board.worst_mark(["🔴", "⚫"]) == "⚫"
+    assert board.worst_mark(["-"]) == "🟢"
