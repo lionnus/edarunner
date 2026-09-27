@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.4.0)
+## 0.4.0 (2026-09-27)
 
 This is the first public release. edarunner runs the EDA flow you already
 have on the machines you already use, and records every run in one SQLite
