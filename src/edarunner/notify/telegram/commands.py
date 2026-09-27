@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import getpass
 import re
-import shlex
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from edarunner.model import BotCommand, Project, Telegram
 from edarunner.notify.telegram import format as fmt
+from edarunner.notify.telegram.custom import run_custom
 
 if TYPE_CHECKING:
     from edarunner.cli import Actions
@@ -125,8 +124,7 @@ class Commands:
             name = "help"
         try:
             if name in self.tg.commands:
-                extra = self.actions.run_info(run) if run else {}
-                return Reply(name, self.custom(self.tg.commands[name], args, extra), "pre")
+                return self.custom(self.tg.commands[name], args, self.actions.run_info(run) if run else {})
             b = BUILTINS[name]
             if run and b.on_run and args[:1] != [run]:
                 args = [run, *args]
@@ -137,6 +135,15 @@ class Commands:
         except Exception as e:  # a refused handle is an answer, not a crash
             self.event("refused", f"{text[:200]}: {e}")
             return Reply(name, f"error: {e}", ok=False)
+
+    def custom(self, c: BotCommand, args: list[str], extra: dict[str, str]) -> Reply:
+        """Run a custom command with the project placeholders plus `extra`, such as the run of an alert."""
+        project = self.project()
+        root = str(project.root)
+        env = {"project": project.project, "root": root, "project_root": root,
+               "site_dir": str(project.site.path.parent), "user": getpass.getuser(), **extra}
+        text, ok = run_custom(c, args, env, Path(project.data), self.event)
+        return Reply(c.name, text, "pre", ok)
 
     def event(self, kind: str, text: str) -> None:
         """One ledger event with the actor telegram."""
@@ -234,57 +241,3 @@ class Commands:
         if args[:1] == ["off"]:
             return Reply("keyboard", "keyboard off", markup={"remove_keyboard": True})
         return Reply("keyboard", "keyboard on", markup=keyboard())
-
-    # custom commands
-
-    def custom(self, c: BotCommand, args: list[str], extra: dict[str, str] | None = None) -> str:
-        """Run one `[telegram.commands.*]` entry: gate every argument, render the argv, run it without a shell.
-
-        `extra` holds more placeholders, such as the run of the alert the command replies to.
-        """
-        names = list(c.args)
-        if names and len(args) >= len(names):
-            values = args[: len(names) - 1] + [" ".join(args[len(names) - 1 :])]  # the last argument takes the rest
-        else:
-            values = args
-        if len(values) != len(names):
-            return f"usage: /{c.name} " + " ".join(f"<{n}>" for n in names)
-        project = self.project()
-        root = str(project.root)
-        env = {"project": project.project, "root": root, "project_root": root,
-               "site_dir": str(project.site.path.parent), "user": getpass.getuser(), **(extra or {})}
-        for n, v in zip(names, values):
-            if not re.fullmatch(c.args[n], v):
-                self.event("refused", f"/{c.name} {n}={v!r} does not match {c.args[n]}")
-                return f"refused: {n} must match {c.args[n]}"
-            env[n] = v
-        try:
-            argv = [t.format_map(env) for t in c.run]
-            cwd = (c.cwd or "{root}").format_map(env)
-            skip = [t.format_map(env) for t in c.skip_if or []]
-            skip_reply = (c.skip_reply or "skipped").format_map(env)
-            reply = c.reply.format_map(env)
-        except (KeyError, IndexError, ValueError) as e:
-            return f"/{c.name}: bad placeholder {e}"
-        self.event("command", f"/{c.name} " + " ".join(f"{n}={v}" for n, v in zip(names, values)))
-        if c.dry_run:
-            return f"would run in {cwd}:\n{shlex.join(argv)}"
-        try:
-            if skip and subprocess.run(skip, capture_output=True, cwd=cwd, timeout=c.timeout_s).returncode == 0:
-                return skip_reply
-            if c.detach:
-                logf = Path(project.data) / f"telegram-{c.name}.log"
-                logf.parent.mkdir(parents=True, exist_ok=True)
-                with open(logf, "ab") as f:
-                    p = subprocess.Popen(argv, cwd=cwd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=f,
-                                         stderr=subprocess.STDOUT)
-                return f"{reply or 'started'} (pid {p.pid}, log {logf})"
-            r = subprocess.run(argv, capture_output=True, text=True, errors="replace", cwd=cwd, timeout=c.timeout_s)
-        except subprocess.TimeoutExpired:
-            return f"/{c.name}: timed out after {c.timeout_s} s"
-        except OSError as e:
-            return f"/{c.name}: {e}"
-        if r.returncode == 0 and reply:
-            return reply
-        out = (r.stdout + r.stderr).strip()
-        return out or f"(no output, exit {r.returncode})"
