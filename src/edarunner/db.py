@@ -24,6 +24,14 @@ CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task T
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, ts INTEGER, actor TEXT, run_id TEXT, kind TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS step_runs(run_id TEXT, stage TEXT, step INTEGER, started INTEGER, PRIMARY KEY(run_id, stage, step));
+CREATE TABLE IF NOT EXISTS host_samples(host TEXT, ts INTEGER, cores INTEGER, load REAL, ram_gb REAL, ram_used_gb REAL,
+  scratch_gb REAL, scratch_used_gb REAL, gpus INTEGER, gpus_busy INTEGER, PRIMARY KEY(host, ts));
+CREATE TABLE IF NOT EXISTS run_samples(run_id TEXT, ts INTEGER, cpu_pct REAL, rss_gb REAL, tree_gb REAL, disk_free_gb REAL,
+  PRIMARY KEY(run_id, ts));
+CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT, instance TEXT, depth INTEGER, area REAL,
+  local_area REAL, cells INTEGER);
+CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
 """
 
 # A table of an older schema, with its current name.
@@ -169,7 +177,10 @@ class Database:
         self.conn.commit()
 
     def add_metric(self, row: Row) -> bool:
-        """Insert one metric. Returns False when the key is already present."""
+        """Insert one metric, and its `instances` into the area table. Returns False when the metric was present.
+
+        The instance rows go in even when the metric was present, so a new area metric fills an old run.
+        """
         r = {"task": "", "step": None, "canonical": "", "unit": "", "source_file": "", "extracted_at": _now(), **row}
         # An `IS` match sees a NULL step; the primary key does not.
         cur = self.conn.execute(
@@ -179,8 +190,50 @@ class Database:
             (r["run_id"], r["stage"], r["step"], r["task"], r["name"], r["canonical"], r["value"], r["unit"],
              r["source_file"], r["extracted_at"], r["run_id"], r["stage"], r["step"], r["task"], r["name"]),
         )
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO area(run_id, stage, step, name, instance, depth, area, local_area, cells) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(r["run_id"], r["stage"], r["step"], r["name"], i["instance"], i["depth"], i["area"], i["local_area"],
+              i["cells"]) for i in r.get("instances") or []])
         self.conn.commit()
         return cur.rowcount == 1
+
+    def set_step_times(self, run_id: str, times: dict[str, dict[str, int]]) -> None:
+        """Write the start time of each step, {stage: {step: unix time}}; a resumed step replaces its time."""
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO step_runs(run_id, stage, step, started) VALUES(?, ?, ?, ?)",
+            [(run_id, stage, int(step), int(ts)) for stage, steps in times.items() for step, ts in steps.items()])
+        self.conn.commit()
+
+    def add_host_samples(self, ts: int, probes: dict[str, dict], keep_days: int = 30) -> None:
+        """One row per host that answered, from the probe dicts of `hosts.HostProbe`; rows older than `keep_days` go."""
+        rows = [(h, ts, p.get("cores"), p.get("load"), p.get("total_ram_gb"),
+                 round(p.get("total_ram_gb", 0) - p.get("free_ram_gb", 0), 2), p.get("total_gb"),
+                 round(p.get("total_gb", 0) - p.get("free_gb", 0), 2), p.get("gpus"),
+                 p.get("gpus", 0) - p.get("gpus_idle", 0)) for h, p in probes.items() if "error" not in p]
+        self.conn.executemany("INSERT OR REPLACE INTO host_samples VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        self.conn.execute("DELETE FROM host_samples WHERE ts<?", (ts - keep_days * 86400,))
+        self.conn.commit()
+
+    def host_samples(self, since_s: int, host: str | None = None) -> list[Row]:
+        """Host samples from `since_s` on, by host and time."""
+        where, args = "ts>=?", [since_s]
+        if host is not None:
+            where, args = where + " AND host=?", [since_s, host]
+        return self._rows(f"SELECT * FROM host_samples WHERE {where} ORDER BY host, ts", args)
+
+    def add_run_sample(self, hb: dict) -> None:
+        """Keep the CPU, RSS, tree size and free disk of one heartbeat, once per heartbeat time."""
+        if hb.get("updated") is None:
+            return
+        self.conn.execute("INSERT OR IGNORE INTO run_samples VALUES(?, ?, ?, ?, ?, ?)",
+                          (hb["run_id"], int(hb["updated"]), hb.get("cpu_pct"), hb.get("rss_gb"), hb.get("tree_gb"),
+                           hb.get("disk_free_gb")))
+        self.conn.commit()
+
+    def run_samples(self, run_id: str) -> list[Row]:
+        """The samples of one run in time order."""
+        return self._rows("SELECT * FROM run_samples WHERE run_id=? ORDER BY ts", (run_id,))
 
     def add_artifact(self, row: Row) -> None:
         """Insert a collected file, or update its size and time."""
@@ -292,6 +345,31 @@ class Database:
         return self._rows(
             "SELECT m.*, r.label, r.config, r.src FROM metrics m JOIN runs r ON r.run_id=m.run_id "
             f"WHERE {' AND '.join(where)} ORDER BY m.run_id, m.stage, m.step, m.task, m.name",
+            args,
+        )
+
+    def area(self, run_ids: list[str] | None = None, design: str | None = None, stage: str | None = None,
+             step: int | None = None, instance: str | None = None, depth: int | None = None) -> list[Row]:
+        """Area rows with the run's label and src and the metric's source_file and unit.
+
+        `instance` matches that instance and every one below it.
+        """
+        where, args = ["1"], []
+        for cond, val in (("r.src=?", design), ("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
+            if val is not None:
+                where.append(cond)
+                args.append(val)
+        if instance is not None:
+            where.append("(a.instance=? OR substr(a.instance, 1, ?)=?)")
+            args += [instance, len(instance) + 1, instance + "/"]
+        if run_ids is not None:
+            where.append(f"a.run_id IN ({', '.join('?' * len(run_ids))})" if run_ids else "0")
+            args += list(run_ids)
+        return self._rows(
+            "SELECT a.*, r.label, r.src, m.source_file, m.unit FROM area a JOIN runs r ON r.run_id=a.run_id "
+            "LEFT JOIN metrics m ON m.run_id=a.run_id AND m.stage=a.stage AND m.step IS a.step AND m.task='' "
+            "AND m.name=a.name "
+            f"WHERE {' AND '.join(where)} ORDER BY a.run_id, a.stage, a.step, a.name, a.area DESC",
             args,
         )
 

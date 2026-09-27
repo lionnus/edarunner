@@ -226,6 +226,9 @@ class Stage:
     prepare: str = doc("a command once before a group starts", "")
     task_dir: str = doc("the directory of a task, relative to the tree; required in a group", "")
     after_each: str = doc("a command after each task, with `{task_dir}`", "")
+    step_log: dict[str, str] = doc("`{ file, regex }`: step start times the flow writes into a collected file; "
+                                   "group 1 of the regex is a unix time, and group 2, when present, the step number",
+                                   factory=dict)
 
     @property
     def is_group(self) -> bool:
@@ -234,7 +237,7 @@ class Stage:
 
 @dataclass
 class Metric:
-    """A metric holds exactly one of the four parsers: `regex`, `csv`, `json` or `python`. A number
+    """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A number
     the flow does not print, such as an energy from a power and a window, comes from a `python`
     hook that reads the input files itself.
 
@@ -249,13 +252,20 @@ class Metric:
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
     file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
                     shown="required")
-    regex: str = doc("a regex; group 1 is the value", "", shown="one of the four")
+    regex: str = doc("a regex; group 1 is the value", "", shown="one of the five")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
-                                        "`where`", None, shown="one of the four")
-    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the four")
-    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the four")
+                                        "`where`", None, shown="one of the five")
+    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
+    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the five")
+    area_hier: int = doc("the deepest instance depth to keep from a hierarchical area report, of Synopsys "
+                         "`report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is "
+                         "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
+                         shown="one of the five")
     unit: str = doc("unit text", "")
-    canonical: str = doc("a name shared across projects, such as `area.cell`", "")
+    canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
+                         "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
+                         "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "
+                         "empty when the schema has no name", "")
 
 
 @dataclass

@@ -36,3 +36,11 @@ def test_check_reports_a_stale_page(tmp_path: Path, capsys) -> None:
     assert "cli.md (committed)" in out.out and "stale: cli.md" in out.err
     gen.write(tmp_path)
     assert gen.check(tmp_path) == 0
+
+
+def test_every_page_starts_with_its_title() -> None:
+    titles = {"README.md": "Reference", "cli.md": "Command line", "configuration.md": "Configuration",
+              "states.md": "Run states", "bot.md": "Telegram bot"}
+    for name, text in gen.pages().items():
+        first, _, second = text.split("\n", 2)
+        assert first == f"# {titles[name]}" and second.startswith("<!-- Generated") and text.count("\n# ") == 0

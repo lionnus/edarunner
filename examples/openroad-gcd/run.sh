@@ -32,6 +32,6 @@ runs = json.load(sys.stdin)["data"]["runs"]
 assert [r["phase"] for r in runs] == ["done"], [(r["label"], r["phase"]) for r in runs]'
 csv=$($EDR metrics --design "$src" --csv)
 echo "$csv"
-grep -q ",area_synth_um2,area.cell," <<<"$csv"
-grep -q ",wns_place_ns,timing.wns," <<<"$csv"
+grep -q ",area_synth_um2,design__instance__area," <<<"$csv"
+grep -q ",wns_place_ns,timing__setup__ws," <<<"$csv"
 $EDR export --design "$src" --out "data/exports/$src"

@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, collect
 from .board import is_live
 from .guards import Refuse
 from .db import Database
@@ -66,7 +66,8 @@ def export(
         "schema": 1,
         "project": project.project,
         "source": design,
-        "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")} for r in runs],
+        "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")},
+                  "record": _record(project, db, r)} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
         "files": [],
         "incomplete": [r["run_id"] for r in runs if is_live(r) or (r.get("counts") or {}).get("failed")],
@@ -91,6 +92,16 @@ def export(
     (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
     os.replace(tmp, out)
     return manifest
+
+
+def _record(project: Project, db: Database, r: Row) -> dict[str, Any]:
+    """What made a run, as far as edarunner knows it: host, start and end, versions, and each stage's times."""
+    spec = collect.load_spec(project, r).get("record") or {}
+    stages = [{k: s[k] for k in ("stage", "task", "attempt", "status", "started", "ended")} for s in db.conn.execute(
+        "SELECT * FROM stage_runs WHERE run_id=? AND task='' ORDER BY started, attempt", (r["run_id"],))]
+    return {"host": r.get("host"), "started": r.get("started"), "ended": None if is_live(r) else r.get("updated"),
+            "edarunner": spec.get("edarunner"), "driver_sha256": spec.get("driver_sha256"), "tools": spec.get("tools") or {},
+            "stages": stages}
 
 
 def _select(db: Database, design: str, labels: list[str] | None) -> list[Row]:
