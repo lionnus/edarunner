@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 HANDLE = re.compile(r"^[\w.@#-]{1,128}$")
 DESIGN = re.compile(r"^[\w.-]{1,64}$")
 LOG_LINES = 200
+# The words of the reply keyboard, in rows; a tap sends the word, which runs the command of that name.
+KEYBOARD = (("Status", "Hosts"), ("Events", "Lic"))
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,9 @@ BUILTINS = {b.name: b for b in (
     Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
     Builtin("compare", "<handle>...", "metrics side by side", "Compare", "pre"),
     Builtin("metric", "<name> [--design H]", "one metric per run", "Compare", "pre"),
-    Builtin("help", "", "this list", "Compare", "html"),
+    Builtin("help", "", "this list", "Help", "html"),
+    Builtin("start", "", "this list and the reply keyboard", "Help", "html"),
+    Builtin("keyboard", "[off]", "show or remove the reply keyboard", "Help"),
 )}
 
 
@@ -73,6 +77,7 @@ class Reply:
     kind: str = "text"
     ok: bool = True
     documents: list[Document] = field(default_factory=list)
+    markup: dict | None = None
 
 
 def handle(args: list[str]) -> str:
@@ -80,6 +85,17 @@ def handle(args: list[str]) -> str:
     if not args or not HANDLE.match(args[0]):
         raise ValueError("a handle is label@batch, a run id prefix or #n")
     return args[0]
+
+
+def keyboard() -> dict:
+    """The persistent reply keyboard of KEYBOARD."""
+    return {"keyboard": [[{"text": w} for w in row] for row in KEYBOARD], "resize_keyboard": True, "is_persistent": True}
+
+
+def keyboard_word(text: str) -> str | None:
+    """The command of a keyboard word, such as `status` for `Status`; None for other text."""
+    word = text.strip().lower()
+    return word if any(word == w.lower() for row in KEYBOARD for w in row) else None
 
 
 class Commands:
@@ -208,6 +224,16 @@ class Commands:
             groups["Custom"] = [(f"/{n} " + " ".join(f"<{a}>" for a in c.args), c.help or "")
                                 for n, c in self.tg.commands.items()]
         return fmt.help_text(groups)
+
+    def cmd_start(self, args: list[str]) -> Reply:
+        """The help, with the reply keyboard."""
+        return Reply("help", self.cmd_help(args), "html", markup=keyboard())
+
+    def cmd_keyboard(self, args: list[str]) -> Reply:
+        """Show the reply keyboard, or remove it with `off`."""
+        if args[:1] == ["off"]:
+            return Reply("keyboard", "keyboard off", markup={"remove_keyboard": True})
+        return Reply("keyboard", "keyboard on", markup=keyboard())
 
     # custom commands
 

@@ -150,6 +150,8 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/compare <handle>...` | metrics side by side |
 | `/metric <name> [--design H]` | one metric for every run of a design |
 | `/help` | the commands by purpose, plus the custom commands |
+| `/start` | the help, with the reply keyboard |
+| `/keyboard [off]` | show the reply keyboard, or remove it |
 
 `/status <handle>` shows the mark, the handle and the state, then the
 stage and step, the host and the age, the proposed command in monospace,
@@ -219,6 +221,23 @@ The regex gate works like this: every value must match its regex in full,
 or the bot replies `refused: <name> must match <regex>`, records the
 refusal in the ledger, and runs nothing. Write the regex as an allowlist
 of the exact values you expect.
+
+## The keyboard
+
+`/start` and `/keyboard` show a reply keyboard under the text field. It
+stays until `/keyboard off` removes it. Its buttons are four words:
+
+```
+Status   Hosts
+Events   Lic
+```
+
+A tap sends the word as a plain message, and the bot runs the command
+of that name: `Status` runs `/status`. The case and spaces around the
+word do not matter; any other plain text gets no answer.
+
+In a group, a bot sees plain text only when it is an admin, or when
+@BotFather turned its privacy mode off with `/setprivacy`.
 
 ## Files
 
