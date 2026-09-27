@@ -350,8 +350,8 @@ def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     rows = [r for r in ledger.runs() if r["batch"] not in retired]
     _save(bdir / "status.html", board.status_html(rows, ledger.events(n=50), probes, now))
     params = [dict(r) for r in ledger.db.execute("SELECT run_id, key, value, source FROM params")]
-    plotly = board.ensure_plotly(project.data)
-    _save(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly.name if plotly else board.PLOTLY_URL))
+    plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
+    _save(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly))
     text = board.narrow(rows, now=now)
     for n in notifiers:
         n.board(text)
