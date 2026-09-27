@@ -513,6 +513,21 @@ def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path
     assert "(dry)" in out and "ref.power" in out
 
 
+def test_retire_collects_the_named_lists_first(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    root = Path(config.load_project(demo).site.scratch[0]) / getpass.getuser() / "edr" / "demo" / a
+    results = demo / "data" / "results" / a
+    (results / "log").mkdir(parents=True)
+    code, out, _ = edr(capsys, "retire", "a@demo", "--collect", "netlist", "--why", "x", "--dry-run")
+    assert code == 0 and "collect netlist: 1 files (dry)" in out and root.is_dir() and not (results / "out").exists()
+    code, _, err = edr(capsys, "retire", "a@demo", "--collect", "netlist,nope", "--why", "x")
+    assert code == 1 and "collect nope" in err and "nothing removed" in err and root.is_dir()
+    code, out, _ = edr(capsys, "retire", "a@demo", "--collect", "netlist", "--why", "x")
+    assert code == 0 and not root.exists() and (results / "out" / "11" / "netlist.v").is_file()
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert [e["kind"] for e in led.events(run_id=a)] == ["collect", "collect", "retire"]
+
+
 def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> None:
     n = seed(demo, "n", None, started=int(time.time()))  # the demo dead_s is 90 s
     (bdir(demo) / f"{n}.json").unlink()
