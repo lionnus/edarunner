@@ -7,7 +7,7 @@ an empty head node to a first batch with a watcher behind it.
 ## Install
 
 The controller, `edr`, runs on the head node. It needs Python 3.11 or
-newer and nothing outside the standard library.
+newer; `rich`, its one dependency, comes with the install.
 
 ```sh
 uv tool install git+https://github.com/lionnus/edarunner

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `edr` draws its tables with `rich`, the one dependency of the
+  controller: colour on a terminal, plain text in a pipe, under
+  `NO_COLOR` and in the boards of the bot; `--json` is unchanged.
+- `edr hosts` shows cores, RAM, scratch and GPUs as used or free of
+  total, with a bar; the probe reports the totals and reads `nvidia-smi`
+  when the host has it.
+
 ## 0.1.0 (2026-09-27)
 
 The first release.
