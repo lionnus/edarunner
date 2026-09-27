@@ -57,7 +57,8 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    `tasks.toml`; `load_batch` reads one `jobs/<batch>.toml`.
 2. `launch.plan` pins the date, computes the build tag and the run id,
    places each job on a host, and renders every string of the job into
-   a spec. A problem lands in the plan, not in an exception.
+   a spec, the JSON file the driver reads. A problem lands in the plan,
+   not in an exception.
 3. `launch.launch` publishes the driver, syncs the checked-out tree with
    `rsync --delete` behind the guard, writes the spec by rename, records
    the run and an event, and starts the driver. A job without a host is
@@ -71,7 +72,7 @@ A channel never imports `cli` or `watch`; it gets its commands through the
 6. `export.export` selects the newest run per label of one source tag
    from the database and copies its results with a manifest.
 
-The read commands (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
+The read commands (`status`, `events`, `hosts`, `tools`, `metrics`, `check`)
 ingest the heartbeats too, so the board follows the driver and not the
 last watcher cycle; that step is idempotent.
 

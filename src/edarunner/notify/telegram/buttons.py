@@ -63,7 +63,7 @@ class Buttons:
             elif action == "keep12":
                 note = self.actions.keep(handle, 12, "telegram") or f"kept {handle} for 12 h"
             elif action == "ack":
-                note = self.actions.ack(handle, "telegram") or f"acked {handle}"
+                note = self.actions.ack(handle, "telegram") or f"acknowledged {handle}"
             elif action == "stopyes":
                 note = self.actions.stop_after_task(handle, "telegram", "stopped from a telegram button")
                 keys = alert

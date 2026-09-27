@@ -8,8 +8,8 @@ as well for a person in a hurry.
 
 Operate the farm through `edr` and nothing else. Do not call `ssh`,
 `rsync`, `rm`, `kill`, `tmux` or the driver yourself. Every `edr` command
-runs the guards, writes an event with the actor and the reason, and has a
-dry twin. A hand command has none of that.
+runs the guards, writes an event with the actor and the reason, and takes
+`--dry-run`. A hand command has none of that.
 
 ## Every call with --json
 
@@ -36,6 +36,9 @@ dead        a@demo                       stage:pnr
     edr run a@demo --stage pnr --from cts
 ```
 
+`a@demo` is a handle. A handle names one run: `label@batch`, a run id
+prefix, or `#n` from the last board that `edr status` printed.
+
 `docs/reference/states.md` gives the proposed command per state. Check
 this before you run it:
 
@@ -56,7 +59,7 @@ last phase after the driver dies.
 
 ## Dry run first
 
-Run the dry twin before every write: `--dry-run` on `checkout`, `plan`,
+Do a dry run before every write: `--dry-run` on `checkout`, `plan`,
 `launch`, `run`, `keep`, `export`, `stop` and `retire`. Read every path in
 the output. A launch shows the run id, the host and the root of every job,
 and a retire shows every `rm -rf` target. Then run the command without the
@@ -108,7 +111,8 @@ when a long task ends or needs a person.
   `edr keep` and `edr stop --after-task` write the keep and stop files, and
   `edr launch` publishes the driver by rename.
 - Never relaunch a batch under its old name to get new directories.
-  `launch` refuses a job whose spec exists. Use a new batch name.
+  `launch` refuses a job whose spec, the run's JSON file in the state
+  directory, exists. Use a new batch name.
 - Never stop `edr watch` to make the board quiet. Use `edr keep <handle>
   --ack` on the run instead.
 - Never write a site string into the public repository: a host name, a

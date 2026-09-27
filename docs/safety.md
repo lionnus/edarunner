@@ -69,7 +69,7 @@ the prefix `dry:`, and writes nothing:
 flow dry, then checks that the state directory does not exist, the scratch
 is empty, and the worktree is the same byte for byte.
 
-Run the dry twin first. Read every target path. Then run the command.
+Do the dry run first. Read every target path. Then run the command.
 
 ## Limits
 

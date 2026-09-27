@@ -213,7 +213,7 @@ class Commands:
     def cmd_ack(self, args: list[str]) -> str:
         """Cancel the pending kill of a run."""
         h = handle(args)
-        return self.actions.ack(h, "telegram") or f"acked {h}"
+        return self.actions.ack(h, "telegram") or f"acknowledged {h}"
 
     def cmd_stop(self, args: list[str]) -> str:
         """Stop a run after its running task."""

@@ -1,6 +1,6 @@
 # The Telegram bot
 
-The bot is a thread of `edr watch`. It sends alerts with two buttons,
+The bot is a thread of `edr watch`. It sends alerts with three buttons,
 keeps one pinned board message, and answers commands from one chat. It
 uses long polling over outbound HTTPS, so it needs no open port and no
 webhook. `docs/reference/configuration.md` lists the keys of

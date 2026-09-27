@@ -43,8 +43,11 @@ the time of the last digest.
 
 `docs/reference/states.md` lists every state: the test that finds it,
 whether it alerts, what the watcher does after `grace_s`, its mark, and
-the command `edr status --triage` proposes. A live run gets its state
-from the heartbeat and the database; a finished run from its phase. A job
+the command `edr status --triage` proposes. The state is the watcher's
+verdict on a run; the phase is the driver's word in the heartbeat for
+where the run is or how it ended, and `docs/running.md` lists the
+phases. A live run gets its state from the heartbeat and the database; a
+finished run from its phase. A job
 without a host is `queued`, and a `queued` run that `edr stop` marked
 `stopped` never starts.
 
@@ -57,7 +60,8 @@ holds off the `superseded` stop.
 The watcher sends one alert per run and state for the states that
 `docs/reference/states.md` marks. A repeat with a new reason edits the
 earlier message in place, so an alert never repeats. An alert carries
-two buttons, keep 12 h and ack. The only channel today is Telegram;
+three buttons: keep 12 h, acknowledge (`ack`) and stop. The only channel
+today is Telegram;
 `docs/telegram.md` explains it.
 
 ## The boards

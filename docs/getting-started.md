@@ -102,7 +102,8 @@ groups and metrics.
 edr check
 ```
 
-`check` loads every file, imports the hooks, probes every host, names
+`check` loads every file, imports the hooks, probes every host (asks it
+over ssh for its cores, load, RAM and scratch), names
 every tool the head node lacks, and plans every batch under `jobs/`. It
 prints one `problem:` line per fault and exits 1, or `ok: 2 hosts, 3
 stages, 5 metrics, 1 batches` and exits 0.
@@ -151,7 +152,8 @@ edr launch sweep1
 
 Read every path of the dry run before the real launch. `launch` copies
 the driver into the state directory, syncs the checked-out tree to each host,
-writes one spec per run and starts one driver per run. A job that no host
+writes one spec per run, the JSON file the driver reads, and starts one
+driver per run. A job that no host
 fits is queued, and the watcher starts it when a host frees up. Confirm
 within a minute that `edr status` shows a phase past `setup`.
 
@@ -163,6 +165,10 @@ edr status --live             # asks each host whether the driver exists
 edr status base@sweep1        # one run: stages, metrics, log tail
 edr status --triage           # every run not running, with one proposed command
 ```
+
+`base@sweep1` is a handle. A handle names one run: `label@batch`, a run
+id prefix, or `#n` from the last board that `edr status` printed. Every
+command that acts on one run takes a handle.
 
 ### 9. Run the watcher
 
