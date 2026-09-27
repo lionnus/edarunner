@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from edarunner import cli
 from test_cli import demo, edr  # noqa: F401 - the fixture and the runner of test_cli
@@ -17,3 +18,10 @@ def test_main_reports_an_unhandled_exception(capsys, caplog, monkeypatch) -> Non
     assert code == 1 and json.loads(out)["code"] == 1
     assert "edr: \"runs: unknown columns ['x']\"" in err
     assert caplog.records[-1].exc_info is not None
+
+
+def test_read_verbs_create_no_database(demo: Path, capsys) -> None:
+    assert edr(capsys, "status")[0] == 0
+    assert edr(capsys, "events")[0] == 2
+    assert edr(capsys, "check")[0] == 0
+    assert not (demo / "data").exists()

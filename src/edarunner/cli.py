@@ -75,6 +75,9 @@ def _since(text: str) -> int:
     return int(time.time() - secs)
 
 
+_READ_VERBS = frozenset({"status", "events", "hosts", "lic", "metrics", "check"})
+
+
 class Ctx:
     """Lazy project, ledger and ssh of one invocation, plus the payload of --json."""
 
@@ -94,8 +97,9 @@ class Ctx:
     def ledger(self) -> Ledger:
         if self._ledger is None:
             path = self.project.data / "edr.db"
-            # A dry run writes nothing, not even an empty database.
-            self._ledger = Ledger(":memory:") if self.a.dry_run and not path.exists() else Ledger(path)
+            # A read verb or a dry run creates nothing, not even an empty database.
+            memory = not path.exists() and (self.a.dry_run or self.a.verb in _READ_VERBS)
+            self._ledger = Ledger(":memory:") if memory else Ledger(path)
         return self._ledger
 
     @functools.cached_property
@@ -131,9 +135,10 @@ class Ctx:
         return b
 
     def refresh(self, batch: str | None = None) -> None:
-        """Ingest the heartbeat files of the shown batches, so the board follows the driver, not the last watcher cycle."""
-        if not (self.project.data / "edr.db").exists():
-            return
+        """Ingest the heartbeat files of the shown batches, so the board follows the driver, not the last watcher cycle.
+
+        This is the watcher's own first step and idempotent, so a read verb may run it.
+        """
         heartbeats = watch.read_heartbeats(self.project, {batch} if batch else None)
         if heartbeats:
             watch.ingest(self.ledger, heartbeats)
