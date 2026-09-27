@@ -440,6 +440,27 @@ def test_project_env_is_rendered_over_the_site_env(env) -> None:
         assert k in e
 
 
+def test_project_env_builds_on_the_site_env(env) -> None:
+    project, batch, ssh, db = env
+    project.site.env = {"PATH": "/opt/tools/bin:$PATH", "LM_LICENSE_FILE": "1717@lic", "TOOLS": "/opt/tools"}
+    project.env = {"PATH": "{root}/.venv/bin:$PATH", "LM_LICENSE_FILE": "2020@other",
+                   "LD_LIBRARY_PATH": "${TOOLS}/lib:$LD_LIBRARY_PATH", "COST": "$$5"}
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
+    e = a.spec["env"]
+    assert e["PATH"] == f"{a.root}/.venv/bin:/opt/tools/bin:$PATH"
+    assert e["LM_LICENSE_FILE"] == "2020@other"
+    assert e["TOOLS"] == "/opt/tools"
+    assert e["LD_LIBRARY_PATH"] == "/opt/tools/lib:$LD_LIBRARY_PATH" and e["COST"] == "$$5"
+
+
+def test_project_env_keeps_a_name_it_sets_itself(env) -> None:
+    project, batch, ssh, db = env
+    project.site.env = {"TOOLS": "/opt/tools"}
+    project.env = {"TOOLS": "/opt/new", "LIB": "$TOOLS/lib"}
+    e = launch.plan(project, batch, ssh, db, date=DATE)[0].spec["env"]
+    assert e["TOOLS"] == "/opt/new" and e["LIB"] == "$TOOLS/lib"
+
+
 def test_tree_id_survives_a_chain_of_reuse(env) -> None:
     project, batch, ssh, db = env
     db.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
