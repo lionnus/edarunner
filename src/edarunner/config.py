@@ -10,7 +10,8 @@ import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import fields
 from pathlib import Path
-from typing import Any, TypeVar
+from types import NoneType, UnionType
+from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
     Batch, BotCommand, Budget, Host, Job, Licence, Limits, Metric, Needs,
@@ -124,10 +125,34 @@ def _schema(raw: Mapping[str, Any], file: Path) -> None:
         raise ConfigError(f"{file}: schema {raw['schema']!r} is not 1")
 
 
+def _typed(value: object, hint: Any) -> bool:
+    """True when `value` fits `hint`: a scalar by its class, a container by its outer type."""
+    origin = get_origin(hint)
+    if origin in (Union, UnionType):
+        return any(_typed(value, a) for a in get_args(hint))
+    cls = origin or hint
+    if isinstance(value, bool):
+        return cls is bool
+    if cls is float and isinstance(value, int):
+        return True
+    return isinstance(value, cls)
+
+
+def _type_name(hint: Any) -> str:
+    origin = get_origin(hint)
+    if origin in (Union, UnionType):
+        return " or ".join(_type_name(a) for a in get_args(hint) if a is not NoneType)
+    return (origin or hint).__name__
+
+
 def _build(cls: type[T], raw: object, file: Path, keypath: str, **fixed: Any) -> T:
-    """Fill a dataclass from a table; the fields of the model are the allowed keys."""
+    """Fill a dataclass from a table; the fields of the model are the allowed keys and types."""
     allowed = {f.name for f in fields(cls)} - set(fixed)  # type: ignore[arg-type]
     raw = _table(raw, allowed, file, keypath)
+    hints = get_type_hints(cls)
+    for key, value in raw.items():
+        if not _typed(value, hints[key]):
+            raise ConfigError(f"{file}: {_dot(keypath, key)} must be {_type_name(hints[key])}, not {type(value).__name__}")
     try:
         return cls(**fixed, **raw)
     except TypeError as e:
@@ -154,14 +179,15 @@ def load_site(path: PathLike) -> Site:
                 for n, t in _table(raw.get("licences", {}), None, file, "licences").items()}
     telegram = None
     if "telegram" in raw:
-        tg = _table(raw["telegram"], {"token_file", "chat_id", "commands"}, file, "telegram")
+        tg = _table(raw["telegram"], {f.name for f in fields(Telegram)}, file, "telegram")
         commands = {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
                     for n, t in _table(tg.get("commands", {}), None, file, "telegram.commands").items()}
-        telegram = Telegram(
-            token_file=_path(tg.get("token_file", "~/.config/edarunner/telegram.token"), file),
-            chat_id=_need(tg, "chat_id", file, "telegram"),
-            commands=commands,
-        )
+        telegram = _build(Telegram, {
+            **tg,
+            "token_file": _path(tg.get("token_file", "~/.config/edarunner/telegram.token"), file),
+            "chat_id": _need(tg, "chat_id", file, "telegram"),
+            "commands": commands,
+        }, file, "telegram")
     return Site(
         path=file,
         scratch=_need(raw, "scratch", file, ""),
