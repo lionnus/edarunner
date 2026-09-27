@@ -123,7 +123,7 @@ def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
 def last_reply(bot: TelegramBot) -> str:
     """The reply under its bold first line, which names the project."""
     head, _, body = bot.api.of("sendMessage")[-1]["text"].partition("\n")
-    assert head.startswith("<b>demo · ") and head.endswith("</b>")
+    assert head.startswith("<b>demo: ") and head.endswith("</b>")
     return body
 
 
@@ -168,10 +168,10 @@ def test_bad_handle_is_an_answer(bot):
 
 def test_help_groups_builtins_and_custom(bot):
     bot.handle_update(msg("/nothing"))
-    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo · help</b>\n<b>Look</b>\n/status [handle] · ")
+    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo: help</b>\n<b>Look</b>\n/status [handle]: ")
     text = last_reply(bot)
-    assert "<pre>" not in text and "/keep &lt;handle&gt; [hours] · add hours, default 12" in text
-    assert "<b>Custom</b>\n/echo &lt;dir&gt; · echo a dir" in text
+    assert "<pre>" not in text and "/keep &lt;handle&gt; [hours]: add hours, default 12" in text
+    assert "<b>Custom</b>\n/echo &lt;dir&gt;: echo a dir" in text
     assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Custom</b>"]
 
 
@@ -322,13 +322,13 @@ def test_alert_send_edits_a_repeat(bot):
     mid = bot.send("hung", "run1", "hung a@demo\nno progress <3 h", alert_buttons("a@demo"), "edr stop a@demo --why hung")
     sent = bot.api.of("sendMessage")[-1]
     assert mid == "1" and sent["disable_notification"] is False
-    assert sent["text"] == "🔴 <b>demo · hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
+    assert sent["text"] == "🔴 <b>demo: hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
     assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo"]
     assert bot.send("hung", "run1", "no progress for 3 h") == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
     assert bot.send("hung", "run2", "x") == "2"
     bot.edit("2", "resolved <ok>")
-    assert bot.api.of("editMessageText")[-1]["text"] == "<b>demo · resolved &lt;ok&gt;</b>"
+    assert bot.api.of("editMessageText")[-1]["text"] == "<b>demo: resolved &lt;ok&gt;</b>"
 
 
 def test_board_is_created_once_then_edited(bot, tmp_path):
@@ -341,7 +341,7 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     assert len(bot.api.of("sendMessage")) == 1
     edit = bot.api.of("editMessageText")[-1]
     assert edit["message_id"] == 1 and edit["reply_markup"] is None
-    assert re.fullmatch(r"<b>demo · board \d\d:\d\d</b>\nboard v2", edit["text"])
+    assert re.fullmatch(r"<b>demo: board \d\d:\d\d</b>\nboard v2", edit["text"])
     # A new bot on the same ledger edits the same message.
     again = TelegramBot(bot.site, bot.project, bot.ledger, bot.actions, str(bot.tg.token_file))
     again.api = FakeApi()
@@ -471,7 +471,7 @@ def test_a_long_reply_is_cut_at_a_line(bot):
 
 def test_an_alert_without_a_state_keeps_its_title(bot):
     bot.send("watch", "", "watch stale\nno watch.json")
-    assert bot.api.of("sendMessage")[-1]["text"] == "<b>demo · watch stale</b>\nno watch.json"
+    assert bot.api.of("sendMessage")[-1]["text"] == "<b>demo: watch stale</b>\nno watch.json"
 
 
 def in_topic(update: dict, thread: int) -> dict:
@@ -537,7 +537,7 @@ def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
     bot.topic = 17
     assert bot.post("note", "a &amp; b", silent=True) is True
     sent = bot.api.of("sendMessage")[-1]
-    assert sent["text"] == "<b>demo · note</b>\na &amp; b"
+    assert sent["text"] == "<b>demo: note</b>\na &amp; b"
     assert sent["disable_notification"] is True and sent["message_thread_id"] == 17
 
     def refuse(method, params, files=None):

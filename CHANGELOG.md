@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- No bot text uses a middle dot as a separator: the first line is
+  `<project>: <title>`, and a run line, a host line and the counts
+  separate their parts with commas.
 - `edr notify TEXT [--silent] [--dry-run]` sends one message through
   every notifier, for example from a Claude Code hook.
 - A command sent as a reply to an alert acts on the run of the alert:
@@ -10,7 +13,7 @@
 - `[telegram] topic_id` puts every message of a project into one topic
   of a forum group; the bot ignores a command from another topic.
 - `/hosts` shows every resource as used of total, in one order:
-  `cores 21/32 · ram 93/376 GB · scratch 195/1538 GB · gpu 0/1`. `/lic`
+  `cores 21/32, ram 93/376 GB, scratch 195/1538 GB, gpu 0/1`. `/lic`
   shows the seats used of the pool.
 - `edr hosts` marks each resource from 🟢 to 🔴 by the thresholds of a
   new `[marks]` table in `site.toml`, which `edr.toml` may override. A
