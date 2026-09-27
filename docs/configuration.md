@@ -29,6 +29,7 @@ plans every batch under `jobs/`, so a wrong file stops there.
 | `state` | the state directory, on a filesystem every host mounts | `"~/.edr/{project}"` |
 | `data` | the head-node data directory: `edr.db`, `results/`, `board/` | `"data"` |
 | `run_prefix` | the run tree prefix under the host scratch | `"{user}/edr/{project}"` |
+| `telegram_poll` | `false`: this project's watcher sends alerts and the board but does not poll for commands. One project per bot token polls | `true` |
 
 `site`, `state`, `data`, `source.repo` and `source.worktrees` render at
 load time with `{project}`, `{project_root}`, `{user}` and `{site_dir}`.

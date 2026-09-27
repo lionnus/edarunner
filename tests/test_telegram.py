@@ -89,7 +89,7 @@ def make_site(tmp_path: Path, chat_id: int = CHAT, mode: int = 0o600, user_id: i
 def make_project(tmp_path: Path) -> SimpleNamespace:
     # A Project needs every stage; the bot reads three fields of it.
     edr = tomllib.loads((DEMO / "edr.toml").read_text())
-    return SimpleNamespace(project=edr["project"], root=DEMO, data=tmp_path / "data")
+    return SimpleNamespace(project=edr["project"], root=DEMO, data=tmp_path / "data", telegram_poll=True)
 
 
 @pytest.fixture
@@ -255,6 +255,19 @@ def test_press_by_another_user_needs_no_user_id(bot, caplog):
     assert ("ack", ("a@demo", "telegram"), {}) in bot.actions.calls
     bot.handle_update(msg("/status", user=999))
     assert last_reply(bot) == pre("status_text ok")
+
+
+def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
+    site = make_site(tmp_path)
+    project = make_project(tmp_path)
+    project.telegram_poll = False
+    b = TelegramBot(site, project, FakeLedger(), FakeActions(), str(site.telegram.token_file))
+    monkeypatch.setattr(b, "api", FakeApi())
+    b.start()
+    b.stop()
+    assert b._thread is None and b.api.of("setMyCommands") == []
+    b.send("dead", "a@demo", "no heartbeat")
+    assert len(b.api.of("sendMessage")) == 1
 
 
 def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):

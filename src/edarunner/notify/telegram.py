@@ -182,6 +182,9 @@ class TelegramBot(Notifier):
 
     def start(self) -> None:
         """Publish the command menu and start the long-poll thread."""
+        if not self.project.telegram_poll:
+            log.info("telegram: alerts only; another project polls this bot")
+            return
         menu = [{"command": c, "description": h[:256]} for c, h in BUILTINS.items()]
         menu += [{"command": n, "description": (c.help or n)[:256]} for n, c in self.tg.commands.items()]
         self._call("setMyCommands", {"commands": menu})
