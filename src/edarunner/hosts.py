@@ -175,7 +175,8 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
     runs = sum(1 for ln in sections[3] if ln.split(None, 1)[0] == me)
     return HostProbe(
         host=host,
-        free_cores=round(int(ncpu) - float(load), 1),
+        # A load above the core count leaves no core free, not a negative count.
+        free_cores=max(0.0, round(int(ncpu) - float(load), 1)),
         free_ram_gb=round(int(mem_kb) / 2**20, 1),
         mount=mount,
         free_gb=round(free_kb / 2**20, 1),
@@ -243,10 +244,15 @@ class Ssh:
 
     def pid_alive(self, host: str, pid: int) -> bool:
         """True when `pid` runs on `host`; HostError when the host did not answer."""
-        rc, _, err = self.run(host, f"ps -p {int(pid)} -o pid=")
+        return int(pid) in self.pids_alive(host, [pid])
+
+    def pids_alive(self, host: str, pids: list[int]) -> set[int]:
+        """The pids of `pids` that run on `host`, by one `ps`; HostError when the host did not answer."""
+        wanted = {int(p) for p in pids}
+        rc, out, err = self.run(host, f"ps -p {','.join(str(p) for p in sorted(wanted))} -o pid=")
         if rc not in (0, 1):
             raise HostError(f"{host}: rc {rc}: {err.strip()}")
-        return rc == 0
+        return {int(t) for t in out.split() if t.isdigit()} & wanted
 
     def kill_pgid(self, host: str, pgid: int, sig: str = "TERM") -> bool:
         """Signal the process group `pgid` on `host`; True when kill returned 0."""

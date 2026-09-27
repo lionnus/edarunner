@@ -29,6 +29,7 @@ commands, the report files and the numbers in them.
 | `hosts.py` | the ssh wrapper with timeouts, the host probe, placement, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
 | `launch.py` | spec rendering, `plan`, `launch`, `stop` |
+| `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`, picked by `[scheduler] backend` |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
@@ -66,7 +67,8 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    not in an exception.
 3. `launch.launch` publishes the driver, syncs the checked-out tree with
    `rsync --delete` behind the guard, writes the spec by rename, records
-   the run and an event, and starts the driver. A job without a host is
+   the run and an event, and starts the driver through the backend,
+   which returns the handle that `runs.handle` keeps. A job without a host is
    a `queued` row.
 4. The driver writes the heartbeat by rename, the logs into the tree,
    and the task queue in the state directory.

@@ -24,6 +24,10 @@ starts a driver only through `tests/helpers_driver.py`. No test reaches
 that needs HTTP patches `urlopen` itself. A change to a module comes
 with a test in `tests/test_<module>.py`.
 
+`tests/helpers_backend.py` holds `FakeBackend`. It records every submit
+and stop, and answers `alive` from a scripted list of states per handle.
+A watcher test passes it as `backend=` to `watch.cycle`.
+
 `tests/test_driver.py::test_compiles_on_py36` needs a Python 3.6. It
 uses `EDR_DRIVER_PYTHON`, else `python3.6` on `PATH`, else
 `/usr/bin/python3`, and skips without a 3.6.

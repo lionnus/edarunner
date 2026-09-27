@@ -132,6 +132,21 @@ def test_site_tools_and_host_tools(tmp_path):
         config.load_project(root)
 
 
+def test_scheduler_backend(tmp_path):
+    root = demo_copy(tmp_path)
+    site = root / "site.toml"
+    text = site.read_text()
+    assert config.load_project(root).site.scheduler_backend == "ssh"
+    site.write_text(text + '\n[scheduler]\nbackend = "local"\n')
+    assert config.load_project(root).site.scheduler_backend == "local"
+    for extra, match in (('backend = "condor"', "scheduler.backend 'condor' is not one of ssh, local"),
+                         ('backend = "ssh"\nqueue = "x"', "unknown key 'scheduler.queue'"),
+                         ('backend = "local"\n[hosts.far]\ncores = 1\nram_gb = 1', "may name only local")):
+        site.write_text(text + "\n[scheduler]\n" + extra + "\n")
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)
+
+
 def test_int_fits_a_float_field(tmp_path):
     p = config.load_project(demo_copy(tmp_path, "disk_gb = 1 }", "disk_gb = 2 }"))
     assert p.stages["synth"].budget.disk_gb == 2 and p.tasks["k_big"].budget.hours == 2

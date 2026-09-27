@@ -18,10 +18,11 @@ import os
 import posixpath
 import shlex
 import shutil
+import socket
 import sys
 import textwrap
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from enum import IntEnum
 from pathlib import Path
 from string import Template
@@ -32,11 +33,12 @@ from rich.table import Table
 from rich.text import Text
 
 from . import __version__, analysis, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
+from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
 from .db import Database, network_fs
-from .model import Batch, Job, Project
+from .model import Batch, Job, Project, Stage
 from .notify import make_notifiers
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
@@ -63,7 +65,7 @@ _READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metric
 
 
 class Ctx:
-    """Lazy project, db and ssh of one invocation, plus the payload of --json."""
+    """Lazy project, db, ssh and backend of one invocation, plus the payload of --json."""
 
     def __init__(self, a: argparse.Namespace) -> None:
         self.a = a
@@ -95,6 +97,10 @@ class Ctx:
         return Ssh(self.project.site)
 
     @functools.cached_property
+    def backend(self) -> Backend:
+        return make_backend(self.project.site, self.ssh)
+
+    @functools.cached_property
     def console(self) -> Console:
         return board.console()
 
@@ -102,6 +108,7 @@ class Ctx:
         """Close the database when a command opened it."""
         if self._db is not None:
             self._db.close()
+            self._db = None
 
     def emit(self, out: str | RenderableType, data: Any = None) -> None:
         """Print `out`; keep `data` (default: the text) for --json."""
@@ -453,18 +460,21 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def _mark_live(c: Ctx, rows: list[Row]) -> int:
-    """Ask each host whether the driver of a live run exists; a gone driver marks the run dead."""
+    """Ask the backend, once, whether the driver of each live run exists; a gone driver marks the run dead."""
+    handles: dict[int, Handle] = {}
+    for i, r in enumerate(rows):
+        hb = c.heartbeat(r) if board.is_live(r) else {}
+        if hb.get("driver_pid") and r.get("host") and (h := run_handle(c.backend.name, r, hb)):
+            handles[i] = h
+    alive = c.backend.alive(list(handles.values())) if handles else {}
     code = Exit.DONE
-    for r in rows:
-        pid = c.heartbeat(r).get("driver_pid") if board.is_live(r) else None
-        if not pid or not r.get("host"):
-            continue
-        try:
-            r["alive"] = c.ssh.pid_alive(str(r["host"]), int(pid))
-        except HostError:
-            r["alive"], code = None, Exit.HOSTS
-        if r["alive"] is False:
-            r["state"] = "dead"
+    for i, h in handles.items():
+        state = alive[h][0]
+        rows[i]["alive"] = None if state is Live.UNKNOWN else state is not Live.GONE
+        if state is Live.UNKNOWN:
+            code = Exit.HOSTS
+        elif state is Live.GONE:
+            rows[i]["state"] = "dead"
     return code
 
 
@@ -675,7 +685,7 @@ def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     """Render every job of a batch; writes nothing."""
-    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db)
+    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db, backend=c.backend)
     lines = [Text.assemble((p.run_id, "bold"), ": ", (p.host or "queued", "" if p.host else "cyan"), " ", (str(p.root), "dim"),
                            *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
     c.emit(Text("\n").join(lines),
@@ -688,7 +698,7 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     """Start one driver per job of a batch."""
     only = a.only.split(",") if a.only else None
     rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.db, dry_run=a.dry_run, only=only,
-                         allow_dirty=a.allow_dirty)
+                         allow_dirty=a.allow_dirty, backend=c.backend)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
     c.emit(Text.assemble((f"{started} started", "green" if started else ""), ", ", (f"{queued} queued", "cyan" if queued else ""),
@@ -735,7 +745,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
     job.label = f"{job.label}.{a.stage}"
     batch.batch, batch.jobs = str(row["batch"]), [job]
     state = project.state_dir
-    (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT))
+    (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT), backend=c.backend)
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
         return Exit.REFUSED
@@ -755,9 +765,60 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
                          "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
                          "tree_id": p.values.get("tree_id") or p.run_id})
     c.db.add_event("user", p.run_id, "continue", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
-    launch.start_driver(c.ssh, str(p.host), driver, spec_path, spec_path.with_name(f"{p.run_id}.driver.log"),
-                        project.site.env)
+    launch.submit(c.backend, c.db, project, p.run_id, p.host, spec_path, driver)
     return Exit.DONE
+
+
+def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
+    """Record a command as a run of the project, then replace this process with the driver of that run."""
+    argv = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
+    if not argv:
+        raise Refuse("track needs a command after --")
+    project = c.project
+    stage = project.stages.get(a.stage) or Stage(name=a.stage)
+    if stage.is_group:
+        raise Refuse(f"stage {a.stage} is a task group; track runs one command")
+    root = Path(a.root or os.getcwd()).resolve()
+    if not root.is_dir():
+        raise Refuse(f"'{root}' is not a directory")
+    try:
+        src = a.src or runid.src_tag(root)
+    except runid.GitError:
+        raise Refuse(f"{root} is not a git tree; pass --src") from None
+    date, host = time.strftime(launch.DATE_FMT), socket.gethostname()
+    job = Job(label=a.label, config=a.label)
+    batch = Batch(batch=a.batch, source=src, jobs=[job], path=project.root / "jobs" / f"{a.batch}.toml")
+    v = config.placeholders(project, date=date, batch=a.batch, label=a.label, config=a.label, build_tag="track",
+                            src=src, overrides={})
+    run_id = config.render(project.source.run_id, v)
+    assert_run_id(run_id)
+    v.update(run_id=run_id, tree_id=run_id, host=None, mount="", root=str(root))
+    # The command runs as given; only the stage's steps, progress, budget, retry and tools come from edr.toml.
+    spec = launch._spec(project, batch, job, [], [], v, stages=[replace(stage, cmd="", resume="")])
+    spec["stages"][0]["cmd"] = shlex.join(argv)
+    spec["collect"] = a.collect
+    plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, src=src)
+    spec_path = project.state_dir / a.batch / f"{run_id}.spec.json"
+    if spec_path.exists():
+        raise Refuse(f"already tracked: {spec_path} exists")
+    driver = sync.publish_driver(project.state_dir, launch.DRIVER_SRC, a.dry_run)
+    launch.write_spec(project.state_dir, a.batch, plan_, driver, a.dry_run)
+    if a.dry_run:
+        c.emit(json.dumps(spec, indent=1), spec)
+        return Exit.DONE
+    now = int(time.time())
+    c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": src, "run_date": date})
+    c.db.upsert_run({"run_id": run_id, "batch": a.batch, "label": a.label, "config": a.label, "build_tag": "track",
+                     "src": src, "dirty": int("-dirty" in src), "host": host, "root": str(root), "created": now,
+                     "phase": "setup", "state": "running", "started": now, "tree_id": run_id,
+                     "handle": str(Handle("track", f"{host}:{os.getpid()}", host))})
+    c.db.add_event("user", run_id, "track", shlex.join(argv))
+    print(f"{run_id}: {a.stage} on {host} {root}", file=sys.stderr)
+    c.close()
+    sys.stdout.flush()
+    # The driver keeps this pid, so a signal to the job reaches it and its exit code is the job's.
+    os.execv(sys.executable, [sys.executable, str(driver), str(spec_path)])
+    return Exit.REFUSED  # not reached
 
 
 def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
@@ -865,7 +926,7 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.NOTHING
     # The driver's own handler ends the run in seconds; limits.grace_s is the watcher's delay.
     ok = launch.stop(c.ssh, c.db, row, hb, after_task=a.after_task, now=a.now, grace_s=30 if a.now else 60,
-                     dry_run=a.dry_run, why=a.why, state=c.project.state_dir)
+                     dry_run=a.dry_run, why=a.why, state=c.project.state_dir, backend=c.backend)
     c.data = {"run_id": row["run_id"], "stopped": ok}
     if not ok and not a.now:
         print(f"{row['run_id']}: still alive; use --now")
@@ -886,8 +947,8 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         run_id, hb = row["run_id"], c.heartbeat(row)
         host, root = row.get("host") or hb.get("host"), row.get("root") or hb.get("root")
         targets = _retire_targets(c, row, hb, str(root), a) if root else []
-        pid = hb.get("driver_pid")
-        if root and board.is_live(hb) and pid and c.ssh.pid_alive(str(host), int(pid)):
+        pid, handle = hb.get("driver_pid"), run_handle(c.backend.name, row, hb)
+        if root and board.is_live(hb) and pid and handle and not gone(c.backend, handle):
             raise Refuse(f"{run_id}: driver {pid} is alive on {host}; stop it first")
         # A driver writes its first heartbeat within seconds; none after dead_s means it never came up.
         if root and not hb and board.is_live(row) and time.time() - (row.get("started") or 0) < project.limits.dead_s:
@@ -1003,7 +1064,7 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     """The watcher: one cycle, a check, or the loop with the bot."""
     project = c.project
     if a.dry_run:
-        watch.cycle(project, c.ssh, c.db, [], dry_run=True)
+        watch.cycle(project, c.ssh, c.db, [], dry_run=True, backend=c.backend)
         return Exit.DONE
     notifiers = _notifiers(c)
     if a.check:
@@ -1322,6 +1383,33 @@ def _parser() -> argparse.ArgumentParser:
         each.add_argument("--on", metavar="HOST", help="the host; default auto")
         each.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
         each.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
+    s = command("track", "run a command under the driver here, as a run of the project", """
+        Runs one command in the foreground under the driver, on this machine, and
+        records it as a run in the batch --batch (default track). A lab with its
+        own scheduler writes edr track into its job script; the board, the alerts,
+        the metrics and export then see the run.
+
+        The run is one stage named --stage. A stage of edr.toml with that name
+        gives its steps, progress, budget, retry and tools, so the gate and the
+        budget work; the command replaces its cmd. The tree is --root, default
+        the current directory, and the driver writes log/<stage>.log there. The
+        run id follows source.run_id with the label as config, track as the
+        build tag, and --src (default the source tag of the tree) as src.
+
+        edr track then replaces itself with the driver: the pid, the signals
+        and the exit code are the driver's. With --collect, the watcher copies
+        the stage's collect paths from the tree, which the head node must read
+        at the same path, and extracts the metrics when the run ends. Without
+        it, the watcher collects nothing. --dry-run prints the spec and runs
+        nothing.
+        """, write=True, exits={Exit.DONE: "the command ended done; once the driver runs, the code is its phase code"})
+    s.add_argument("--label", required=True, metavar="L", help="the label of the run")
+    s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
+    s.add_argument("--batch", default="track", metavar="B", help="the batch; default track")
+    s.add_argument("--src", metavar="TAG", help="the source tag; default the tag of the tree")
+    s.add_argument("--root", metavar="DIR", help="the run tree; default the current directory")
+    s.add_argument("--collect", action="store_true", help="the watcher collects the stage and extracts its metrics")
+    s.add_argument("cmd", nargs=argparse.REMAINDER, help="the command, after --")
     s = command("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
         Writes the keep file of a live run. --hours (default 12 when --ack is
         absent) adds hours to the budget of the running stage or task; --ack

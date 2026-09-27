@@ -78,11 +78,15 @@ def collect_run(
     heartbeat: dict,
     dry_run: bool = False,
     step_final_s: int = 600,
+    host: str = "",
 ) -> CollectResult:
-    """Copy log/ and the collect paths of every finished stage and task of `run` into data/results."""
+    """Copy log/ and the collect paths of every finished stage and task of `run` into data/results.
+
+    `host` is where the tree is read, as the backend names it; empty means the run's host."""
     spec = load_spec(project, run)
     only = spec_stages(spec)
-    c = _Copier(project, ssh, db, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), spec.get("vars"))
+    c = _Copier(project, ssh, db, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), spec.get("vars"),
+                host)
     if c.result.failures:
         return c.result
     finished, running = stage_state(project, heartbeat, only)
@@ -147,7 +151,7 @@ def restore_on_request(
 class _Copier:
     def __init__(
         self, project: Project, ssh: Ssh, db: Database, run: dict, heartbeat: dict, dry_run: bool,
-        task_dirs: dict[str, str] | None = None, job_vars: dict[str, str] | None = None,
+        task_dirs: dict[str, str] | None = None, job_vars: dict[str, str] | None = None, host: str = "",
     ) -> None:
         self.project, self.ssh, self.db, self.dry_run = project, ssh, db, dry_run
         self.task_dirs = task_dirs or {}
@@ -155,7 +159,7 @@ class _Copier:
         scalars = {k: v for k, v in {**heartbeat, **run}.items() if isinstance(v, (str, int, float))}
         self.values = placeholders(project, **scalars, vars=job_vars or {})
         self.run_id = str(self.values.get("run_id", ""))
-        self.host = str(self.values.get("host", ""))
+        self.host = host or str(self.values.get("host", ""))
         self.root = str(self.values.get("root", ""))
         try:
             assert_run_id(self.run_id)

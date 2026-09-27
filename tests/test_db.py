@@ -160,7 +160,7 @@ def test_old_schema_migrates_on_open(tmp_path):
         assert not {"kv", "params"} & tables and {"store", "parameters"} <= tables
         assert db.conn.execute("SELECT value FROM parameters WHERE run_id='r1'").fetchone()[0] == "0"
         assert db.get_store("last_board") == ["r1"]
-        assert "tree_id" in db._table_columns("runs")
+        assert {"tree_id", "handle"} <= set(db._table_columns("runs"))
     with Database(path) as db:
         assert db.get_store("last_board") == ["r1"]
 
