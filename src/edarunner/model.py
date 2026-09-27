@@ -88,7 +88,6 @@ class Retry:
 @dataclass
 class Stage:
     name: str
-    after: str | dict[str, str] = ""  # "", "pnr", or {"stage": "pnr", "step": "route"}
     cmd: str = ""
     resume: str = ""
     cwd: str = "."
