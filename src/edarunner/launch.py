@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import string
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -161,10 +162,17 @@ def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[
 
 
 def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
-    """The site env, then the project env rendered per run; `$VAR` expands on the host."""
+    """The site env, then the project env rendered per run.
+
+    A project value builds on the site: its `$NAME` or `${NAME}` takes the site value of
+    NAME when the project does not set NAME under another key. The host expands the rest.
+    """
     env = dict(project.site.env)
     for k, val in project.env.items():
-        env[k] = config.render(val, v)
+        site = {n: s for n, s in project.site.env.items() if n == k or n not in project.env}
+        env[k] = string.Template.pattern.sub(
+            lambda m, site=site: site.get(m.group("named") or m.group("braced") or "", m.group(0)),
+            config.render(val, v))
     return env
 
 

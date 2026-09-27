@@ -29,6 +29,13 @@
   buttons, next to the command lines. A server that refuses the buttons
   with a 400 gets the push again without them.
 - docs/notify.md lists every message kind and what each channel gets.
+- A project `[env]` value that names a site variable as `$NAME` or
+  `${NAME}` gets the site's value in its place, so
+  `PATH = "{root}/.venv/bin:$PATH"` keeps the site's `PATH`. A project
+  value without such a reference still replaces the site's value.
+- The copy of the tree to the host always leaves out `.git`, also when
+  `[sync] exclude` does not list it. The `.git` file of a worktree points
+  at the head node, and git on the host failed on it.
 
 ## 0.3.0 (2026-09-27)
 

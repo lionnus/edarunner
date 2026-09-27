@@ -140,8 +140,9 @@ Three details matter in this shape:
 - `{tree_id}` names the tree the flow writes in. A run that reuses a tree
   has its own `{run_id}`, but the flow's run directory must keep the
   tree's id.
-- The flow needs its own `PATH`. The project `[env]` table carries it, and
-  `$PATH` expands on the host.
+- The flow needs its own `PATH`. The project `[env]` table carries it on
+  top of the site's `PATH`; [the environment](#the-environment) below
+  shows how the two combine.
 - A number the flow does not print comes from a `python` hook that reads
   the files the flow does print, such as the energy from a power and a
   window. [results.md](results.md) shows the hook.
@@ -199,6 +200,46 @@ worktree. The run id then carries `-dirty-<hash of the diff>`.
 of OpenROAD-flow-scripts on nangate45, three stages `synth`, `floorplan` and
 `place`, one `make` target each. The area comes from `synth_stat.txt`, the
 area and the slack of each later stage from the METRICS2.1 JSON of ORFS.
+
+### The environment
+
+The site file and the project file each have an `[env]` table. A command
+on the host sees both, and the project wins where both set a variable.
+When a project value names a variable the site sets, as `$NAME` or
+`${NAME}`, edr puts the site's value in its place first. The project
+value then builds on the site's instead of replacing it:
+
+```toml
+# site.toml
+[env]
+PATH = "/opt/tools/bin:$PATH"
+
+# edr.toml
+[env]
+PATH = "{root}/.venv/bin:$PATH"
+```
+
+The run gets `PATH = "{root}/.venv/bin:/opt/tools/bin:$PATH"`, and the
+host expands the last `$PATH` to its own path. A project value without
+such a reference, such as `LM_LICENSE_FILE = "2020@lic"`, replaces the
+site's value.
+
+### The copy of the tree
+
+`edr launch` copies the checked-out tree to the host with `rsync
+--delete`. `[sync] exclude` lists the paths that stay behind, such as a
+virtual environment that the host builds itself:
+
+```toml
+[sync]
+exclude = [".venv"]
+```
+
+`.git` never goes, whether the list names it or not. `edr checkout`
+makes a git worktree, and its `.git` is a file that points at the
+repository on the head node. On the host that pointer leads nowhere, so
+every git command in the flow would fail. The run id and the spec
+already record the source tag, and the flow on the host needs no git.
 
 ## 4. Write a batch
 

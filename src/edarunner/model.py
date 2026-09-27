@@ -167,7 +167,9 @@ class Site:
 
     path: Path
     scratch: list[str] = doc("scratch roots, in order; the largest writable one is the mount")
-    env: dict[str, str] = doc("environment for every command on every host", factory=dict)
+    env: dict[str, str] = doc("environment for every command on every host; a project `env` value that "
+                             "names one of these variables as `$NAME` builds on the value set here",
+                             factory=dict)
     ssh_options: list[str] = doc("the options of every ssh call", key="ssh.options",
                                  factory=lambda: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
     ssh_timeout_s: int = doc("seconds a remote command may take", 45, key="ssh.timeout_s")
@@ -332,7 +334,8 @@ class Source:
 class Sync:
     """The copy of the checked-out tree to the host, by `rsync --delete` behind the guard."""
 
-    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree", factory=list)
+    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree; `.git` is always excluded, "
+                             "because the `.git` file of a worktree points at the head node", factory=list)
     after: str = doc("a command on the head node after each sync, with the run placeholders", "")
 
 
@@ -401,7 +404,10 @@ class Project:
     telegram_poll: bool = doc("`false`: this project's watcher sends alerts and the board but does not poll "
                               "for commands; one project per bot token polls", True)
     env: dict[str, str] = doc("the variables every command of every stage needs, on top of the site `env`; "
-                              "a value takes the run placeholders, and `$VAR` expands on the host", factory=dict)
+                              "a value takes the run placeholders. A `$NAME` or `${NAME}` that the site sets takes "
+                              "the site value, so `PATH = \"{root}/.venv/bin:$PATH\"` keeps the site path; a value "
+                              "without a reference replaces the site value, and any other `$VAR` expands on the host",
+                              factory=dict)
     tasks: dict[str, Task] = field(default_factory=dict)
     task_resolver: str = doc("a hook `id -> table` for ids the file does not list", "", key="pattern.resolver")
 

@@ -367,6 +367,20 @@ def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
     assert (target / ".git" / "HEAD").exists()  # an excluded path survives the delete
 
 
+@pytest.mark.parametrize("excludes", [[], [".venv"], [".git", ".venv"]])
+def test_sync_tree_never_copies_the_git_pointer(env, tmp_path: Path, excludes) -> None:
+    project, batch, ssh, db = env
+    src = tmp_path / "src"
+    (src / ".venv").mkdir(parents=True)
+    (src / ".git").write_text("gitdir: /head/repo/.git/worktrees/src\n")
+    (src / ".venv" / "x").write_text("v")
+    (src / "flow.sh").write_text("f")
+    target = tmp_path / "a" / "edr" / "b"
+    assert sync.sync_tree(ssh, "local", src, str(target), excludes, "/edr/", 3)
+    assert (target / "flow.sh").exists() and not (target / ".git").exists()
+    assert (target / ".venv").exists() == (".venv" not in excludes)
+
+
 def test_publish_driver_one_copy_per_version(tmp_path: Path) -> None:
     dest = sync.publish_driver(tmp_path, launch.DRIVER_SRC)
     digest = hashlib.sha256(launch.DRIVER_SRC.read_bytes()).hexdigest()[:8]
@@ -438,6 +452,27 @@ def test_project_env_is_rendered_over_the_site_env(env) -> None:
     assert e["PATH"] == f"{a.root}/.venv/bin:$PATH" and e["FLOW_TAG"] == a.values["build_tag"]
     for k, val in project.site.env.items():
         assert k in e
+
+
+def test_project_env_builds_on_the_site_env(env) -> None:
+    project, batch, ssh, db = env
+    project.site.env = {"PATH": "/opt/tools/bin:$PATH", "LM_LICENSE_FILE": "1717@lic", "TOOLS": "/opt/tools"}
+    project.env = {"PATH": "{root}/.venv/bin:$PATH", "LM_LICENSE_FILE": "2020@other",
+                   "LD_LIBRARY_PATH": "${TOOLS}/lib:$LD_LIBRARY_PATH", "COST": "$$5"}
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
+    e = a.spec["env"]
+    assert e["PATH"] == f"{a.root}/.venv/bin:/opt/tools/bin:$PATH"
+    assert e["LM_LICENSE_FILE"] == "2020@other"
+    assert e["TOOLS"] == "/opt/tools"
+    assert e["LD_LIBRARY_PATH"] == "/opt/tools/lib:$LD_LIBRARY_PATH" and e["COST"] == "$$5"
+
+
+def test_project_env_keeps_a_name_it_sets_itself(env) -> None:
+    project, batch, ssh, db = env
+    project.site.env = {"TOOLS": "/opt/tools"}
+    project.env = {"TOOLS": "/opt/new", "LIB": "$TOOLS/lib"}
+    e = launch.plan(project, batch, ssh, db, date=DATE)[0].spec["env"]
+    assert e["TOOLS"] == "/opt/new" and e["LIB"] == "$TOOLS/lib"
 
 
 def test_tree_id_survives_a_chain_of_reuse(env) -> None:

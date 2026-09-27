@@ -33,7 +33,7 @@ hold for every file:
 | `data` | the head-node data directory: `edr.db`, `results/`, `board/` | `"data"` |
 | `run_prefix` | the run tree prefix under the host scratch | `"{user}/edr/{project}"` |
 | `telegram_poll` | `false`: this project's watcher sends alerts and the board but does not poll for commands; one project per bot token polls | `true` |
-| `env` | the variables every command of every stage needs, on top of the site `env`; a value takes the run placeholders, and `$VAR` expands on the host | `{}` |
+| `env` | the variables every command of every stage needs, on top of the site `env`; a value takes the run placeholders. A `$NAME` or `${NAME}` that the site sets takes the site value, so `PATH = "{root}/.venv/bin:$PATH"` keeps the site path; a value without a reference replaces the site value, and any other `$VAR` expands on the host | `{}` |
 
 ### [source]
 
@@ -54,7 +54,7 @@ The copy of the checked-out tree to the host, by `rsync --delete` behind the gua
 
 | Key | Meaning | Default |
 |---|---|---|
-| `exclude` | rsync exclude patterns for the copy of the tree | `[]` |
+| `exclude` | rsync exclude patterns for the copy of the tree; `.git` is always excluded, because the `.git` file of a worktree points at the head node | `[]` |
 | `after` | a command on the head node after each sync, with the run placeholders | `""` |
 
 ### [safety]
@@ -214,7 +214,7 @@ remote command runs through `sh -c`, so the login shell of a host may be `csh` o
 | Key | Meaning | Default |
 |---|---|---|
 | `scratch` | scratch roots, in order; the largest writable one is the mount | required |
-| `env` | environment for every command on every host | `{}` |
+| `env` | environment for every command on every host; a project `env` value that names one of these variables as `$NAME` builds on the value set here | `{}` |
 | `ssh.options` | the options of every ssh call | `["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]` |
 | `ssh.timeout_s` | seconds a remote command may take | `45` |
 | `tool_procs` | a regex over process names, for the orphan check and the host table | `""` |
