@@ -25,3 +25,12 @@ def test_read_verbs_create_no_database(demo: Path, capsys) -> None:
     assert edr(capsys, "events")[0] == 2
     assert edr(capsys, "check")[0] == 0
     assert not (demo / "data").exists()
+
+
+def test_project_is_found_from_a_subdirectory(demo: Path, capsys, monkeypatch) -> None:
+    monkeypatch.chdir(demo / "jobs")
+    code, out, _ = edr(capsys, "check")
+    assert code == 0 and out.startswith("ok:")
+    monkeypatch.chdir(demo.parent)
+    code, _, err = edr(capsys, "status")
+    assert code == 1 and f"no edr.toml in {demo.parent} or above; run edr init" in err
