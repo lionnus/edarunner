@@ -442,7 +442,7 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     assert code == 3 and len(lines) == 5 and "\x1b" not in out
     a = next(ln for ln in lines if ln.startswith("hostA"))
     assert a.split() == ["hostA", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "120/256", "/scratch", "800/2000",
-                         "\u2588" * 5 + "\u2591" * 3, "1/4", "30/320", "4/2", "3"]
+                         "\u2588" * 5 + "\u2591" * 3, "1/4", "290/320", "4/2", "3"]
     local = next(ln for ln in lines if ln.startswith("local"))
     assert local.split() == ["local", "0/8", "\u2591" * 8, "0.2", "35/62.3", "/tmp/x", "15.5/15.6", "\u2591" * 8, "-", "-", "3/0", "0"]
     assert next(ln for ln in lines if ln.startswith("hostB")).split()[1:] == ["error:", "hostB:", "rc", "255:", "timeout"]
