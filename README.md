@@ -50,6 +50,21 @@ where the flow is, and metrics are extracted per step. A task group runs
 its tasks in parallel on the host, each with its own directory, budget
 and result, and shards claim tasks from one queue.
 
+## Run the watcher as a service
+
+`edr init` writes `edr-watch.service` next to `edr.toml`. On a head node
+with `loginctl enable-linger`, the watcher then survives a logout and a
+reboot without root:
+
+```sh
+cp edr-watch.service ~/.config/systemd/user/edr-<project>.service
+systemctl --user daemon-reload
+systemctl --user enable --now edr-<project>
+```
+
+Without a user service, `edr watch` in a tmux session does the same job,
+and a cron line with `edr watch --check` tells you when it stopped.
+
 ## What you get back
 
 - `edr status`, on 48 columns if you ask, so it reads in an ssh app on a
