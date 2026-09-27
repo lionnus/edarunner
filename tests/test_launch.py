@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
 import shutil
+import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -181,6 +184,18 @@ def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
     assert (hb_path.with_name(f"{row['run_id']}.stop")).read_text().strip() == "after-task"
 
 
+def test_stop_kills_a_process_group_by_pgid(env) -> None:
+    project, batch, ssh, ledger = env
+    p = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    assert os.getpgid(p.pid) == p.pid
+    row = {"run_id": "r", "host": "local", "batch": "demo"}
+    assert launch.stop(ssh, ledger, row, {"driver_pid": None, "pgids": [p.pid]}, why="test")
+    assert p.wait(timeout=10) == -signal.SIGTERM
+    with pytest.raises(ProcessLookupError):
+        os.killpg(p.pid, 0)
+    assert ledger.events()[-1]["text"] == f"test [driver None, pgids [{p.pid}], term, ended]"
+
+
 # dry run and guards
 
 
@@ -245,6 +260,20 @@ def test_sync_tree_guards_the_target(env, tmp_path: Path) -> None:
         sync.sync_tree(ssh, "local", tmp_path, str(tmp_path / "no-marker"), [], "/edr/", 3)
     assert sync.sync_tree(ssh, "local", tmp_path, str(tmp_path / "a" / "edr" / "b"), [], "/edr/", 3, dry_run=True)
     assert not (tmp_path / "a").exists()
+
+
+def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
+    project, batch, ssh, ledger = env
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "keep.txt").write_text("k")
+    target = tmp_path / "a" / "edr" / "b"
+    (target / ".git").mkdir(parents=True)
+    (target / "stale.txt").write_text("s")
+    (target / ".git" / "HEAD").write_text("ref")
+    assert sync.sync_tree(ssh, "local", src, str(target), [".git"], "/edr/", 3)
+    assert (target / "keep.txt").read_text() == "k" and not (target / "stale.txt").exists()
+    assert (target / ".git" / "HEAD").exists()  # an excluded path survives the delete
 
 
 def test_publish_driver_copies_by_rename(tmp_path: Path) -> None:
