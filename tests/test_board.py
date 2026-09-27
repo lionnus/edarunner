@@ -75,14 +75,29 @@ def test_narrow_width_and_order(width):
 
 
 def test_wide_all_states():
-    text = board.wide(_rows(), now=NOW)
+    text = board.plain(board.wide(_rows(), now=NOW))
     lines = text.splitlines()
     assert lines[0].split() == ["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"]
-    assert len(lines) == 7
-    assert lines[1].startswith("#1 a") and " dead " in lines[1]
-    assert lines[5].startswith("#5 b_nodw") and " incomplete " in lines[5] and " 1f/1d " in lines[5]
-    assert lines[6].startswith("#6 a") and " done " in lines[6]
+    assert len(lines) == 8 and "\x1b" not in text
+    assert lines[2].startswith("#1  a") and " dead " in lines[2]
+    assert lines[6].startswith("#5  b_nodw") and " incomplete " in lines[6] and " 1f/1d " in lines[6]
+    assert lines[7].startswith("#6  a") and " done " in lines[7]
     assert board.wide([]) == "no runs"
+
+
+def test_narrow_text_colours_the_state():
+    text = board.narrow_text(_rows(), now=NOW)
+    assert text.plain == board.narrow(_rows(), now=NOW)
+    styled = {text.plain[s.start:s.end]: str(s.style) for s in text.spans}
+    assert styled == {"DEAD": "red", "stale": "yellow", "RUN": "green"}
+
+
+def test_plain_and_console_have_no_escape_codes(monkeypatch, capsys):
+    table = board.wide(_rows(), now=NOW)
+    assert "\x1b" not in board.plain(table)
+    monkeypatch.setenv("NO_COLOR", "1")
+    board.console().print(table)
+    assert "\x1b" not in capsys.readouterr().out
 
 
 def test_cost():
@@ -101,7 +116,7 @@ def test_run_detail():
                "ended": NOW - 50, "signature": "boom: kernel bad failed"}]
     metrics = [{"stage": "synth", "step": 3, "task": "", "name": "area_cell_um2", "canonical": "area.cell",
                 "value": 1031.5, "unit": "um2"}]
-    text = board.run_detail(row, stages, metrics, "line one\nline two\n", now=NOW)
+    text = board.plain(board.run_detail(row, stages, metrics, "line one\nline two\n", now=NOW))
     assert text.startswith(RUN["run1"] + "\nrunning  stage:synth  synth/3  exit -")
     assert "cost 2.0 core-h" in text and "counts done 1 failed 0" in text
     assert "k_bad" in text and "boom: kernel bad failed" in text

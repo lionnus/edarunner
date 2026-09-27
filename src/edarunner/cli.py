@@ -26,6 +26,10 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
+from rich.console import Console, RenderableType
+from rich.table import Table
+from rich.text import Text
+
 from . import __version__, board, collect, config, export, launch, metrics, runid, stagectl, sync, watch
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
@@ -88,16 +92,24 @@ class Ctx:
     def ssh(self) -> Ssh:
         return Ssh(self.project.site)
 
+    @functools.cached_property
+    def console(self) -> Console:
+        return board.console()
+
     def close(self) -> None:
         """Close the ledger when a verb opened it."""
         if self._ledger is not None:
             self._ledger.close()
 
-    def emit(self, text: str, data: Any = None) -> None:
-        """Print `text`; keep `data` (default: the text) for --json."""
-        self.data = text if data is None else data
-        if not self.a.json:
-            print(text)
+    def emit(self, out: str | RenderableType, data: Any = None) -> None:
+        """Print `out`; keep `data` (default: the text) for --json."""
+        self.data = board.plain(out) if data is None else data
+        if self.a.json:
+            return
+        if isinstance(out, str):
+            print(out)
+        else:
+            self.console.print(out)
 
     def batch_name(self, name: str | None) -> str:
         """`name`, else EDR_BATCH, else the newest batch directory of the state."""
@@ -164,11 +176,11 @@ class Ctx:
 
 # --- texts shared by the verbs and the bot
 
-def _events_text(c: Ctx, events: list[Row]) -> str:
+def _events_table(c: Ctx, events: list[Row]) -> Table | str:
     names = {r["run_id"]: f"{r['label']}@{r['batch']}" for r in c.ledger.runs()}
-    return "\n".join(
-        f"{time.strftime('%m-%d %H:%M', time.localtime(e['ts']))} {e['actor']:<8} "
-        f"{names.get(e['run_id'], e['run_id'] or '-')} {e['kind']}: {e['text']}" for e in events) or "no events"
+    body = [[time.strftime("%m-%d %H:%M", time.localtime(e["ts"])), e["actor"], names.get(e["run_id"], e["run_id"] or "-"),
+             board.state_text(e["kind"]), e["text"]] for e in events]
+    return board.table(["time", "actor", "run", "kind", "text"], body, styles={"time": "dim", "run": "bold"}) if body else "no events"
 
 
 def _probe_rows(c: Ctx) -> list[Row]:
@@ -181,16 +193,16 @@ def _probe_rows(c: Ctx) -> list[Row]:
     return out
 
 
-def _hosts_text(rows: list[Row], narrow: bool) -> str:
+def _hosts_table(rows: list[Row], narrow: bool) -> Table:
     head = ["host", "cores", "ram_gb", "free_gb"] + ([] if narrow else ["mount", "tools", "runs"])
     body = []
     for r in rows:
         if "error" in r:
-            body.append([r["host"], "error: " + r["error"]])
+            body.append([r["host"], Text("error: " + r["error"], style="red")])
             continue
         body.append([r["host"], r["free_cores"], r["free_ram_gb"], r["free_gb"]] + ([] if narrow else [
             r["mount"], f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]]))
-    return board.table(head, body)
+    return board.table(head, body, styles={"host": "bold", "mount": "dim"}, right=("cores", "ram_gb", "free_gb", "tools", "runs"))
 
 
 def _lic_rows(c: Ctx) -> list[Row]:
@@ -216,9 +228,18 @@ def _lic_rows(c: Ctx) -> list[Row]:
     return out
 
 
-def _lic_text(rows: list[Row]) -> str:
+def _lic_table(rows: list[Row]) -> Table | str:
     keys = ["licence", "feature", "pool", "used", "free", "ours", "others", "floor", "note"]
-    return board.table(keys, [[r.get(k, "") for k in keys] for r in rows]) if rows else "no licences"
+    body = []
+    for r in rows:
+        cells: list[Any] = [r.get(k, "") for k in keys]
+        if "free" in r:
+            # Seats at or under the floor are not ours to take.
+            cells[4] = Text(str(r["free"]), style="green" if r["free"] > r["floor"] else "red")
+        if "note" in r:
+            cells[8] = Text(r["note"], style="red")
+        body.append(cells)
+    return board.table(keys, body, styles={"licence": "bold"}, right=tuple(keys[2:8])) if rows else "no licences"
 
 
 def _metric_key(m: Row) -> str:
@@ -233,13 +254,15 @@ def _compare_text(c: Ctx, handles: list[str]) -> str:
         if step >= cur.get(m["run_id"], (-2, None))[0]:
             cur[m["run_id"]] = (step, m["value"])
     body = [[k, *[cur.get(r["run_id"], (0, None))[1] for r in rows]] for k, cur in sorted(final.items())]
-    return board.table(["metric", *[str(r["label"]) for r in rows]], body) if body else "no metrics"
+    labels = [str(r["label"]) for r in rows]
+    return board.table(["metric", *labels], body, styles={"metric": "bold"}, right=tuple(labels)) if body else "no metrics"
 
 
-def _metrics_text(rows: list[Row]) -> str:
+def _metrics_table(rows: list[Row]) -> Table | str:
     body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
              m.get("unit")] for m in rows]
-    return board.table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body) if rows else "no metrics"
+    return board.table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body,
+                       styles={"label": "bold", "design": "dim"}, right=("step", "value")) if rows else "no metrics"
 
 
 def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
@@ -278,22 +301,22 @@ class Actions:
     def status_text(self, narrow: bool = True) -> str:
         rows = self.c.rows()
         self.c.save_board(rows)
-        return board.narrow(rows) if narrow else board.wide(rows)
+        return board.narrow(rows) if narrow else board.plain(board.wide(rows))
 
     def events_text(self, n: int) -> str:
-        return _events_text(self.c, self.c.ledger.events(n=n))
+        return board.plain(_events_table(self.c, self.c.ledger.events(n=n)))
 
     def hosts_text(self) -> str:
-        return _hosts_text(_probe_rows(self.c), narrow=True)
+        return board.plain(_hosts_table(_probe_rows(self.c), narrow=True))
 
     def lic_text(self) -> str:
-        return _lic_text(_lic_rows(self.c))
+        return board.plain(_lic_table(_lic_rows(self.c)))
 
     def compare_text(self, handles: list[str]) -> str:
-        return _compare_text(self.c, handles)
+        return board.plain(_compare_text(self.c, handles))
 
     def metric_text(self, name: str, design: str | None) -> str:
-        return _metrics_text(self.c.ledger.metrics(design=design, name=name))
+        return board.plain(_metrics_table(self.c.ledger.metrics(design=design, name=name)))
 
 
 # --- verbs
@@ -317,9 +340,9 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         if a.live:
             code = max(code, _mark_live(c, rows))
         c.save_board(rows)
-        text = _triage(c, rows) if a.triage else board.narrow(rows) if a.narrow else board.wide(rows)
+        text = _triage(c, rows) if a.triage else board.narrow_text(rows) if a.narrow else board.wide(rows)
         if a.watch and not a.json:
-            print("\x1b[2J\x1b[H", end="")
+            c.console.clear()
         c.emit(text, {"runs": rows})
         if not a.watch or a.json:
             return code
@@ -342,7 +365,7 @@ def _mark_live(c: Ctx, rows: list[Row]) -> int:
     return code
 
 
-def _triage(c: Ctx, rows: list[Row]) -> str:
+def _triage(c: Ctx, rows: list[Row]) -> Text | str:
     lines = []
     for r in board.order(rows):
         state, h = board.state_of(r), f"{r['label']}@{r['batch']}"
@@ -362,8 +385,9 @@ def _triage(c: Ctx, rows: list[Row]) -> str:
             cmd = f"edr export --design {r.get('src')} --out exports/{r.get('src')}"
         else:
             cmd = f"edr retire {h} --why {state}"
-        lines.append(f"{state:<11} {h:<28} {r.get('phase') or '-'}\n    {cmd}")
-    return "\n".join(lines) or "nothing to triage"
+        lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ", (f"{h:<28}", "bold"),
+                                   f" {r.get('phase') or '-'}\n    {cmd}"))
+    return Text("\n").join(lines) if lines else "nothing to triage"
 
 
 def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
@@ -371,21 +395,21 @@ def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
     since = _since(a.since) if a.since else None
     run_id = c.resolve(a.run)["run_id"] if a.run else None
     events = c.ledger.events(since_s=since, run_id=run_id, n=a.n)
-    c.emit(_events_text(c, events), events)
+    c.emit(_events_table(c, events), events)
     return 0 if events else 2
 
 
 def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
     """Probe every site host."""
     rows = _probe_rows(c)
-    c.emit(_hosts_text(rows, a.narrow), rows)
+    c.emit(_hosts_table(rows, a.narrow), rows)
     return 3 if any("error" in r for r in rows) else 0
 
 
 def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
     """Probe every site licence from the head node."""
     rows = _lic_rows(c)
-    c.emit(_lic_text(rows), rows)
+    c.emit(_lic_table(rows), rows)
     return 3 if any("note" in r for r in rows) else 0
 
 
@@ -400,7 +424,7 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
                     for m in rows)
         c.data = rows
     else:
-        c.emit(_metrics_text(rows), rows)
+        c.emit(_metrics_table(rows), rows)
     return 0 if rows else 2
 
 
@@ -465,8 +489,8 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
         if not bad:
             for p in launch.plan(project, b, c.ssh, c.ledger, probes=probes):
                 problems += [f"{b.batch}/{p.label}: {x}" for x in p.problems]
-    text = "\n".join(f"problem: {p}" for p in problems) or (
-        f"ok: {len(hosts)} hosts, {len(project.stages)} stages, {len(project.metrics)} metrics, {len(batches)} batches")
+    text = Text("\n").join(Text.assemble(("problem", "red"), f": {p}") for p in problems) if problems else Text.assemble(
+        ("ok", "green"), f": {len(hosts)} hosts, {len(project.stages)} stages, {len(project.metrics)} metrics, {len(batches)} batches")
     c.emit(text, {"problems": problems, "hosts": hosts, "batches": [b.batch for b in batches]})
     return 1 if problems else 0
 
@@ -474,7 +498,7 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_stage(c: Ctx, a: argparse.Namespace) -> int:
     """Stage a ref as a worktree, or a dirty tree as a snapshot."""
     res = stagectl.stage(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
-    c.emit(f"{res.src} {res.path}" + (" (dirty)" if res.dirty else ""),
+    c.emit(Text.assemble((res.src, "bold"), " ", (str(res.path), "dim"), (" (dirty)" if res.dirty else "", "yellow")),
            {"src": res.src, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
     return 0
 
@@ -482,8 +506,9 @@ def cmd_stage(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     """Render every job of a batch; writes nothing."""
     plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.ledger)
-    c.emit("\n".join(f"{p.run_id}: {p.host or 'queued'} {p.root}" + "".join(f"\n    problem: {x}" for x in p.problems)
-                     for p in plans),
+    lines = [Text.assemble((p.run_id, "bold"), ": ", (p.host or "queued", "" if p.host else "cyan"), " ", (str(p.root), "dim"),
+                           *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
+    c.emit(Text("\n").join(lines),
            [{"run_id": p.run_id, "label": p.label, "host": p.host, "root": p.root, "queued": p.queued,
              "problems": p.problems, "spec": p.spec} for p in plans])
     return 1 if any(p.problems for p in plans) else 0
@@ -496,7 +521,8 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
                          allow_dirty=a.allow_dirty)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
-    c.emit(f"{started} started, {queued} queued, {len(problems)} with problems" + (" (dry)" if a.dry_run else ""), rows)
+    c.emit(Text.assemble((f"{started} started", "green" if started else ""), ", ", (f"{queued} queued", "cyan" if queued else ""),
+                         ", ", (f"{len(problems)} with problems", "red" if problems else ""), " (dry)" if a.dry_run else ""), rows)
     if started or queued or (a.dry_run and not problems):
         return 0
     # A second launch of the same batch names every old job "already launched"; that is nothing to do.

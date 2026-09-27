@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -181,9 +182,9 @@ def test_events_filters(demo: Path, capsys) -> None:
         led.add_event("watch", a, "done", "")
         led.add_event("user", "", "export", "x -> y")
     code, out, _ = edr(capsys, "events", "-n", "2")
-    assert code == 0 and out.count("\n") == 2 and "launch" not in out and "export" in out
+    assert code == 0 and len(out.splitlines()) == 4 and "launch" not in out and "export" in out
     code, out, _ = edr(capsys, "events", "--run", "a@demo")
-    assert code == 0 and out.count("\n") == 2 and "a@demo launch: local /x" in out
+    assert code == 0 and len(out.splitlines()) == 4 and re.search(r"a@demo +launch +local /x", out)
     code, out, _ = edr(capsys, "--json", "events", "--since", "1h")
     assert code == 0 and len(json.loads(out)["data"]) == 3
     code, out, _ = edr(capsys, "events", "--since", "1")
@@ -312,14 +313,17 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert "#1" in acts.status_text(narrow=False) and not (demo / "data" / "board").exists()
     with Ledger(demo / "data" / "edr.db") as led:
         assert len(led.get_kv("last_board")) == 2
-    assert acts.events_text(2).count("\n") == 1
+    assert len(acts.events_text(2).splitlines()) == 4
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
-    assert cmp[0].split() == ["metric", "a", "b_nodw"] and cmp[1].split() == ["area.cell", "1031.5", "999.0"]
-    assert cmp[2].split() == ["power_w[k_small]", "0.25", "-"]
-    assert acts.metric_text("area.cell", None).count("\n") == 3 and acts.metric_text("area.cell", "zzz") == "no metrics"
-    assert acts.hosts_text().splitlines()[1].startswith("local ")
+    assert cmp[0].split() == ["metric", "a", "b_nodw"] and cmp[2].split() == ["area.cell", "1031.5", "999.0"]
+    assert cmp[3].split() == ["power_w[k_small]", "0.25", "-"]
+    assert len(acts.metric_text("area.cell", None).splitlines()) == 5 and acts.metric_text("area.cell", "zzz") == "no metrics"
+    assert acts.hosts_text().splitlines()[2].startswith("local ")
     lic = acts.lic_text().splitlines()
-    assert lic[0].split()[:3] == ["licence", "feature", "pool"] and lic[1].split()[:7] == ["demo", "demo", "10", "2", "8", "0", "2"]
+    assert lic[0].split()[:3] == ["licence", "feature", "pool"] and lic[2].split()[:7] == ["demo", "demo", "10", "2", "8", "0", "2"]
+    # The bot gets text: no colour and no trailing blank.
+    for text in (acts.status_text(narrow=False), acts.events_text(2), acts.hosts_text(), acts.lic_text(), cmp):
+        assert "\x1b" not in "".join(text)
     capsys.readouterr()
 
 
@@ -402,11 +406,11 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
 def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     assert code == 0 and out.splitlines()[0].split() == ["host", "cores", "ram_gb", "free_gb", "mount", "tools", "runs"]
-    assert out.splitlines()[1].split()[0] == "local" and str(tmp_path / "scratch") in out
+    assert out.splitlines()[2].split()[0] == "local" and str(tmp_path / "scratch") in out
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
     code, out, _ = edr(capsys, "lic")
-    assert code == 0 and out.splitlines()[1].split() == ["demo", "demo", "10", "2", "8", "0", "2", "2"]
+    assert code == 0 and out.splitlines()[2].split() == ["demo", "demo", "10", "2", "8", "0", "2", "2"]
     assert out.splitlines()[0].split()[-1] == "note"
     site = demo / "site.toml"
     site.write_text(site.read_text().replace("bash {root}/flow/lmstat.sh", "false"))
@@ -453,6 +457,42 @@ def test_watch_check_dry_and_once(demo: Path, capsys) -> None:
     assert code == 0 and (state.parent / "watch.json").exists()
     assert b"b_nodw" in (demo / "data" / "board" / "status.html").read_bytes()
     assert edr(capsys, "watch", "--check")[0] == 0
+
+
+def _edr_bytes(demo: Path, *argv: str, **env: str) -> bytes:
+    """edr in a subprocess with stdout a pipe; the colour variables of the caller stay out."""
+    clean = {k: v for k, v in os.environ.items() if k not in ("NO_COLOR", "FORCE_COLOR", "TTY_COMPATIBLE", "COLUMNS")}
+    p = subprocess.run([sys.executable, "-m", "edarunner.cli", *argv], cwd=demo, env={**clean, **env},
+                       capture_output=True, timeout=120)
+    assert p.returncode == 0, p.stderr.decode()
+    return p.stdout
+
+
+def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
+    a = seed(demo, "a", "done")
+    seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
+    with Ledger(demo / "data" / "edr.db") as led:
+        led.add_event("user", a, "launch", "local /x")
+    for argv in (["status"], ["status", "--narrow"], ["status", "--triage"], ["status", "a@demo"], ["hosts"], ["lic"],
+                 ["events"], ["check"]):
+        assert b"\x1b" not in _edr_bytes(demo, *argv), argv
+        assert b"\x1b" not in _edr_bytes(demo, *argv, NO_COLOR="1", FORCE_COLOR="1", TERM="xterm-256color"), argv
+    # A forced terminal proves the colour path is live; NO_COLOR above switched it off.
+    assert b"\x1b[32m" in _edr_bytes(demo, "status", FORCE_COLOR="1", TERM="xterm-256color")
+    narrow = _edr_bytes(demo, "status", "--narrow", FORCE_COLOR="1", TERM="xterm-256color").decode()
+    assert b"\x1b" in narrow.encode() and all(len(re.sub(r"\x1b\[[0-9;]*m", "", ln)) <= 48 for ln in narrow.splitlines())
+
+
+def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path) -> None:
+    a = seed(demo, "a", "done")
+    with Ledger(demo / "data" / "edr.db") as led:
+        led.add_event("user", a, "launch", "local /x")
+    for argv in (["status"], ["hosts"], ["lic"], ["events"], ["check"], ["status", "a@demo"]):
+        plain = _edr_bytes(demo, "--json", *argv)
+        forced = _edr_bytes(demo, "--json", *argv, FORCE_COLOR="1", TERM="xterm-256color")
+        assert plain == forced and b"\x1b" not in plain, argv
+        env = json.loads(plain)
+        assert env["code"] == 0 and env["output"] == "" and env["data"], argv
 
 
 def test_bad_input_exits_1(capsys) -> None:
