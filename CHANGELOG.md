@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- The backends `condor`, `slurm` and `lsf` hand a run to a batch
+  scheduler. `[scheduler]` in `site.toml` takes `backend`, `submit_via`,
+  `tree_root`, `max_jobs`, `queue` and `options`; `scheduler.backend`
+  keeps its meaning. The driver is the job; the scheduler picks the
+  host, and the run tree lies under `tree_root`. New keys
+  `tools.<name>.licence` (a scheduler licence or concurrency limit for
+  the whole job) and `needs.ram_gb`. The watcher asks the scheduler once
+  per cycle for every job, and three new states come from it:
+  `pending`, `held` (alerts) and `suspended`. `edr check` asks HTCondor
+  or Slurm whether each licence exists. CI runs the local demo on an
+  HTCondor pool and on a Slurm cluster in containers;
+  `tools/harness/` holds the scripts. LSF has rendering and contract
+  tests only.
+
 ## 0.3.0 (2026-09-27)
 
 - The database uses the DELETE journal with `synchronous=FULL` when

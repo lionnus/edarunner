@@ -43,7 +43,8 @@ _SHORT = {"running": "RUN", "dead": "DEAD", "hung": "HUNG", "looping": "LOOP", "
 STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "yellow", "superseded": "yellow",
          "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
-         "imported": "dim", "abandoned": "dim", "resumed": "cyan"}
+         "imported": "dim", "abandoned": "dim", "resumed": "cyan", "pending": "cyan", "held": "magenta",
+         "suspended": "yellow"}
 # Resource marks from green to red, then black for a host that did not answer.
 RESOURCE_MARKS = ("🟢", "🟡", "🟠", "🔴")
 NO_ANSWER = "⚫"
@@ -252,7 +253,7 @@ def cols(head: list[str], body: list[list[Any]], width: int = 40) -> str:
 
 
 STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "--why over-budget",
-              "host_full": "--now --why host-full", "superseded": "--after-task --why superseded"}
+              "host_full": "--now --why host-full", "superseded": "--after-task --why superseded", "held": "--why held"}
 
 
 def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
@@ -262,7 +263,7 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
         return None
     if state == "queued":
         return f"edr launch {row['batch']} --only {row['label']}"
-    if state == "stale":
+    if state in ("stale", "pending", "suspended"):
         return f"edr status {h} --live"
     if state == "dead":
         return f"edr continue {h} --stage {hb.get('stage') or row.get('stage')}" + (

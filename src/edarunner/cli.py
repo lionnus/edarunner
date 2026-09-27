@@ -38,7 +38,7 @@ from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
 from .db import Database, network_fs
-from .model import Batch, Job, Project, Stage
+from .model import SCHEDULERS, Batch, Job, Project, Stage
 from .notify import make_notifiers
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
@@ -653,18 +653,25 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
         batches.append(b)
     hosts = _probe_rows(c)
     problems += [f"{r['host']}: {r['error']}" for r in hosts if "error" in r]
+    sched = project.site.scheduler.backend in SCHEDULERS
+    warnings = []
+    for name in sorted({t.licence for t in project.site.tools.values() if t.licence}) if sched else []:
+        known = c.backend.licence(name)
+        if known is False:
+            problems.append(f"licence {name}: the scheduler does not define it, so it would never hold a job back")
+        elif known is None:
+            warnings.append(f"licence {name}: cannot ask {project.site.scheduler.backend} whether it is defined")
     problems += [p for p in c.ssh.check_local() if p not in problems]
     probes = {r["host"]: HostProbe(**r) for r in hosts if "error" not in r}
     for b in batches:
         bad = [f"{b.batch}: job {j.label} names unknown host {j.host}" for j in b.jobs
-               if j.host != "auto" and j.host not in project.site.hosts]
+               if j.host != "auto" and j.host not in project.site.hosts and not sched]
         problems += bad
         if not bad:
             for p in launch.plan(project, b, c.ssh, c.db, probes=probes):
                 problems += [f"{b.batch}/{p.label}: {x}" for x in p.problems]
     text = Text("\n").join(Text.assemble(("problem", "red"), f": {p}") for p in problems) if problems else Text.assemble(
         ("ok", "green"), f": {len(hosts)} hosts, {len(project.stages)} stages, {len(project.metrics)} metrics, {len(batches)} batches")
-    warnings = []
     db_path = project.data / "edr.db"
     if fs := network_fs(db_path.parent):
         warnings.append(f"{db_path} is on a network filesystem ({fs}); journal_mode DELETE, not WAL")
@@ -686,7 +693,8 @@ def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     """Render every job of a batch; writes nothing."""
     plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db, backend=c.backend)
-    lines = [Text.assemble((p.run_id, "bold"), ": ", (p.host or "queued", "" if p.host else "cyan"), " ", (str(p.root), "dim"),
+    lines = [Text.assemble((p.run_id, "bold"), ": ",
+                           (p.host or ("queued" if p.queued else c.project.site.scheduler.backend), "cyan" if p.queued else ""), " ", (str(p.root), "dim"),
                            *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
     c.emit(Text("\n").join(lines),
            [{"run_id": p.run_id, "label": p.label, "host": p.host, "root": p.root, "queued": p.queued,

@@ -44,8 +44,20 @@ head node; it needs the ORFS tools, and CI runs it in a container.
 | `tests` | `pytest` with coverage on Python 3.11 and 3.12. The run fails under 88 %. The 3.11 run uploads `coverage.svg`. |
 | `driver` | `tests/test_driver.py` in a `python:3.6` container, the floor of the compute hosts. The image's interpreter is linked to `/usr/bin/python3`, the fallback of `tests/helpers_driver.py` and of `test_compiles_on_py36`. |
 | `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. About 2 min, 1 min of it the image pull. |
+| `condor` | `tools/harness/condor.sh` with `RUNTIME=docker`: the `htcondor/mini` image as a one-machine pool, and the local demo through the `condor` backend with `submit_via = ["docker", "exec", "-u", <user>, "edr-mini"]`, where the user has the uid of the runner. It asserts that two runs end `done`, that the concurrency limit `fc` of one runs them one after the other, and that `edr stop` ends a third run `KILLED`. |
+| `slurm` | `tools/harness/slurm.sh`: the `giovtorres/slurm-docker-cluster` compose setup with `Licenses=fc:1`, and the same demo and assertions through the `slurm` backend with `submit_via = ["docker", "exec", "slurmctld"]`. |
 | `docs` | `tools/gen_docs.py --check`: the pages under `docs/reference/` must equal what the code generates. |
 | `status` | after every other job, also after a failure: writes the outcome into the branch `ci-status`. |
+
+## The scheduler harness
+
+`tests/test_schedulers.py` needs no scheduler. It compares the rendered
+submit file, `sbatch` script and `bsub` argv with the files in
+`tests/golden/`, and puts shims of `condor_submit`, `condor_q`,
+`condor_rm`, `sbatch`, `squeue`, `sacct`, `scancel`, `bsub`, `bjobs` and
+`bkill` on an otherwise empty `PATH` to check the argv and the parse of
+their output. The real schedulers run in containers under
+`tools/harness/`; its README says how to run them on a desk machine.
 
 ## The ci-status branch
 

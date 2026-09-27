@@ -55,7 +55,7 @@ def test_handle_text_and_pid() -> None:
 
 def test_make_backend_follows_the_site(site) -> None:
     assert make_backend(site).name == "ssh"
-    assert isinstance(make_backend(replace(site, scheduler_backend="local")), LocalBackend)
+    assert isinstance(make_backend(replace(site, scheduler=replace(site.scheduler, backend="local"))), LocalBackend)
 
 
 def test_ssh_alive_asks_each_host_once(site) -> None:

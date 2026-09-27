@@ -136,11 +136,18 @@ def test_scheduler_backend(tmp_path):
     root = demo_copy(tmp_path)
     site = root / "site.toml"
     text = site.read_text()
-    assert config.load_project(root).site.scheduler_backend == "ssh"
+    assert config.load_project(root).site.scheduler.backend == "ssh"
     site.write_text(text + '\n[scheduler]\nbackend = "local"\n')
-    assert config.load_project(root).site.scheduler_backend == "local"
-    for extra, match in (('backend = "condor"', "scheduler.backend 'condor' is not one of ssh, local"),
-                         ('backend = "ssh"\nqueue = "x"', "unknown key 'scheduler.queue'"),
+    assert config.load_project(root).site.scheduler.backend == "local"
+    site.write_text(text.replace('probe = ["bash"', 'licence = "fc"\nprobe = ["bash"') + '\n[scheduler]\nbackend = "condor"\n'
+                    'submit_via = ["ssh", "sub"]\ntree_root = "/net/{user}"\nmax_jobs = 3\noptions = ["+Owner = 1"]\n')
+    s = config.load_project(root).site
+    assert (s.scheduler.backend, s.scheduler.submit_via, s.scheduler.max_jobs, s.tools["demo"].licence) == \
+        ("condor", ["ssh", "sub"], 3, "fc")
+    for extra, match in (('backend = "pbs"', "scheduler.backend 'pbs' is not one of ssh, local, condor, slurm, lsf"),
+                         ('backend = "slurm"', "needs scheduler.tree_root"),
+                         ('backend = "ssh"\nqueues = "x"', "unknown key 'scheduler.queues'"),
+                         ('max_jobs = "3"', "scheduler.max_jobs must be int"),
                          ('backend = "local"\n[hosts.far]\ncores = 1\nram_gb = 1', "may name only local")):
         site.write_text(text + "\n[scheduler]\n" + extra + "\n")
         with pytest.raises(ConfigError, match=match):
