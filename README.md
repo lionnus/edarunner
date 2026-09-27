@@ -25,7 +25,7 @@ files and the numbers in them.
 ## Install
 
 ```sh
-uv tool install edarunner        # the controller, Python 3.11 or newer
+uv tool install git+https://github.com/lionnus/edarunner   # the controller, Python 3.11 or newer; PyPI follows the first release
 ```
 
 A compute host needs only ssh, `rsync` and its own `python3` (3.6 or
