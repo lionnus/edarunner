@@ -105,14 +105,14 @@ the two values over ssh.
 | `host` | the `host` of the spec; the name `socket.gethostname()` gives when the spec has none |
 | `sched_id` | the job id of a scheduler: `EDR_SCHED_ID`, else `SLURM_JOB_ID`, else `LSB_JOBID`; null without one |
 | `driver_pid`, `pgids` | what `edr stop` signals |
-| `cpu_s` | the CPU time in seconds of every process in `pgids`, with its reaped children, from `/proc`, else from `ps`; every heartbeat |
+| `cpu_s`, `rss_gb` | the CPU time in seconds and the summed RSS of every process in `pgids`, read in one pass over `/proc` at every heartbeat; the CPU time includes reaped children. Without `/proc`, both come from `ps -e -o pgid=,cputimes=,rss=`, which gives whole seconds and leaves out the children |
 | `log_bytes` | the size of `log` in bytes; every heartbeat |
 | `stages` | per stage started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
 | `tasks` | per task: `phase`, `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
 | `counts` | `done`, `failed`, `skipped`, `running`, `queued`, over every task group of the run |
 | `started`, `updated`, `elapsed_s` | unix times; the watcher reads the age of `updated` |
 | `disk_free_gb`, `tree_gb` | free space at `root`; `du -s` of the tree at most once per ten minutes |
-| `cpu_pct`, `rss_gb` | the CPU seconds of the run's process groups since the last sample, as a percent of one core, and their summed RSS, from `ps -e -o pgid=,cputimes=,rss=` every `heartbeat_s`; a process that ended takes its CPU seconds with it, so a drop reads as zero |
+| `cpu_pct` | the CPU use since the previous sample as a percent of one core, computed from two successive `cpu_s` values and the time between them. It is null on the first sample, and a heartbeat less than a second after the previous one keeps the old value. A process group that ended takes its CPU seconds with it, so a drop in `cpu_s` reads as zero |
 | `step_times` | per stage, the unix time the driver first saw each step number from `progress`; a resumed step replaces its time in `step_runs` |
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
 | `last_cmd`, `last_log`, `log` | the last command, the last three lines of the current log, its path |

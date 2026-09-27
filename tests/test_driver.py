@@ -8,6 +8,8 @@ import os
 import signal
 import socket
 import subprocess
+import threading
+import types
 import time
 from pathlib import Path
 
@@ -386,15 +388,41 @@ def test_heartbeat_names_the_host_the_job_and_the_samples(tmp_path: Path, monkey
     assert hb["log_bytes"] == (Path(spec["root"]) / "log" / "synth.log").stat().st_size and hb["cpu_s"] == 0.0
 
 
-def test_cpu_seconds_of_a_busy_group_from_proc_and_from_ps(monkeypatch) -> None:
+def test_usage_of_a_busy_group_from_proc_and_from_ps(monkeypatch) -> None:
     mod = _load_driver()
-    busy = subprocess.Popen(["python3", "-c", "import time\nend = time.time() + 30\nwhile time.time() < end: pass"],
+    busy = subprocess.Popen(["python3", "-c", "import time\nend = time.time() + 60\nwhile time.time() < end: pass"],
                             start_new_session=True)
+
+    def until(pred, timeout: float = 30):
+        end = time.time() + timeout
+        while time.time() < end:
+            got = mod.usage([busy.pid])
+            if pred(got):
+                return got
+            time.sleep(0.2)
+        raise AssertionError(f"usage never matched: {got}")
+
     try:
-        time.sleep(1.5)
-        assert mod.cpu_seconds([busy.pid]) > 0.3 and mod.cpu_seconds([]) == 0.0
+        cpu, rss = until(lambda u: u[0] > 0.3)
+        assert rss > 0 and mod.usage([]) == (0.0, 0.0)
         monkeypatch.setattr(mod.os.path, "isdir", lambda p: False)
-        assert mod.cpu_seconds([busy.pid]) >= 1.0
+        cpu, rss = until(lambda u: u[0] >= 1.0)
+        assert cpu == int(cpu) and rss > 0  # ps gives whole seconds
     finally:
         busy.kill()
         busy.wait()
+
+
+def test_cpu_pct_comes_from_two_cpu_s_values(monkeypatch) -> None:
+    mod = _load_driver()
+    d = mod.Driver.__new__(mod.Driver)
+    d.lock, d.procs, d.hb, d.last_cpu = threading.RLock(), {7: None}, {"log": None}, None
+    feed = iter([(10.0, 1.0), (40.0, 1.0), (40.5, 1.0), (30.0, 1.0), (None, None)])
+    clock = iter([100.0, 160.0, 160.5, 220.0, 280.0])
+    monkeypatch.setattr(mod, "usage", lambda pgids: next(feed))
+    monkeypatch.setattr(mod, "time", types.SimpleNamespace(time=lambda: next(clock)))
+    assert d.samples() == {"cpu_s": 10.0, "rss_gb": 1.0, "log_bytes": None, "cpu_pct": None}
+    assert d.samples()["cpu_pct"] == 50.0  # 30 s of CPU in 60 s
+    assert "cpu_pct" not in d.samples() and d.last_cpu == (160.0, 40.0)  # 0.5 s later keeps the last value
+    assert d.samples()["cpu_pct"] == 0.0  # a group that ended takes its CPU seconds along
+    assert d.samples()["cpu_pct"] is None and d.last_cpu is None
