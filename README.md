@@ -91,6 +91,39 @@ something writes an event with the actor and the reason.
 `jobs/<batch>.toml`, and the private `site.toml` with the hosts and the
 bot.
 
+## Tools and processes
+
+edarunner is glue around tools that a Linux host already has. Nothing runs
+as root, and nothing is installed on a compute host.
+
+| Tool | Used for |
+|---|---|
+| `ssh` with `BatchMode=yes` | every remote command, under `sh -c`, so a tcsh login shell is fine |
+| `rsync` | the source tree to the host, with `--delete` behind the guard; the results back to `data/results/` |
+| `setsid` and `nohup` | the driver starts in its own session, out of reach of a closed terminal or a lost ssh |
+| `ps` from procps-ng, `/proc` | whether a driver is alive, the cpu time behind the hung check, load, memory and the working directory of a process |
+| `git worktree` | one pinned checkout per source tag under `wt/`; an uncommitted tree becomes a snapshot commit |
+| `sqlite3`, through Python | the ledger |
+| `systemd --user` or tmux, and cron | the watcher, and the check that it is still there |
+| `lmutil` | the seats of a FlexLM licence server; optional |
+
+`edr launch` copies the driver, one Python file, into the state directory
+on the shared filesystem, writes the spec of the run next to it, and
+starts the driver over ssh with `setsid nohup python3 edr_driver.py`.
+From there the run needs no connection to the head node. The driver
+starts every stage command in a new process group, logs it to
+`log/<stage>.log` in the run tree, writes its heartbeat by a rename every
+minute and reads the stop and keep files next to the spec. A stop signals
+the driver pid and the process groups the heartbeat names, never a
+session name or a process pattern.
+
+`edr watch` is one long-running process per project on the head node,
+with the Telegram bot as a thread inside it. It runs as a systemd user
+service with lingering, or in a tmux session, and a cron line with
+`edr watch --check` tells you when it stopped. Every other verb runs and
+exits. `docs/requirements.md` lists what each machine needs, and
+`docs/architecture.md` follows one run from `plan` to `export`.
+
 ## What you get
 
 - `edr status` draws the board, or one run with `edr status <run>`.
