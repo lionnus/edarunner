@@ -167,7 +167,6 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
         "shell": "/bin/bash", "env": _env(project, v),
         "limits": {k: getattr(project.limits, k) for k in _SPEC_LIMITS},
-        "netlist_stage": v["netlist_stage"],
         "start_at": {"stage": names[0], "checkpoint": None},
         "stages": [_stage_spec(project, project.stages[n], tasks, v) for n in names],
     }
@@ -218,8 +217,9 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
             problems.append(str(e))
             tag = job.config
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
-                            build_tag=tag, src=src, overrides=job.overrides,
-                            netlist_stage=11 if job.netlist_stage is None else job.netlist_stage)
+                            build_tag=tag, src=src, overrides=job.overrides)
+    if job.netlist_stage is not None:
+        v["netlist_stage"] = job.netlist_stage
     run_id = config.render(project.source.run_id, v)
     if not job.reuse:
         host = job.host if job.host != "auto" else placed.get(job.label)
