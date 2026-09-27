@@ -358,6 +358,26 @@ class Actions:
         """One line per licence."""
         return tgfmt.licences(_lic_rows(self.c))
 
+    def log_tail(self, handle: str, n: int) -> tuple[str, bytes]:
+        """The last `n` lines of the log of the running or last stage, fetched from the host: (file name, bytes)."""
+        row = self.c.resolve(handle)
+        log = self.c.heartbeat(row).get("log")
+        if not log:
+            raise Refuse(f"{board.handle(row)}: the heartbeat names no log")
+        rc, out, err = self.c.ssh.run(str(row["host"]), ["tail", "-n", str(n), str(log)])
+        if rc != 0:
+            raise HostError(f"{row['host']}: tail {log}: rc {rc}: {err.strip()}")
+        return f"{board.handle(row)}.log", out.encode()
+
+    def board_files(self) -> list[Path]:
+        """compare.html and status.html of the last watcher cycle, the ones that exist."""
+        bdir = self.c.project.data / "board"
+        return [p for p in (bdir / "compare.html", bdir / "status.html") if p.is_file()]
+
+    def metrics_csv(self, design: str) -> bytes:
+        """The CSV of `edr metrics --design <design> --csv`."""
+        return _metrics_csv(self.c.ledger.metrics(design=design)).encode()
+
     def compare_text(self, handles: list[str]) -> str:
         """One block per metric: its name, then one `label value` line per run."""
         rows = [self.c.resolve(h) for h in handles]
@@ -463,15 +483,22 @@ def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
     return 3 if any("note" in r for r in rows) else 0
 
 
+def _metrics_csv(rows: list[Row]) -> str:
+    """Metric rows as CSV with the columns of an export."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(export.METRIC_COLUMNS)
+    w.writerows([m["run_id"], m.get("label"), m.get("config"), m.get("src"), m["stage"], m.get("step"),
+                 m.get("task"), m["name"], m.get("canonical"), m["value"], m.get("unit"), m.get("source_file")]
+                for m in rows)
+    return out.getvalue()
+
+
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
     """The metrics of one design, as a table or CSV."""
     rows = c.ledger.metrics(design=a.design, stage=a.stage, step=a.step)
     if a.csv and not a.json:
-        w = csv.writer(sys.stdout, lineterminator="\n")
-        w.writerow(export.METRIC_COLUMNS)
-        w.writerows([m["run_id"], m.get("label"), m.get("config"), m.get("src"), m["stage"], m.get("step"),
-                     m.get("task"), m["name"], m.get("canonical"), m["value"], m.get("unit"), m.get("source_file")]
-                    for m in rows)
+        sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
         c.emit(_metrics_table(rows), rows)

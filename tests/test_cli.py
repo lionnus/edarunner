@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from edarunner import board, cli, config, launch
+from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.ledger import Ledger
 from edarunner.model import Telegram
@@ -328,6 +329,14 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
     assert acts.hosts_text().startswith("<b>local</b> ")
     assert acts.lic_text() == "<b>demo</b> 2/10 seats used"
+    assert acts.metrics_csv("abc1234").decode().splitlines()[0].startswith("run_id,label,")
+    assert len(acts.metrics_csv("abc1234").decode().splitlines()) == 5 and acts.metrics_csv("zzz").count(b"\n") == 1
+    assert acts.board_files() == []
+    (demo / "data" / "board").mkdir(parents=True)
+    (demo / "data" / "board" / "status.html").write_text("<html></html>")
+    assert [p.name for p in acts.board_files()] == ["status.html"]
+    with pytest.raises(Refuse, match="names no log"):
+        acts.log_tail("a@demo", 5)
     info = acts.run_info("a@demo")
     assert info["handle"] == "a@demo" and info["run_id"] == a and info["host"] == "local" and info["run_root"].endswith(a)
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
@@ -778,3 +787,15 @@ def test_notify_sends_one_message_through_every_notifier(demo: Path, capsys, mon
     assert posts == [("note", "a &amp; b", True)] * 2
     monkeypatch.setattr(cli, "make_notifiers", lambda *a: [Rec(True), Rec(False)])
     assert edr(capsys, "notify", "x")[0] == 1
+
+
+def test_log_tail_fetches_the_last_lines_from_the_host(demo: Path) -> None:
+    log = demo.parent / "synth.log"
+    log.write_text("".join(f"line {n}\n" for n in range(10)))
+    hb_file = bdir(demo) / f"{seed(demo, 'a', 'stage:synth', pid=os.getpid())}.json"
+    hb_file.write_text(json.dumps({**json.loads(hb_file.read_text()), "log": str(log)}))
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert acts.log_tail("a@demo", 3) == ("a@demo.log", b"line 7\nline 8\nline 9\n")
+    log.unlink()
+    with pytest.raises(HostError, match="tail"):
+        acts.log_tail("a@demo", 3)

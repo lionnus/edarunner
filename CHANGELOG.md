@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The bot sends files: `/log <handle> [n]` the log tail of a run,
+  `/board` the two HTML boards, and `/csv <design>` the metrics, each
+  up to 20 MB. `/pin` now pins a new board message, which `/board` did
+  before.
 - No bot text uses a middle dot as a separator: the first line is
   `<project>: <title>`, and a run line, a host line and the counts
   separate their parts with commas.

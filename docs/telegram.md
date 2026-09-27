@@ -118,7 +118,7 @@ demo: board 14:05
 The board shows at most 30 runs and then a line `… and N more`. When
 no run is live, a line `nothing live` comes before the counts. Its message id lives in the
 ledger's `kv` table under `telegram`, so a restart edits the same message.
-`/board` unpins the old message and pins a new one at the bottom of the
+`/pin` unpins the old message and pins a new one at the bottom of the
 chat.
 
 ## Built-in commands
@@ -132,7 +132,10 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/events [n]` | the last `n` events, default 8, at most 30, newest first |
 | `/hosts` | cores, RAM, scratch and GPUs per host, each as used of total |
 | `/lic` | licence seats, used of total |
-| `/board` | pin a new board message |
+| `/pin` | pin a new board message |
+| `/log <handle> [n]` | the last `n` lines of the log of a run as a file, default 200 |
+| `/board` | `compare.html` and `status.html` as files |
+| `/csv <design>` | the metrics of one design as `metrics.csv` |
 | `/keep <handle> [hours]` | add hours to the running stage or task, default 12 |
 | `/ack <handle>` | cancel a pending kill |
 | `/stop <handle> [why]` | `edr stop --after-task`; never a kill |
@@ -208,6 +211,22 @@ The regex gate works like this: every value must match its regex in full,
 or the bot replies `refused: <name> must match <regex>`, records the
 refusal in the ledger, and runs nothing. Write the regex as an allowlist
 of the exact values you expect.
+
+## Files
+
+Three commands answer with a file instead of a message. The phone opens
+an HTML file in its browser and a CSV file in a sheet app.
+
+- `/log <handle> [n]` fetches the last `n` lines, default 200, of the
+  log of the running or last stage from the host, with the same ssh
+  wrapper as `edr`. The file is `<handle>.log`.
+- `/board` sends `data/board/compare.html` and `data/board/status.html`
+  of the last watcher cycle.
+- `/csv <design>` sends `metrics.csv`, the output of
+  `edr metrics --design <design> --csv`.
+
+A file over 20 MB is not sent; the bot answers with its size and the
+limit instead.
 
 ## Reply to an alert
 

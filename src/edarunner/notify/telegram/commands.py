@@ -10,7 +10,7 @@ import re
 import shlex
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from edarunner.cli import Actions
 
 HANDLE = re.compile(r"^[\w.@#-]{1,128}$")
+DESIGN = re.compile(r"^[\w.-]{1,64}$")
+LOG_LINES = 200
 
 
 @dataclass(frozen=True)
@@ -41,7 +43,10 @@ BUILTINS = {b.name: b for b in (
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
     Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html"),
     Builtin("lic", "", "licence seats, used of total", "Look", "html"),
-    Builtin("board", "", "pin a new board message", "Look"),
+    Builtin("pin", "", "pin a new board message", "Look"),
+    Builtin("log", "<handle> [n]", "the last n log lines as a file, default 200", "Files", on_run=True),
+    Builtin("board", "", "compare.html and status.html as files", "Files"),
+    Builtin("csv", "<design>", "the metrics of one design as a CSV file", "Files"),
     Builtin("keep", "<handle> [hours]", "add hours, default 12", "Act on a run", self_logged=True, on_run=True),
     Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True, on_run=True),
     Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
@@ -52,13 +57,22 @@ BUILTINS = {b.name: b for b in (
 
 
 @dataclass
+class Document:
+    """One file to upload: its name on the phone and its bytes."""
+
+    name: str
+    data: bytes
+
+
+@dataclass
 class Reply:
-    """One answer to a command: the title of its first line, the body, and how the body is sent."""
+    """One answer to a command: the title of its first line, the body, how the body is sent, and files."""
 
     title: str
     body: str
     kind: str = "text"
     ok: bool = True
+    documents: list[Document] = field(default_factory=list)
 
 
 def handle(args: list[str]) -> str:
@@ -100,10 +114,10 @@ class Commands:
             b = BUILTINS[name]
             if run and b.on_run and args[:1] != [run]:
                 args = [run, *args]
-            body = getattr(self, "cmd_" + name)(args)
+            out = getattr(self, "cmd_" + name)(args)
             if not b.self_logged:
                 self.event("command", text[:200])
-            return Reply(name, body, b.kind)
+            return out if isinstance(out, Reply) else Reply(name, out, b.kind)
         except Exception as e:  # a refused handle is an answer, not a crash
             self.event("refused", f"{text[:200]}: {e}")
             return Reply(name, f"error: {e}", ok=False)
@@ -130,10 +144,30 @@ class Commands:
         """One line per licence."""
         return self.actions.lic_text()
 
-    def cmd_board(self, args: list[str]) -> str:
+    def cmd_pin(self, args: list[str]) -> str:
         """Unpin the board and pin a new one."""
         self.repin()
         return "board pinned"
+
+    def cmd_log(self, args: list[str]) -> Reply:
+        """The last n lines, default 200, of the log of a run as a file `<handle>.log`."""
+        h = handle(args)
+        n = int(args[1]) if len(args) > 1 and args[1].isdecimal() else LOG_LINES
+        name, data = self.actions.log_tail(h, n)
+        return Reply("log", f"the last {n} lines", documents=[Document(name, data)])
+
+    def cmd_board(self, args: list[str]) -> Reply | str:
+        """compare.html and status.html of the last watcher cycle as files."""
+        files = self.actions.board_files()
+        if not files:
+            return "no board files yet; the watcher writes them every cycle"
+        return Reply("board", "", documents=[Document(p.name, p.read_bytes()) for p in files])
+
+    def cmd_csv(self, args: list[str]) -> Reply | str:
+        """The metrics of one design as `metrics.csv`."""
+        if not args or not DESIGN.match(args[0]):
+            return "usage: /csv <design>"
+        return Reply("csv", args[0], documents=[Document("metrics.csv", self.actions.metrics_csv(args[0]))])
 
     def cmd_keep(self, args: list[str]) -> str:
         """Add hours, default 12, to the running stage or task."""

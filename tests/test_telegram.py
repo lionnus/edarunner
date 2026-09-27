@@ -37,8 +37,8 @@ class FakeApi(BotApi):
         self.n = 0
 
     def call(self, method: str, params: dict, files=None) -> dict:
-        self.calls.append((method, params))
-        if method == "sendMessage":
+        self.calls.append((method, {**params, "files": files} if files else params))
+        if method in ("sendMessage", "sendDocument"):
             self.n += 1
             return {"message_id": self.n}
         return {}
@@ -50,6 +50,7 @@ class FakeApi(BotApi):
 class FakeActions:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.board: list[Path] = []
 
     def __getattr__(self, name: str):
         def f(*a, **k):
@@ -57,6 +58,16 @@ class FakeActions:
             return f"{name} ok"
 
         return f
+
+    def log_tail(self, handle: str, n: int) -> tuple[str, bytes]:
+        self.calls.append(("log_tail", (handle, n), {}))
+        return f"{handle}.log", b"line\n" * n
+
+    def board_files(self) -> list[Path]:
+        return self.board
+
+    def metrics_csv(self, design: str) -> bytes:
+        return f"run_id,src\nr1,{design}\n".encode()
 
     def run_info(self, handle: str) -> dict:
         self.calls.append(("run_info", (handle,), {}))
@@ -172,7 +183,7 @@ def test_help_groups_builtins_and_custom(bot):
     text = last_reply(bot)
     assert "<pre>" not in text and "/keep &lt;handle&gt; [hours]: add hours, default 12" in text
     assert "<b>Custom</b>\n/echo &lt;dir&gt;: echo a dir" in text
-    assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Custom</b>"]
+    assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Files</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Custom</b>"]
 
 
 def test_custom_good_argument_runs_argv(bot):
@@ -347,8 +358,8 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     again.api = FakeApi()
     again.board("board v3")
     assert again.api.of("sendMessage") == [] and again.api.of("editMessageText")[-1]["message_id"] == 1
-    # /board unpins the old message and pins a new one.
-    bot.handle_update(msg("/board"))
+    # /pin unpins the old message and pins a new one.
+    bot.handle_update(msg("/pin"))
     assert bot.api.of("unpinChatMessage")[-1]["message_id"] == 1
     assert bot.api.of("pinChatMessage")[-1]["message_id"] == 2
 
@@ -402,10 +413,10 @@ def test_api_retries_idempotent_methods_only(monkeypatch):
 
 
 def test_builtin_commands_land_in_events(bot):
-    bot.handle_update(msg("/board"))
+    bot.handle_update(msg("/pin"))
     bot.handle_update(msg("/keep 'a;rm' 3"))
     bot.handle_update(msg("/ack a@demo"))  # the action records its own event
-    assert [(e["kind"], e["text"][:6]) for e in bot.ledger.events] == [("command", "/board"), ("refused", "/keep ")]
+    assert [(e["kind"], e["text"][:6]) for e in bot.ledger.events] == [("command", "/pin"), ("refused", "/keep ")]
 
 
 def test_poll_survives_a_bad_response(bot, monkeypatch):
@@ -545,3 +556,44 @@ def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
 
     monkeypatch.setattr(bot.api, "call", refuse)
     assert bot.post("note", "x") is False
+
+
+def test_files_go_up_as_documents_under_the_limit(bot, tmp_path, monkeypatch):
+    bot.handle_update(msg("/log a@demo 3"))
+    doc = bot.api.of("sendDocument")[-1]
+    assert bot.actions.calls[-1] == ("log_tail", ("a@demo", 3), {})
+    assert doc["files"] == {"document": ("a@demo.log", b"line\n" * 3)}
+    assert doc["caption"] == "<b>demo: log</b>\nthe last 3 lines"
+    bot.handle_update(msg("/log a@demo"))
+    assert bot.actions.calls[-1] == ("log_tail", ("a@demo", 200), {})
+    bot.handle_update(msg("/board"))
+    assert last_reply(bot) == "no board files yet; the watcher writes them every cycle"
+    for name in ("compare.html", "status.html"):
+        (tmp_path / name).write_text(f"<html>{name}</html>")
+        bot.actions.board.append(tmp_path / name)
+    bot.handle_update(msg("/board"))
+    assert [d["files"]["document"][0] for d in bot.api.of("sendDocument")[-2:]] == ["compare.html", "status.html"]
+    bot.handle_update(msg("/csv gabc1234"))
+    assert bot.api.of("sendDocument")[-1]["files"] == {"document": ("metrics.csv", b"run_id,src\nr1,gabc1234\n")}
+    bot.handle_update(msg("/csv a;b"))
+    assert last_reply(bot) == "usage: /csv &lt;design&gt;"
+    monkeypatch.setattr(tgbot, "MAX_DOCUMENT", 2**20)
+    sent = len(bot.api.of("sendDocument"))
+    bot.handle_update(msg("/log a@demo 300000"))
+    assert len(bot.api.of("sendDocument")) == sent
+    assert last_reply(bot) == "a@demo.log: 1.4 MB is over the limit of 1 MB"
+
+
+def test_send_document_posts_a_multipart_body(monkeypatch):
+    seen: list = []
+
+    def fake_urlopen(req, timeout):
+        seen.append(req)
+        return io.BytesIO(b'{"ok":true,"result":{"message_id":4}}')
+
+    monkeypatch.setattr(tgapi, "urlopen", fake_urlopen)
+    assert BotApi("1:A").send_document(CHAT, "a@demo.log", b"x\n", "<b>demo: log</b>", thread_id=17) == 4
+    req = seen[0]
+    assert req.full_url.endswith("/sendDocument") and req.headers["Content-type"].startswith("multipart/form-data")
+    assert b'name="message_thread_id"\r\n\r\n17\r\n' in req.data
+    assert b'filename="a@demo.log"\r\nContent-Type: application/octet-stream\r\n\r\nx\n\r\n' in req.data
