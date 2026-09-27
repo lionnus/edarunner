@@ -7,6 +7,7 @@ config = "demo"
 host = "local"
 stages = ["synth", "pnr", "export", "power"]
 tasks = ["k_small", "k_big"]
+vars = { netlist_stage = 11 }
 
 [[job]]
 label = "b_nodw"

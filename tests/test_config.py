@@ -221,6 +221,25 @@ def test_duplicate_label(tmp_path):
         config.load_batch(config.load_project(root), "demo")
 
 
+def test_job_vars_and_optional_config(tmp_path):
+    root = demo_copy(tmp_path)
+    jobs = root / "jobs" / "demo.toml"
+    text = jobs.read_text()
+    b = config.load_batch(config.load_project(root), "demo")
+    assert b.jobs[0].vars == {"netlist_stage": "11"} and b.jobs[1].vars == {}
+    jobs.write_text(text.replace('label = "b_nodw"\nconfig = "demo"\n', 'label = "b_nodw"\n'))
+    assert config.load_batch(config.load_project(root), "demo").jobs[1].config == ""
+    for old, new, match in (("vars = { netlist_stage = 11 }", 'vars = { "not-id" = 1 }', "vars key 'not-id' is not an identifier"),
+                            ("vars = { netlist_stage = 11 }", "vars = { x = [1] }", r"job\[0\].vars.x must be a string or a number"),
+                            ("vars = { netlist_stage = 11 }", "netlist_stage = 11",
+                             r"job\[0\].netlist_stage is gone; write vars = \{ netlist_stage = 11 \}")):
+        jobs.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_batch(config.load_project(root), "demo")
+    with pytest.raises(ConfigError, match=r"\{netlist_stage\} is gone; write \{vars.netlist_stage\}"):
+        config.load_project(demo_copy(tmp_path / "x", "out/{vars.netlist_stage}/", "out/{netlist_stage}/"))
+
+
 def test_site_path_forms(tmp_path, monkeypatch):
     root = demo_copy(tmp_path, 'site = "site.toml"', 'site = "etc/site.toml"')
     (root / "etc").mkdir()

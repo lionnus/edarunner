@@ -322,12 +322,12 @@ plan problem.
 | Key | Meaning | Default |
 |---|---|---|
 | `label` | the run label; unique in the batch | required |
-| `config` | the configuration name the flow takes; `{config}` | required |
+| `config` | the configuration name the flow takes; `{config}`. Without it the build tag hook gets `""` and the run id drops the empty part | `""` |
 | `host` | a host name, or `"auto"` | `"auto"` |
 | `stages` | the stages to run, a subset of `edr.toml` in file order | every stage |
 | `tasks` | the task ids of the task groups | `[]` |
 | `overrides` | `KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens | `{}` |
-| `netlist_stage` | a number the flow needs to find its netlist; `{netlist_stage}` | `none` |
+| `vars` | `{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; `{vars.<name>}` in the stage strings, `[env]` and `collect` | `{}` |
 | `reuse` | `{ run_id = "..." }` or `{ label = "...", latest = true }`: start on the tree of that run. With `restore = "<name>"`, start on a fresh tree with the `collect_on_request.<name>` files of that run copied back from `data/results/` | `none` |
 
 ## Placeholders
@@ -346,11 +346,11 @@ to the shell and stays as it is.
 | `{date}` | the pinned date of the batch, `YYYYMMDD_HHMM` | the run id |
 | `{batch}` | the batch name | the run id, the stage strings |
 | `{label}` | the label of the job | the run id, the stage strings |
-| `{config}` | the configuration name of the job | the run id, the stage strings |
+| `{config}` | the configuration name of the job; `""` without one | the run id, the stage strings |
 | `{build_tag}` | the build tag of the job | the run id, the stage strings |
 | `{src}` | the source tag of the batch | the run id, the stage strings |
 | `{overrides}` | the overrides of the job as `KEY=VALUE` tokens separated by spaces | the stage strings |
-| `{netlist_stage}` | the `netlist_stage` of the job, only when the job sets it | the stage strings |
+| `{vars.<name>}` | a key of the job's `vars` table | the stage strings, `[env]`, `collect` |
 | `{run_id}` | the run id | the stage strings, `[env]`, `sync.after` |
 | `{host}` | the host of the run | the stage strings, `[env]`, `sync.after` |
 | `{mount}` | the scratch mount of the host | the stage strings, `[env]`, `sync.after` |

@@ -75,7 +75,15 @@ def build_tag(project: Project, job: Job, src: str = "") -> str:
                 return str(fn(job.config, job.overrides))
         except Exception as e:  # a hook fault is a plan problem, never a traceback
             raise ConfigError(f"build_tag hook {name}: {e}") from e
-    return job.config + "".join(f"_{k}{v}" for k, v in job.overrides.items())
+    return "_".join([job.config] * bool(job.config) + [f"{k}{v}" for k, v in job.overrides.items()])
+
+
+def render_run_id(template: str, values: dict[str, object]) -> str:
+    """Render the run id template; an empty placeholder takes one `_` or `-` next to it along."""
+    for key, value in values.items():
+        if value == "":
+            template = re.sub(rf"[_-]\{{{re.escape(key)}\}}|\{{{re.escape(key)}\}}[_-]?", "", template)
+    return config.render(template, values)
 
 
 # --- spec rendering
@@ -157,7 +165,7 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
     run_id = str(v["run_id"])
     return {
         "schema": 1, "run_id": run_id, "batch": batch.batch, "project": project.project,
-        "label": job.label, "config": job.config, "host": v["host"], "root": v["root"],
+        "label": job.label, "config": job.config, "vars": job.vars, "host": v["host"], "root": v["root"],
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
         "shell": "/bin/bash", "env": _env(project, v),
         "limits": {k: getattr(project.limits, k) for k in _SPEC_LIMITS},
@@ -219,10 +227,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             problems.append(str(e))
             tag = job.config
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
-                            build_tag=tag, src=src, overrides=job.overrides)
-    if job.netlist_stage is not None:
-        v["netlist_stage"] = job.netlist_stage
-    run_id = config.render(project.source.run_id, v)
+                            build_tag=tag, src=src, overrides=job.overrides, vars=job.vars)
+    run_id = render_run_id(project.source.run_id, v)
     if _fresh(job):
         host = job.host if job.host != "auto" else placed.get(job.label)
         if host in errors:
@@ -360,7 +366,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
                                 project.safety.marker, project.safety.min_depth, dry_run)
             if ok and p.restore:
                 res = collect.restore_on_request(project, ssh, db, db.run(p.reuse) or {}, p.restore,
-                                                 p.host, p.root, dry_run)
+                                                 p.host, p.root, dry_run, p.spec.get("vars"))
                 print(f"{p.run_id}: restore {p.restore} of {p.reuse}: {res.files} files" + (" (dry)" if dry_run else ""))
                 for f in res.failures:
                     print(f"{p.run_id}: {f}")

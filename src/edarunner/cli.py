@@ -660,9 +660,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
         # An imported tree has no jobs file; the database row is the job.
         batch, job = None, None
     if job is None:
-        if not row.get("config"):
-            raise Refuse(f"{run_id}: no job {row['label']} in jobs/{row['batch']}.toml and no config in the database")
-        job = Job(label=str(row["label"]), config=str(row["config"]))
+        job = Job(label=str(row["label"]), config=str(row.get("config") or ""))
         batch = Batch(batch=str(row["batch"]), source=str(row["src"] or ""), jobs=[job],
                       path=project.root / "jobs" / f"{row['batch']}.toml")
     job.reuse, job.stages, job.host = {"run_id": run_id}, [a.stage], a.on or "auto"

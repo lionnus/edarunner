@@ -8,7 +8,7 @@ tests build on it, and it is the shortest way to see the tool at work.
 
 | Script | Stands in for | Does |
 |---|---|---|
-| `flow/flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [KEY=VALUE ...]` | synthesis, place and route, export | one step per second; writes `reports/<n>/area.rpt` and `reports/<n>/qor.rpt`; `export` writes `out/11/netlist.v` |
+| `flow/flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [NETLIST_STAGE=n] [KEY=VALUE ...]` | synthesis, place and route, export | one step per second; writes `reports/<n>/area.rpt` and `reports/<n>/qor.rpt`; `export` writes `out/<n>/netlist.v`, 11 by default |
 | `flow/kernel.sh <kernel> <test> [KEY=VALUE ...]` | a gate-level power simulation | sleeps `DEMO_SLEEP` seconds (default 2); writes a 1 MiB `wave.vcd`, `power/reports/power.csv` and `power/phases.json` |
 | `flow/seats.sh` | the seat probe of the tool `demo` | prints `free total`; 10 seats, `DEMO_SEATS_USED` in use (default 2) |
 
@@ -31,7 +31,7 @@ Two switches make failures:
 | `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; five metrics; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
 | `site.toml` | one host, `local`, with the tool `demo` in version `1.0`; the scratch `/tmp/edr-demo`; the tool `demo` with 10 seats and its probe |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
-| `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
+| `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`, and `vars = { netlist_stage = 11 }` for `export`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
 | `setup.sh` | makes `repo/`, a git repository with `flow/`; the source the batch stages |
 
 The run makes `repo/`, `wt/` and `data/`, and git ignores them.

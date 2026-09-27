@@ -64,11 +64,11 @@ PLACEHOLDERS = {
     "date": ("the pinned date of the batch, `YYYYMMDD_HHMM`", "the run id"),
     "batch": ("the batch name", "the run id, the stage strings"),
     "label": ("the label of the job", "the run id, the stage strings"),
-    "config": ("the configuration name of the job", "the run id, the stage strings"),
+    "config": ("the configuration name of the job; `\"\"` without one", "the run id, the stage strings"),
     "build_tag": ("the build tag of the job", "the run id, the stage strings"),
     "src": ("the source tag of the batch", "the run id, the stage strings"),
     "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
-    "netlist_stage": ("the `netlist_stage` of the job, only when the job sets it", "the stage strings"),
+    "vars.<name>": ("a key of the job's `vars` table", "the stage strings, `[env]`, `collect`"),
     "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),
     "host": ("the host of the run", "the stage strings, `[env]`, `sync.after`"),
     "mount": ("the scratch mount of the host", "the stage strings, `[env]`, `sync.after`"),
@@ -97,7 +97,7 @@ def render(template: str, values: Mapping[str, object]) -> str:
     def sub(m: re.Match[str]) -> str:
         key = m.group(1)
         if key not in values:
-            known = key in PLACEHOLDERS or key.startswith(("task.", "tool."))
+            known = key in PLACEHOLDERS or key.startswith(("task.", "tool.", "vars."))
             raise ConfigError(f"{'missing' if known else 'unknown'} placeholder {{{key}}} in '{template}'")
         return str(values[key])
 
@@ -339,6 +339,9 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         raise ConfigError(f"{file}: 'state' is now 'state_dir'")
     raw = _table(raw, _PROJECT_KEYS, file, "")
     _schema(raw, file)
+    if "{netlist_stage}" in repr(raw):
+        raise ConfigError(f"{file}: {{netlist_stage}} is gone; write {{vars.netlist_stage}} and set "
+                          "vars = { netlist_stage = <n> } in the job")
     name = _need(raw, "project", file, "")
     values: dict[str, object] = {"project": name, "project_root": str(root), "user": getpass.getuser()}
     if site_path is None:
@@ -499,6 +502,14 @@ def _job(raw: object, index: int, project: Project, file: Path) -> Job:
     at = f"job[{index}]"
     raw = dict(_table(raw, None, file, at))
     raw["overrides"] = {k: str(v) for k, v in raw.get("overrides", {}).items()}
+    if "netlist_stage" in raw:
+        raise ConfigError(f"{file}: {at}.netlist_stage is gone; write vars = {{ netlist_stage = {raw['netlist_stage']} }}")
+    for k, v in _table(raw.get("vars", {}), None, file, f"{at}.vars").items():
+        if not re.fullmatch(r"[A-Za-z_]\w*", k):
+            raise ConfigError(f"{file}: {at}.vars key {k!r} is not an identifier")
+        if isinstance(v, (dict, list)):
+            raise ConfigError(f"{file}: {at}.vars.{k} must be a string or a number")
+    raw["vars"] = {k: str(v) for k, v in raw.get("vars", {}).items()}
     for s in raw.get("stages", []):
         if s not in project.stages:
             raise ConfigError(f"{file}: {at}.stages names unknown stage '{s}'")

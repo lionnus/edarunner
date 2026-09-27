@@ -84,6 +84,11 @@ def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batc
     return run_id
 
 
+def with_vars(root: Path, run_id: str) -> None:
+    """The spec of a seeded run with the job vars of the demo job `a`."""
+    (bdir(root) / f"{run_id}.spec.json").write_text(json.dumps({"vars": {"netlist_stage": "11"}}))
+
+
 def add_metric(root: Path, run_id: str, name: str, value: float, step: int | None = 3, task: str = "") -> None:
     with Database(config.load_project(root).data / "edr.db") as db:
         db.add_metric({"run_id": run_id, "stage": "synth", "step": step, "task": task, "name": name,
@@ -527,6 +532,7 @@ def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
 
 def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
+    with_vars(demo, a)
     assert edr(capsys, "continue", "a@demo")[0] == 1
     assert edr(capsys, "continue", "a@demo", "--stage", "nope")[0] == 1
     code, _, err = edr(capsys, "continue", "a@demo", "--stage", "export", "--on", "local", "--from", "cts", "--dry-run")
@@ -673,6 +679,7 @@ def test_retire_collects_the_named_lists_first(demo: Path, capsys) -> None:
     root = Path(config.load_project(demo).site.scratch[0]) / getpass.getuser() / "edr" / "demo" / a
     results = demo / "data" / "results" / a
     (results / "log").mkdir(parents=True)
+    with_vars(demo, a)
     code, out, _ = edr(capsys, "retire", "a@demo", "--collect", "netlist", "--why", "x", "--dry-run")
     assert code == 0 and "collect netlist: 1 files (dry)" in out and root.is_dir() and not (results / "out").exists()
     code, _, err = edr(capsys, "retire", "a@demo", "--collect", "netlist,nope", "--why", "x")

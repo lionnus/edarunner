@@ -121,6 +121,11 @@ def test_on_request(env) -> None:
     project, ssh, db, run, root = env
     run_tree(root)
     r = collect.collect_on_request(project, ssh, db, run, "netlist")
+    assert r.failures == ["export: missing placeholder {vars.netlist_stage} in 'out/{vars.netlist_stage}/'"]
+    spec = project.state_dir / "demo" / f"{RUN_ID}.spec.json"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text('{"vars": {"netlist_stage": "11"}}')
+    r = collect.collect_on_request(project, ssh, db, run, "netlist")
     assert r.failures == [] and r.copied == ["out/11/netlist.v"]
     assert artifacts(db) == [("out/11/netlist.v", "netlist", 22)]
     assert collect.collect_on_request(project, ssh, db, run, "nope").failures == ["no stage has collect_on_request.nope"]
