@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 
 from edarunner.guards import Refuse
-from edarunner.hosts import HostError, HostProbe, Ssh, place
+from edarunner.hosts import HostError, HostProbe, Ssh, missing_tools, place, tool_versions
 from edarunner.model import (
-    Host, Job, Limits, Needs, Placement, Project, Safety, Site, Source, Stage, Sync,
+    Host, Job, Limits, Needs, Placement, Project, Safety, Site, Source, Stage, Sync, Tool,
 )
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -31,15 +31,18 @@ def demo_site(scratch: list[str]) -> Site:
         ssh_timeout_s=t["ssh"]["timeout_s"],
         tool_procs=t["tool_procs"],
         hosts={n: Host(n, h["cores"], h["ram_gb"], h.get("scratch")) for n, h in t["hosts"].items()},
+        tools={n: Tool(n, **x) for n, x in t["tools"].items()},
     )
+
+
+def needs_of(s: dict) -> Needs:
+    tools = s["needs"].get("tools", {})
+    return Needs(s["needs"]["cores"], s["needs"]["disk_gb"], dict.fromkeys(tools, 1) if isinstance(tools, list) else tools)
 
 
 def demo_project(site: Site) -> Project:
     t = tomllib.loads((DEMO / "edr.toml").read_text())
-    stages = {
-        n: Stage(n, needs=Needs(s["needs"]["cores"], s["needs"]["disk_gb"], s["needs"].get("licence")))
-        for n, s in t["stages"].items()
-    }
+    stages = {n: Stage(n, needs=needs_of(s)) for n, s in t["stages"].items()}
     return Project(
         root=DEMO, project=t["project"], site=site, state=Path("/nonexistent"), data=Path("data"),
         run_prefix=t["run_prefix"],
@@ -249,6 +252,19 @@ def test_place_fits_nowhere(ssh: Ssh) -> None:
     assert place(proj, [job("j")], {}, {}) == {"j": None}
     low = {"a": probe("a", cores=0.5), "b": probe("b", ram=0.5), "c": probe("c", disk=0.1)}
     assert place(proj, [job("j")], low, {}) == {"j": None}
+
+
+def test_place_skips_a_host_without_the_tool(ssh: Ssh) -> None:
+    proj = demo_project(ssh.site)
+    proj.site.hosts.update({"a": Host("a", 64, 256, tools={}), "b": Host("b", 64, 256, tools={"demo": "1.0"}),
+                            "c": Host("c", 64, 256), "d": Host("d", 64, 256, tools={"demo": ""})})
+    probes = {"a": probe("a", cores=64), "b": probe("b", cores=8), "c": probe("c", cores=16), "d": probe("d", cores=4)}
+    assert place(proj, [job("j")], probes, {}) == {"j": "c"}  # a has the cores but not the tool; c has every tool
+    assert missing_tools(proj.site, "a", {"demo"}) == ["demo"] and missing_tools(proj.site, "zz", {"demo"}) == []
+    assert tool_versions(proj.site, "b") == {"tool.demo.version": "1.0"} and tool_versions(proj.site, "a") == {}
+    assert tool_versions(proj.site, "c") == {"tool.demo.version": ""} == tool_versions(proj.site, None)
+    proj.stages["synth"].needs = Needs(cores=1, disk_gb=0.1)
+    assert place(proj, [job("j")], probes, {}) == {"j": "a"}
 
 
 def test_place_fixed_host_and_needs_subtraction(ssh: Ssh) -> None:
