@@ -29,7 +29,7 @@ event, not even an empty database.
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read verb (check, events, hosts, lic, metrics, status) never creates
+A read verb (check, events, hosts, lic, metrics, status, tools) never creates
 data/edr.db. Without a database it reads an empty ledger in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
@@ -113,41 +113,57 @@ edr hosts [--narrow]
 ```
 
 Probes every host of the site file and prints one row per host: the
-name; cores in use of total, with a bar; the one-minute load average; RAM
-free of total; the largest writable scratch of the host's list, and its
-space free of total, with a bar of the used part; GPUs idle of total,
-where idle means under 5 % utilisation and under 5 % memory in use; GPU
-memory free of total, summed over the GPUs; processes that match
-tool_procs, ours and others; and our driver processes.
+worst mark of the host; the name; cores in use of total, with a bar; the
+one-minute load average; RAM free of total; the largest writable scratch
+of the host's list, and its space free of total, with a bar of the used
+part; GPUs idle of total, where idle means under 5 % utilisation and
+under 5 % memory in use; GPU memory free of total, summed over the GPUs;
+processes that match tool_procs, ours and others; and our driver
+processes.
+
+A mark tells how full a resource is. It is 🟢 below the first threshold
+of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
+the third. A value exactly at a threshold takes the colour of that
+threshold. The used fraction is the load over the cores for cores, the
+used part of the total for ram GB and scratch GB, and the busy GPUs over
+all GPUs for gpu. A host without GPUs shows -, and a host that did not
+answer shows ⚫ and its error in the row. The rows go by the worst mark,
+⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by host name within one mark.
 
 The GPU columns come from nvidia-smi; a host without it shows -. A bar is
-green below 70 % used, yellow below 90 %, red above. A host that did not
-answer shows its error in the row. --json gives the numbers: cores, load,
-free_cores, free_ram_gb, total_ram_gb, mount, free_gb, total_gb, gpus,
-gpus_idle, gpu_used_gb, gpu_total_gb, our_tool_procs, other_tool_procs
-and our_runs.
+green below 70 % used, yellow below 90 %, red above. --json gives the
+numbers: cores, load, free_cores, free_ram_gb, total_ram_gb, mount,
+free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
+our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
+ram, scratch and gpu in marks.
 
 | Flag | Meaning |
 |---|---|
-| `--narrow` | host, cores, RAM, scratch and GPUs only, in 48 columns |
+| `--narrow` | ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number |
 
 | Exit | Meaning |
 |---|---|
 | 3 | a host did not answer |
 
-## lic
+## tools
 
 ```
-edr lic
+edr tools
 ```
 
-Runs every licence probe from the head node and prints pool, used, free,
-ours, others and the floor.
+One row per tool of the site file. free and total are the seats the
+probe reports; the probe runs on the head node with the project
+directory as {root}. hosts lists the hosts that have the tool, with
+their versions. A tool without a probe shows - for the seats. --json
+gives tool, free, total, hosts (host to version) and note.
+
+edr lic prints the same and a deprecation line on stderr; it goes in
+the next release.
 
 
 | Exit | Meaning |
 |---|---|
-| 3 | a probe failed, or the feature line is missing |
+| 3 | a probe failed, or printed no number |
 
 ## metrics
 

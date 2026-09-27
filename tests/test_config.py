@@ -34,8 +34,8 @@ def test_demo_end_to_end():
     assert list(p.stages) == ["synth", "pnr", "export", "power"]
     power = p.stages["power"]
     assert power.is_group and power.parallel == 2
-    assert power.needs.licence == {"demo": 1} and power.budget.per == "task"
-    assert p.stages["synth"].needs.licence == "demo" and p.stages["synth"].retry.max == 2
+    assert power.needs.tools == {"demo": 1} and power.budget.per == "task"
+    assert p.stages["synth"].needs.tools == {"demo": 1} and p.stages["synth"].retry.max == 2
     assert p.stages["pnr"].retry is None and p.stages["export"].prune == {"netlist": ["out"]}
     assert p.metrics["area_cell_um2"].stage == ["synth", "pnr"] and p.metrics["area_cell_um2"].step == "*"
     assert p.metrics["power_w"].stage == ["power"] and p.metrics["power_w"].csv["column"] == "total_w"
@@ -44,7 +44,9 @@ def test_demo_end_to_end():
     assert p.tasks["k_big"].budget.hours == 2 and p.tasks["k_small"].budget is None
     assert p.task_resolver == ""
     assert p.site.hosts["local"].cores == 4 and p.site.hosts["local"].scratch is None
-    assert p.site.licences["demo"].floor == 2 and p.site.telegram is None
+    assert p.site.hosts["local"].tools == {"demo": "1.0"} and p.site.hosts["local"].has("demo")
+    assert p.site.tools["demo"].seats == 10 and p.site.tools["demo"].probe == ["bash", "{root}/flow/seats.sh"]
+    assert p.site.telegram is None
     assert p.site.ssh_timeout_s == 20 and p.site.scratch == ["/tmp/edr-demo"]
 
     b = config.load_batch(p, "demo")
@@ -75,8 +77,11 @@ def test_render_and_placeholders():
         ("parallel = 2", 'parallel = 2\nafter = "export"', "unknown key 'stages.power.after'"),
         ('stage = ["synth", "pnr"]', 'stage = ["synth", "gone"]', "stage names unknown stage 'gone'"),
         ('task_dir = "simulation/tests/{config}/{task.test}"', "", "task group and needs task_dir"),
-        ('licence = "demo"', 'licence = "fc"', "unknown licence 'fc'"),
-        ("licence = { demo = 1 }", "licence = { questa = 1 }", "unknown licence 'questa'"),
+        ('tools = ["demo"]', 'tools = ["fc"]', "stages.synth.needs.tools names unknown tool 'fc'"),
+        ("tools = { demo = 1 }", "tools = { questa = 1 }", "unknown tool 'questa'"),
+        ('tools = ["demo"]', 'licence = "demo"', "stages.synth.needs.licence is gone; use stages.synth.needs.tools"),
+        ('tools = ["demo"]', "tools = 1", "stages.synth.needs.tools must be a list of names or"),
+        ('tools = ["demo"]', 'tools = { demo = "2" }', "stages.synth.needs.tools must be a list of names or"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
         ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
         ("host_free_min_gb = 1", 'host_free_min_gb = "1"', "limits.host_free_min_gb must be float, not str"),
@@ -84,13 +89,43 @@ def test_render_and_placeholders():
         ('marker = "/edr/"', "marker = 1", "safety.marker must be str, not int"),
         ('steps = ["setup", "analyze", "elaborate", "synth"]', 'steps = "setup"', "stages.synth.steps must be list, not str"),
         ('prune = { netlist = ["out"] }', 'prune = ["out"]', "stages.export.prune must be dict, not list"),
-        ('licence = "demo"', "licence = 1", "stages.synth.needs.licence must be str or dict, not int"),
         ("budget = { hours = 1 }", "budget = { hours = true }", "budget.hours must be float, not bool"),
     ],
 )
 def test_refused(tmp_path, old, new, msg):
     with pytest.raises(ConfigError, match=msg):
         config.load_project(demo_copy(tmp_path, old, new))
+
+
+def test_site_tools_and_host_tools(tmp_path):
+    root = demo_copy(tmp_path)
+    site = root / "site.toml"
+    text = site.read_text()
+    site.write_text(text.replace('tools = { demo = "1.0" }', 'tools = ["demo"]'))
+    assert config.load_project(root).site.hosts["local"].tools == {"demo": ""}
+    site.write_text(text.replace('tools = { demo = "1.0" }\n', ""))
+    host = config.load_project(root).site.hosts["local"]
+    assert host.tools is None and host.has("demo") and host.has("anything")
+    site.write_text(text.replace('tools = { demo = "1.0" }', "tools = []"))
+    assert not config.load_project(root).site.hosts["local"].has("demo")
+    site.write_text(text + '\n[tools.plain]\n')
+    plain = config.load_project(root).site.tools["plain"]
+    assert plain.seats is None and plain.probe == []
+    for old, new, match in (('tools = { demo = "1.0" }', 'tools = ["nope"]', "hosts.local.tools names unknown tool 'nope'"),
+                            ('tools = { demo = "1.0" }', "tools = 1", "hosts.local.tools must be dict, not int"),
+                            ("seats = 10", 'seats = "10"', "tools.demo.seats must be int, not str"),
+                            ('probe = ["bash", "{root}/flow/seats.sh"]', 'probe = "bash seats.sh"', "tools.demo.probe must be list, not str"),
+                            ("[tools.demo]", "[licences.demo]", r"\[licences\] is gone; declare \[tools.<name>\]")):
+        site.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)
+    site.write_text(text)
+    tasks = root / "tasks.toml"
+    tasks.write_text(tasks.read_text().replace("budget = { hours = 2 }", "budget = { hours = 2 }\nneeds = { tools = { demo = 2 } }"))
+    assert config.load_project(root).tasks["k_big"].needs.tools == {"demo": 2}
+    tasks.write_text(tasks.read_text().replace("tools = { demo = 2 }", 'licence = "demo"'))
+    with pytest.raises(ConfigError, match="tasks.k_big.needs.licence is gone"):
+        config.load_project(root)
 
 
 def test_int_fits_a_float_field(tmp_path):
@@ -140,6 +175,28 @@ def test_project_telegram_overrides_the_site(tmp_path):
         config.load_project(root)
     edr.write_text(edr_text + "\n[telegram]\nchat_id = 5\n")
     assert config.load_project(root).site.telegram.chat_id == 5
+
+
+def test_marks_defaults_site_and_project_override(tmp_path):
+    root = demo_copy(tmp_path)
+    site, edr = root / "site.toml", root / "edr.toml"
+    site_text, edr_text = site.read_text(), edr.read_text()
+    m = config.load_project(root).site.marks
+    assert (m.cores, m.ram, m.scratch, m.gpu) == ([0.6, 0.8, 0.9], [0.6, 0.8, 0.9], [0.7, 0.85, 0.95], [0.6, 0.8, 0.9])
+    site.write_text(site_text + "\n[marks]\ncores = [0.5, 0.7, 0.8]\nram = [0, 0.5, 1]\n")
+    edr.write_text(edr_text + "\n[marks]\ncores = [0.1, 0.2, 0.3]\n")
+    m = config.load_project(root).site.marks
+    assert (m.cores, m.ram, m.scratch) == ([0.1, 0.2, 0.3], [0, 0.5, 1], [0.7, 0.85, 0.95])
+    for bad, match in (("gpu = [0.9, 0.8, 0.95]", "marks.gpu must be three ascending numbers between 0 and 1"),
+                       ("ram = [0.6, 0.8]", "marks.ram must be three ascending"),
+                       ("scratch = [0.5, 0.8, 1.2]", "marks.scratch must be three ascending"),
+                       ("cores = [0.5, 0.8, true]", "marks.cores must be three ascending"),
+                       ('cores = "0.5"', "marks.cores must be list, not str"),
+                       ("disk = [0.5, 0.8, 0.9]", "unknown key 'marks.disk'")):
+        edr.write_text(edr_text + f"\n[marks]\n{bad}\n")
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)
+
 
 def test_duplicate_label(tmp_path):
     root = demo_copy(tmp_path)

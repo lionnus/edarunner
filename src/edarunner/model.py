@@ -15,15 +15,19 @@ class Host:
     cores: int
     ram_gb: int
     scratch: list[str] | None = None  # None: the site default
+    tools: dict[str, str] | None = None  # tool -> version, "" when unknown; None: every tool
+
+    def has(self, tool: str) -> bool:
+        """True when the host has `tool`; a host without a `tools` key has every tool."""
+        return self.tools is None or tool in self.tools
 
 
 @dataclass
-class Licence:
+class Tool:
+    """A tool of the site: an optional seat total, and a probe whose first line is `free` or `free total`."""
     name: str
-    feature: str
-    floor: int
-    probe: str
-    seats_per_task: int = 1
+    seats: int | None = None
+    probe: list[str] = field(default_factory=list)  # argv, run on the host with the run placeholders filled
 
 
 @dataclass
@@ -50,6 +54,16 @@ class Telegram:
 
 
 @dataclass
+class Marks:
+    """The used fractions at which a resource mark of `edr hosts` turns yellow, orange and red."""
+
+    cores: list[float] = field(default_factory=lambda: [0.6, 0.8, 0.9])
+    ram: list[float] = field(default_factory=lambda: [0.6, 0.8, 0.9])
+    scratch: list[float] = field(default_factory=lambda: [0.7, 0.85, 0.95])
+    gpu: list[float] = field(default_factory=lambda: [0.6, 0.8, 0.9])  # the fraction of GPUs busy
+
+
+@dataclass
 class Site:
     path: Path
     scratch: list[str]
@@ -58,16 +72,17 @@ class Site:
     ssh_timeout_s: int
     tool_procs: str
     hosts: dict[str, Host]
-    licences: dict[str, Licence] = field(default_factory=dict)
+    tools: dict[str, Tool] = field(default_factory=dict)
     nfs_export: str = ""
     telegram: Telegram | None = None
+    marks: Marks = field(default_factory=Marks)
 
 
 @dataclass
 class Needs:
     cores: int = 1
     disk_gb: float = 0.0
-    licence: str | dict[str, int] | None = None  # "fc" or {"questa": 1}
+    tools: dict[str, int] = field(default_factory=dict)  # tool -> seats
 
 
 @dataclass

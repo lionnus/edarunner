@@ -94,34 +94,31 @@ def _budget(base: Budget, over: Budget | None) -> dict[str, Any]:
     return {k: v for k, v in merged.items() if v not in (None, False) and not (k == "per" and v == "stage")}
 
 
-def _licence(project: Project, ref: str | dict[str, int] | None, values: dict[str, object]) -> dict[str, Any] | None:
-    if not ref:
-        return None
-    name, seats = (ref, None) if isinstance(ref, str) else next(iter(ref.items()))
-    lic = project.site.licences[name]
-    return {"name": name, "feature": lic.feature, "floor": lic.floor,
-            "seats_per_task": lic.seats_per_task if seats is None else seats,
-            "probe": config.render(lic.probe, values)}
+def _tools(project: Project, needs: dict[str, int], values: dict[str, object]) -> list[dict[str, Any]]:
+    """The gate of a stage or task: name, seats and the rendered probe argv of each needed tool with a probe."""
+    return [{"name": n, "seats": seats, "probe": [config.render(a, values) for a in project.site.tools[n].probe]}
+            for n, seats in needs.items() if project.site.tools[n].probe]
 
 
-def _task_spec(stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:
+def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:
     needs = _merge(stage.needs, task.needs)
-    needs.pop("licence")
+    tools = needs.pop("tools")
     v = {**values, **{f"task.{k}": x for k, x in task.fields.items()}, "cores": needs["cores"]}
     v["task_dir"] = os.path.normpath(os.path.join(str(values["root"]), config.render(stage.task_dir, v)))
-    return {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"],
-            "needs": needs, "budget": _budget(stage.budget, task.budget)}
+    out = {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"],
+           "needs": needs, "budget": _budget(stage.budget, task.budget)}
+    if task.needs and task.needs.tools:
+        out["tools"] = _tools(project, tools, v)
+    return out
 
 
 def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[str, object]) -> dict[str, Any]:
     needs = _merge(stage.needs, None)
-    ref = needs.pop("licence")
     v = {**values, "cores": needs["cores"]}
     out: dict[str, Any] = {"name": stage.name, "cwd": os.path.normpath(os.path.join(str(v["root"]), stage.cwd)),
                            "needs": needs}
-    lic = _licence(project, ref, v)
-    if lic:
-        out["licence"] = lic
+    if tools := _tools(project, needs.pop("tools"), v):
+        out["tools"] = tools
     if budget := _budget(stage.budget, None):
         out["budget"] = budget
     if stage.retry:
@@ -142,7 +139,7 @@ def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[
     if stage.after_each:
         # The driver fills {task_dir} per task.
         out["after_each"] = config.render(stage.after_each, {**v, "task_dir": "{task_dir}"})
-    out["tasks"] = [_task_spec(stage, t, v) for t in tasks]
+    out["tasks"] = [_task_spec(project, stage, t, v) for t in tasks]
     return out
 
 
@@ -237,8 +234,14 @@ def _plan_job(project: Project, batch: Batch, job: Job, ledger: Ledger, date: st
             if not mount:
                 problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
+    tools = hosts.job_tools(project, job)
+    lack = hosts.missing_tools(project.site, host, tools) if host else \
+        [t for t in sorted(tools) if not any(h.has(t) for h in project.site.hosts.values())]
+    if lack:
+        problems.append((f"{host} lacks" if host else "no host has") + " the tools: " + ", ".join(lack))
     # {tree_id} names the tree the flow writes in: the reused run's id, else this run's.
-    v.update(run_id=run_id, tree_id=tree or run_id, host=host, mount=mount, root=root)
+    v.update(run_id=run_id, tree_id=tree or run_id, host=host, mount=mount, root=root,
+             **hosts.tool_versions(project.site, host))
     spec: dict[str, Any] = {}
     if host and not problems:
         try:

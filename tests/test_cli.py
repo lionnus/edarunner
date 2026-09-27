@@ -325,8 +325,8 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
-    assert acts.hosts_text().startswith("<b>local</b> · ")
-    assert acts.lic_text() == "<b>demo</b> · 8/10 seats free"
+    assert acts.hosts_text().split(" ", 1)[1].startswith("<b>local</b> · ")
+    assert acts.tools_text() == "<b>demo</b> · 8/10 seats free · 1 host"
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
@@ -394,7 +394,7 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     assert edr(capsys, "retire", "--batch", "empty", "--why", "x")[0] == 2
 
 
-# metrics, export, hosts, lic
+# metrics, export, hosts, tools
 
 
 def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
@@ -424,20 +424,31 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
         assert [e["kind"] for e in led.events()] == ["export"]
 
 
-def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
+def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     head, row = out.splitlines()[0], out.splitlines()[2]
-    assert code == 0 and head.split() == ["host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
-    assert row.split()[0] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
+    assert code == 0 and head.split() == ["ok", "host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
+    assert row.split()[1] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
-    code, out, _ = edr(capsys, "lic")
-    assert code == 0 and out.splitlines()[2].split() == ["demo", "demo", "10", "2", "8", "0", "2", "2"]
-    assert out.splitlines()[0].split()[-1] == "note"
+    code, out, _ = edr(capsys, "tools")
+    assert code == 0 and out.splitlines()[0].split() == ["tool", "free", "total", "hosts", "note"]
+    assert out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"]
+    code, out, err = edr(capsys, "lic")
+    assert code == 0 and out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"] and "deprecated" in err
+    code, out, _ = edr(capsys, "--json", "tools")
+    assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 8, "total": 10, "hosts": {"local": "1.0"}}]
     site = demo / "site.toml"
-    site.write_text(site.read_text().replace("bash {root}/flow/lmstat.sh", "false"))
-    code, out, _ = edr(capsys, "lic")
+    text = site.read_text()
+    site.write_text(text.replace('["bash", "{root}/flow/seats.sh"]', '["false"]'))
+    code, out, _ = edr(capsys, "tools")
     assert code == 3 and "unknown" in out
+    site.write_text(text.replace('["bash", "{root}/flow/seats.sh"]', '["echo", "3"]') + '\n[tools.plain]\n')
+    code, out, _ = edr(capsys, "--json", "tools")
+    assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 3, "total": 10, "hosts": {"local": "1.0"}},
+                                                     {"tool": "plain", "hosts": {}}]  # local lists demo only
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert acts.tools_text().splitlines() == ["<b>demo</b> · 3/10 seats free · 1 host", "<b>plain</b> · 0 hosts"]
 
 
 # run (reuse), watch, bad input
@@ -461,23 +472,44 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     code, out, _ = edr(capsys, "hosts")
     lines = out.splitlines()
     assert code == 3 and len(lines) == 5 and "\x1b" not in out
-    a = next(ln for ln in lines if ln.startswith("hostA"))
-    assert a.split() == ["hostA", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "120/256", "/scratch", "800/2000",
-                         "\u2588" * 5 + "\u2591" * 3, "1/4", "290/320", "4/2", "3"]
-    local = next(ln for ln in lines if ln.startswith("local"))
-    assert local.split() == ["local", "0/8", "\u2591" * 8, "0.2", "35/62.3", "/tmp/x", "15.5/15.6", "\u2591" * 8, "-", "-", "3/0", "0"]
-    assert next(ln for ln in lines if ln.startswith("hostB")).split()[1:] == ["error:", "hostB:", "rc", "255:", "timeout"]
+    assert [ln.split()[:2] for ln in lines[2:]] == [["⚫", "hostB"], ["🟠", "hostA"], ["🟢", "local"]]
+    a = next(ln for ln in lines if " hostA " in ln)
+    assert a.split() == ["🟠", "hostA", "🟠", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "🟢", "120/256", "/scratch", "🟢",
+                         "800/2000", "\u2588" * 5 + "\u2591" * 3, "🟡", "1/4", "290/320", "4/2", "3"]
+    local = next(ln for ln in lines if " local " in ln)
+    assert local.split() == ["🟢", "local", "🟢", "0/8", "\u2591" * 8, "0.2", "🟢", "35/62.3", "/tmp/x", "🟢", "15.5/15.6",
+                             "\u2591" * 8, "-", "-", "3/0", "0"]
+    assert next(ln for ln in lines if " hostB " in ln).split()[2:] == ["error:", "hostB:", "rc", "255:", "timeout"]
     code, out, _ = edr(capsys, "hosts", "--narrow")
     lines = out.splitlines()
     assert code == 3 and all(len(ln) <= 48 for ln in lines)
-    assert lines[0].split() == ["host", "cores", "ram", "GB", "scratch", "GB", "gpu"]
-    assert next(ln for ln in lines if ln.startswith("hostA")).split() == ["hostA", "52/64", "120/256", "800/2000", "1/4"]
+    assert lines[0].split() == ["ok", "host", "cores", "ram", "GB", "scratch", "GB", "gpu"]
+    assert next(ln for ln in lines if " hostA " in ln).split() == ["🟠", "hostA", "🟠52/64", "🟢120/256", "🟢800/2000", "🟡1/4"]
     code, out, _ = edr(capsys, "--json", "hosts")
-    data = {r["host"]: r for r in json.loads(out)["data"]}
+    data = json.loads(out)["data"]
+    assert [r["host"] for r in data] == ["hostB", "hostA", "local"]
+    data = {r["host"]: r for r in data}
     assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
+    assert data["hostA"]["marks"] == {"cores": "🟠", "ram": "🟢", "scratch": "🟢", "gpu": "🟡"}
+    assert data["local"]["marks"]["gpu"] == "-" and set(data["hostB"]["marks"].values()) == {"⚫"}
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     text = acts.hosts_text().splitlines()
-    assert "<b>hostA</b> · 52/64 cores · 800/2000 GB free · gpu 1/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
+    assert "🟠 <b>hostA</b> · 52/64 cores · 800/2000 GB free · gpu 1/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
+
+
+def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
+    site = demo / "site.toml"
+    site.write_text(site.read_text() + "".join(f"\n[hosts.{h}]\ncores = 8\nram_gb = 8\n" for h in ("b", "a", "c")))
+    (demo / "edr.toml").write_text((demo / "edr.toml").read_text() + "\n[marks]\nram = [0.1, 0.2, 0.3]\n")
+    ram_used = {"local": 0.0, "a": 0.25, "b": 0.3, "c": 0.3}
+
+    def probe(self, host):
+        return HostProbe(host, 8, 10 - 10 * ram_used[host], "/s", 10, cores=8, total_ram_gb=10, total_gb=10)
+
+    monkeypatch.setattr(Ssh, "probe", probe)
+    code, out, _ = edr(capsys, "--json", "hosts")
+    data = json.loads(out)["data"]
+    assert code == 0 and [(r["host"], r["marks"]["ram"]) for r in data] == [("b", "🔴"), ("c", "🔴"), ("a", "🟠"), ("local", "🟢")]
 
 
 def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
@@ -532,7 +564,7 @@ def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
     seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
     with Ledger(demo / "data" / "edr.db") as led:
         led.add_event("user", a, "launch", "local /x")
-    for argv in (["status"], ["status", "--narrow"], ["status", "--triage"], ["status", "a@demo"], ["hosts"], ["lic"],
+    for argv in (["status"], ["status", "--narrow"], ["status", "--triage"], ["status", "a@demo"], ["hosts"], ["tools"],
                  ["events"], ["check"]):
         assert b"\x1b" not in _edr_bytes(demo, *argv), argv
         assert b"\x1b" not in _edr_bytes(demo, *argv, NO_COLOR="1", FORCE_COLOR="1", TERM="xterm-256color"), argv
@@ -550,7 +582,7 @@ def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsy
     monkeypatch.setattr(Ssh, "probe", lambda self, host: HostProbe(host, 4.0, 8.0, "/tmp/x", 50.0, cores=4, total_gb=60.0))
     for var in ("NO_COLOR", "FORCE_COLOR", "TTY_COMPATIBLE", "COLUMNS"):
         monkeypatch.delenv(var, raising=False)
-    for argv in (["status"], ["hosts"], ["lic"], ["events"], ["check"], ["status", "a@demo"]):
+    for argv in (["status"], ["hosts"], ["tools"], ["events"], ["check"], ["status", "a@demo"]):
         monkeypatch.delenv("FORCE_COLOR", raising=False)
         plain = edr(capsys, "--json", *argv)[1]
         monkeypatch.setenv("FORCE_COLOR", "1")
@@ -568,7 +600,7 @@ def test_bad_input_exits_1(capsys) -> None:
 
 
 def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> None:
-    root = tmp_path / "scratch" / "lkesting" / "edr" / "old" / "20260904_0411_ref_x_gabc1234"
+    root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_x_gabc1234"
     root.mkdir(parents=True)
     argv = ["import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
             "--host", "local", "--root", str(root), "--why", "reference"]
@@ -613,7 +645,7 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
 
 
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
-    root = tmp_path / "scratch" / "lkesting" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
+    root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
     root.mkdir(parents=True)
     assert edr(capsys, "import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
                "--host", "local", "--root", str(root))[0] == 0

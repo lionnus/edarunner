@@ -11,7 +11,6 @@ import argparse
 import contextlib
 import csv
 import functools
-import getpass
 import io
 import json
 import logging
@@ -59,7 +58,7 @@ def _since(text: str) -> int:
     return int(time.time() - secs)
 
 
-_READ_VERBS = frozenset({"status", "events", "hosts", "lic", "metrics", "check"})
+_READ_VERBS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check"})
 
 
 class Ctx:
@@ -195,64 +194,92 @@ def _probe_rows(c: Ctx) -> list[Row]:
     return out
 
 
+def _mark_hosts(c: Ctx, rows: list[Row]) -> list[Row]:
+    """Give each probe row its `marks`; sort the rows by the worst mark, black and red first, then by host."""
+    for r in rows:
+        r["marks"] = board.host_marks(None if "error" in r else HostProbe(**r), c.project.site.marks)
+    return sorted(rows, key=lambda r: (board.SEVERITY.index(board.worst_mark(r["marks"].values())), r["host"]))
+
+
 def _hosts_table(rows: list[Row], narrow: bool) -> Table:
-    """One row per host: used or free of total, a bar for the cores and the scratch, GPUs when the host has any."""
-    head = ["host", "cores", "ram GB", "scratch GB", "gpu"] if narrow else [
-        "host", "cores", "", "load", "ram GB", "mount", "scratch GB", "", "gpu", "gpu GB", "tools", "runs"]
+    """One row per host: the worst mark, then used or free of total with a mark, a bar for the cores and the scratch."""
+    head = ["ok", "host", "cores", "ram GB", "scratch GB", "gpu"] if narrow else [
+        "ok", "host", "cores", "", "load", "ram GB", "mount", "scratch GB", "", "gpu", "gpu GB", "tools", "runs"]
     body = []
     for r in rows:
+        m = r["marks"]
+        ok = board.worst_mark(m.values())
         if "error" in r:
-            body.append([r["host"], Text("error: " + r["error"], style="red", justify="left")])
+            body.append([ok, r["host"], Text("error: " + r["error"], style="red", justify="left")])
             continue
         cores, used = r["cores"], max(0, min(r["cores"], round(r["load"])))
-        ram, disk = f"{r['free_ram_gb']:g}/{r['total_ram_gb']:g}", f"{r['free_gb']:g}/{r['total_gb']:g}"
-        gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
+        sep = "" if narrow else " "  # 48 columns leave no room for the space
+        cpu, ram = f"{m['cores']}{sep}{used}/{cores}", f"{m['ram']}{sep}{r['free_ram_gb']:g}/{r['total_ram_gb']:g}"
+        disk = f"{m['scratch']}{sep}{r['free_gb']:g}/{r['total_gb']:g}"
+        gpu = f"{m['gpu']}{sep}{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
         if narrow:
-            body.append([r["host"], f"{used}/{cores}", ram, disk, gpu])
+            body.append([ok, r["host"], cpu, ram, disk, gpu])
             continue
-        body.append([r["host"], f"{used}/{cores}", board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
+        body.append([ok, r["host"], cpu, board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
                      board.bar(r["total_gb"] - r["free_gb"], r["total_gb"]), gpu,
                      f"{r['gpu_total_gb'] - r['gpu_used_gb']:g}/{r['gpu_total_gb']:g}" if r["gpus"] else "-",
                      f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]])
-    return board.table(head, body, styles={"host": "bold", "mount": "dim"},
-                       right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
+    t = board.table(head, body, styles={"host": "bold", "mount": "dim"},
+                    right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
+    if narrow:
+        # One space between columns, and only the cores column, which holds an error, folds.
+        t.padding = (0, 0)
+        for col in t.columns:
+            col.no_wrap = col.header != "cores"
+    return t
 
 
-def _lic_rows(c: Ctx) -> list[Row]:
-    project, me = c.project, getpass.getuser()
-    # A probe says {root}; from the head node the project directory stands in for it.
+def _seats(text: str) -> tuple[int, int | None] | None:
+    """(free, total) from the first line of a probe, `free` or `free total`; None when it is no number."""
+    parts = text.split("\n", 1)[0].split()
+    try:
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else None
+    except (IndexError, ValueError):
+        return None
+
+
+def _tool_rows(c: Ctx) -> list[Row]:
+    """One row per site tool: the hosts that have it with their versions, and the seats its probe reports."""
+    project = c.project
+    # A probe may say {root}; from the head node the project directory stands in for it.
     values = config.placeholders(project, root=str(project.root), host="local")
     out: list[Row] = []
-    for name, lic in project.site.licences.items():
-        row: Row = {"licence": name, "feature": lic.feature, "floor": lic.floor}
+    for name, tool in project.site.tools.items():
+        row: Row = {"tool": name, "hosts": {h.name: (h.tools or {}).get(name, "") for h in project.site.hosts.values()
+                                            if h.has(name)}}
+        if tool.seats is not None:
+            row["total"] = tool.seats
+        if not tool.probe:
+            out.append(row)
+            continue
         try:
-            rc, text, err = c.ssh.run("local", config.render(lic.probe, values))
+            rc, text, err = c.ssh.run("local", [config.render(a, values) for a in tool.probe])
         except ConfigError as e:
             rc, text, err = 1, "", str(e)
-        parsed = metrics.parse_flexlm(text, lic.feature) if rc == 0 else None
-        if parsed is None:
-            row["note"] = "unknown: " + (err.strip() or "no feature line").splitlines()[0]
+        seats = _seats(text) if rc == 0 else None
+        if seats is None:
+            row["note"] = "unknown: " + (err.strip() or text.strip() or "no number").splitlines()[0]
         else:
-            issued, used = parsed
-            block = text.split(f"Users of {lic.feature}:", 1)[1].split("Users of ", 1)[0]
-            ours = sum(1 for ln in block.splitlines() if ln.split()[:1] == [me])
-            row.update(pool=issued, used=used, free=issued - used, ours=ours, others=used - ours)
+            row["free"] = seats[0]
+            if seats[1] is not None:
+                row["total"] = seats[1]
         out.append(row)
     return out
 
 
-def _lic_table(rows: list[Row]) -> Table | str:
-    keys = ["licence", "feature", "pool", "used", "free", "ours", "others", "floor", "note"]
+def _tools_table(rows: list[Row]) -> Table | str:
     body = []
     for r in rows:
-        cells: list[Any] = [r.get(k, "") for k in keys]
-        if "free" in r:
-            # Seats at or under the floor are not ours to take.
-            cells[4] = Text(str(r["free"]), style="green" if r["free"] > r["floor"] else "red")
-        if "note" in r:
-            cells[8] = Text(r["note"], style="red")
-        body.append(cells)
-    return board.table(keys, body, styles={"licence": "bold"}, right=tuple(keys[2:8])) if rows else "no licences"
+        free = Text(str(r["free"]), style="green" if r["free"] > 0 else "red") if "free" in r else None
+        have = ", ".join(f"{h} {v}".strip() for h, v in r["hosts"].items())
+        body.append([r["tool"], free, r.get("total"), have, Text(r["note"], style="red") if "note" in r else ""])
+    return board.table(["tool", "free", "total", "hosts", "note"], body, styles={"tool": "bold"},
+                       right=("free", "total")) if rows else "no tools"
 
 
 def _metric_key(m: Row) -> str:
@@ -293,7 +320,7 @@ def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> 
 class Actions:
     """The verbs the Telegram bot may call; each one is a CLI verb without the printing.
 
-    The status, events, hosts and lic texts are Telegram HTML; the compare and metric texts are 40 plain columns.
+    The status, events, hosts and tools texts are Telegram HTML; the compare and metric texts are 40 plain columns.
     """
 
     def __init__(self, c: Ctx) -> None:
@@ -359,15 +386,19 @@ class Actions:
                 continue
             used = max(0, min(r["cores"], round(r["load"])))
             gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
-            lines.append(f"<b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
+            lines.append(f"{board.worst_mark(board.host_marks(HostProbe(**r), self.c.project.site.marks).values())} <b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
                          f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB free · gpu {gpu}")
         return "\n".join(lines) or "<i>no hosts</i>"
 
-    def lic_text(self) -> str:
-        """`licence · free/pool seats free` per licence; a failed probe shows its note."""
-        lines = [f"<b>{esc(r['licence'])}</b> · " + (f"{r['free']}/{r['pool']} seats free" if "free" in r
-                                                      else f"<i>{esc(r['note'])}</i>") for r in _lic_rows(self.c)]
-        return "\n".join(lines) or "<i>no licences</i>"
+    def tools_text(self) -> str:
+        """`tool · free/total seats free · n hosts` per tool; a failed probe shows its note."""
+        lines = []
+        for r in _tool_rows(self.c):
+            seats = (f"{r['free']}/{r['total']} seats free" if "total" in r else f"{r['free']} seats free") if "free" in r \
+                else f"<i>{esc(r['note'])}</i>" if "note" in r else ""
+            n = len(r["hosts"])
+            lines.append(" · ".join(filter(None, [f"<b>{esc(r['tool'])}</b>", seats, f"{n} host{'s' if n != 1 else ''}"])))
+        return "\n".join(lines) or "<i>no tools</i>"
 
     def compare_text(self, handles: list[str]) -> str:
         """One block per metric: its name, then one `label value` line per run."""
@@ -459,7 +490,7 @@ def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
     """Probe every site host."""
-    rows = _probe_rows(c)
+    rows = _mark_hosts(c, _probe_rows(c))
     if a.narrow:
         # A long cell, such as an error, folds inside its column instead of widening the table.
         c.console.width = 48
@@ -467,11 +498,17 @@ def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.HOSTS if any("error" in r for r in rows) else Exit.DONE
 
 
-def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
-    """Probe every site licence from the head node."""
-    rows = _lic_rows(c)
-    c.emit(_lic_table(rows), rows)
+def cmd_tools(c: Ctx, a: argparse.Namespace) -> int:
+    """Every site tool: the seats its probe reports from the head node, and the hosts that have it."""
+    rows = _tool_rows(c)
+    c.emit(_tools_table(rows), rows)
     return Exit.HOSTS if any("note" in r for r in rows) else Exit.DONE
+
+
+def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
+    """`edr tools` under its old name; gone in the next release."""
+    print("edr: lic is deprecated; use edr tools", file=sys.stderr)
+    return cmd_tools(c, a)
 
 
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
@@ -1012,25 +1049,43 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("-n", type=int, default=50, help="the last N events; default 50")
     s = verb("hosts", "probe every host", """
         Probes every host of the site file and prints one row per host: the
-        name; cores in use of total, with a bar; the one-minute load average; RAM
-        free of total; the largest writable scratch of the host's list, and its
-        space free of total, with a bar of the used part; GPUs idle of total,
-        where idle means under 5 % utilisation and under 5 % memory in use; GPU
-        memory free of total, summed over the GPUs; processes that match
-        tool_procs, ours and others; and our driver processes.
+        worst mark of the host; the name; cores in use of total, with a bar; the
+        one-minute load average; RAM free of total; the largest writable scratch
+        of the host's list, and its space free of total, with a bar of the used
+        part; GPUs idle of total, where idle means under 5 % utilisation and
+        under 5 % memory in use; GPU memory free of total, summed over the GPUs;
+        processes that match tool_procs, ours and others; and our driver
+        processes.
+
+        A mark tells how full a resource is. It is 🟢 below the first threshold
+        of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
+        the third. A value exactly at a threshold takes the colour of that
+        threshold. The used fraction is the load over the cores for cores, the
+        used part of the total for ram GB and scratch GB, and the busy GPUs over
+        all GPUs for gpu. A host without GPUs shows -, and a host that did not
+        answer shows ⚫ and its error in the row. The rows go by the worst mark,
+        ⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by host name within one mark.
 
         The GPU columns come from nvidia-smi; a host without it shows -. A bar is
-        green below 70 % used, yellow below 90 %, red above. A host that did not
-        answer shows its error in the row. --json gives the numbers: cores, load,
-        free_cores, free_ram_gb, total_ram_gb, mount, free_gb, total_gb, gpus,
-        gpus_idle, gpu_used_gb, gpu_total_gb, our_tool_procs, other_tool_procs
-        and our_runs.
+        green below 70 % used, yellow below 90 %, red above. --json gives the
+        numbers: cores, load, free_cores, free_ram_gb, total_ram_gb, mount,
+        free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
+        our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
+        ram, scratch and gpu in marks.
         """, exits={Exit.HOSTS: "a host did not answer"})
-    s.add_argument("--narrow", action="store_true", help="host, cores, RAM, scratch and GPUs only, in 48 columns")
-    verb("lic", "probe every licence", """
-        Runs every licence probe from the head node and prints pool, used, free,
-        ours, others and the floor.
-        """, exits={Exit.HOSTS: "a probe failed, or the feature line is missing"})
+    s.add_argument("--narrow", action="store_true",
+                   help="ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number")
+    verb("tools", "every site tool: free seats and hosts", """
+        One row per tool of the site file. free and total are the seats the
+        probe reports; the probe runs on the head node with the project
+        directory as {root}. hosts lists the hosts that have the tool, with
+        their versions. A tool without a probe shows - for the seats. --json
+        gives tool, free, total, hosts (host to version) and note.
+
+        edr lic prints the same and a deprecation line on stderr; it goes in
+        the next release.
+        """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
+    sub.add_parser("lic").set_defaults(fn=cmd_lic)  # no help: the old name stays out of the listing
     s = verb("metrics", "the metrics of one design", """
         Every metric of one design: label, design, stage, step, task, name,
         value and unit. --design is the source tag exactly as edr stage printed

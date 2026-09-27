@@ -37,6 +37,8 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [limits]", [model.Limits], ""),
     ("### [placement]", [model.Placement], ""),
     ("### [telegram]", [], TG),
+    ("### [marks]", [], "The table is optional. It takes the keys of the site's `[marks]` table and replaces them for this "
+                       "project only. A key it leaves out keeps the site's value."),
     ("### [stages.<name>]", [model.Stage], ""),
     ("#### needs", [model.Needs], ""),
     ("#### budget", [model.Budget], ""),
@@ -44,7 +46,8 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [metrics.<name>]", [model.Metric], ""),
     ("## site.toml", [(model.Site, ["scratch", "env", "ssh_options", "ssh_timeout_s", "tool_procs", "nfs_export"])], ""),
     ("### [hosts.<name>]", [model.Host], ""),
-    ("### [licences.<name>]", [model.Licence], ""),
+    ("### [marks]", [model.Marks], ""),
+    ("### [tools.<name>]", [model.Tool], ""),
     ("### [telegram]", [model.Telegram], ""),
     ("### [telegram.commands.<name>]", [], "One table per custom bot command; `bot.md` lists the keys."),
     ("## tasks.toml", [model.Task, (model.Project, ["task_resolver"])], ""),
@@ -83,7 +86,7 @@ def verbs() -> dict[str, argparse.ArgumentParser]:
     """Every verb's parser, in the order of the definitions."""
     p = cli._parser()
     sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
-    return dict(sub.choices)
+    return {name: s for name, s in sub.choices.items() if name in cli.EXITS}  # an alias without help stays out
 
 
 def _usage(p: argparse.ArgumentParser) -> str:

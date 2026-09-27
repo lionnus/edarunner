@@ -20,6 +20,10 @@ Load and validate the four TOML files, and read and write the JSON state files.
 
 In `edr.toml` the table takes `token_file`, `chat_id` and `user_id` of the site's `[telegram]` table and replaces them for this project only. A key it leaves out keeps the site's value. Without a `[telegram]` table in `site.toml`, the table here needs `chat_id`. The custom commands stay in `site.toml`.
 
+### [marks]
+
+The table is optional. It takes the keys of the site's `[marks]` table and replaces them for this project only. A key it leaves out keeps the site's value.
+
 ### [stages.<name>]
 
 #### needs
@@ -34,7 +38,13 @@ In `edr.toml` the table takes `token_file`, `chat_id` and `user_id` of the site'
 
 ### [hosts.<name>]
 
-### [licences.<name>]
+### [marks]
+
+The used fractions at which a resource mark of `edr hosts` turns yellow, orange and red.
+
+### [tools.<name>]
+
+A tool of the site: an optional seat total, and a probe whose first line is `free` or `free total`.
 
 ### [telegram]
 
