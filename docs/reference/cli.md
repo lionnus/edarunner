@@ -448,8 +448,8 @@ edr launch [--dry-run] [--json] [--only L] [--allow-dirty] [--show-spec] [batch]
 Checks out a missing clean source the way plan does, then pins the date
 of the batch, publishes the driver into the state directory, syncs the
 checked-out tree to each host, writes one spec per run
-and starts one driver per run, stagger_s apart. Prints
-<n> started, <n> queued, <n> with problems.
+and starts one driver per run, stagger_s apart, with a waiting line
+before each wait. Prints <n> started, <n> queued, <n> with problems.
 --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec
 exists is already launched; a batch name is used once.

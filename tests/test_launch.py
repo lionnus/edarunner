@@ -336,6 +336,17 @@ def test_spec_text_shows_the_env_commands_and_collect_paths(env) -> None:
     assert f"    task {a.spec['stages'][3]['tasks'][0]['id']} in {a.root}/simulation/" in text and text.endswith("    collect: {task_dir}/power/")
 
 
+def test_launch_says_when_it_waits_for_the_stagger(env, tmp_path: Path, monkeypatch, capsys) -> None:
+    project, batch, ssh, db = env
+    waits: list[float] = []
+    monkeypatch.setattr(launch.time, "sleep", waits.append)
+    monkeypatch.setattr(launch.sync, "sync_tree", lambda *a, **k: True)
+    monkeypatch.setattr(launch, "submit", lambda *a, **k: Handle("local", "local:1", "local"))
+    rows = launch.launch(project, batch, ssh, db, stagger_s=7, src_dir=src_tree(tmp_path))
+    assert [r["started"] for r in rows] == [True, True] and waits == [7]
+    assert "waiting 7 s (stagger) before b_nodw\n" in capsys.readouterr().out
+
+
 def test_launch_refuses_a_dirty_source(env) -> None:
     project, batch, ssh, db = env
     batch.source = "abc1234-dirty-deadbeef"

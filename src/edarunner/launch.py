@@ -451,6 +451,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
             print(f"{p.run_id}: " + ("queued" if p.queued else "; ".join(p.problems)))
             continue
         if started and stagger > 0:
+            print(f"waiting {stagger} s (stagger) before {p.label}")
             time.sleep(stagger)
         if not p.reuse or p.restore:
             ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.src, src_dir, dry_run), p.root, project.sync.exclude,
