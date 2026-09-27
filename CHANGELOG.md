@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `edr brief` prints a Markdown briefing of the project for a person or
+  an agent who is new to it: the source, the flow, the hosts and tools,
+  the runs per batch, the runs that need a decision with the proposed
+  command, and the last ten events. `edr brief --run <handle>` tells the
+  story of one run. docs/run.md shows a Claude Code `SessionStart` hook
+  that runs it, and AGENTS.md starts with it.
 - The backends `condor`, `slurm` and `lsf` hand a run to a batch
   scheduler. `[scheduler]` in `site.toml` takes `backend`, `submit_via`,
   `tree_root`, `max_jobs`, `queue` and `options`; `scheduler.backend`

@@ -4,6 +4,16 @@ This file explains how an agent operates a farm with edarunner. An agent
 here is a Claude session, a script or a cron job, but the rules hold just
 as well for a person in a hurry.
 
+## Start with edr brief
+
+Run `edr brief` first. It prints what the project is, its flow, the
+hosts and tools, the runs per batch, every run that needs a decision
+with the proposed command, and the last ten events. Before you act on a
+run you did not start, read its story with `edr brief --run <handle>`:
+its phases, events, log tail, metrics and the proposed command.
+`docs/run.md` shows the Claude Code hook that runs it at the start of
+every session.
+
 ## Only through edr
 
 Operate the farm through `edr` and nothing else. Do not call `ssh`,
@@ -26,10 +36,11 @@ driver is still alive and `--now` is the next step. Act on `data`, and
 quote `output` when you report. `docs/reference/cli.md` lists every
 command.
 
-## Start with triage
+## Triage
 
-`edr status --triage` is the entry point. It lists every run that is not
-`running`, together with its state, its phase and one proposed command:
+`edr status --triage` gives the decisions of the briefing on their own.
+It lists every run that is not `running`, together with its state, its
+phase and one proposed command:
 
 ```
 dead        a@demo                       stage:pnr

@@ -214,6 +214,70 @@ def test_events_filters(demo: Path, capsys) -> None:
     assert code == 1 and "--since" in err
 
 
+# brief
+
+
+def test_brief_on_an_empty_project_names_it_and_says_no_runs(demo: Path, capsys) -> None:
+    code, out, _ = edr(capsys, "brief")
+    assert code == 0 and out.startswith("# demo\n") and f"`{demo}`" in out and "There are no runs yet" in out
+    assert "not been probed yet" in out and not (demo / "data" / "edr.db").exists()
+
+
+def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    seed(demo, "b", "FAILED:synth", exit=5)
+    seed(demo, "c", "stage:synth")
+    (demo / "wt" / "abc1234").mkdir(parents=True)
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_event("user", a, "launch", "local /x")
+        db.add_host_samples(int(time.time()) - 60, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
+                                                              "free_ram_gb": 6, "total_gb": 100, "free_gb": 90}})
+    (demo / "AGENTS.md").write_text("notes\n")
+    code, out, _ = edr(capsys, "brief")
+    heads = [ln for ln in out.splitlines() if ln.startswith("## ")]
+    assert code == 0 and heads == ["## The flow", "## The site", "## The state", "## Read more"]
+    assert "- `synth` runs one command through 4 steps, collects `reports/` and needs the tool `demo`." in out
+    assert "- `power` is a task group that runs 2 tasks at a time" in out
+    assert "`local` at the probe 60 seconds ago: cores 🔴, ram 🟢, scratch 🟢." in out
+    assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
+    assert "One source is checked out under" in out and ": `abc1234` (batch `demo`)." in out
+    assert "One run has not finished:" in out and "`c@demo` is running in stage `synth` at step 2 (elaborate) on `local`" in out
+    assert "`b@demo` (failed): `edr retire b@demo --why failed`" in out
+    assert "user recorded `launch` on `a@demo`: local /x" in out and f"`{demo / 'AGENTS.md'}`" in out
+    code, out, _ = edr(capsys, "brief", "--json")
+    data = json.loads(out)["data"]
+    assert code == 0 and {"project", "root", "repo", "sources", "backend", "stages", "hosts", "tools", "batches",
+                          "live", "decisions", "events", "read", "docs"} <= data.keys()
+    assert data["hosts"][0]["marks"]["cores"] == "🔴" and [d["handle"] for d in data["decisions"]] == ["b@demo", "a@demo"]
+
+
+def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> None:
+    b = seed(demo, "b", "FAILED:synth", exit=5, stage="synth", step=2)
+    log = Path(json.loads((bdir(demo) / f"{b}.json").read_text())["root"]) / "log" / "synth.log"
+    log.write_text("".join(f"line {i}\n" for i in range(30)) + "Error: no licence\n")
+    now = int(time.time())
+    hb = json.loads((bdir(demo) / f"{b}.json").read_text())
+    (bdir(demo) / f"{b}.json").write_text(json.dumps({
+        **hb, "exit": 5, "log": str(log), "step_times": {"synth": {"1": now - 90, "2": now - 50}},
+        "stages": {"synth": {"attempt": 1, "status": "failed", "started": now - 90, "ended": now - 10, "exit": 5}}}))
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_event("watch", b, "failed", "synth ended FAILED")
+    add_metric(demo, b, "area_cell_um2", 12.5)
+    code, out, _ = edr(capsys, "brief", "--run", "b@demo")
+    assert code == 0 and out.startswith("# b@demo\n") and f"`{b}`" in out and "ended with the phase `FAILED:synth` and exit 5, so its state is failed." in out
+    assert "- Stage `synth`, attempt 1," in out and "ran for 1m, ending failed with exit 5." in out
+    assert "  - Step 2 (elaborate) started" in out and "watch recorded `failed` on `b@demo`: synth ended FAILED" in out
+    assert "Error: no licence" in out and "line 11\n" in out and "line 10\n" not in out
+    assert "`design__instance__area` is 12.5 u at `synth` step 3." in out
+    assert "The triage proposes `edr retire b@demo --why failed`." in out and "the run ended `FAILED`" in out
+    code, out, _ = edr(capsys, "--json", "brief", "--run", "b@demo")
+    data = json.loads(out)["data"]
+    assert code == 0 and data["command"] == "edr retire b@demo --why failed" and data["state"] == "failed"
+    assert {"runtime", "events", "log_tail", "metrics", "reason"} <= data.keys()
+    code, _, err = edr(capsys, "brief", "--run", "nope@demo")
+    assert code == 1 and "nope" in err
+
+
 # keep, stop, actions
 
 
