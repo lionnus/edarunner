@@ -324,7 +324,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, ledger: Ledger, dry_r
            src_dir: Path | None = None) -> list[dict[str, Any]]:
     """Pin the date, publish the driver, sync, write the specs and start one driver per run."""
     if "-dirty" in batch.source and not allow_dirty:
-        raise Refuse(f"source {batch.source} is dirty; pass allow_dirty")
+        raise Refuse(f"source {batch.source} is dirty; pass --allow-dirty")
     state = project.state
     date = pin_date(state, batch.batch, dry_run)
     plans = plan(project, batch, ssh, ledger, date=date, only=only)
