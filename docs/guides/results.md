@@ -1,8 +1,9 @@
-# Results and analysis
+# Get the results out
 
-This page shows how to get the numbers of a design out of the run
-database, compare runs on the board or the phone, and hand a frozen
-snapshot to any analysis.
+What did my runs produce, and how do I compare them? This page gets the
+numbers of a design out of the run database, compares runs on the
+terminal, the board or the phone, and hands a frozen snapshot to an
+analysis.
 
 ## The database
 
@@ -28,14 +29,10 @@ holds every run, every number and every action.
 run tree, so a metric's `source_file` is a path under it.
 
 Read the tables with `sqlite3 data/edr.db` when a command does not answer
-the question. Only the head node opens the file; a read command without
-the file reads an empty database in memory and creates nothing.
-
-The journal mode follows the filesystem of `data/`. On a local disk it is
-WAL, so `edr status` reads while the watcher writes. On NFS, SMB, 9p or
-FUSE it is DELETE with `synchronous=FULL`, because WAL needs shared memory
-that a network filesystem does not give. `edr check` prints a warning line
-with the path and the mode.
+the question. Only the head node opens the file, and a read command
+without the file reads an empty database in memory and creates nothing.
+[how-it-works.md](../how-it-works.md#where-the-results-end-up) says how
+the database works on a network filesystem.
 
 ## Canonical names
 
@@ -264,7 +261,7 @@ cd data/board && python -m http.server --bind 127.0.0.1 8000
 On the phone, `/compare <handle>...` puts the metrics of several runs
 side by side, `/metric <name>` shows one metric per run, `/board` sends
 the two pages as files, and `/csv <design>` sends `metrics.csv`;
-[telegram.md](telegram.md) has the bot.
+[alerts.md](alerts.md#files) has the bot.
 
 ## edr export
 
@@ -298,7 +295,7 @@ for the host, and the start, end and status of each stage.
 The directory is written under a temporary name and renamed at the end,
 so a reader never sees a half snapshot. A `--out` that exists and is not
 empty is refused. `--dry-run` lists the files.
-[reference/cli.md](reference/cli.md) lists every flag of `metrics` and
+[reference/cli.md](../reference/cli.md) lists every flag of `metrics` and
 `export`.
 
 ## MLflow
@@ -357,4 +354,4 @@ A snapshot is small by design. A large collected file, a VCD or a full
 netlist, belongs to `data/results/` on the head node, not to a snapshot.
 Leave it out of `collect`, name it under `collect_on_request`, and fetch
 it with `edr continue <handle> --collect <name>` or `edr retire --collect`
-when you need it; [run.md](run.md) shows both.
+when you need it; [cleanup.md](cleanup.md#keep-the-large-files) shows both.

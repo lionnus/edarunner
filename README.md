@@ -121,8 +121,7 @@ with the commands written out. The bot also answers `/status`, `/hosts`,
 `/events`, `/tools` and `/digest`. A site can add its own commands, such
 as one that opens a Claude Code session in the project directory. Scripts
 and hooks send their own messages with `edr notify`. See
-[docs/telegram.md](docs/telegram.md) for the bot and
-[docs/notify.md](docs/notify.md) for ntfy and mail.
+[docs/guides/alerts.md](docs/guides/alerts.md) for the bot, ntfy and mail.
 
 ## Operate it with an agent
 
@@ -145,6 +144,8 @@ stages and writes a heartbeat file every minute. `edr watch` on the head
 node reads the heartbeats, collects the reports, extracts the metrics
 and sends the alerts. The watcher never deletes a run tree; the only files
 it removes are expired licence-seat leases.
+[docs/how-it-works.md](docs/how-it-works.md) follows one run through
+every step.
 
 ## Documentation
 

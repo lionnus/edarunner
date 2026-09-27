@@ -57,7 +57,7 @@
 
 <!-- Site -->
 <rect class="frame" x="656" y="176" width="280" height="240" rx="10"/>
-<text class="h" x="672" y="200">PRIVATE, NOT IN GIT</text>
+<text class="h" x="672" y="200">PRIVATE TO YOUR SITE</text>
 <text class="m" x="920" y="200" text-anchor="end">site.toml</text>
 <rect class="box" x="672" y="216" width="248" height="52" rx="7"/>
 <text class="t" x="686" y="238">Tools, seats and probes</text>

@@ -121,7 +121,7 @@ the two values over ssh.
 | `gate` | why the run waits at a gate, such as `pnr: 1 free, 1 held by others, 1 needed`; null when it does not |
 | `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
 
-The exit code of the driver names its terminal phase. [run.md](../run.md)
+The exit code of the driver names its terminal phase. [guides/run.md](../guides/run.md#phases)
 lists the phases and the codes as a user reads them on the board.
 
 ## Signals, the stop file and the keep file
@@ -164,7 +164,7 @@ claims nothing more.
 |---|---|
 | the spec | `launch._spec`, `tests/test_driver.py`, the table above |
 | a heartbeat field | `watch.ingest`, `board.py`, the table above; `cpu_s` and `log_bytes` also `watch._signature` |
-| a phase or an exit code | `board.state_of`, `watch.STATES`, the table in `run.md` |
+| a phase or an exit code | `board.state_of`, `watch.STATES`, the table in `guides/run.md` |
 | the queue layout | `collect.py`, which reads the task directories from the spec |
 
 `tests/test_driver.py::test_compiles_on_py36` compiles the file with a

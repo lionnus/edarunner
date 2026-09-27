@@ -11,7 +11,7 @@ hosts and tools, the runs per batch, every run that needs a decision
 with the proposed command, and the last ten events. Before you act on a
 run you did not start, read its story with `edr brief --run <handle>`:
 its phases, events, log tail, metrics and the proposed command.
-`docs/run.md` shows the Claude Code hook that runs it at the start of
+`docs/guides/agents.md` shows the Claude Code hook that runs it at the start of
 every session.
 
 ## Only through edr
