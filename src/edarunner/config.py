@@ -46,7 +46,7 @@ _PROJECT_KEYS = {
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
-_EXTRACTORS = ("regex", "csv", "json", "python", "expr")
+_EXTRACTORS = ("regex", "csv", "json", "python", "area_hier", "expr")
 
 
 class ConfigError(Exception):
@@ -437,6 +437,8 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         _table(raw["csv"], {"where", "column"}, file, f"{at}.csv")
     if sum(k in raw for k in _EXTRACTORS) != 1:
         raise ConfigError(f"{file}: {at} needs exactly one of {', '.join(_EXTRACTORS)}")
+    if "area_hier" in raw and not (type(raw["area_hier"]) is int and raw["area_hier"] >= 1):
+        raise ConfigError(f"{file}: {at}.area_hier is the deepest depth to keep, a number from 1")
     if "expr" not in raw and not (raw.get("file") and raw["stage"]):
         raise ConfigError(f"{file}: {at} needs file and stage")
     return _build(Metric, raw, file, at, name=name)

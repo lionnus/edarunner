@@ -42,6 +42,65 @@ def evaluate(expr: str, names: dict[str, float]) -> float:
     return ev(ast.parse(expr, mode="eval"))
 
 
+TOP = "<top>"
+_NUM = re.compile(r"-?\d+(\.\d*)?([eE][-+]?\d+)?$")
+
+
+def parse_area_hier(text: str) -> list[dict]:
+    """One row per instance of a hierarchical area report: instance, depth, area, local_area, cells.
+
+    The top is `<top>` at depth 0; a child's instance is its path from the top, `/` separated.
+    `area` includes the children, `local_area` does not. `cells` is None when the report has no count.
+    """
+    if "Hierarchical Area Report" in text:
+        return _area_openroad(text)
+    if "Hierarchical cell" in text:
+        return _area_synopsys(text)
+    raise ValueError("neither a Synopsys nor an OpenROAD hierarchical area report")
+
+
+def _area_synopsys(text: str) -> list[dict]:
+    # report_area -hierarchy: name, global total, percent, local comb, local noncomb, local black box, design.
+    lines = text[text.index("Hierarchical cell"):].splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("---")) + 1
+    rows: list[dict] = []
+    words: list[str] = []
+    for ln in lines[start:]:
+        if ln.startswith("---"):
+            break
+        words += ln.split()
+        # A long name can push the numbers onto the next line.
+        if len(words) < 6 or not all(_NUM.match(w) for w in words[1:6]):
+            continue
+        name, nums = words[0], [float(w) for w in words[1:6]]
+        words = []
+        top = not rows
+        rows.append({"instance": TOP if top else name, "depth": 0 if top else name.count("/") + 1,
+                     "area": nums[0], "local_area": round(sum(nums[2:5]), 6), "cells": None})
+    return rows
+
+
+def _area_openroad(text: str) -> list[dict]:
+    # Hierarchy name indented two spaces a level, then global area x5, global instances x5,
+    # local area x5 and local instances x5; each group starts with its total.
+    body = text[text.index("Hierarchical Area Report"):].splitlines()
+    rows: list[dict] = []
+    path: list[str] = []
+    started = False
+    for ln in body[1:]:
+        words = ln.split()
+        if len(words) == 21 and all(_NUM.match(w) for w in words[1:]):
+            started = True
+            depth = (len(ln) - len(ln.lstrip(" "))) // 2
+            name = words[0].replace("\\", "")
+            path = path[:max(depth - 1, 0)] + ([name] if depth else [])
+            rows.append({"instance": "/".join(path) if depth else TOP, "depth": depth, "area": float(words[1]),
+                         "local_area": float(words[11]), "cells": int(float(words[6]))})
+        elif started and words and not words[0].startswith("-"):
+            break
+    return rows
+
+
 def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
     """Parse one value from `path` with the parser of `metric`."""
     if metric.regex:
@@ -64,6 +123,8 @@ def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
     if metric.python:
         fn, _ = load_hook(project_root, metric.python)
         return float(fn(path))
+    if metric.area_hier:
+        return parse_area_hier(path.read_text(errors="replace"))[0]["area"]
     raise ValueError(f"metric {metric.name} has no parser")
 
 
@@ -125,11 +186,20 @@ def _extract_one(
         if step is not None and step not in owned:
             continue  # a numbered step belongs to one stage; the others skip it
         rel = str(path.relative_to(run_dir))
+        instances = None
         try:
-            value, source = parse_file(metric, path, project.root), rel
+            if metric.area_hier:
+                instances = parse_area_hier(path.read_text(errors="replace"))
+                value, source = instances[0]["area"], rel
+                instances = [i for i in instances if i["depth"] <= metric.area_hier]
+            else:
+                value, source = parse_file(metric, path, project.root), rel
         except Exception as e:  # a parse error is a row, never a crash
             value, source = None, f"{rel}: {e}"
-        rows.append(_row(run_id, stage_name, step, task_id, metric, value, source, now))
+        row = _row(run_id, stage_name, step, task_id, metric, value, source, now)
+        if instances:
+            row["instances"] = instances
+        rows.append(row)
     return rows
 
 

@@ -202,7 +202,7 @@ class Stage:
 
 @dataclass
 class Metric:
-    """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `expr`.
+    """A metric holds exactly one of the six parsers: `regex`, `csv`, `json`, `python`, `area_hier` or `expr`.
     `expr` allows numbers, metric names, `+ - * /` and a unary minus, nothing else; it is computed
     once every input exists, and with `stage` set only for those stages.
 
@@ -217,13 +217,17 @@ class Metric:
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
     file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
                     shown="required without `expr`")
-    regex: str = doc("a regex; group 1 is the value", "", shown="one of the five")
+    regex: str = doc("a regex; group 1 is the value", "", shown="one of the six")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
-                                        "`where`", None, shown="one of the five")
-    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
-    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the five")
+                                        "`where`", None, shown="one of the six")
+    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the six")
+    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the six")
+    area_hier: int = doc("the deepest instance depth to keep from a hierarchical area report, of Synopsys "
+                         "`report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is "
+                         "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
+                         shown="one of the six")
     expr: str = doc("an expression over other metrics of the same run, stage, step and task", "",
-                    shown="one of the five")
+                    shown="one of the six")
     unit: str = doc("unit text", "")
     canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
                          "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "

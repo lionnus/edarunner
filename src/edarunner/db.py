@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task T
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, ts INTEGER, actor TEXT, run_id TEXT, kind TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT, instance TEXT, depth INTEGER, area REAL,
+  local_area REAL, cells INTEGER);
+CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
 """
 
 # A table of an older schema, with its current name.
@@ -134,7 +137,10 @@ class Database:
         self.conn.commit()
 
     def add_metric(self, row: Row) -> bool:
-        """Insert one metric. Returns False when the key is already present."""
+        """Insert one metric, and its `instances` into the area table. Returns False when the metric was present.
+
+        The instance rows go in even when the metric was present, so a new area metric fills an old run.
+        """
         r = {"task": "", "step": None, "canonical": "", "unit": "", "source_file": "", "extracted_at": _now(), **row}
         # An `IS` match sees a NULL step; the primary key does not.
         cur = self.conn.execute(
@@ -144,6 +150,11 @@ class Database:
             (r["run_id"], r["stage"], r["step"], r["task"], r["name"], r["canonical"], r["value"], r["unit"],
              r["source_file"], r["extracted_at"], r["run_id"], r["stage"], r["step"], r["task"], r["name"]),
         )
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO area(run_id, stage, step, name, instance, depth, area, local_area, cells) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(r["run_id"], r["stage"], r["step"], r["name"], i["instance"], i["depth"], i["area"], i["local_area"],
+              i["cells"]) for i in r.get("instances") or []])
         self.conn.commit()
         return cur.rowcount == 1
 
@@ -257,6 +268,31 @@ class Database:
         return self._rows(
             "SELECT m.*, r.label, r.config, r.src FROM metrics m JOIN runs r ON r.run_id=m.run_id "
             f"WHERE {' AND '.join(where)} ORDER BY m.run_id, m.stage, m.step, m.task, m.name",
+            args,
+        )
+
+    def area(self, run_ids: list[str] | None = None, design: str | None = None, stage: str | None = None,
+             step: int | None = None, instance: str | None = None, depth: int | None = None) -> list[Row]:
+        """Area rows with the run's label and src and the metric's source_file and unit.
+
+        `instance` matches that instance and every one below it.
+        """
+        where, args = ["1"], []
+        for cond, val in (("r.src=?", design), ("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
+            if val is not None:
+                where.append(cond)
+                args.append(val)
+        if instance is not None:
+            where.append("(a.instance=? OR substr(a.instance, 1, ?)=?)")
+            args += [instance, len(instance) + 1, instance + "/"]
+        if run_ids is not None:
+            where.append(f"a.run_id IN ({', '.join('?' * len(run_ids))})" if run_ids else "0")
+            args += list(run_ids)
+        return self._rows(
+            "SELECT a.*, r.label, r.src, m.source_file, m.unit FROM area a JOIN runs r ON r.run_id=a.run_id "
+            "LEFT JOIN metrics m ON m.run_id=a.run_id AND m.stage=a.stage AND m.step IS a.step AND m.task='' "
+            "AND m.name=a.name "
+            f"WHERE {' AND '.join(where)} ORDER BY a.run_id, a.stage, a.step, a.name, a.area DESC",
             args,
         )
 

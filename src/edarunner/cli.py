@@ -31,7 +31,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
+from . import __version__, analysis, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
@@ -59,7 +59,7 @@ def _since(text: str) -> int:
 
 
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check", "notify"})
+_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "compare", "check", "notify"})
 
 
 class Ctx:
@@ -522,14 +522,36 @@ def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
     return cmd_tools(c, a)
 
 
+def _area_table(rows: list[Row]) -> Table | str:
+    body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m["instance"], m["depth"], m["area"],
+             m.get("local_area"), m.get("cells")] for m in rows]
+    return board.table(["label", "design", "stage", "step", "instance", "depth", "area", "local", "cells"], body,
+                       styles={"label": "bold", "design": "dim"},
+                       right=("step", "depth", "area", "local", "cells")) if rows else "no area rows"
+
+
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
-    """The metrics of one design, as a table or CSV."""
+    """The metrics of one design, as a table or CSV; with --instance or --depth, its area rows."""
+    if a.instance is not None or a.depth is not None:
+        rows = c.db.area(design=a.design, stage=a.stage, step=a.step, instance=a.instance, depth=a.depth)
+        c.emit(_area_table(rows), rows)
+        return Exit.DONE if rows else Exit.NOTHING
     rows = c.db.metrics(design=a.design, stage=a.stage, step=a.step)
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
         c.emit(_metrics_table(rows), rows)
+    return Exit.DONE if rows else Exit.NOTHING
+
+
+def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
+    """Two or more runs side by side."""
+    runs = [c.resolve(h) for h in a.handles]
+    if not a.area:
+        raise Refuse("compare needs --area")
+    picked, rows = analysis.area_delta(c.db, runs, a.depth, a.instance, a.stage, a.step)
+    c.emit(analysis.area_view(picked, rows, a.depth), {"runs": picked, "depth": a.depth, "rows": rows})
     return Exit.DONE if rows else Exit.NOTHING
 
 
@@ -1118,11 +1140,32 @@ def _parser() -> argparse.ArgumentParser:
         it, -dirty-... included. It has no default, because one table holds one
         design. --csv writes the columns of metrics.csv (docs/results.md) to
         stdout.
+
+        --instance or --depth prints the area rows of an area_hier metric
+        instead: label, design, stage, step, instance, depth, area with the
+        children, local area without them, and the cell count when the report
+        has one. --instance takes that instance and every instance below it.
         """, exits={Exit.NOTHING: "no metric row"})
     s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
     s.add_argument("--stage", metavar="S", help="the metrics of one stage")
     s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
+    s.add_argument("--instance", metavar="PATH", help="the area rows of this instance and every instance below it")
+    s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
+    s = command("compare", "two or more runs side by side", """
+        Puts two or more runs side by side. --area compares the hierarchical
+        area: one row per instance at --depth (default 1; the top is 0), one
+        column per run, and the delta and the percent of each run to the
+        first. Each run is compared at its last step with an area report, or
+        at --stage and --step. The source file of each run is printed under
+        the table.
+        """, exits={Exit.NOTHING: "no row to compare"})
+    s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
+    s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
+    s.add_argument("--depth", type=int, default=1, metavar="N", help="the instance depth; default 1")
+    s.add_argument("--instance", metavar="PATH", help="only this instance and the instances below it")
+    s.add_argument("--stage", metavar="S", help="compare at this stage")
+    s.add_argument("--step", type=int, metavar="N", help="compare at this step number")
     command("init", "write edr.toml and the watch unit here", """
         Writes edr.toml and edr-watch.service into the current directory. --site
         is the directory or the file of the site file; init does not write that
