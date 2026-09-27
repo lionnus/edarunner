@@ -259,17 +259,11 @@ def _stage(name: str, raw: object, file: Path) -> Stage:
     for key, cls in (("needs", Needs), ("budget", Budget), ("retry", Retry)):
         if key in raw:
             raw[key] = _build(cls, raw[key], file, f"{at}.{key}")
-    if isinstance(raw.get("after"), dict):
-        _table(raw["after"], {"stage", "step"}, file, f"{at}.after")
-        _need(raw["after"], "stage", file, f"{at}.after")
     return _build(Stage, raw, file, at, name=name)
 
 
 def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path) -> None:
     at = f"stages.{stage.name}"
-    after = stage.after["stage"] if isinstance(stage.after, dict) else stage.after
-    if after and after not in stages:
-        raise ConfigError(f"{file}: {at}.after names unknown stage '{after}'")
     if not stage.cmd:
         raise ConfigError(f"{file}: {at} needs cmd")
     if stage.is_group and not stage.task_dir:
