@@ -18,8 +18,10 @@ $EDR launch gcd
 
 end=$((SECONDS + CAP_S))
 while :; do
+  # The collect cycle runs after the terminal state is seen, so the last stage is collected too.
+  $EDR status --narrow | grep -q "nothing live" && over=1 || over=0
   $EDR watch --once
-  $EDR status --narrow | grep -q "nothing live" && break
+  [ "$over" = 1 ] && break
   [ "$SECONDS" -lt "$end" ] || { echo "run still live after $CAP_S s"; $EDR status; exit 1; }
   sleep 10
 done
