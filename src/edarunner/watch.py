@@ -21,6 +21,7 @@ from .hosts import HostError, Ssh
 from .ledger import Ledger
 from .model import Project, Task
 from .notify import Notifier, alert_buttons
+from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
 
 log = logging.getLogger(__name__)
@@ -30,8 +31,6 @@ _RUN_KEYS = ("run_id", "label", "config", "host", "root", "phase", "stage", "ste
              "started", "updated", "disk_free_gb", "tree_gb", "counts")
 _TASK_KEYS = ("started", "ended", "exit", "signature", "log")
 _BUSY = ("stage:", "group:", "retry:")
-_NOTIFY = {"dead", "hung", "looping", "over_budget", "host_full", "superseded", "orphan", "incomplete", "failed",
-           "killed"}
 
 
 # files
@@ -187,7 +186,7 @@ def actions(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
         if not (rec.get("state") is None and state == "running"):
             ledger.add_event("watch", run_id, state, text)
         rec.update(state=state, since=now, acted=False)
-    if state in _NOTIFY:
+    if state in board.ALERT_STATES:
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
             handle = board.handle(run)
@@ -381,6 +380,12 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
         return states
     _launch_queued(project, ssh, ledger)
     _boards(project, ssh, ledger, notifiers, now)
+    digest = Digest(project, ledger)
+    if digest.due(now):
+        text = digest.text(now)
+        for n in notifiers:
+            n.post("digest", text)
+        digest.mark_sent(now)
     ledger.set_kv("progress", progress)
     ledger.set_kv("notified", notes)
     n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1

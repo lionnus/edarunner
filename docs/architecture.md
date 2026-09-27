@@ -36,6 +36,7 @@ commands, the report files and the numbers in them.
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
 | `notify/__init__.py` | the notifier interface and `make_notifiers` |
+| `notify/digest.py` | `Digest`, the daily summary that the watcher sends and `/digest` shows |
 | `notify/telegram/api.py` | `BotApi`, the HTTPS client: one method per Bot API call, the retry and the 429 wait |
 | `notify/telegram/format.py` | pure functions that turn ledger rows into Telegram HTML |
 | `notify/telegram/commands.py` | the built-in command table and one handler per command |

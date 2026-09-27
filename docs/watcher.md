@@ -30,11 +30,14 @@ service up.
    belong to no live run tree.
 6. Launch queued jobs whose host now fits, one per batch per cycle.
 7. Write the boards and the pinned Telegram board.
-8. Write `<state>/watch.json` with the time, the cycle count and the pid.
+8. Send the daily digest once a day, at the first cycle after
+   `limits.digest_at`.
+9. Write `<state>/watch.json` with the time, the cycle count and the pid.
 
-Its memory between cycles is two rows of the ledger's `kv` table:
-`progress`, what each run looked like last time, and `notified`, the
-states, the alerts sent and the grace clocks.
+Its memory between cycles is three rows of the ledger's `kv` table:
+`progress`, what each run looked like last time, `notified`, the
+states, the alerts sent and the grace clocks, and `digest`, the day and
+the time of the last digest.
 
 ## Run states
 

@@ -799,3 +799,11 @@ def test_log_tail_fetches_the_last_lines_from_the_host(demo: Path) -> None:
     log.unlink()
     with pytest.raises(HostError, match="tail"):
         acts.log_tail("a@demo", 3)
+
+
+def test_status_digest_prints_the_digest_as_text(demo: Path, capsys) -> None:
+    seed(demo, "a", "done")
+    code, out, _ = edr(capsys, "status", "--digest")
+    assert code == 0 and out.startswith("Ended since ") and "⚪ a@demo done" in out and "<" not in out
+    code, out, _ = edr(capsys, "--json", "status", "--digest")
+    assert code == 0 and "<code>a@demo</code>" in json.loads(out)["data"]["digest"]

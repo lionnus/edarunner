@@ -180,6 +180,7 @@ class Limits:
     gate_max_s: int = 14400
     kill_hung: bool = False
     kill_orphan: bool = False
+    digest_at: str = ""  # local HH:MM of the daily digest; "" is off
 
 
 @dataclass
