@@ -296,6 +296,12 @@ class Actions:
     def __init__(self, c: Ctx) -> None:
         self.c = c
 
+    def run_info(self, handle: str) -> dict[str, str]:
+        """The handle, run id, run root and host of one run, for the placeholders of a custom command."""
+        row = self.c.resolve(handle)
+        return {"handle": board.handle(row), "run_id": row["run_id"], "run_root": str(row.get("root") or ""),
+                "host": str(row.get("host") or "")}
+
     def keep(self, handle: str, hours: int, actor: str) -> str:
         row = self.c.resolve(handle)
         return f"{board.handle(row)}: " + _keep(self.c, row, hours, None, actor)
