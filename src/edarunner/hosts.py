@@ -147,8 +147,6 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
 class Ssh:
     """Runs short commands on a host with a timeout; `local` runs without ssh."""
 
-    place = staticmethod(place)
-
     def __init__(self, site: Site) -> None:
         self.site = site
 
@@ -237,10 +235,3 @@ class Ssh:
         if "ps" not in missing and self.run("local", "ps -o etimes=,pcpu=,cputimes= -p $$")[0] != 0:
             problems.append("local: ps has no etimes, pcpu or cputimes column; procps-ng 3.3.10 or newer")
         return problems
-
-    def scratch_free_gb(self, host: str, path: str) -> float:
-        """Free GB of the filesystem under `path` on `host`."""
-        out = self._run_ok(host, f"df -Pk {shlex.quote(path)} | awk 'NR==2{{print $4}}'")
-        if not out.strip():
-            raise HostError(f"{host}: df found nothing at {path}")
-        return round(int(out.split()[-1]) / 2**20, 1)

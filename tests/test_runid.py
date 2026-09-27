@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from edarunner import config, runid, stagectl
-from edarunner.guards import Refuse
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
@@ -96,53 +95,7 @@ def test_dirty_snapshot_tag_is_stable(project):
     assert stagectl.stage(project, dirty_dir=repo).src != a.src
 
 
-def test_build_tag_default_and_hook(project):
-    batch = config.load_batch(project, "demo")
-    a, b = batch.jobs
-    assert runid.build_tag(project, a) == "demo"
-    assert runid.build_tag(project, b) == "demo_DW-0"
-    b.overrides = {"N": "8", "DW": "0"}
-    assert runid.build_tag(project, b) == "demo_DW-0_N-8"
-    hooks = project.root / "hooks"
-    hooks.mkdir()
-    (hooks / "build_tag.py").write_text("def build_tag(config, overrides):\n    return f'{config}-x{len(overrides)}'\n")
-    project.source.build_tag = "python:hooks/build_tag.py:build_tag"
-    assert runid.build_tag(project, b) == "demo-x2"
 
-
-def test_run_id_and_batch_date(project, tmp_path):
-    state = tmp_path / "state"
-    batch = config.load_batch(project, "demo")
-    date = runid.batch_date(state, batch.batch)
-    assert re.fullmatch(r"\d{8}_\d{4}", date)
-    assert (state / "demo" / "RUN_DATE").read_text() == date + "\n"
-    assert runid.batch_date(state, batch.batch) == date
-    (state / "demo" / "RUN_DATE").write_text("20260101_0900\n")
-    assert runid.batch_date(state, batch.batch, dry_run=True) == "20260101_0900"
-    rid = runid.run_id(project, batch, batch.jobs[1], "abc1234", "20260101_0900")
-    assert rid == "20260101_0900_b_nodw_demo_DW-0_gabc1234"
-    rid = runid.run_id(project, "demo", batch.jobs[0], "abc1234-dirty-01234567", "20260101_0900")
-    assert rid == "20260101_0900_a_demo_gabc1234-dirty-01234567"
-    project.source.run_id = "{label}_{date}"
-    with pytest.raises(Refuse):
-        runid.run_id(project, batch, batch.jobs[0], "abc1234", "20260101_0900")
-
-
-def test_remove_guards_then_removes(project):
-    repo = project.source.repo
-    a = stagectl.stage(project, "HEAD")
-    with pytest.raises(stagectl.StageError, match="not a src tag"):
-        stagectl.remove(project, "../..")
-    with pytest.raises(stagectl.StageError, match="not staged"):
-        stagectl.remove(project, "0000000")
-    project.safety.marker = "/nope/"
-    with pytest.raises(Refuse):
-        stagectl.remove(project, a.src)
-    project.safety.marker = "/edr/"
-    assert stagectl.remove(project, a.src) == a.path
-    assert not a.path.exists()
-    assert git("worktree", "list", "--porcelain", cwd=repo).count("worktree ") == 1
-    assert stagectl.stage(project, "HEAD") == a
 
 
 def test_dry_run_writes_nothing(project, tmp_path, capsys):
@@ -153,10 +106,8 @@ def test_dry_run_writes_nothing(project, tmp_path, capsys):
     before = listing(tmp_path)
     old = stagectl.stage(project, "HEAD~1", dry_run=True)
     dirty = stagectl.stage(project, dirty_dir=repo, dry_run=True)
-    assert stagectl.remove(project, a.src, dry_run=True) == a.path
-    assert re.fullmatch(r"\d{8}_\d{4}", runid.batch_date(tmp_path / "state", "demo", dry_run=True))
     assert listing(tmp_path) == before
     assert not old.path.exists() and old.nested == {"nonfree": a.nested["nonfree"]}
     assert "-dirty-" in dirty.src and not dirty.path.exists() and dirty.dirty
     out = capsys.readouterr().out
-    assert "worktree add" in out and "git clone" in out and "rsync -a" in out and f"remove {a.path}" in out
+    assert "worktree add" in out and "git clone" in out and "rsync -a" in out

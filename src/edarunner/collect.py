@@ -30,7 +30,6 @@ _FORMAT = "--out-format=%i %l %n"
 class CollectResult:
     files: int = 0
     failures: list[str] = field(default_factory=list)
-    new_dirs: list[str] = field(default_factory=list)
     copied: list[str] = field(default_factory=list)
 
 
@@ -183,13 +182,12 @@ class _Copier:
         return [posixpath.relpath(p.strip(), self.root) + "/" for p in out.splitlines() if p.strip()]
 
     def copy_all(self, paths: list[str], klass: str) -> None:
-        """Copy every distinct path, then list the directories that received a file."""
+        """Copy every distinct path; an empty entry is a counted failure."""
         for entry in dict.fromkeys(paths):
             if entry:
                 self._copy(entry, klass)
             else:
                 self.result.failures.append("empty collect entry")
-        self.result.new_dirs = sorted({posixpath.dirname(p) for p in self.result.copied} - {""})
 
     def _copy(self, entry: str, klass: str) -> None:
         # A path without a trailing slash lands in its parent, so a second copy does not nest it.

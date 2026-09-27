@@ -73,13 +73,12 @@ def test_done_run_and_idempotent(env) -> None:
     assert not (results / "out").exists()
     assert r.files == 8 + 5 + 4 == len(r.copied)
     assert "reports/0/area.rpt" in r.copied and "log/synth.log" in r.copied
-    assert "reports/3" in r.new_dirs and "log" in r.new_dirs
     rows = artifacts(ledger)
     assert len(rows) == r.files and {c for _, c, _ in rows} == {"always"}
     assert ("reports/3/area.rpt", "always", 13) in rows
 
     again = collect.collect_run(project, ssh, ledger, run, hb)
-    assert (again.files, again.failures, again.copied, again.new_dirs) == (0, [], [], [])
+    assert (again.files, again.failures, again.copied) == (0, [], [])
     assert artifacts(ledger) == rows
 
 
@@ -96,7 +95,6 @@ def test_running_stage_copies_final_steps_only(env) -> None:
     assert sorted(p.name for p in (results / "reports").iterdir()) == ["0", "1"]
     assert (results / "log" / "synth.log").is_file()
     assert not (results / "simulation").exists()
-    assert r.new_dirs == ["log", "reports/0", "reports/1"]
 
 
 def test_missing_path_is_a_counted_failure(env) -> None:
