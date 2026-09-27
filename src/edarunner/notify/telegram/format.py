@@ -152,3 +152,33 @@ def help_text(groups: dict[str, list[tuple[str, str]]]) -> str:
     """Prose: a bold line per group, then one `usage: help` line per command."""
     return fit("\n\n".join(f"<b>{esc(g)}</b>\n" + "\n".join(f"{esc(u.rstrip())}: {esc(h)}" for u, h in cmds)
                            for g, cmds in groups.items()))
+
+
+def plain(text: str) -> str:
+    """Telegram HTML as terminal text: no tags, no entities."""
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
+
+
+def _section(title: str, lines: list[str], most: int = 10) -> str:
+    body = lines[:most] + ([f"<i>… and {len(lines) - most} more</i>"] if len(lines) > most else [])
+    return f"<b>{esc(title)}</b>\n" + ("\n".join(body) or "<i>none</i>")
+
+
+def digest(ended: list[Row], live: list[Row], queued: list[Row], hosts: list[Row], alerts: list[Row],
+           since: float, now: float) -> str:
+    """The daily summary: the runs that ended since `since`, the live runs with their age, the queue,
+    the hosts with the least free scratch, and the open alerts, one section each."""
+    def line(r: Row, *parts: str) -> str:
+        st = runs.state_of(r)
+        return f"{mark(st)} <code>{esc(runs.handle(r))}</code> {esc(', '.join(p for p in parts if p))}".rstrip()
+
+    return fit("\n\n".join([
+        _section("Ended since " + time.strftime("%d.%m %H:%M", time.localtime(since)),
+                 [line(r, runs.state_of(r)) for r in ended]),
+        _section("Live", [line(r, str(r.get("stage") or ""), runs.hm(now - r["started"]) if r.get("started") else "")
+                          for r in live]),
+        _section("Queued", [line(r) for r in queued]),
+        _section("Least free scratch", [f"<b>{esc(h['host'])}</b> scratch {h['total_gb'] - h['free_gb']:.0f}/"
+                                        f"{h['total_gb']:.0f} GB" for h in hosts]),
+        _section("Open alerts", [line(r, runs.state_of(r)) for r in alerts]),
+    ]))

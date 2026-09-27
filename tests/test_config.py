@@ -164,6 +164,19 @@ def test_marks_defaults_site_and_project_override(tmp_path):
             config.load_project(root)
 
 
+def test_digest_at_is_a_time_of_day(tmp_path):
+    root = demo_copy(tmp_path)
+    edr = root / "edr.toml"
+    text = edr.read_text()
+    assert config.load_project(root).limits.digest_at == ""
+    edr.write_text(text.replace("[limits]", '[limits]\ndigest_at = "08:00"'))
+    assert config.load_project(root).limits.digest_at == "08:00"
+    for bad in ('"8:00"', '"24:00"', '"08:00:00"'):
+        edr.write_text(text.replace("[limits]", f"[limits]\ndigest_at = {bad}"))
+        with pytest.raises(ConfigError, match="limits.digest_at must be HH:MM"):
+            config.load_project(root)
+
+
 def test_duplicate_label(tmp_path):
     root = demo_copy(tmp_path)
     jobs = root / "jobs" / "demo.toml"

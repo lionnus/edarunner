@@ -37,6 +37,7 @@ from .hosts import HostError, HostProbe, Ssh
 from .ledger import Ledger
 from .model import Batch, Job, Project
 from .notify import make_notifiers
+from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -358,6 +359,11 @@ class Actions:
         """One line per licence."""
         return tgfmt.licences(_lic_rows(self.c))
 
+    def digest_text(self) -> str:
+        """The daily digest now, as Telegram HTML."""
+        self.c.refresh()
+        return Digest(self.c.project, self.c.ledger).text(time.time())
+
     def log_tail(self, handle: str, n: int) -> tuple[str, bytes]:
         """The last `n` lines of the log of the running or last stage, fetched from the host: (file name, bytes)."""
         row = self.c.resolve(handle)
@@ -402,7 +408,11 @@ class Actions:
 # --- verbs
 
 def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
-    """The board, or one run with its stages, metrics and log tail."""
+    """The board, one run with its stages, metrics and log tail, or the daily digest."""
+    if a.digest:
+        text = Actions(c).digest_text()
+        c.emit(tgfmt.plain(text), {"digest": text})
+        return 0
     if a.handle:
         row = c.resolve(a.handle)
         c.refresh(str(row["batch"]))
@@ -961,6 +971,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s")
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists")
     s.add_argument("--triage", action="store_true", help="every run not running, with a proposed command")
+    s.add_argument("--digest", action="store_true", help="the daily digest that the watcher sends")
     s = verb("events", "the last events")
     s.add_argument("--since", metavar="T", help="30m, 2h, 1d or seconds")
     s.add_argument("--run", metavar="HANDLE", help="the events of one run")

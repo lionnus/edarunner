@@ -140,6 +140,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/events [n]` | the last `n` events, default 8, at most 30, newest first |
 | `/hosts` | cores, RAM, scratch and GPUs per host, each as used of total |
 | `/lic` | licence seats, used of total |
+| `/digest` | the daily digest now |
 | `/pin` | pin a new board message |
 | `/log <handle> [n]` | the last `n` lines of the log of a run as a file, default 200 |
 | `/board` | `compare.html` and `status.html` as files |
@@ -230,11 +231,11 @@ of the exact values you expect.
 ## The keyboard
 
 `/start` and `/keyboard` show a reply keyboard under the text field. It
-stays until `/keyboard off` removes it. Its buttons are four words:
+stays until `/keyboard off` removes it. Its buttons are five words:
 
 ```
 Status   Hosts
-Events   Lic
+Events   Lic   Digest
 ```
 
 A tap sends the word as a plain message, and the bot runs the command
@@ -257,6 +258,45 @@ The bot reacts to the message of a command:
 Telegram accepts only a fixed set of reaction emoji, and ⏳, ✅ and ❌
 are not in it. A chat or a client without reactions makes the call
 fail; the bot ignores that failure and answers as usual.
+
+## The daily digest
+
+With `digest_at = "08:00"` in `[limits]` of `edr.toml`, the watcher
+sends one message a day, at its first cycle after 08:00 local time. The
+message has five parts:
+
+- the runs that ended since the last digest, with their states;
+- the live runs, with the stage and the time since the start;
+- the queued runs;
+- the three hosts with the least free scratch, as used of total;
+- the open alerts: live runs in an alert state without an `ack`.
+
+```
+demo: digest
+Ended since 14.01 03:00
+⚪ a@demo done
+
+Live
+🔴 h@demo synth, 2h
+🟢 c@demo synth, 2h
+
+Queued
+🔵 q@demo
+
+Least free scratch
+local scratch 50/100 GB
+hostA scratch 900/1000 GB
+
+Open alerts
+🔴 h@demo hung
+```
+
+The host figures come from `data/board/board.json` of the last cycle,
+so the digest runs no probe. The day and the time of the last digest
+live in the ledger's `kv` table under `digest`; the first digest covers
+the last 24 hours. `/digest` sends the same text at any time, and
+`edr status --digest` prints it on the terminal. Neither moves the start
+of the next digest.
 
 ## Files
 

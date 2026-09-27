@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A daily digest at `[limits] digest_at`: the runs that ended, the live
+  and queued runs, the hosts with the least free scratch, and the open
+  alerts. `/digest` and `edr status --digest` show it on demand.
 - A custom command with `detach` that ends within 5 seconds replies
   `ended with rc N: <last output line>` instead of its `reply`.
 - The bot reacts to a command message: 👀 when a slow command starts,

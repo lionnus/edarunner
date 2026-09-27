@@ -84,6 +84,7 @@ that calls `python` from the venv of its own tree.
 | `gate_max_s` | longest wait at a licence gate | `14400` |
 | `kill_hung` | the watcher kills a hung run after `grace_s` | `false` |
 | `kill_orphan` | the watcher kills an orphan tool process after `grace_s` | `false` |
+| `digest_at` | the local time, `HH:MM`, of the daily digest; empty is off | `""` |
 
 ### [placement]
 

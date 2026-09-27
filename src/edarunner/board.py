@@ -44,6 +44,9 @@ STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "
          "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
          "imported": "dim", "abandoned": "dim", "resumed": "cyan"}
+# The states that send an alert.
+ALERT_STATES = {"dead", "hung", "looping", "over_budget", "host_full", "superseded", "orphan", "incomplete", "failed",
+                "killed"}
 # Resource marks from green to red, then black for a host that did not answer.
 RESOURCE_MARKS = ("🟢", "🟡", "🟠", "🔴")
 NO_ANSWER = "⚫"

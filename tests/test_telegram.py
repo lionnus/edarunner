@@ -641,13 +641,15 @@ def test_the_reply_keyboard_sends_plain_words(bot):
     bot.handle_update(msg("/start"))
     sent = bot.api.of("sendMessage")[-1]
     assert sent["text"].startswith("<b>demo: help</b>\n<b>Look</b>")
-    assert sent["reply_markup"]["keyboard"] == [[{"text": "Status"}, {"text": "Hosts"}], [{"text": "Events"}, {"text": "Lic"}]]
+    assert sent["reply_markup"]["keyboard"] == [[{"text": "Status"}, {"text": "Hosts"}],
+                                                [{"text": "Events"}, {"text": "Lic"}, {"text": "Digest"}]]
     assert sent["reply_markup"]["is_persistent"] is True
-    for word, call in (("Status", "status_text"), ("hosts", "hosts_text"), (" Events ", "events_text"), ("Lic", "lic_text")):
+    for word, call in (("Status", "status_text"), ("hosts", "hosts_text"), (" Events ", "events_text"), ("Lic", "lic_text"),
+                       ("Digest", "digest_text")):
         bot.handle_update(msg(word))
         assert bot.actions.calls[-1][0] == call
     bot.handle_update(msg("status please"))
-    assert bot.actions.calls[-1][0] == "lic_text"
+    assert bot.actions.calls[-1][0] == "digest_text"
     bot.handle_update(msg("/keyboard off"))
     assert bot.api.of("sendMessage")[-1]["reply_markup"] == {"remove_keyboard": True}
     bot.handle_update(msg("/keyboard"))

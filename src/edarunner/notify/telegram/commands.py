@@ -23,7 +23,7 @@ HANDLE = re.compile(r"^[\w.@#-]{1,128}$")
 DESIGN = re.compile(r"^[\w.-]{1,64}$")
 LOG_LINES = 200
 # The words of the reply keyboard, in rows; a tap sends the word, which runs the command of that name.
-KEYBOARD = (("Status", "Hosts"), ("Events", "Lic"))
+KEYBOARD = (("Status", "Hosts"), ("Events", "Lic", "Digest"))
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,7 @@ BUILTINS = {b.name: b for b in (
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
     Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html", slow=True),
     Builtin("lic", "", "licence seats, used of total", "Look", "html"),
+    Builtin("digest", "", "the daily digest now", "Look", "html"),
     Builtin("pin", "", "pin a new board message", "Look"),
     Builtin("log", "<handle> [n]", "the last n log lines as a file, default 200", "Files", on_run=True, slow=True),
     Builtin("board", "", "compare.html and status.html as files", "Files"),
@@ -196,6 +197,10 @@ class Commands:
         if not args or not DESIGN.match(args[0]):
             return "usage: /csv <design>"
         return Reply("csv", args[0], documents=[Document("metrics.csv", self.actions.metrics_csv(args[0]))])
+
+    def cmd_digest(self, args: list[str]) -> str:
+        """The daily digest now."""
+        return self.actions.digest_text()
 
     def cmd_keep(self, args: list[str]) -> str:
         """Add hours, default 12, to the running stage or task."""

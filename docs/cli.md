@@ -67,7 +67,7 @@ A verb that takes a run accepts three forms:
 ## status
 
 ```
-edr status [handle] [--batch B] [--narrow] [--watch] [--live] [--triage]
+edr status [handle] [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest]
 ```
 
 Without a handle, the board: one line per run of every batch that is not
@@ -86,6 +86,7 @@ core hours so far. The state of a live run follows the heartbeat age
 | `--watch` | redraw every `heartbeat_s` seconds; Ctrl-C ends it |
 | `--live` | ask each host whether the driver process exists; a gone driver shows `dead` |
 | `--triage` | every run not `running`, with one proposed command; `docs/watcher.md` has the table |
+| `--digest` | the daily digest that the watcher sends, as plain text; `docs/telegram.md` describes it |
 
 Exit 3 with `--live` when a host did not answer.
 
