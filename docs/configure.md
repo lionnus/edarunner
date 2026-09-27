@@ -294,7 +294,7 @@ has one, and one scheduler licence per tool with `licence`:
 |---|---|---|---|
 | cores | `request_cpus = N` | `--cpus-per-task=N --nodes=1` | `-n N -R "span[hosts=1]"` |
 | `needs.ram_gb` | `request_memory` in MB | `--mem` in MB | `-R "rusage[mem=NGB]" -M NGB` |
-| `needs.disk_gb` | `request_disk` in KB | `--tmp` in MB | `-R "rusage[tmp=NGB]"` |
+| `needs.disk_gb` | `request_disk` in KB | none; the driver checks it | `-R "rusage[tmp=NGB]"` |
 | wall time | `periodic_remove` after the seconds | `--time=H:MM:00` | `-W H:MM` |
 | licence | `concurrency_limits = fc:1` | `--licenses=fc:1` | `-R "rusage[fc=1]"` |
 | a named host | `requirements = (Machine == "h")` | `--nodelist=h` | `-m h` |

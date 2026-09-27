@@ -63,12 +63,13 @@ def condor_submit(req: Request) -> str:
 
 
 def slurm_script(req: Request) -> str:
-    """The `sbatch` script of one run: the `#SBATCH` header, then the driver."""
+    """The `sbatch` script of one run: the `#SBATCH` header, then the driver.
+
+    It asks no `--tmp`: a node without `TmpDisk` in `slurm.conf` refuses every job that does, and the
+    driver checks the free space of the tree itself."""
     opts = [f"--job-name={req.run_id}", f"--output={req.log}", "--nodes=1", f"--cpus-per-task={req.cores}"]
     if req.ram_gb:
         opts.append(f"--mem={math.ceil(req.ram_gb * 1024)}M")
-    if req.disk_gb:
-        opts.append(f"--tmp={math.ceil(req.disk_gb * 1024)}M")
     if req.hours:
         opts.append(f"--time={_hmm(req.hours)}:00")
     if req.licences:

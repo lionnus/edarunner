@@ -437,7 +437,15 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
             continue
         db.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
-        handle = submit(backend, db, project, p.run_id, p.host, path, driver)
+        try:
+            handle = submit(backend, db, project, p.run_id, p.host, path, driver)
+        except hosts.HostError as e:
+            # A run the backend refused never starts; a live phase would wait for a heartbeat for ever.
+            p.problems.append(f"submit failed: {e}")
+            db.upsert_run({"run_id": p.run_id, "phase": "FAILED:submit", "state": "failed"})
+            db.add_event("user", p.run_id, "launch", f"submit failed: {e}")
+            print(f"{p.run_id}: submit failed: {e}")
+            continue
         row["pid"], row["handle"] = handle.pid, str(handle)
         row["started"] = True
         started += 1

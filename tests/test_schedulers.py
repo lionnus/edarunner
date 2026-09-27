@@ -196,3 +196,11 @@ def test_launch_under_a_scheduler(sched_env, tmp_path: Path, shims: Shims) -> No
     shims.add("condor_q")
     assert launch.stop(ssh, db, run, hb, grace_s=5, backend=backend)
     assert ["condor_rm", "12.0"] in shims.calls()
+
+
+def test_a_refused_submit_fails_the_run(sched_env, tmp_path: Path, shims: Shims) -> None:
+    project, batch, ssh, db = sched_env
+    shims.add("condor_submit", rc=1, err="ERROR: Requested node configuration is not available\n")
+    row = launch.launch(project, batch, ssh, db, src_dir=tmp_path / "src", backend=make_backend(project.site, ssh))[0]
+    assert not row["started"] and row["problems"][0].startswith("submit failed: condor_submit: rc 1")
+    assert (db.run(row["run_id"])["phase"], db.run(row["run_id"])["state"]) == ("FAILED:submit", "failed")

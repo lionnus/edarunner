@@ -78,8 +78,12 @@ elif [ "$RUNTIME" = docker ]; then
     docker run -d --name "$NAME" -v "$WORK:$WORK" -v "$EDR_CONF:/etc/condor/config.d/99-edr.conf:ro" "$IMAGE" >/dev/null
     stop_pool() { docker rm -f "$NAME" >/dev/null; }
     # The jobs write the state directory of the caller, so they run with the caller's uid.
-    docker exec "$NAME" useradd -m -u "$(id -u)" edr
-    VIA=(docker exec -u edr "$NAME")
+    JOB_USER=$(docker exec "$NAME" getent passwd "$(id -u)" | cut -d: -f1)
+    if [ -z "$JOB_USER" ]; then
+        JOB_USER=edr
+        docker exec "$NAME" useradd -m -u "$(id -u)" "$JOB_USER"
+    fi
+    VIA=(docker exec -u "$JOB_USER" "$NAME")
 else
     echo "RUNTIME is docker or singularity"; exit 2
 fi

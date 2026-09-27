@@ -4,7 +4,6 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8192M
-#SBATCH --tmp=1536M
 #SBATCH --time=2:30:00
 #SBATCH --licenses=fc:1,vcs:2
 #SBATCH --nodelist=node7
