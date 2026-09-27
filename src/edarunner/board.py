@@ -51,6 +51,7 @@ MARK = {"running": "🟢", "queued": "🔵", "resumed": "🔵", "stale": "🟡",
 # Resource marks from green to red, then black for a host that did not answer.
 RESOURCE_MARKS = ("🟢", "🟡", "🟠", "🔴")
 NO_ANSWER = "⚫"
+SEVERITY = (NO_ANSWER, *reversed(RESOURCE_MARKS))
 # No markup: a task in a metric key looks like a tag, `power_w[k_small]`.
 _OPTS = {"markup": False, "highlight": False, "emoji": False}
 
@@ -107,9 +108,8 @@ def host_marks(probe: HostProbe | None, marks: Marks) -> dict[str, str]:
 
 
 def worst_mark(marks: Iterable[str]) -> str:
-    """The most severe of `marks`: black, then red to green; '-' counts as green."""
-    order = (NO_ANSWER, *reversed(RESOURCE_MARKS))
-    return min((m for m in marks if m in order), key=order.index, default=RESOURCE_MARKS[0])
+    """The most severe of `marks` by SEVERITY; '-' counts as green."""
+    return min((m for m in marks if m in SEVERITY), key=SEVERITY.index, default=RESOURCE_MARKS[0])
 
 
 # row helpers
