@@ -1,10 +1,14 @@
-# The Telegram bot
+# Telegram
+
+After this page your phone shows the alerts and the board of a project,
+and you can keep, acknowledge or stop a run from there.
 
 The bot is a thread of `edr watch`. It sends alerts with three buttons,
 keeps one pinned board message, and answers commands from one chat. It
 uses long polling over outbound HTTPS, so it needs no open port and no
-webhook. `docs/reference/configuration.md` lists the keys of
-`[telegram]`.
+webhook. [reference/configuration.md](reference/configuration.md) lists
+the keys of `[telegram]`, and [reference/bot.md](reference/bot.md) every
+command. [guarantees.md](guarantees.md) says what the bot never does.
 
 ## Set up the bot
 
@@ -160,7 +164,7 @@ timeout_s = 60
 
 [telegram.commands.claude]
 help = "open a Claude remote-control session: /claude <dir>"
-args = { dir = "^(backend|paper|rtl|sw)$" }
+args = { dir = "^(backend|rtl|sw)$" }
 skip_if = ["tmux", "has-session", "-t", "claude-{project}-{dir}"]
 skip_reply = "already open: claude-{project}-{dir}"
 run = ["tmux", "new-session", "-d", "-s", "claude-{project}-{dir}", "-c", "{root}/{dir}", "claude remote-control --name {project}-{dir}"]
@@ -400,28 +404,3 @@ Without `topic_id`, the bot answers a command in the thread it came
 from, and it sends its alerts and its board to the main thread. Each
 project that answers commands still needs its own bot, because one
 token has one poller.
-
-## Security
-
-- The token is the one secret. Keep it in a file with mode 600; the bot
-  refuses any other mode.
-- The bot obeys one `chat_id`, and one `user_id` when it is set. Every
-  other chat or user gets no answer, and the first message from it makes
-  one database event `rejected`.
-- The command set, the argument shapes and the working directory come
-  from `site.toml` on the head node. The phone chooses among those
-  entries and fills the gated slots.
-- Every command, action and refusal lands in `events` with the actor
-  `telegram`. A button press or `/keep`, `/ack` and `/stop` records the
-  event of its action only.
-- A 429 from Telegram makes the bot wait `retry_after` seconds.
-
-## What the bot never does
-
-- It never runs a shell string or free text.
-- It never kills a process. `/stop` writes the `after-task` stop file.
-- It never runs `retire`, `prune`, `launch` or `rm`.
-- It never answers a chat outside the allowlist.
-- It writes only `data/board/` itself; `/keep`, `/ack` and `/stop` write
-  the keep file and the stop file under `state/<batch>/` through the same
-  commands as the CLI.

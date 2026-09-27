@@ -484,7 +484,7 @@ The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
 bot as a thread when the site file configures it. --once runs one cycle.
 --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
 reads and classifies every run, prints the states and writes nothing.
-docs/watcher.md explains the cycle.
+docs/run.md explains the cycle.
 
 | Flag | Meaning |
 |---|---|
