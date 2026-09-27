@@ -37,3 +37,19 @@ until git fetch -q origin ci-status && git show origin/ci-status:status.json | g
 
 Every branch writes the same branch, so `ci-status` shows the newest run
 of the repository, not the newest run of one branch.
+
+## The documentation site
+
+`.github/workflows/pages.yml` builds the pages under `docs/` with MkDocs
+Material. On a pull request it only builds, and a broken link or anchor
+fails the job. On a push to `main` it also deploys the site to
+<https://lionnus.github.io/edarunner/>. The navigation follows the files
+in `docs/`: `docs/.pages` puts the index and `getting-started.md` first
+and `architecture.md` last.
+
+Build the site locally from the repository root:
+
+```sh
+uv run --extra docs mkdocs build --strict   # writes site/
+uv run --extra docs mkdocs serve            # serves it at http://127.0.0.1:8000
+```
