@@ -1,8 +1,9 @@
 """The Telegram bot: alerts with buttons, a pinned board, commands.
 
 See docs/design.md section 11 and docs/telegram.md. Long polling over
-outbound HTTPS only; one chat id is obeyed. Every HTTP call goes through
-`TelegramBot.api`, so a test replaces that one method.
+outbound HTTPS only; one chat id is obeyed, and one user id when
+`user_id` is set. Every HTTP call goes through `TelegramBot.api`, so a
+test replaces that one method.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ log = logging.getLogger(__name__)
 
 HANDLE = re.compile(r"^[\w.@#-]{1,64}$")
 LIMIT = 4000  # the message limit is 4096 characters after parsing
+# Only an idempotent call is sent again after a network failure; a resent sendMessage posts twice.
+RETRIES = {"getUpdates", "editMessageText", "answerCallbackQuery"}
 BUILTINS = {
     "status": "the narrow board",
     "events": "the last events: /events [n]",
@@ -80,6 +83,7 @@ class TelegramBot(Notifier):
         self.actions = actions
         self.token = Path(token_file).read_text().strip()
         self.chat_id = int(self.tg.chat_id)
+        self.user_id = self.tg.user_id or None
         self.state_file = Path(project.data) / "board" / "telegram.json"
         self._state = self._load_state()
         self._lock = threading.Lock()
@@ -90,7 +94,7 @@ class TelegramBot(Notifier):
     # HTTP
 
     def api(self, method: str, params: dict, files: dict[str, tuple[str, bytes]] | None = None) -> object:
-        """One Bot API call. Obeys a 429 and retries a network failure twice."""
+        """One Bot API call. Obeys a 429; retries a network failure twice for a method in RETRIES."""
         fields = {k: (json.dumps(v) if isinstance(v, (dict, list)) else str(v)) for k, v in params.items() if v is not None}
         if files:
             body, ctype = _multipart(fields, files)
@@ -117,6 +121,8 @@ class TelegramBot(Notifier):
                 break
             except (OSError, http.client.HTTPException, ValueError) as e:
                 last = str(e)
+                if method not in RETRIES:
+                    break
                 time.sleep(5 * (attempt + 1))
         raise ApiError(f"{method}: {last}")
 
@@ -190,6 +196,8 @@ class TelegramBot(Notifier):
         menu = [{"command": c, "description": h[:256]} for c, h in BUILTINS.items()]
         menu += [{"command": n, "description": (c.help or n)[:256]} for n, c in self.tg.commands.items()]
         self._call("setMyCommands", {"commands": menu})
+        if not self.user_id:
+            log.warning("telegram: no user_id set; chat %d is the only gate, so it must be a private chat", self.chat_id)
         self._thread = threading.Thread(target=self._poll, name="telegram", daemon=True)
         self._thread.start()
 
@@ -220,6 +228,7 @@ class TelegramBot(Notifier):
         msg, q = u.get("message"), u.get("callback_query")
         m = msg or (q or {}).get("message") or {}
         who = m.get("chat", {}).get("id")
+        actor = (q or msg or {}).get("from", {}).get("id")
         if who is None:
             return
         if who != self.chat_id or self.chat_id == 0:
@@ -228,6 +237,11 @@ class TelegramBot(Notifier):
                 self._event("rejected", f"chat {who} ignored")
                 if self.chat_id == 0:
                     print(f"telegram: the first message came from chat {who}; set chat_id = {who} in site.toml", file=sys.stderr)
+            return
+        if self.user_id and actor != self.user_id:
+            if actor not in self._rejected:
+                self._rejected.add(actor)
+                self._event("rejected", f"user {actor} in chat {who} ignored")
             return
         if q:
             self._callback(q)
