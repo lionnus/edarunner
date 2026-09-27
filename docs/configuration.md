@@ -100,6 +100,21 @@ and then the one with the most free cores, that is not avoided, runs
 fewer than `max_per_host`, has the free cores, RAM and disk the job's
 first stage needs. No such host means the job is queued.
 
+### [telegram]
+
+The table is optional. It takes three keys of the site's `[telegram]`
+table and replaces them for this project only. A key it leaves out keeps
+the site's value. Without a `[telegram]` table in `site.toml`, the table
+here needs `chat_id`. The custom commands stay in `site.toml`.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `token_file` | the bot token of this project, mode 600 | the site's |
+| `chat_id` | the one chat the bot of this project answers | the site's |
+| `user_id` | the one user whose messages and buttons the bot obeys | the site's |
+
+`docs/telegram.md` says when a project needs its own bot.
+
 ### [stages.<name>]
 
 A stage is one command of the flow. Stages run in the order of the file.

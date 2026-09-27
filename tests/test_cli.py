@@ -18,6 +18,8 @@ import pytest
 from edarunner import board, cli, config, launch
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.ledger import Ledger
+from edarunner.model import Telegram
+from edarunner.notify.telegram import TelegramBot
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
@@ -301,31 +303,49 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     add_metric(demo, b, "area_cell_um2", 999.0)
     add_metric(demo, a, "power_w", 0.25, step=None, task="k_small")
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
-    assert acts.keep("b_nodw@demo", 5, "telegram") == f"{b}: keep 5 h" and keep_file(demo, b) == {"hours": 5, "ack": False}
-    assert acts.ack("b_nodw@demo", "telegram") == f"{b}: keep 5 h, ack" and keep_file(demo, b)["ack"] is True
-    assert acts.stop_after_task("b_nodw@demo", "telegram", "why") == f"{b} stops after its task"
-    assert acts.stop_after_task("a@demo", "telegram", "why") == f"{a} already done"
+    assert acts.keep("b_nodw@demo", 5, "telegram") == "b_nodw@demo: keep 5 h" and keep_file(demo, b) == {"hours": 5, "ack": False}
+    assert acts.ack("b_nodw@demo", "telegram") == "b_nodw@demo: keep 5 h, ack" and keep_file(demo, b)["ack"] is True
+    assert acts.stop_after_task("b_nodw@demo", "telegram", "why") == "b_nodw@demo stops after its task"
+    assert acts.stop_after_task("a@demo", "telegram", "why") == "a@demo already done"
     assert (bdir(demo) / f"{b}.stop").exists()
     with Ledger(demo / "data" / "edr.db") as led:
         assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
-    text = acts.status_text()
-    assert "b_nodw" in text and all(len(ln) <= 48 for ln in text.splitlines())
-    assert "#1" in acts.status_text(narrow=False) and not (demo / "data" / "board").exists()
+    status = acts.status_text().splitlines()
+    assert [ln.split() for ln in status] == [["RUN", "b_nodw@demo", "0m"], ["done", "a@demo", "0m"], ["RUN:1", "done:1"]]
     with Ledger(demo / "data" / "edr.db") as led:
         assert len(led.get_kv("last_board")) == 2
-    assert len(acts.events_text(2).splitlines()) == 4
+    one = acts.status_text("b_nodw@demo").splitlines()
+    assert one[:2] == ["running b_nodw@demo", "stage synth, step 2 elaborate"] and one[-1] == "  step 2 elaborate"
+    events = acts.events_text(2).splitlines()
+    assert events[0].split()[1:] == ["stop", "b_nodw@demo"] and events[1] == "  after-task: why" and len(events) == 4
+    assert b not in acts.events_text(8)
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
-    assert cmp[0].split() == ["metric", "a", "b_nodw"] and cmp[2].split() == ["area.cell", "1031.5", "999.0"]
-    assert cmp[3].split() == ["power_w[k_small]", "0.25", "-"]
-    assert len(acts.metric_text("area.cell", None).splitlines()) == 5 and acts.metric_text("area.cell", "zzz") == "no metrics"
-    assert acts.hosts_text().splitlines()[2].startswith("local ")
+    assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
+    assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
+    assert acts.hosts_text().splitlines()[1].split()[0] == "local"
     lic = acts.lic_text().splitlines()
-    assert lic[0].split()[:3] == ["licence", "feature", "pool"] and lic[2].split()[:7] == ["demo", "demo", "10", "2", "8", "0", "2"]
-    # The bot gets text: no colour and no trailing blank.
-    for text in (acts.status_text(narrow=False), acts.events_text(2), acts.hosts_text(), acts.lic_text(), cmp):
-        assert "\x1b" not in "".join(text)
+    assert lic[0].split() == ["licence", "free", "used", "ours"] and lic[1].split() == ["demo", "8/10", "2", "0"]
+    for text in (acts.status_text(), acts.status_text("a@demo"), acts.events_text(30), acts.hosts_text(),
+                 acts.lic_text(), "\n".join(cmp), acts.metric_text("area.cell", None)):
+        assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
 
+
+
+def test_a_button_press_records_one_event(demo: Path, tmp_path: Path) -> None:
+    b = seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
+    token = tmp_path / "token"
+    token.write_text("1:A")
+    ctx = cli.Ctx(argparse.Namespace(json=False, dry_run=False))
+    ctx.project.site.telegram = Telegram(token_file=token, chat_id=42)
+    bot = TelegramBot(ctx.project.site, ctx.project, ctx.ledger, cli.Actions(ctx), str(token))
+    bot.api = lambda method, params, files=None: {}
+    press = {"id": "q", "from": {"id": 7}, "data": "ack:b_nodw@demo",
+             "message": {"message_id": 1, "chat": {"id": 42}, "text": "dead b_nodw@demo"}}
+    bot.handle_update({"update_id": 1, "callback_query": press})
+    events = ctx.ledger.events()
+    assert [(e["actor"], e["run_id"], e["kind"]) for e in events] == [("telegram", b, "keep")]
+    ctx.close()
 
 # retire
 
@@ -455,8 +475,10 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     data = {r["host"]: r for r in json.loads(out)["data"]}
     assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
-    text = acts.hosts_text()
-    assert "\x1b" not in text and text.splitlines()[0].split()[0] == "host" and all(len(ln) <= 48 for ln in text.splitlines())
+    text = acts.hosts_text().splitlines()
+    assert text[0].split() == ["host", "cores", "scratch", "gpu"] and all(len(ln) <= 40 for ln in text)
+    assert next(ln for ln in text if ln.startswith("hostA")).split() == ["hostA", "52/64", "800/2000", "1/4"]
+    assert text[-1].startswith("hostB: hostB: rc 255")
 
 
 def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
