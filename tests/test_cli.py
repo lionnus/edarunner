@@ -457,10 +457,13 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
         led.upsert_run({"run_id": f"{DATE}_b_nodw_demo_gabc1234", "batch": "demo", "label": "b_nodw", "config": "demo",
                         "host": row["host"], "root": row["root"], "src": "abc1234", "phase": "done", "state": "done"})
     code, out, err = edr(capsys, "retire", "a@demo", "--why", "t", "--uncollected")
-    assert code == 1 and "shared with another run" in err
+    assert code == 1 and "results are not collected" in err
     assert Path(row["root"]).exists()
     code, out, err = edr(capsys, "retire", "a@demo", "--why", "t", "--prune", "netlist", "--dry-run")
     assert code == 0, err  # a prune of a shared root is fine while no sharer is live
+    (demo / "data" / "results" / f"{DATE}_b_nodw_demo_gabc1234" / "log").mkdir(parents=True)
+    code, out, err = edr(capsys, "retire", "a@demo", "--why", "t", "--uncollected", "--dry-run")
+    assert code == 0, err  # the sharer is finished and collected, so the tree may go
     code, out, err = edr(capsys, "retire", "--batch", "demo", "--why", "t", "--uncollected")
     assert code == 0, err
     assert not Path(row["root"]).exists()
