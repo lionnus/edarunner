@@ -61,7 +61,7 @@ exports/3f9a2c1/
 | `manifest.json` | `producer`, `created`, `schema`, `project`, `source`, `runs` (id, label, config, build tag, source, host, phase), `tables` with the row counts, `files` with path, size and sha256, `incomplete` with the runs still live or with a failed task |
 | `runs.csv` | `run_id,label,config,build_tag,design,host,phase,started,ended` |
 | `metrics.csv` | `run_id,label,config,design,stage,step,task,metric,canonical,value,unit,source` |
-| `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; a `power.csv` is cut to instances of depth 1 |
+| `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs` |
 
 The directory is written under a temporary name and renamed at the end,
 so a reader never sees a half snapshot. A `--out` that exists and is not
