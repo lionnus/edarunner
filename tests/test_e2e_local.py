@@ -119,11 +119,12 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--why", "test")
     assert code == 0 and not any(p.exists() for p in roots.values()) and (state / "demo" / "RETIRED").is_file()
     assert (state / "demo" / f"{ids['a']}.json").is_file()  # the state outlives the tree
+    assert not (demo / "wt" / src).exists() and (demo / "repo" / "flow").is_dir()  # no batch has the source now
     assert runs(capsys) == []  # the export run went with its batch
     code, out, _ = edr(capsys, "--json", "events", "-n", "100")
     kinds = [(e["actor"], e["kind"]) for e in json.loads(out)["data"]]
     assert kinds.count(("user", "launch")) == 2 and ("user", "keep") in kinds and ("user", "run") in kinds
-    assert kinds.count(("user", "retire")) == 3 and ("user", "export") in kinds and ("watch", "done") in kinds
+    assert kinds.count(("user", "retire")) == 4 and ("user", "export") in kinds and ("watch", "done") in kinds
 
 
 def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:

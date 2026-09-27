@@ -24,8 +24,8 @@ DATE = "20260926_1200"
 
 @pytest.fixture
 def demo(tmp_path: Path, monkeypatch) -> Path:
-    """The demo copied to tmp_path, its scratch and HOME under tmp_path, cwd in the copy."""
-    root = tmp_path / "demo"
+    """The demo copied under tmp_path/edr (the safety marker), its scratch and HOME under tmp_path, cwd in the copy."""
+    root = tmp_path / "edr" / "demo"
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     (tmp_path / "scratch").mkdir()
     site = root / "site.toml"
@@ -50,7 +50,7 @@ def dead_pid() -> int:
 
 def bdir(root: Path, batch: str = "demo") -> Path:
     """The batch directory of the state: <HOME>/.edr/<project>/<batch>."""
-    return root.parent / ".edr" / "demo" / batch
+    return Path.home() / ".edr" / "demo" / batch
 
 
 def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batch: str = "demo",
@@ -399,10 +399,10 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
         assert [e["kind"] for e in led.events()] == ["export"]
 
 
-def test_hosts_and_lic_probe_local(demo: Path, capsys) -> None:
+def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     assert code == 0 and out.splitlines()[0].split() == ["host", "cores", "ram_gb", "free_gb", "mount", "tools", "runs"]
-    assert out.splitlines()[1].split()[0] == "local" and str(demo.parent / "scratch") in out
+    assert out.splitlines()[1].split()[0] == "local" and str(tmp_path / "scratch") in out
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
     code, out, _ = edr(capsys, "lic")
@@ -549,6 +549,33 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     code, out, err = edr(capsys, "retire", "--batch", "demo", "--why", "t", "--uncollected")
     assert code == 0, err
     assert not Path(row["root"]).exists()
+
+
+def test_retire_batch_removes_the_staged_tree_no_other_batch_uses(demo: Path, capsys) -> None:
+    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
+    repo = demo / "repo"
+    src = json.loads(edr(capsys, "--json", "stage", "HEAD")[1])["data"]["src"]
+    wt = demo / "wt" / src
+    seed(demo, "a", "done", src=src)
+    seed(demo, "b", "done", src=src, batch="other")
+    assert edr(capsys, "retire", "--batch", "other", "--uncollected", "--why", "x")[0] == 0
+    assert (wt / ".git").is_file()  # demo still has the source
+    code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x", "--dry-run")
+    assert code == 0 and f"git worktree remove --force {wt} (dry)" in out and (wt / ".git").is_file()
+    code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
+    assert code == 0 and not wt.exists() and repo.is_dir()
+    listed = subprocess.run(["git", "-C", str(repo), "worktree", "list"], capture_output=True, text=True, check=True).stdout
+    assert str(wt) not in listed
+    with open(repo / "flow" / "flow.sh", "a") as f:
+        f.write("# dirty\n")
+    dirty = json.loads(edr(capsys, "--json", "stage", "--dirty", str(repo))[1])["data"]["src"]
+    snap = demo / "wt" / dirty
+    assert "-dirty-" in dirty and snap.is_dir() and not (snap / ".git").exists()
+    seed(demo, "c", "done", src=dirty, batch="snap")
+    code, out, _ = edr(capsys, "retire", "--batch", "snap", "--uncollected", "--why", "y")
+    assert code == 0 and f"rm -rf {snap}" in out and not snap.exists() and (repo / "flow").is_dir()
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert [e["text"] for e in led.events() if e["run_id"] == ""] == [f"x: worktree {wt}", f"y: worktree {snap}"]
 
 
 def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -> None:

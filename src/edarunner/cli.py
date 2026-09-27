@@ -686,6 +686,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         if root:
             _refuse_shared_root(c, row, str(host), str(root), retiring, bool(a.prune))
         checked.append((row, hb, host, root, targets))
+    worktree = _worktree_target(c, a.batch) if a.batch and not a.prune else None
     failed, done = 0, []
     for row, hb, host, root, targets in checked:
         run_id = row["run_id"]
@@ -711,8 +712,35 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         (project.state / a.batch).mkdir(parents=True, exist_ok=True)
         (project.state / a.batch / "RETIRED").touch()
         c.ledger.mark_batch_retired(a.batch)
+    if worktree is not None:
+        real = (worktree / ".git").exists()
+        print(f"{a.batch}: {'git worktree remove --force' if real else 'rm -rf'} {worktree}{dry}")
+        if not a.dry_run:
+            try:
+                if real:
+                    runid.git("worktree", "remove", "--force", str(worktree), cwd=project.source.repo)
+                else:
+                    shutil.rmtree(worktree)
+                c.ledger.add_event("user", "", "retire", f"{a.why}: worktree {worktree}")
+            except (runid.GitError, OSError) as e:
+                failed += 1
+                print(f"{a.batch}: worktree not removed: {e}", file=sys.stderr)
     c.data = {"retired": done, "failed": failed}
     return 3 if failed else 0
+
+
+def _worktree_target(c: Ctx, batch: str) -> Path | None:
+    """The staged tree of the batch's source, when no other batch that is not retired has it; guarded."""
+    rows = {b["batch"]: b for b in c.ledger.batches()}
+    src = str((rows.get(batch) or {}).get("source") or "")
+    if not src or any(b["batch"] != batch and not b.get("retired") and b.get("source") == src for b in rows.values()):
+        return None
+    path = c.project.source.worktrees / src
+    if not path.is_dir():
+        return None
+    if path.resolve() == c.project.source.repo.resolve():
+        raise Refuse(f"{path} is the source repository")
+    return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
 
 
 def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[str], prune: bool) -> None:

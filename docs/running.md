@@ -254,7 +254,11 @@ import time as `started` and `ended`.
 `rm -rf`. `--prune <name>` removes only the paths that `prune.<name>`
 names in the stages, such as a library or a build directory, and keeps
 the tree. `--batch <B>` retires every run of a batch and writes
-`RETIRED`, so the watcher skips it and the board drops it.
+`RETIRED`, so the watcher skips it and the board drops it. It then
+removes the staged tree of the batch's source under `source.worktrees`
+when no other batch that is not retired has the same source: a worktree
+with `git worktree remove --force`, a dirty snapshot with a plain
+delete, both on the head node. The source repository is never a target.
 
 Every target passes the guard first: an absolute path with the safety
 marker and at least `min_depth` components, not `/`, not the home
@@ -269,4 +273,5 @@ directory, not a one-component path. `retire` also refuses:
   `--uncollected`
 
 Run `edr watch --once` before a retire, so the results are on the head
-node, and `--dry-run` first, which prints every `rm -rf` target.
+node, and `--dry-run` first, which prints every `rm -rf` target and the
+staged tree.

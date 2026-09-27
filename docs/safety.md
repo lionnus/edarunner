@@ -46,7 +46,9 @@ because `kill -TERM -- -0` would signal every process of the user.
 
 `retire` refuses a run whose driver is alive, a live run with no
 heartbeat yet, a root another live run uses, and a root shared with an
-uncollected run. `docs/running.md` lists them with the way out.
+uncollected run. `docs/running.md` lists them with the way out. The
+staged tree that `retire --batch` removes passes `assert_safe_target`
+too, and `source.repo` is never a target.
 
 A guard raises `Refuse`. The verb prints `edr: <reason>` to stderr, exits
 1, and runs nothing after the refusal. The events table gets no row,
