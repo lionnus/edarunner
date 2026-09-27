@@ -20,7 +20,6 @@ import os
 import posixpath
 import shlex
 import shutil
-import sqlite3
 import sys
 import threading
 import time
@@ -734,11 +733,8 @@ def _notifiers(c: Ctx) -> list:
     project = c.project
     bot = Ctx(c.a)
     bot._project = project
-    bot._ledger = Ledger(project.data / "edr.db")
-    # The bot polls in its own thread, and sqlite refuses a connection made in another one.
-    bot._ledger.db.close()
-    bot._ledger.db = sqlite3.connect(project.data / "edr.db", check_same_thread=False)
-    bot._ledger.db.row_factory = sqlite3.Row
+    # The bot polls in its own thread.
+    bot._ledger = Ledger(project.data / "edr.db", threads=True)
     return make_notifiers(project.site, project, bot.ledger, Actions(bot))
 
 
