@@ -256,8 +256,8 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
     res = collect.collect_run(project, ssh, ledger, run, hb)
     if res.failures:
         ledger.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
-    if not res.copied:
-        return
+    # No new file does not mean no new metric: a broad collect path copies a stage's reports while it
+    # runs, and the stage becomes eligible only when it ends. Extraction is idempotent, so run it.
     task_dirs = collect.spec_task_dirs(spec, str(run.get("root") or hb.get("root") or ""))
     done: dict[str, Task] = {}
     for t, p in tasks.items():
