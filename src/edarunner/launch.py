@@ -1,17 +1,16 @@
-"""Plan, launch and stop runs: the run spec, the driver start and the stop signals."""
+"""Plan, launch and stop runs: the run spec, and the driver start and stop through the backend."""
 
 from __future__ import annotations
 
 import os
 import re
-import shlex
-import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import collect, config, hosts, sync
+from .backend import Backend, Handle, Request, check_pid, gone, make_backend
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
 from .db import Database
@@ -265,7 +264,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
-         only: list[str] | None = None, probes: dict[str, hosts.HostProbe] | None = None) -> list[RunPlan]:
+         only: list[str] | None = None, probes: dict[str, hosts.HostProbe] | None = None,
+         backend: Backend | None = None) -> list[RunPlan]:
     """Render every job of a batch into a RunPlan; a problem is reported in the plan, not raised.
 
     `probes` are the results of a caller who probed already; the hosts are then not probed again.
@@ -277,11 +277,11 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
     errors: dict[str, str] = {}
     if probes is None:
         probes = {}
-        for h in sorted(names):
-            try:
-                probes[h] = ssh.probe(h)
-            except hosts.HostError as e:
-                errors[h] = str(e)
+        for h, p in ((backend or make_backend(project.site, ssh)).free(sorted(names)) or {}).items():
+            if isinstance(p, str):
+                errors[h] = p
+            else:
+                probes[h] = p
     else:
         errors = {h: "no probe of the host" for h in names if h not in probes}
     auto = [j for j in jobs if j.host == "auto" and _fresh(j)]
@@ -303,26 +303,14 @@ def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: b
     return path
 
 
-def start_driver(ssh: hosts.Ssh, host: str, driver_path: Path, spec_path: Path, log_path: Path,
-                 env: dict[str, str]) -> int | None:
-    """Start the driver on `host` with the host's python3; return its pid when known."""
-    if host == "local":
-        full = dict(os.environ)
-        full.update({k: os.path.expandvars(v) for k, v in env.items()})
-        with open(log_path, "ab") as log:
-            p = subprocess.Popen(["python3", str(driver_path), str(spec_path)], stdin=subprocess.DEVNULL,
-                                 stdout=log, stderr=subprocess.STDOUT, env=full, start_new_session=True)
-        return p.pid
-    # The interpreter is the host's own python3 from the login PATH: a tool PATH once put a
-    # Python 3.4 first, and the driver died at its first subprocess.run. The site env reaches
-    # the driver's children through the spec, so nothing is exported here.
-    cmd = (f"py=$(command -v python3); setsid nohup \"$py\" {shlex.quote(str(driver_path))} "
-           f"{shlex.quote(str(spec_path))} > {shlex.quote(str(log_path))} 2>&1 < /dev/null & echo $!")
-    rc, out, err = ssh.run(host, cmd)
-    if rc != 0:
-        raise hosts.HostError(f"{host}: rc {rc}: {err.strip()}")
-    last = out.split()[-1] if out.split() else ""
-    return int(last) if last.isdigit() else None
+def submit(backend: Backend, db: Database, project: Project, run_id: str, host: str | None, spec_path: Path,
+           driver: Path) -> Handle:
+    """Start the driver of a written spec through the backend and record the handle in `runs`."""
+    log = spec_path.with_name(f"{run_id}.driver.log")
+    handle = backend.submit(Request(run_id=run_id, spec=spec_path, driver=Path(driver), log=log, host=host,
+                                    env=dict(project.site.env)))
+    db.upsert_run({"run_id": run_id, "handle": str(handle)})
+    return handle
 
 
 def _src_dir(project: Project, src: str, src_dir: Path | None) -> Path:
@@ -337,13 +325,14 @@ def _src_dir(project: Project, src: str, src_dir: Path | None) -> Path:
 
 def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run: bool = False,
            only: list[str] | None = None, allow_dirty: bool = False, stagger_s: int | None = None,
-           src_dir: Path | None = None) -> list[dict[str, Any]]:
+           src_dir: Path | None = None, backend: Backend | None = None) -> list[dict[str, Any]]:
     """Pin the date, publish the driver, sync, write the specs and start one driver per run."""
     if "-dirty" in batch.source and not allow_dirty:
         raise Refuse(f"source {batch.source} is dirty; pass --allow-dirty")
+    backend = backend or make_backend(project.site, ssh)
     state = project.state_dir
     date = pin_date(state, batch.batch, dry_run)
-    plans = plan(project, batch, ssh, db, date=date, only=only)
+    plans = plan(project, batch, ssh, db, date=date, only=only, backend=backend)
     driver = sync.publish_driver(state, DRIVER_SRC, dry_run)
     if not dry_run:
         db.upsert_batch({"batch": batch.batch, "project": project.project, "source": batch.source, "run_date": date})
@@ -380,13 +369,13 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
                 p.problems.append("sync failed")
                 continue
         path = write_spec(state, batch.batch, p, driver, dry_run)
-        log = path.with_name(f"{p.run_id}.driver.log")
         print(f"{p.run_id}: {p.host} {p.root}" + (" (dry)" if dry_run else ""))
         if dry_run:
             continue
         db.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host} {p.root}")
-        row["pid"] = start_driver(ssh, p.host, driver, path, log, project.site.env)
+        handle = submit(backend, db, project, p.run_id, p.host, path, driver)
+        row["pid"], row["handle"] = handle.pid, str(handle)
         row["started"] = True
         started += 1
     return out
@@ -402,7 +391,7 @@ def _run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
 
 def stop(ssh: hosts.Ssh, db: Database, run_row: dict[str, Any], heartbeat: dict[str, Any], after_task: bool = False,
          now: bool = False, grace_s: int = 30, dry_run: bool = False, why: str = "", state: Path | None = None,
-         actor: str = "user") -> bool:
+         actor: str = "user", backend: Backend | None = None) -> bool:
     """Stop one run: the stop file with `after_task`, else TERM to the driver and every pgid, KILL with `now`."""
     run_id, host = run_row["run_id"], run_row["host"]
     if after_task:
@@ -420,26 +409,20 @@ def stop(ssh: hosts.Ssh, db: Database, run_row: dict[str, Any], heartbeat: dict[
     print(f"{run_id}: TERM driver {pid} and pgids {pgids} on {host}" + (" (dry)" if dry_run else ""))
     if dry_run:
         return True
+    check_pid(pid)
+    backend = backend or make_backend(ssh.site, ssh)
+    handle = Handle(backend.name, f"{host}:{pid if pid is not None else ''}", host)
     # The driver's own handler kills its groups and writes KILLED; the pgids follow for a dead driver.
-    _signal(ssh, host, pid, pgids, "TERM")
+    backend.stop(handle, False, pgids)
     end = time.time() + grace_s
     alive = pid is not None
     while alive and time.time() < end:
         time.sleep(2)
-        alive = ssh.pid_alive(host, pid)
+        alive = not gone(backend, handle)
     if alive and now:
-        _signal(ssh, host, pid, pgids, "KILL")
-        alive = ssh.pid_alive(host, pid)
+        backend.stop(handle, True, pgids)
+        alive = not gone(backend, handle)
     db.add_event(actor, run_id, "stop", f"{why} [driver {pid}, pgids {pgids}, {'killed' if now else 'term'}, "
                      f"{'alive' if alive else 'ended'}]")
     return not alive
 
-
-def _signal(ssh: hosts.Ssh, host: str, pid: int | None, pgids: list[int], sig: str) -> None:
-    # pid 0 or a negative number would signal the shell's group or every process.
-    if pid is not None and (not isinstance(pid, int) or pid <= 1):
-        raise Refuse(f"'{pid}' is not a pid")
-    if pid:
-        ssh.run(host, f"kill -{sig} {pid}")
-    for pgid in pgids:
-        ssh.kill_pgid(host, pgid, sig)

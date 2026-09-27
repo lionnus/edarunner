@@ -266,7 +266,7 @@ def test_stop_waits_60_s_then_says_now(demo: Path, capsys, monkeypatch) -> None:
     class AliveSsh(Ssh):
         def run(self, host, cmd, timeout_s=None):
             cmds.append(cmd)
-            return 0, "1\n", ""
+            return 0, f"{os.getpid()}\n", ""
 
     class Clock:
         now, sleeps = 0.0, []

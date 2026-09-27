@@ -18,7 +18,7 @@ its text change. The spec records the copy the run started with, and a
 resume uses that copy.
 
 The host starts the driver with its own `python3` from the login `PATH`,
-in its own session (`launch.start_driver`):
+in its own session (`backend.SshBackend.submit`):
 
 ```sh
 setsid nohup python3 <state_dir>/bin/edr_driver-<hash>.py <state_dir>/<batch>/<run_id>.spec.json

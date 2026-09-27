@@ -32,6 +32,7 @@ from rich.table import Table
 from rich.text import Text
 
 from . import __version__, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
+from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
@@ -63,7 +64,7 @@ _READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metric
 
 
 class Ctx:
-    """Lazy project, db and ssh of one invocation, plus the payload of --json."""
+    """Lazy project, db, ssh and backend of one invocation, plus the payload of --json."""
 
     def __init__(self, a: argparse.Namespace) -> None:
         self.a = a
@@ -93,6 +94,10 @@ class Ctx:
     @functools.cached_property
     def ssh(self) -> Ssh:
         return Ssh(self.project.site)
+
+    @functools.cached_property
+    def backend(self) -> Backend:
+        return make_backend(self.project.site, self.ssh)
 
     @functools.cached_property
     def console(self) -> Console:
@@ -452,18 +457,21 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def _mark_live(c: Ctx, rows: list[Row]) -> int:
-    """Ask each host whether the driver of a live run exists; a gone driver marks the run dead."""
+    """Ask the backend, once, whether the driver of each live run exists; a gone driver marks the run dead."""
+    handles: dict[int, Handle] = {}
+    for i, r in enumerate(rows):
+        hb = c.heartbeat(r) if board.is_live(r) else {}
+        if hb.get("driver_pid") and r.get("host") and (h := run_handle(c.backend.name, r, hb)):
+            handles[i] = h
+    alive = c.backend.alive(list(handles.values())) if handles else {}
     code = Exit.DONE
-    for r in rows:
-        pid = c.heartbeat(r).get("driver_pid") if board.is_live(r) else None
-        if not pid or not r.get("host"):
-            continue
-        try:
-            r["alive"] = c.ssh.pid_alive(str(r["host"]), int(pid))
-        except HostError:
-            r["alive"], code = None, Exit.HOSTS
-        if r["alive"] is False:
-            r["state"] = "dead"
+    for i, h in handles.items():
+        state = alive[h][0]
+        rows[i]["alive"] = None if state is Live.UNKNOWN else state is not Live.GONE
+        if state is Live.UNKNOWN:
+            code = Exit.HOSTS
+        elif state is Live.GONE:
+            rows[i]["state"] = "dead"
     return code
 
 
@@ -617,7 +625,7 @@ def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     """Render every job of a batch; writes nothing."""
-    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db)
+    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db, backend=c.backend)
     lines = [Text.assemble((p.run_id, "bold"), ": ", (p.host or "queued", "" if p.host else "cyan"), " ", (str(p.root), "dim"),
                            *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
     c.emit(Text("\n").join(lines),
@@ -630,7 +638,7 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     """Start one driver per job of a batch."""
     only = a.only.split(",") if a.only else None
     rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.db, dry_run=a.dry_run, only=only,
-                         allow_dirty=a.allow_dirty)
+                         allow_dirty=a.allow_dirty, backend=c.backend)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
     c.emit(Text.assemble((f"{started} started", "green" if started else ""), ", ", (f"{queued} queued", "cyan" if queued else ""),
@@ -679,7 +687,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
     job.label = f"{job.label}.{a.stage}"
     batch.batch, batch.jobs = str(row["batch"]), [job]
     state = project.state_dir
-    (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT))
+    (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT), backend=c.backend)
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
         return Exit.REFUSED
@@ -699,8 +707,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
                          "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
                          "tree_id": p.values.get("tree_id") or p.run_id})
     c.db.add_event("user", p.run_id, "continue", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
-    launch.start_driver(c.ssh, str(p.host), driver, spec_path, spec_path.with_name(f"{p.run_id}.driver.log"),
-                        project.site.env)
+    launch.submit(c.backend, c.db, project, p.run_id, p.host, spec_path, driver)
     return Exit.DONE
 
 
@@ -796,7 +803,7 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.NOTHING
     # The driver's own handler ends the run in seconds; limits.grace_s is the watcher's delay.
     ok = launch.stop(c.ssh, c.db, row, hb, after_task=a.after_task, now=a.now, grace_s=30 if a.now else 60,
-                     dry_run=a.dry_run, why=a.why, state=c.project.state_dir)
+                     dry_run=a.dry_run, why=a.why, state=c.project.state_dir, backend=c.backend)
     c.data = {"run_id": row["run_id"], "stopped": ok}
     if not ok and not a.now:
         print(f"{row['run_id']}: still alive; use --now")
@@ -817,8 +824,8 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         run_id, hb = row["run_id"], c.heartbeat(row)
         host, root = row.get("host") or hb.get("host"), row.get("root") or hb.get("root")
         targets = _retire_targets(c, row, hb, str(root), a) if root else []
-        pid = hb.get("driver_pid")
-        if root and board.is_live(hb) and pid and c.ssh.pid_alive(str(host), int(pid)):
+        pid, handle = hb.get("driver_pid"), run_handle(c.backend.name, row, hb)
+        if root and board.is_live(hb) and pid and handle and not gone(c.backend, handle):
             raise Refuse(f"{run_id}: driver {pid} is alive on {host}; stop it first")
         # A driver writes its first heartbeat within seconds; none after dead_s means it never came up.
         if root and not hb and board.is_live(row) and time.time() - (row.get("started") or 0) < project.limits.dead_s:
@@ -934,7 +941,7 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     """The watcher: one cycle, a check, or the loop with the bot."""
     project = c.project
     if a.dry_run:
-        watch.cycle(project, c.ssh, c.db, [], dry_run=True)
+        watch.cycle(project, c.ssh, c.db, [], dry_run=True, backend=c.backend)
         return Exit.DONE
     notifiers = _notifiers(c)
     if a.check:

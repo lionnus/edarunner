@@ -10,10 +10,12 @@ from pathlib import Path
 import pytest
 
 from edarunner import board, collect, config, launch, watch
+from edarunner.backend import Live
 from edarunner.config import load_project
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.db import Database
 from edarunner.notify import Notifier
+from helpers_backend import FakeBackend
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 NOW = 1_800_000_000.0
@@ -36,8 +38,8 @@ class FakeSsh(Ssh):
     def probe(self, host):
         return HostProbe(host, 4.0, 8.0, "/tmp/x", 50.0)
 
-    def pid_alive(self, host, pid):
-        return self.alive.get(pid, False)
+    def pids_alive(self, host, pids):
+        return {p for p in pids if self.alive.get(p)}
 
     def tool_processes(self, host, pattern):
         return list(self.procs)
@@ -273,20 +275,21 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     spec_path.write_text(json.dumps({"run_id": hb["run_id"], "start_at": {"stage": "synth", "checkpoint": None},
                                      "driver": "/x/bin/edr_driver-0badc0de.py",
                                      "stages": [{"name": "synth", "cmd": "x", "resume": "x FIRST_STAGE={checkpoint}"}]}))
-    starts: list[tuple] = []
-    monkeypatch.setattr(launch, "start_driver", lambda ssh, host, driver, spec, log, env_: starts.append((host, driver, spec)) or 777)
+    fake = FakeBackend()
     env.ssh.alive[4300] = True
-    assert env.cycle()[hb["run_id"]] == "dead" and starts == [] and env.ssh.killed == []
+    assert env.cycle(backend=fake)[hb["run_id"]] == "dead" and fake.requests == [] and env.ssh.killed == []
     assert [e for e in env.events() if e[1] == "resume"] == [(hb["run_id"], "resume")]
     env.ssh.alive[4300] = False
-    assert env.cycle()[hb["run_id"]] == "dead"
+    assert env.cycle(backend=fake)[hb["run_id"]] == "dead"
     assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate"}
+    starts = [(r.host, str(r.driver), r.spec) for r in fake.requests]
     assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
+    assert env.db.run(hb["run_id"])["handle"] == "fake:1"
     rows = [tuple(r) for r in env.db.conn.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
     assert rows == [("synth", 1, "running"), ("synth", 2, "resumed")]
     assert env.events().count((hb["run_id"], "resume")) == 2
-    env.cycle(NOW + 1)
-    assert len(starts) == 1
+    env.cycle(NOW + 1, backend=fake)
+    assert len(fake.requests) == 1
 
 
 def test_queued_runs_are_relaunched(env: Env, monkeypatch) -> None:
@@ -454,3 +457,34 @@ def test_stale_leases_are_swept_with_an_event(env: Env) -> None:
     assert not (d / f"{rid('live')}.synth.0").exists()
     assert any(e["text"] == f"stale lease demo/{rid('live')}.synth.0: older than the stage budget of 3600 s"
                for e in env.db.events(n=50))
+
+
+@pytest.mark.parametrize("age, live, state, reason", [
+    (200, Live.GONE, "dead", "heartbeat older than 90 s, driver 4242 gone on local"),
+    (200, Live.RUNNING, "stale", "heartbeat older than 90 s, driver 4242 alive"),
+    (200, Live.SUSPENDED, "stale", "heartbeat older than 90 s, driver 4242 alive"),
+    (200, Live.UNKNOWN, "stale", "heartbeat older than 90 s, local did not answer"),
+    (60, Live.SUSPENDED, "stale", "suspended by the scheduler"),
+    (60, Live.RUNNING, "stale", "heartbeat older than 30 s"),
+    (5, Live.GONE, "running", None),  # a fresh heartbeat outweighs the backend: the file may lag on NFS
+])
+def test_the_backend_state_of_a_live_run(env: Env, age, live, state, reason) -> None:
+    fake = FakeBackend()
+    hb = env.heartbeat("a", age=age)
+    fake.states["local:4242"] = [live]
+    assert env.cycle(backend=fake)[hb["run_id"]] == state
+    events = [e["text"] for e in env.db.events(run_id=hb["run_id"]) if e["kind"] == state]
+    assert events == ([reason] if reason else [])
+
+
+def test_the_backend_is_asked_once_per_cycle_for_every_live_run(env: Env) -> None:
+    fake = FakeBackend()
+    env.heartbeat("a")
+    env.heartbeat("b", driver_pid=None)
+    env.db.upsert_run({"run_id": rid("b"), "handle": "fake:7"})
+    env.heartbeat("c", driver_pid=None)
+    env.heartbeat("g", phase="done", exit=0)
+    fake.states["7"] = [Live.RUNNING, Live.GONE]
+    env.cycle(backend=fake)
+    env.cycle(NOW + 1, backend=fake)
+    assert [sorted(ids) for ids in fake.asked] == [["7", "local:4242"]] * 2

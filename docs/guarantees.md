@@ -9,12 +9,12 @@ Each guarantee names the code that holds it, so you can read it.
 | edr never | Held by |
 |---|---|
 | deletes on its own. Only `edr retire` removes a tree, after `--why`, a guard on every target and a check that the results are on the head node. The watcher stops or kills a run; it removes no file but a stale seat lease. | `cli.cmd_retire`, `cli._retire_targets`, `watch._act`, `watch.sweep_leases` |
-| signals by a session name or a process pattern. A stop signals the `driver_pid` and the `pgids` the heartbeat recorded, and refuses a pid or a group id of 1 or lower. | `launch.stop`, `launch._signal`, `hosts.Ssh.kill_pgid` |
+| signals by a session name or a process pattern. A stop signals the `driver_pid` and the `pgids` the heartbeat recorded, and refuses a pid or a group id of 1 or lower. | `launch.stop`, `backend.check_pid`, `hosts.Ssh.kill_pgid` |
 | runs an `rm -rf` or an `rsync --delete` without the guard below. | `guards.assert_safe_target`, `sync.sync_tree`, `cli._retire_targets`, `cli._worktree_target` |
 | deletes the source repository, or a tree another run uses. `retire` refuses a root a live run uses, and a root shared with a run whose results are not collected. | `cli._worktree_target`, `cli._refuse_shared_root` |
 | overwrites a driver that runs. A new driver version gets a new file name with the hash of its text, written by a temporary file and a rename. | `sync.publish_driver` |
 | writes a torn heartbeat or spec. Both go to disk by a temporary file and a rename. | `Driver.beat`, `config.save_json` |
-| starts a stage in your shell's session. The driver starts in its own session, and every stage command in a new one, so a signal to a tool's group never reaches the shell you stand in. | `launch.start_driver`, `Driver.spawn` |
+| starts a stage in your shell's session. The driver starts in its own session, and every stage command in a new one, so a signal to a tool's group never reaches the shell you stand in. | `backend.SshBackend.submit`, `Driver.spawn` |
 | hides a failed task. A task group counts every failure, and the run ends `INCOMPLETE:<n>f<m>s` with exit 8, never `done`. `streak` equal failures in a row stop the group. | `Driver.end_task`, `Driver.main` |
 | takes a heartbeat as proof of life. A run is `stale` after `stale_s` and `dead` after `dead_s` with no driver on the host; `edr status --live` asks the hosts. | `watch.classify`, `cli._mark_live` |
 | mixes two designs in one table. `metrics` and `export` take `--design` with no default, and the tag matches exactly. | `cli.cmd_metrics`, `export._select` |
@@ -60,7 +60,7 @@ start with `YYYYMMDD_HHMM_`.
 `hosts.Ssh.kill_pgid(host, pgid, sig)` refuses a group id of 1 or lower,
 and a signal name with characters other than capital letters and digits.
 `kill -TERM -- -0` would signal every process of the user.
-`launch._signal` refuses a driver pid of 1 or lower for the same reason.
+`backend.check_pid` refuses a driver pid of 1 or lower for the same reason.
 
 `retire` refuses a run whose driver is alive and a live run with no
 heartbeat yet. It refuses a root another live run uses, a root shared

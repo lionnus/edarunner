@@ -217,6 +217,7 @@ remote command runs through `sh -c`, so the login shell of a host may be `csh` o
 | `ssh.timeout_s` | seconds a remote command may take | `45` |
 | `tool_procs` | a regex over process names, for the orphan check and the host table | `""` |
 | `nfs_export` | a path the head node reads when ssh to a host fails at collect | `""` |
+| `scheduler.backend` | what starts and watches a driver: `"ssh"` on the site hosts, or `"local"` on the head node only | `"ssh"` |
 
 ### [hosts.<name>]
 

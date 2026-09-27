@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from edarunner import config, launch, sync
+from edarunner.backend import Handle, Request, SshBackend
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.db import Database
@@ -401,9 +402,8 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
             self.cmd = cmd
             return 0, "4242\n", ""
     ssh = FakeSsh()
-    pid = launch.start_driver(ssh, "hostA", tmp_path / "d.py", tmp_path / "s.json", tmp_path / "l.log",
-                              {"PATH": "/usr/sepp/bin:$PATH"})
-    assert pid == 4242
+    req = Request("r", tmp_path / "s.json", tmp_path / "d.py", tmp_path / "l.log", "hostA", {"PATH": "/usr/sepp/bin:$PATH"})
+    assert SshBackend(ssh).submit(req) == Handle("ssh", "hostA:4242", "hostA")
     assert ssh.cmd.startswith("py=$(command -v python3); setsid nohup \"$py\" ")
     assert "export" not in ssh.cmd and "/usr/sepp" not in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
 

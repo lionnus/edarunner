@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from . import board, collect, config, launch, metrics
+from .backend import Backend, Live, make_backend, run_handle
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .db import Database
@@ -152,23 +153,23 @@ def _signature(ssh: Ssh, hb: dict) -> list:
 
 
 def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict, now: float,
-             progress: dict | None = None) -> tuple[str, list[str]]:
-    """The state of one run (running, stale, dead, hung, looping, over_budget, host_full or superseded) and every reason found."""
+             progress: dict | None = None, live: Live | None = None) -> tuple[str, list[str]]:
+    """The state of one run (running, stale, dead, hung, looping, over_budget, host_full or superseded) and every reason found.
+
+    `live` is what the backend said of the driver this cycle; None means the run has no handle."""
     hb, lim = heartbeat, project.limits
     if not board.is_live(hb):
         return board.state_of(hb), []
     age, host, pid = now - (hb.get("updated") or 0), hb.get("host") or run.get("host"), hb.get("driver_pid")
     # A reason text stays the same from cycle to cycle, or every cycle would re-send the alert.
     if age > lim.dead_s:
-        try:
-            alive = bool(pid) and ssh.pid_alive(host, int(pid))
-        except HostError:
+        if live is Live.UNKNOWN:
             return "stale", [f"heartbeat older than {lim.dead_s} s, {host} did not answer"]
-        if not alive:
+        if live in (None, Live.GONE):
             return "dead", [f"heartbeat older than {lim.dead_s} s, driver {pid} gone on {host}"]
         return "stale", [f"heartbeat older than {lim.dead_s} s, driver {pid} alive"]
     if age > lim.stale_s:
-        return "stale", [f"heartbeat older than {lim.stale_s} s"]
+        return "stale", ["suspended by the scheduler" if live is Live.SUSPENDED else f"heartbeat older than {lim.stale_s} s"]
     found = []
     if hb.get("looping"):
         found.append(("looping", "driver reported it"))
@@ -294,7 +295,7 @@ def _parameters(project: Project, run: Row) -> dict[str, Any]:
     return out
 
 
-def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict) -> None:
+def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> None:
     spec = collect.load_spec(project, run)
     only = collect.spec_stages(spec)
     finished, running = collect.stage_state(project, hb, only)
@@ -304,7 +305,7 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     if rec.get("collected") == key or not (finished or tasks or running):
         return
     rec["collected"] = key
-    res = collect.collect_run(project, ssh, db, run, hb)
+    res = collect.collect_run(project, ssh, db, run, hb, host=host)
     if res.failures:
         db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
     # No new file does not mean no new metric: a broad collect path copies a stage's reports while it
@@ -335,7 +336,8 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
 
 
-def _resume(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, now: float) -> None:
+def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict,
+            now: float) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
     spec_path = project.state_dir / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
@@ -355,15 +357,14 @@ def _resume(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progre
     checkpoint = hb.get("step_name") if hb.get("step") else None
     spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint}
     config.save_json(spec_path, spec)
-    logf = spec_path.with_name(f"{run_id}.driver.log")
     try:
-        pid = launch.start_driver(ssh, host, driver, spec_path, logf, project.site.env)
+        handle = launch.submit(backend, db, project, run_id, host, spec_path, driver)
     except (HostError, OSError) as e:
         db.add_event("watch", run_id, "resume", f"failed: {e}")
         return
     db.upsert_stage_run({"run_id": run_id, "stage": stage["name"], "attempt": 2, "started": int(now),
-                             "status": "resumed", "log": str(logf)})
-    db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {pid}")
+                             "status": "resumed", "log": str(spec_path.with_name(f"{run_id}.driver.log"))})
+    db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {handle}")
 
 
 def sweep_leases(project: Project, db: Database, heartbeats: list[tuple[str, dict]], states: dict[str, str],
@@ -420,13 +421,9 @@ def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
 
 # boards and the cycle
 
-def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float) -> None:
-    probes: dict[str, Any] = {}
-    for host in project.site.hosts:
-        try:
-            probes[host] = asdict(ssh.probe(host))
-        except HostError as e:
-            probes[host] = {"error": str(e)}
+def _boards(project: Project, backend: Backend, db: Database, notifiers: list[Notifier], now: float) -> None:
+    free = backend.free(project.site.hosts) or {}
+    probes: dict[str, Any] = {h: {"error": p} if isinstance(p, str) else asdict(p) for h, p in free.items()}
     bdir = project.data / "board"
     db.write_board_json(bdir / "board.json", probes)
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
@@ -441,26 +438,36 @@ def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
 
 
 def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
-          dry_run: bool = False) -> dict[str, str]:
-    """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing."""
+          dry_run: bool = False, backend: Backend | None = None) -> dict[str, str]:
+    """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing.
+
+    The backend answers once per cycle for the drivers of every live run."""
     now = time.time() if now is None else now
+    backend = backend or make_backend(project.site, ssh)
     progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
     heartbeats = read_heartbeats(project)
     if not dry_run:
         ingest(db, heartbeats)
+    handles = {}
+    for batch, hb in heartbeats:
+        if board.is_live(hb) and (h := run_handle(backend.name, db.run(hb["run_id"]) or {}, hb)):
+            handles[hb["run_id"]] = h
+    alive = backend.alive(list(handles.values())) if handles else {}
     states: dict[str, str] = {}
     for batch, hb in heartbeats:
         run = db.run(hb["run_id"]) or {**hb, "batch": batch}
-        state, reasons = classify(project, ssh, db, run, hb, now, progress)
+        h = handles.get(hb["run_id"])
+        live = alive[h][0] if h in alive else None
+        state, reasons = classify(project, ssh, db, run, hb, now, progress, live)
         states[hb["run_id"]] = state
         if dry_run:
             print(f"{hb['run_id']}: {state} {'; '.join(reasons)}".rstrip())
             continue
         db.upsert_run({"run_id": hb["run_id"], "state": state})
         actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
-        _collect(project, ssh, db, run, hb, progress)
+        _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
         if state == "dead":
-            _resume(project, ssh, db, run, hb, progress, now)
+            _resume(project, ssh, backend, db, run, hb, progress, now)
     for o in orphans(project, ssh, db):
         states[o["key"]] = "orphan"
         if dry_run:
@@ -471,7 +478,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     if dry_run:
         return states
     _launch_queued(project, ssh, db)
-    _boards(project, ssh, db, notifiers, now)
+    _boards(project, backend, db, notifiers, now)
     digest = Digest(project, db)
     if digest.due(now):
         text = digest.text(now)
@@ -500,7 +507,7 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
                 for n in notifiers:
                     if hasattr(n, "project"):
                         n.project = project
-                cycle(project, ssh, db, notifiers)
+                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh))
             except config.ConfigError as e:  # a config edit mid-way: skip this cycle, keep the service
                 log.error("config not loadable, cycle skipped: %s", e)
                 failed = True

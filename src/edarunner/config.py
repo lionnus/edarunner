@@ -32,7 +32,7 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    Batch, BotCommand, Budget, Host, Job, Limits, Marks, Metric, Needs, Placement,
+    BACKENDS, Batch, BotCommand, Budget, Host, Job, Limits, Marks, Metric, Needs, Placement,
     Project, Retry, Safety, Site, Source, Stage, Sync, Task, Telegram, Tool,
 )
 
@@ -45,7 +45,7 @@ _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "telegram",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
-_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
+_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks", "scheduler"}
 _EXTRACTORS = ("regex", "csv", "json", "python", "expr")
 
 
@@ -277,6 +277,13 @@ def load_site(path: PathLike) -> Site:
     telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
     given = {k: raw[k] for k in ("env", "tool_procs", "nfs_export") if k in raw}
     given.update({f"ssh_{k}": v for k, v in ssh.items()})
+    sched = _table(raw.get("scheduler", {}), {"backend"}, file, "scheduler")
+    if "backend" in sched:
+        if sched["backend"] not in BACKENDS:
+            raise ConfigError(f"{file}: scheduler.backend {sched['backend']!r} is not one of {', '.join(BACKENDS)}")
+        if sched["backend"] == "local" and set(hosts) - {"local"}:
+            raise ConfigError(f"{file}: scheduler.backend \"local\" runs on the head node; [hosts] may name only local")
+        given["scheduler_backend"] = sched["backend"]
     return Site(path=file, scratch=_need(raw, "scratch", file, ""), hosts=hosts, tools=tools, telegram=telegram,
                 marks=_marks(raw.get("marks", {}), file, Marks()), **given)
 

@@ -244,10 +244,15 @@ class Ssh:
 
     def pid_alive(self, host: str, pid: int) -> bool:
         """True when `pid` runs on `host`; HostError when the host did not answer."""
-        rc, _, err = self.run(host, f"ps -p {int(pid)} -o pid=")
+        return int(pid) in self.pids_alive(host, [pid])
+
+    def pids_alive(self, host: str, pids: list[int]) -> set[int]:
+        """The pids of `pids` that run on `host`, by one `ps`; HostError when the host did not answer."""
+        wanted = {int(p) for p in pids}
+        rc, out, err = self.run(host, f"ps -p {','.join(str(p) for p in sorted(wanted))} -o pid=")
         if rc not in (0, 1):
             raise HostError(f"{host}: rc {rc}: {err.strip()}")
-        return rc == 0
+        return {int(t) for t in out.split() if t.isdigit()} & wanted
 
     def kill_pgid(self, host: str, pgid: int, sig: str = "TERM") -> bool:
         """Signal the process group `pgid` on `host`; True when kill returned 0."""

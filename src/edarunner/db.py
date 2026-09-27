@@ -15,7 +15,7 @@ DDL = """
 CREATE TABLE IF NOT EXISTS batches(batch TEXT PRIMARY KEY, project TEXT, source TEXT, created INTEGER, retired INTEGER, run_date TEXT);
 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT, config TEXT, build_tag TEXT, src TEXT, dirty INTEGER,
   host TEXT, root TEXT, created INTEGER, phase TEXT, state TEXT, stage TEXT, step INTEGER, exit INTEGER, killed_by TEXT,
-  started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT, tree_id TEXT);
+  started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT, tree_id TEXT, handle TEXT);
 CREATE TABLE IF NOT EXISTS stage_runs(run_id TEXT, stage TEXT, task TEXT, attempt INTEGER, started INTEGER, ended INTEGER,
   status TEXT, exit INTEGER, signature TEXT, log TEXT, PRIMARY KEY(run_id, stage, task, attempt));
 CREATE TABLE IF NOT EXISTS parameters(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));
@@ -118,8 +118,10 @@ class Database:
             self.conn.rollback()
             raise
         # A database made before a column existed gets it here; SQLite adds a NULL column in place.
-        if "tree_id" not in self._table_columns("runs"):
-            self.conn.execute("ALTER TABLE runs ADD COLUMN tree_id TEXT")
+        have = self._table_columns("runs")
+        for col in ("tree_id", "handle"):
+            if col not in have:
+                self.conn.execute(f"ALTER TABLE runs ADD COLUMN {col} TEXT")
         self.conn.commit()
 
     def _table_columns(self, table: str) -> tuple[str, ...]:

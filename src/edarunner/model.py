@@ -109,6 +109,10 @@ class Marks:
     gpu: list[float] = doc("the busy GPUs over all GPUs", factory=lambda: [0.6, 0.8, 0.9])
 
 
+# The values of `[scheduler] backend`.
+BACKENDS = ("ssh", "local")
+
+
 @dataclass
 class Site:
     """`site.toml` lives outside the project: the hosts, the tools and the bot of a site. Every
@@ -122,6 +126,8 @@ class Site:
     ssh_timeout_s: int = doc("seconds a remote command may take", 45, key="ssh.timeout_s")
     tool_procs: str = doc("a regex over process names, for the orphan check and the host table", "")
     nfs_export: str = doc("a path the head node reads when ssh to a host fails at collect", "")
+    scheduler_backend: str = doc("what starts and watches a driver: `\"ssh\"` on the site hosts, or `\"local\"` on "
+                                 "the head node only", "ssh", key="scheduler.backend")
     hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
     telegram: Telegram | None = None
