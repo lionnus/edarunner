@@ -217,6 +217,11 @@ that parses its argument itself, such as `tmux new-session <cmd>`,
 gate every placeholder inside such a token with an exact allowlist regex,
 as the `claude` example does.
 
+A command with `detach` is watched for 5 seconds after the start. When
+it ends in that window, the reply is `ended with rc N: <last output
+line>` instead of `reply`, so a program that refuses to start, such as a
+Claude session in a directory that is not trusted, says why.
+
 The regex gate works like this: every value must match its regex in full,
 or the bot replies `refused: <name> must match <regex>`, records the
 refusal in the ledger, and runs nothing. Write the regex as an allowlist

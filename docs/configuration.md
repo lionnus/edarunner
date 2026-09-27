@@ -266,7 +266,7 @@ run.
 | `skip_if` | an argv list; exit 0 skips `run` | none |
 | `skip_reply` | the reply when skipped | `"skipped"` |
 | `reply` | the reply after `run` instead of its output | `""` |
-| `detach` | start `run` in its own session and reply at once | `false` |
+| `detach` | start `run` in its own session and reply after 5 s, or at its end when it ends sooner | `false` |
 | `timeout_s` | kill `run` after this | `60` |
 | `cwd` | the working directory of `run` | the project directory |
 | `dry_run` | reply with the rendered argv and run nothing | `false` |
