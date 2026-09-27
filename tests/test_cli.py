@@ -326,7 +326,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
     assert acts.hosts_text().startswith("<b>local</b> · ")
-    assert acts.lic_text() == "<b>demo</b> · 8/10 seats free"
+    assert acts.lic_text() == "<b>demo</b> · 2/10 seats used"
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
@@ -477,7 +477,7 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     text = acts.hosts_text().splitlines()
-    assert "<b>hostA</b> · 52/64 cores · 800/2000 GB free · gpu 1/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
+    assert "<b>hostA</b> · cores 52/64 · ram 136/256 GB · scratch 1200/2000 GB · gpu 3/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
 
 
 def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
