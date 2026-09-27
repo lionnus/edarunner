@@ -7,6 +7,7 @@
 | `tests` | `pytest` with coverage on Python 3.11 and 3.12. The run fails under 88 % (measured: 93 %). The 3.11 run uploads `coverage.svg`. |
 | `driver` | `tests/test_driver.py` in a `python:3.6` container, the floor of the compute hosts. The image's interpreter is linked to `/usr/bin/python3`, the fallback of `tests/helpers_driver.py` and of `test_compiles_on_py36`. |
 | `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. About 2 min, 1 min of it the image pull. |
+| `docs` | `tools/gen_docs.py --check`: the pages under `docs/reference/` must equal what the code generates. |
 | `status` | after every other job, also after a failure: writes the outcome into the branch `ci-status`. |
 
 ## The ci-status branch
