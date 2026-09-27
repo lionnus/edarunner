@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `[telegram] topic_id` puts every message of a project into one topic
+  of a forum group; the bot ignores a command from another topic.
 - `/hosts` shows every resource as used of total, in one order:
   `cores 21/32 · ram 93/376 GB · scratch 195/1538 GB · gpu 0/1`. `/lic`
   shows the seats used of the pool.

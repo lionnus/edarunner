@@ -74,10 +74,11 @@ class BotApi:
                 time.sleep(5 * (attempt + 1))
         raise ApiError(f"{method}: {last}")
 
-    def send_message(self, chat_id: int, text: str, silent: bool = False, markup: dict | None = None) -> int:
-        """Send `text` as HTML; return the message id."""
-        r = self.call("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                                      "disable_notification": silent, "reply_markup": markup})
+    def send_message(self, chat_id: int, text: str, silent: bool = False, markup: dict | None = None,
+                     thread_id: int | None = None) -> int:
+        """Send `text` as HTML, into the forum thread `thread_id` when it is given; return the message id."""
+        r = self.call("sendMessage", {"chat_id": chat_id, "message_thread_id": thread_id, "text": text,
+                                      "parse_mode": "HTML", "disable_notification": silent, "reply_markup": markup})
         return int(r["message_id"])
 
     def edit_message(self, chat_id: int, msg_id: int, text: str, markup: dict | None = None,

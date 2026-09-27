@@ -126,10 +126,11 @@ def test_project_telegram_overrides_the_site(tmp_path):
     edr.write_text(edr_text + '\n[telegram]\ntoken_file = "bot.token"\nchat_id = -100\n')
     tg = config.load_project(root).site.telegram
     assert (tg.token_file, tg.chat_id, tg.user_id, list(tg.commands)) == (root / "bot.token", -100, 7, ["x"])
-    edr.write_text(edr_text + '\n[telegram]\nuser_id = 9\n')
+    edr.write_text(edr_text + '\n[telegram]\nuser_id = 9\ntopic_id = 17\n')
     tg = config.load_project(root).site.telegram
-    assert (tg.chat_id, tg.user_id, tg.token_file.name) == (42, 9, "telegram.token")
+    assert (tg.chat_id, tg.user_id, tg.token_file.name, tg.topic_id) == (42, 9, "telegram.token", 17)
     for bad, match in (('chat_id = "1"', "telegram.chat_id must be int, not str"), ("token_file = 5", "token_file must be str"),
+                       ('topic_id = "17"', "telegram.topic_id must be int, not str"),
                        ("[telegram.commands.y]", "unknown key 'telegram.commands'")):
         edr.write_text(edr_text + f"\n[telegram]\n{bad}\n")
         with pytest.raises(ConfigError, match=match):

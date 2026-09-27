@@ -466,3 +466,34 @@ def test_a_long_reply_is_cut_at_a_line(bot):
 def test_an_alert_without_a_state_keeps_its_title(bot):
     bot.send("watch", "", "watch stale\nno watch.json")
     assert bot.api.of("sendMessage")[-1]["text"] == "<b>demo · watch stale</b>\nno watch.json"
+
+
+def in_topic(update: dict, thread: int) -> dict:
+    """`update` with its message in forum thread `thread`."""
+    m = update.get("message") or update["callback_query"]["message"]
+    m.update(message_thread_id=thread, is_topic_message=True)
+    return update
+
+
+def test_a_topic_routes_every_message_and_ignores_other_threads(bot, capsys):
+    bot.topic = 17
+    bot.handle_update(in_topic(msg("/status"), 99))
+    bot.handle_update(in_topic(callback("ack:a@demo"), 99))
+    bot.handle_update(msg("/status"))
+    assert bot.api.calls == [] and bot.actions.calls == [] and bot.ledger.events == []
+    bot.handle_update(in_topic(msg("/status"), 17))
+    assert bot.api.of("sendMessage")[-1]["message_thread_id"] == 17
+    bot.send("dead", "run1", "dead a@demo\nno heartbeat", alert_buttons("a@demo"))
+    bot.board("board v1")
+    assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [17, 17, 17]
+    assert bot.api.of("pinChatMessage")[0]["message_id"] == 3
+    assert capsys.readouterr().err == ""
+
+
+def test_without_a_topic_the_reply_goes_to_the_thread_and_its_id_is_printed(bot, capsys):
+    bot.handle_update(in_topic(msg("/status"), 99))
+    bot.handle_update(in_topic(msg("/status"), 99))
+    assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [99, 99]
+    assert capsys.readouterr().err.count("set topic_id = 99 in [telegram] of edr.toml") == 1
+    bot.handle_update(msg("/status"))
+    assert bot.api.of("sendMessage")[-1]["message_thread_id"] is None

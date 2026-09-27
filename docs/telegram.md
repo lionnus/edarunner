@@ -235,9 +235,46 @@ up:
    group to stderr. A group id is negative. Put it in `chat_id` and
    restart the watcher again.
 
-The table in `edr.toml` replaces `token_file`, `chat_id` and `user_id`
+The table in `edr.toml` replaces `token_file`, `chat_id`, `user_id` and `topic_id`
 of the site for this project only; the custom commands stay in
 `site.toml`. Keep `telegram_poll = true` in a project with its own bot.
+
+## Topics: one group, one thread per project
+
+A Telegram group with Topics on is a forum: each topic is a thread with
+its own id. `topic_id` in `[telegram]` puts every message of a project
+into one thread: the alerts, the board, the replies and the pinned
+board. The bot then obeys a command or a button press only when it
+comes from that thread. It ignores a command from another thread
+without an event, because the watcher of another project answers it.
+
+To set it up:
+
+1. Make a group and turn on Topics in the group settings.
+2. Add the bot of each project and make it an admin with the right to
+   pin messages. An admin bot also receives the plain words of the
+   reply keyboard.
+3. Make one topic per project.
+4. Start the watcher of the project without `topic_id` and send
+   `/status` in its topic. The watcher prints the id of the topic to
+   stderr:
+
+   ```
+   telegram: a message came from topic 17 of chat -1001234; set topic_id = 17 in [telegram] of edr.toml
+   ```
+
+5. Put the id into `edr.toml` of that project and restart its watcher:
+
+   ```toml
+   [telegram]
+   chat_id = -1001234
+   topic_id = 17
+   ```
+
+Without `topic_id`, the bot answers a command in the thread it came
+from, and it sends its alerts and its board to the main thread. Each
+project that answers commands still needs its own bot, because one
+token has one poller.
 
 ## Security
 
