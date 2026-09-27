@@ -155,8 +155,8 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
                                                 ("over_budget", rid("o")), ("host_full", rid("f"))])
     assert len(env.notifier.boards) == 1 and "DEAD" in env.notifier.boards[0]
     bdir = env.project.data / "board"
-    assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html", "progress.json",
-                                                 "notified.json"}
+    assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
+    assert set(env.ledger.get_kv("progress")) == set(states) and rid("d") in env.ledger.get_kv("notified")
     assert len(json.loads((bdir / "board.json").read_text())["runs"]) == 9
     assert f'<script src="{board.PLOTLY_URL}">' in (bdir / "compare.html").read_text()
     assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 1
