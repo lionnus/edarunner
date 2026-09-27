@@ -1,7 +1,7 @@
 """Load and validate the four TOML files, and read and write the JSON state files.
 
 `edr.toml` and `tasks.toml` live in the project directory, one `jobs/<batch>.toml` per batch next
-to them, and `site.toml` outside the project with the hosts, the tools and the bot. These rules
+to them, and `site.toml`, wherever `site` points, with the hosts, the tools and the bot. These rules
 hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
