@@ -49,7 +49,6 @@ retry = { match = "licen[cs]e", wait_s = 1, max = 2 }
 collect = ["reports/"]
 
 [stages.pnr]
-after = "synth"
 cmd = "bash {root}/flow/flow.sh pnr {run_id} {config} {overrides}"
 resume = "bash {root}/flow/flow.sh pnr {run_id} {config} FIRST_STAGE={checkpoint} {overrides}"
 steps = ["setup", "analyze", "elaborate", "synth", "cts", "route"]
@@ -59,7 +58,6 @@ budget = { hours = 1 }
 collect = ["reports/"]
 
 [stages.export]
-after = "pnr"
 cmd = "bash {root}/flow/flow.sh export {run_id} {config}"
 needs = { cores = 1, disk_gb = 0.1 }
 collect = []
@@ -67,7 +65,6 @@ collect_on_request = { netlist = ["out/11/"] }
 prune = { netlist = ["out"] }
 
 [stages.power]
-after = "export"
 foreach = "tasks"
 parallel = 2
 task_dir = "simulation/tests/{config}/{task.test}"

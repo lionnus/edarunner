@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -33,7 +32,6 @@ def demo(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("EDR_BATCH", raising=False)
     monkeypatch.chdir(root)
-    monkeypatch.setattr(board, "ensure_plotly", lambda d: None)
     return root
 
 
@@ -439,7 +437,7 @@ def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
         assert [e["kind"] for e in led.events()] == ["collect", "collect"]
 
 
-def test_watch_check_dry_once_and_serve(demo: Path, capsys) -> None:
+def test_watch_check_dry_and_once(demo: Path, capsys) -> None:
     b = seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
     state = bdir(demo)
     assert edr(capsys, "watch", "--check")[0] == 1
@@ -447,11 +445,9 @@ def test_watch_check_dry_once_and_serve(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "watch", "--once", "--dry-run")
     assert code == 0 and f"{b}: running" in out and sorted(p.name for p in state.iterdir()) == before
     assert not (demo / "data" / "board").exists()
-    port = 40000 + os.getpid() % 20000
-    code, out, _ = edr(capsys, "watch", "--once", "--serve", str(port))
-    assert code == 0 and (state.parent / "watch.json").exists() and (demo / "data" / "board" / "status.html").exists()
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/status.html", timeout=5) as r:
-        assert r.status == 200 and b"b_nodw" in r.read()
+    code, out, _ = edr(capsys, "watch", "--once")
+    assert code == 0 and (state.parent / "watch.json").exists()
+    assert b"b_nodw" in (demo / "data" / "board" / "status.html").read_bytes()
     assert edr(capsys, "watch", "--check")[0] == 0
 
 

@@ -1,4 +1,4 @@
-"""A frozen snapshot of one design for a paper. See docs/design.md section 9."""
+"""A frozen snapshot of one design for a paper: manifest, two tables and the collected files."""
 
 from __future__ import annotations
 
@@ -24,12 +24,6 @@ RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "design", "host", "phas
 METRIC_COLUMNS = ["run_id", "label", "config", "design", "stage", "step", "task", "metric", "canonical", "value", "unit", "source"]
 
 
-def reduce_power_csv(path: str | os.PathLike, depth: int = 1) -> list[dict[str, str]]:
-    """Rows of a per-instance power table whose `instance` has at most `depth` separators '/'."""
-    with open(path, newline="") as fh:
-        return [r for r in csv.DictReader(fh) if (r.get("instance") or "").count("/") <= depth]
-
-
 def export(
     project: Project,
     ledger: Ledger,
@@ -37,8 +31,12 @@ def export(
     out: Path,
     labels: list[str] | None = None,
     dry_run: bool = False,
+    with_logs: bool = False,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv and the collected files of `design` to `out`."""
+    """Write manifest.json, runs.csv, metrics.csv and the collected files of `design` to `out`.
+
+    The files are copied verbatim; `log/` directories and `*.log` files only with `with_logs`.
+    """
     if not design:
         raise Refuse("empty design")
     out = Path(out)
@@ -46,7 +44,7 @@ def export(
         raise Refuse(f"'{out}' exists and is not empty")
     runs = _select(ledger, design, labels)
     if not runs:
-        raise Refuse(f"no run has a source that starts with '{design}'" + (f" and a label in {labels}" if labels else ""))
+        raise Refuse(f"no run has the source '{design}'" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
     metrics = ledger.metrics(run_ids=ids)
 
@@ -58,13 +56,15 @@ def export(
         results = Path(project.data) / "results" / r["run_id"]
         for src in sorted(p for p in results.rglob("*") if p.is_file()):
             rel = src.relative_to(results)
-            plan.append((f"{r['label']}/{rel}", _reduced(src) if src.name == "power.csv" else src))
+            if not with_logs and ("log" in rel.parts[:-1] or rel.suffix == ".log"):
+                continue
+            plan.append((f"{r['label']}/{rel}", src))
 
     manifest: dict[str, Any] = {
         "producer": f"edarunner {__version__}",
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "schema": 1,
-        "sources": {r["src"]: design for r in runs},
+        "source": design,
         "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
         "files": [],
@@ -93,10 +93,10 @@ def export(
 
 
 def _select(ledger: Ledger, design: str, labels: list[str] | None) -> list[Row]:
-    """The newest run per label whose src starts with `design`, in label order."""
+    """The newest run per label with the exact source tag `design`, in label order."""
     newest: dict[str, Row] = {}
     for r in ledger.runs():
-        if (r.get("src") or "").startswith(design) and (labels is None or r["label"] in labels):
+        if r.get("src") == design and (labels is None or r["label"] in labels):
             newest[r["label"]] = r
     return [newest[k] for k in sorted(newest)]
 
@@ -117,16 +117,6 @@ def _csv(head: list[str], rows: list[list[Any]]) -> bytes:
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(head)
     w.writerows([["" if v is None else v for v in row] for row in rows])
-    return buf.getvalue().encode()
-
-
-def _reduced(path: Path) -> bytes:
-    with open(path, newline="") as fh:
-        head = next(csv.reader(fh), [])
-    buf = io.StringIO()
-    w = csv.DictWriter(buf, head, lineterminator="\n")
-    w.writeheader()
-    w.writerows(reduce_power_csv(path))
     return buf.getvalue().encode()
 
 

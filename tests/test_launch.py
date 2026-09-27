@@ -14,14 +14,14 @@ from pathlib import Path
 import pytest
 
 from edarunner import config, launch, sync
-from edarunner.guards import Refuse
+from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.ledger import Ledger
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
 SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "host", "root", "state_file",
-             "queue_dir", "shell", "env", "limits", "netlist_stage", "start_at", "stages"}
+             "queue_dir", "shell", "env", "limits", "start_at", "stages"}
 
 
 class FakeProbeSsh(Ssh):
@@ -96,7 +96,7 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     assert spec["state_file"] == f"{tmp_path}/state/demo/{a.run_id}.json"
     assert spec["queue_dir"] == f"{tmp_path}/state/demo/{a.run_id}.queue"
     assert spec["limits"] == {"host_free_min_gb": 1, "streak": 2, "heartbeat_s": 1, "gate_max_s": 30}
-    assert spec["start_at"] == {"stage": "synth", "checkpoint": None} and spec["netlist_stage"] == 11
+    assert spec["start_at"] == {"stage": "synth", "checkpoint": None}
     synth, pnr, export, power = spec["stages"]
     assert [s["name"] for s in spec["stages"]] == ["synth", "pnr", "export", "power"]
     assert synth["cmd"].split() == ["bash", f"{root}/flow/flow.sh", "synth", a.run_id, "demo", "LAST_STAGE=synth"]
@@ -140,6 +140,29 @@ def test_plan_reports_problems(env) -> None:
     project.stages["export"].cmd = "true"
     _, b = launch.plan(project, batch, ssh, ledger, date=DATE)
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
+
+
+def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
+    project, batch, ssh, ledger = env
+    a, b = batch.jobs
+    assert launch.build_tag(project, a) == "demo" and launch.build_tag(project, b) == "demo_DW0"
+    b.overrides = {"N": "8", "DW": "0"}
+    assert launch.build_tag(project, b) == "demo_N8_DW0"
+    hook = tmp_path / "build_tag.py"
+    hook.write_text("def build_tag(config, overrides):\n    return f'{config}-x{len(overrides)}'\n")
+    project.source.build_tag = f"python:{hook}:build_tag"
+    assert launch.build_tag(project, b) == "demo-x2"
+
+
+def test_netlist_stage_is_a_plain_job_field(env) -> None:
+    project, batch, ssh, ledger = env
+    synth_only(batch)
+    project.stages["synth"].cmd += " NETLIST={netlist_stage}"
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == [f"missing placeholder {{netlist_stage}} in '{project.stages['synth'].cmd}'"]
+    batch.jobs[0].netlist_stage = 7
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == [] and p.spec["stages"][0]["cmd"].endswith(" NETLIST=7")
 
 
 def test_plan_reuses_a_ledger_run(env) -> None:
@@ -238,8 +261,14 @@ def test_launch_refuses_a_dirty_source(env) -> None:
         launch.launch(project, batch, ssh, ledger, dry_run=True)
 
 
+def test_guard_refuses_a_root_a_top_level_directory_and_home() -> None:
+    for bad in ("/", "/x", "/edr", "/edr/", os.path.expanduser("~"), "/a/edr/../.."):
+        with pytest.raises(Refuse, match="root"):
+            assert_safe_target(bad, "/edr/", 1)
+    assert assert_safe_target("/edr/x", "/edr/", 1) == Path("/edr/x")
+
+
 def test_guard_normalizes_dotdot(tmp_path: Path) -> None:
-    from edarunner.guards import assert_safe_target
     for bad in ("/a/edr/b/c/../../../..", f"{tmp_path}/edr/../../{tmp_path.name}", "/scratch2/u/edr/x/../../../.."):
         with pytest.raises(Refuse):
             assert_safe_target(bad, "/edr/", 4)

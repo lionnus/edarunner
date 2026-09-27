@@ -1,4 +1,4 @@
-"""The SQLite ledger: schema, upserts, queries, board.json. See docs/design.md section 8."""
+"""The SQLite ledger: schema, upserts, queries, board.json."""
 
 from __future__ import annotations
 
@@ -160,16 +160,13 @@ class Ledger:
             row["counts"] = json.loads(row["counts"])
         return row
 
-    def runs(self, batch: str | None = None, state: str | None = None, phase_prefix: str | None = None) -> list[Row]:
+    def runs(self, batch: str | None = None, state: str | None = None) -> list[Row]:
         """Runs in run id order. `counts` comes back as a dict."""
         where, args = ["1"], []
         for col, val in (("batch", batch), ("state", state)):
             if val is not None:
                 where.append(f"{col}=?")
                 args.append(val)
-        if phase_prefix is not None:
-            where.append("substr(phase, 1, ?)=?")
-            args += [len(phase_prefix), phase_prefix]
         return [self._run_row(r) for r in self._rows(f"SELECT * FROM runs WHERE {' AND '.join(where)} ORDER BY run_id", args)]
 
     def run(self, run_id: str) -> Row | None:

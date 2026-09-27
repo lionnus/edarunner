@@ -1,4 +1,4 @@
-"""The ssh wrapper, the host probe and the placement. See docs/design.md 3.1, 3.2, 6.
+"""The ssh wrapper, the host probe and the placement.
 
 Every remote command is one short shell string, run by `sh -c` so the
 login shell of the host (tcsh on many farms) never parses it. The host
@@ -63,7 +63,7 @@ def place(
     probes: dict[str, HostProbe],
     running_per_host: dict[str, int],
 ) -> dict[str, str | None]:
-    """Give each job a host by the design 3.1 rules; None means queue."""
+    """Give each job a host by the [placement] rules of edr.toml; None means queue."""
     pl = project.placement
     free = {h: replace(p) for h, p in probes.items()}
     running = dict(running_per_host)
@@ -147,8 +147,6 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
 class Ssh:
     """Runs short commands on a host with a timeout; `local` runs without ssh."""
 
-    place = staticmethod(place)
-
     def __init__(self, site: Site) -> None:
         self.site = site
 
@@ -226,7 +224,7 @@ class Ssh:
         return rows
 
     def check_local(self) -> list[str]:
-        """The faults of the head node, as `local: ...` lines; see docs/requirements.md."""
+        """The faults of the head node, as `local: ...` lines: a missing tool, or a ps without the columns."""
         missing = [t for t in HEAD_TOOLS if shutil.which(t) is None]
         problems = [f"local: {t} not on PATH" for t in missing]
         if "local" not in self.site.hosts:  # else the host probe of the caller covers it
@@ -237,10 +235,3 @@ class Ssh:
         if "ps" not in missing and self.run("local", "ps -o etimes=,pcpu=,cputimes= -p $$")[0] != 0:
             problems.append("local: ps has no etimes, pcpu or cputimes column; procps-ng 3.3.10 or newer")
         return problems
-
-    def scratch_free_gb(self, host: str, path: str) -> float:
-        """Free GB of the filesystem under `path` on `host`."""
-        out = self._run_ok(host, f"df -Pk {shlex.quote(path)} | awk 'NR==2{{print $4}}'")
-        if not out.strip():
-            raise HostError(f"{host}: df found nothing at {path}")
-        return round(int(out.split()[-1]) / 2**20, 1)

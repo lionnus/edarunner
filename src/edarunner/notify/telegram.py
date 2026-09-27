@@ -1,7 +1,6 @@
 """The Telegram bot: alerts with buttons, a pinned board, commands.
 
-See docs/design.md section 11 and docs/telegram.md. Long polling over
-outbound HTTPS only; one chat id is obeyed, and one user id when
+Long polling over outbound HTTPS only; one chat id is obeyed, and one user id when
 `user_id` is set. Every HTTP call goes through `TelegramBot.api`, so a
 test replaces that one method.
 """
@@ -13,7 +12,6 @@ import html
 import http.client
 import json
 import logging
-import os
 import re
 import shlex
 import subprocess
@@ -24,10 +22,15 @@ import urllib.error
 import urllib.parse
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.request import Request, urlopen
 
+from edarunner.config import load_json, save_json
 from edarunner.model import BotCommand, Project, Site
-from edarunner.notify import Actions, Button, Notifier
+from edarunner.notify import Button, Notifier
+
+if TYPE_CHECKING:
+    from edarunner.cli import Actions
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +88,7 @@ class TelegramBot(Notifier):
         self.chat_id = int(self.tg.chat_id)
         self.user_id = self.tg.user_id or None
         self.state_file = Path(project.data) / "board" / "telegram.json"
-        self._state = self._load_state()
+        self._state = load_json(self.state_file)
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -174,20 +177,8 @@ class TelegramBot(Notifier):
             self.api("pinChatMessage", {"chat_id": self.chat_id, "message_id": mid, "disable_notification": True})
         with self._lock:
             self._state[key] = mid
-            self._save_state()
+            save_json(self.state_file, self._state)
         return mid
-
-    def _load_state(self) -> dict:
-        try:
-            return json.loads(self.state_file.read_text())
-        except (OSError, ValueError):
-            return {}
-
-    def _save_state(self) -> None:
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._state, indent=1))
-        os.replace(tmp, self.state_file)
 
     # The poll thread
 

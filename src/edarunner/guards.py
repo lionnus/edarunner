@@ -1,7 +1,6 @@
 """The two guards every delete and every `rsync --delete` call first.
 
 A wrong variable then stops the command instead of removing the wrong tree.
-See docs/design.md section 12.
 """
 
 from __future__ import annotations
@@ -13,15 +12,13 @@ from pathlib import Path
 
 RUN_ID_RE = re.compile(r"^\d{8}_\d{4}_\S+$")
 
-_ROOTS = {"/", "/home", "/usr", "/tmp", "/scratch", "/scratch2", "/var", "/opt"}
-
 
 class Refuse(Exception):
     """A guard refused. The message says why. Exit code 1."""
 
 
 def assert_safe_target(path: str | os.PathLike, marker: str, min_depth: int = 4) -> Path:
-    """Refuse an empty, relative, root, home, scratch or marker-less path.
+    """Refuse an empty, relative, root, top-level, home, marker-less or shallow path.
 
     Returns the path as a `Path` when it passes.
     """
@@ -32,8 +29,9 @@ def assert_safe_target(path: str | os.PathLike, marker: str, min_depth: int = 4)
         raise Refuse(f"'{text}' is not absolute")
     # A '..' segment would carry the marker and the depth past the tree it names.
     norm = posixpath.normpath(text)
-    if norm in _ROOTS or norm == os.path.expanduser("~"):
-        raise Refuse(f"'{text}' is a root, not a target")
+    # A path with one component (/x) is a filesystem root or a mount, never a run tree.
+    if norm.count("/") < 2 or norm == os.path.expanduser("~"):
+        raise Refuse(f"'{text}' is a root or a top-level directory, not a target")
     if not marker:
         raise Refuse("empty safety marker")
     if marker not in norm:

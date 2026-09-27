@@ -1,11 +1,13 @@
-"""Load and validate the four TOML files. See docs/design.md section 3."""
+"""Load and validate the four TOML files, and read and write the JSON state files."""
 
 from __future__ import annotations
 
 import getpass
 import importlib.util
+import json
 import os
 import re
+import time
 import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import fields
@@ -87,6 +89,34 @@ def load_hook(root: Path, spec: str) -> tuple[Callable[..., Any], str]:
     if not callable(fn):
         raise ConfigError(f"{path} has no function '{func}'")
     return fn, f"{file}:{func}"
+
+
+# --- JSON state files
+
+def load_json(path: PathLike) -> Any:
+    """The parsed JSON of `path`; {} when the file is absent, or unreadable after three tries."""
+    for _ in range(3):
+        try:
+            return json.loads(Path(path).read_text())
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            time.sleep(0.05)
+    return {}
+
+
+def save_text(path: PathLike, text: str) -> None:
+    """Write `text` by a temporary file and a rename, so a reader never sees a torn file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def save_json(path: PathLike, obj: object) -> None:
+    """Write `obj` as indented JSON by a temporary file and a rename."""
+    save_text(path, json.dumps(obj, indent=1) + "\n")
 
 
 # --- table helpers
@@ -259,17 +289,11 @@ def _stage(name: str, raw: object, file: Path) -> Stage:
     for key, cls in (("needs", Needs), ("budget", Budget), ("retry", Retry)):
         if key in raw:
             raw[key] = _build(cls, raw[key], file, f"{at}.{key}")
-    if isinstance(raw.get("after"), dict):
-        _table(raw["after"], {"stage", "step"}, file, f"{at}.after")
-        _need(raw["after"], "stage", file, f"{at}.after")
     return _build(Stage, raw, file, at, name=name)
 
 
 def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path) -> None:
     at = f"stages.{stage.name}"
-    after = stage.after["stage"] if isinstance(stage.after, dict) else stage.after
-    if after and after not in stages:
-        raise ConfigError(f"{file}: {at}.after names unknown stage '{after}'")
     if not stage.cmd:
         raise ConfigError(f"{file}: {at} needs cmd")
     if stage.is_group and not stage.task_dir:

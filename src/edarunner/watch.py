@@ -1,4 +1,4 @@
-"""The watcher: one cycle over every heartbeat. See docs/design.md section 7.
+"""The watcher: one cycle over every heartbeat.
 
 The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a file or a tree. Its memory between cycles
@@ -8,13 +8,11 @@ looked like last time) and notified.json (states, alerts, grace clocks).
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shlex
 import time
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 from . import board, collect, config, launch, metrics
@@ -37,31 +35,12 @@ _NOTIFY = {"dead", "hung", "looping", "over_budget", "host_full", "superseded", 
 
 # files
 
-def _load(path: Path) -> dict:
-    """A JSON file as a dict; {} when absent, or torn after three tries."""
-    for _ in range(3):
-        try:
-            return json.loads(path.read_text())
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError):
-            time.sleep(0.05)
-    return {}
-
-
-def _save(path: Path, obj: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(obj if isinstance(obj, str) else json.dumps(obj, indent=1) + "\n")
-    os.replace(tmp, path)
-
-
 def _hb(project: Project, run: Row) -> dict:
-    return _load(project.state / str(run.get("batch")) / f"{run['run_id']}.json")
+    return config.load_json(project.state / str(run.get("batch")) / f"{run['run_id']}.json")
 
 
 def _keep(project: Project, run: Row) -> dict:
-    return _load(project.state / str(run.get("batch")) / f"{run['run_id']}.keep.json")
+    return config.load_json(project.state / str(run.get("batch")) / f"{run['run_id']}.keep.json")
 
 
 def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
@@ -72,9 +51,22 @@ def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[t
             continue
         for f in sorted(bdir.glob("*.json")):
             if not f.name.endswith((".spec.json", ".keep.json")):
-                hb = _load(f)
+                hb = config.load_json(f)
                 if hb.get("run_id"):
                     out.append((bdir.name, hb))
+    return out
+
+
+def _stages(hb: dict) -> dict[str, dict]:
+    """The stage entries of a heartbeat; a stage still running in a finished run ended with the run."""
+    stage = hb.get("stage") or ""
+    stages = hb.get("stages") or ({stage: {"log": hb.get("log")}} if stage else {})
+    out = {}
+    for name, s in stages.items():
+        status = s.get("status") or "running"
+        if status == "running" and not board.is_live(hb):
+            status = board.state_of(hb)  # killed, stopped or failed
+        out[name] = {**s, "status": status}
     return out
 
 
@@ -82,18 +74,12 @@ def ingest(ledger: Ledger, heartbeats: list[tuple[str, dict]]) -> None:
     """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify."""
     for batch, hb in heartbeats:
         ledger.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
-        stage = hb.get("stage") or ""
-        stages = hb.get("stages") or ({stage: {"status": "running", "log": hb.get("log")}} if stage else {})
-        for name, s in stages.items():
-            status = s.get("status") or "running"
-            # A stage still running in a finished run ended with the run: killed, stopped or failed.
-            if status == "running" and not board.is_live(hb):
-                status = board.state_of(hb)
+        for name, s in _stages(hb).items():
             ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
-                                     "status": status, "started": s.get("started"), "ended": s.get("ended"),
+                                     "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
                                      "exit": s.get("exit"), "log": s.get("log")})
         for tid, t in (hb.get("tasks") or {}).items():
-            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
+            ledger.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
                                      **{k: t.get(k) for k in _TASK_KEYS}})
 
 
@@ -116,7 +102,7 @@ def _signature(ssh: Ssh, hb: dict) -> list:
 
 def classify(project: Project, ssh: Ssh, ledger: Ledger, run: Row, heartbeat: dict, now: float,
              progress: dict | None = None) -> tuple[str, list[str]]:
-    """The state of one run by the table of section 7, and every reason found."""
+    """The state of one run (running, stale, dead, hung, looping, over_budget, host_full or superseded) and every reason found."""
     hb, lim = heartbeat, project.limits
     if not board.is_live(hb):
         return board.state_of(hb), []
@@ -284,8 +270,12 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
                 done[t] = Task(id=t, fields={"id": t})
             else:
                 ledger.add_event("watch", run["run_id"], "extract", f"unknown task {t}: {e}")
-    rows = metrics.extract(project, run, project.data / "results", done,
-                           stages=set(only) if only else None, task_dirs=task_dirs)
+    # A failed stage can leave a stale report from a copied tree: a one-command stage counts
+    # only with status done, and a task group counts per task with phase done.
+    status = _stages(hb)
+    eligible = {n for n, st in project.stages.items() if (only is None or n in only)
+                and (st.is_group or status.get(n, {}).get("status") == "done")}
+    rows = metrics.extract(project, run, project.data / "results", done, stages=eligible, task_dirs=task_dirs)
     n = sum(ledger.add_metric(r) for r in rows if r["value"] is not None)
     if not rec.get("params"):
         ledger.set_params(run["run_id"], _params(project, run), "spec")
@@ -296,7 +286,7 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
 def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, progress: dict, now: float) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
     spec_path = project.state / str(run["batch"]) / f"{run_id}.spec.json"
-    spec = _load(spec_path)
+    spec = config.load_json(spec_path)
     stage = next((s for s in spec.get("stages") or [] if s.get("name") == hb.get("stage")), None)
     if rec.get("resumed") or not stage or not stage.get("resume"):
         return
@@ -311,7 +301,7 @@ def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, prog
     rec["resumed"] = True
     checkpoint = hb.get("step_name") if hb.get("step") else None
     spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint}
-    _save(spec_path, spec)
+    config.save_json(spec_path, spec)
     driver, logf = project.state / "bin" / str(run["batch"]) / "edr_driver.py", spec_path.with_name(f"{run_id}.driver.log")
     try:
         pid = launch.start_driver(ssh, host, driver, spec_path, logf, project.site.env)
@@ -348,10 +338,10 @@ def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     ledger.write_board_json(bdir / "board.json", probes)
     retired = {b["batch"] for b in ledger.batches() if b.get("retired")}
     rows = [r for r in ledger.runs() if r["batch"] not in retired]
-    _save(bdir / "status.html", board.status_html(rows, ledger.events(n=50), probes, now))
+    config.save_text(bdir / "status.html", board.status_html(rows, ledger.events(n=50), probes, now))
     params = [dict(r) for r in ledger.db.execute("SELECT run_id, key, value, source FROM params")]
-    plotly = board.ensure_plotly(project.data)
-    _save(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly.name if plotly else board.PLOTLY_URL))
+    plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
+    config.save_text(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly))
     text = board.narrow(rows, now=now)
     for n in notifiers:
         n.board(text)
@@ -362,7 +352,7 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing."""
     now = time.time() if now is None else now
     bdir = project.data / "board"
-    progress, notes = _load(bdir / "progress.json"), _load(bdir / "notified.json")
+    progress, notes = config.load_json(bdir / "progress.json"), config.load_json(bdir / "notified.json")
     heartbeats = read_heartbeats(project)
     if not dry_run:
         ingest(ledger, heartbeats)
@@ -389,10 +379,10 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
         return states
     _launch_queued(project, ssh, ledger)
     _boards(project, ssh, ledger, notifiers, now)
-    _save(bdir / "progress.json", progress)
-    _save(bdir / "notified.json", notes)
-    n = int(_load(project.state / "watch.json").get("cycle") or 0) + 1
-    _save(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
+    config.save_json(bdir / "progress.json", progress)
+    config.save_json(bdir / "notified.json", notes)
+    n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1
+    config.save_json(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states
 
 
@@ -428,7 +418,7 @@ def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Noti
 
 def check(project: Project, notifiers: list[Notifier] = ()) -> int:
     """1 (and an alert) when watch.json is older than three cycles, else 0."""
-    w = _load(project.state / "watch.json")
+    w = config.load_json(project.state / "watch.json")
     age = time.time() - float(w.get("ts") or 0)
     if age <= 3 * project.limits.heartbeat_s:
         return 0

@@ -33,7 +33,7 @@ def test_demo_end_to_end():
     assert p.safety.min_depth == 3 and p.limits.heartbeat_s == 5 and p.placement.max_per_host == 4
     assert list(p.stages) == ["synth", "pnr", "export", "power"]
     power = p.stages["power"]
-    assert power.is_group and power.after == "export" and power.parallel == 2
+    assert power.is_group and power.parallel == 2
     assert power.needs.licence == {"demo": 1} and power.budget.per == "task"
     assert p.stages["synth"].needs.licence == "demo" and p.stages["synth"].retry.max == 2
     assert p.stages["pnr"].retry is None and p.stages["export"].prune == {"netlist": ["out"]}
@@ -72,7 +72,7 @@ def test_render_and_placeholders():
         ('project = "demo"', 'project = "demo"\ncolour = 1', "unknown key 'colour'"),
         ("parallel = 2", "parallel = 2\nbogus = 1", "unknown key 'stages.power.bogus'"),
         ("stagger_s = 0", "stagger_s = 0\nfoo = 1", "unknown key 'limits.foo'"),
-        ('after = "export"', 'after = "nope"', "after names unknown stage 'nope'"),
+        ("parallel = 2", 'parallel = 2\nafter = "export"', "unknown key 'stages.power.after'"),
         ('stage = ["synth", "pnr"]', 'stage = ["synth", "gone"]', "stage names unknown stage 'gone'"),
         ('task_dir = "simulation/tests/{config}/{task.test}"', "", "task group and needs task_dir"),
         ('licence = "demo"', 'licence = "fc"', "unknown licence 'fc'"),
