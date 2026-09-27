@@ -58,6 +58,11 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert edr(capsys, "plan", "demo", "--dry-run")[0] == 0 and not state.exists()
     code, out, _ = edr(capsys, "plan", "demo")
     assert code == 0 and f"_a_demo_g{src}: local " in out and f"_b_nodw_demo_DW0_g{src}: local " in out
+    code, out, _ = edr(capsys, "plan", "demo", "--show-spec")
+    assert code == 0 and f"  env:\n    " in out and f"    EDR_SRC={src}\n" in out and "    collect: reports/\n" in out
+    assert "  stage synth, in " in out and "    cmd: bash " in out
+    code, out, _ = edr(capsys, "plan", "demo", "--json")
+    assert code == 0 and len(json.loads(out)["data"]) == 2
     assert not state.exists()
 
     code, out, _ = edr(capsys, "launch", "demo")
