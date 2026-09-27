@@ -47,7 +47,7 @@ def mark(state: str) -> str:
 
 def head(project: str, title: str) -> str:
     """The bold first line of every message: the project, then `title`."""
-    return f"<b>{esc(project)} · {esc(title)}</b>"
+    return f"<b>{esc(project)}: {esc(title)}</b>"
 
 
 def alert(project: str, text: str, cmd: str | None = None) -> str:
@@ -62,7 +62,7 @@ def alert(project: str, text: str, cmd: str | None = None) -> str:
 
 
 def run_line(row: Row, now: float, totals: dict[str, int] | None = None) -> str:
-    """`mark handle state · stage step/total · age`; a running run leaves out its state."""
+    """`mark handle state, stage step/total, age`; a running run leaves out its state."""
     st, parts = runs.state_of(row), []
     if st != "running":
         parts.append(st)
@@ -72,7 +72,7 @@ def run_line(row: Row, now: float, totals: dict[str, int] | None = None) -> str:
         parts.append(f"{row['stage']}{step}")
     age = None if row.get("updated") is None else max(0.0, now - row["updated"])
     parts.append(runs.hm(age))
-    return f"{mark(st)} <code>{esc(runs.handle(row))}</code> {esc(' · '.join(parts))}"
+    return f"{mark(st)} <code>{esc(runs.handle(row))}</code> {esc(', '.join(parts))}"
 
 
 def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None, most: int = 30) -> str:
@@ -85,7 +85,7 @@ def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | No
     if ordered and not any(runs.is_live(r) for r in ordered):
         lines.append("<i>nothing live</i>")
     counts = Counter(runs.state_of(r) for r in ordered)
-    lines.append("<i>" + (" · ".join(f"{v} {esc(k)}" for k, v in sorted(counts.items(), key=lambda kv: runs.RANK.get(kv[0], 7)))
+    lines.append("<i>" + (", ".join(f"{v} {esc(k)}" for k, v in sorted(counts.items(), key=lambda kv: runs.RANK.get(kv[0], 7)))
                           or "no runs") + "</i>")
     return fit("\n".join(lines))
 
@@ -130,25 +130,25 @@ def resources(probe: Row) -> list[tuple[str, str]]:
 
 
 def hosts(rows: Iterable[Row]) -> str:
-    """`host · mark cores used/total · mark ram used/total GB · …` per host; `marks` of a row holds the marks."""
+    """`host mark cores used/total, mark ram used/total GB, …` per host; `marks` of a row holds the marks."""
     lines = []
     for r in rows:
         if "error" in r:
-            lines.append(f"{runs.NO_ANSWER} <b>{esc(r['host'])}</b> · <i>no answer</i>")
+            lines.append(f"{runs.NO_ANSWER} <b>{esc(r['host'])}</b> <i>no answer</i>")
             continue
-        lines.append(f"<b>{esc(r['host'])}</b> · " + " · ".join(f"{r['marks'][name]} {name} {value}"
+        lines.append(f"<b>{esc(r['host'])}</b> " + ", ".join(f"{r['marks'][name]} {name} {value}"
                                                               for name, value in resources(r)))
     return fit("\n".join(lines)) or "<i>no hosts</i>"
 
 
 def licences(rows: Iterable[Row]) -> str:
-    """`licence · used/pool seats used` per licence; a failed probe shows its note."""
-    lines = [f"<b>{esc(r['licence'])}</b> · " + (f"{r['used']}/{r['pool']} seats used" if "used" in r
+    """`licence used/pool seats used` per licence; a failed probe shows its note."""
+    lines = [f"<b>{esc(r['licence'])}</b> " + (f"{r['used']}/{r['pool']} seats used" if "used" in r
                                                   else f"<i>{esc(r['note'])}</i>") for r in rows]
     return fit("\n".join(lines)) or "<i>no licences</i>"
 
 
 def help_text(groups: dict[str, list[tuple[str, str]]]) -> str:
-    """Prose: a bold line per group, then one `usage · help` line per command."""
-    return fit("\n\n".join(f"<b>{esc(g)}</b>\n" + "\n".join(f"{esc(u.rstrip())} · {esc(h)}" for u, h in cmds)
+    """Prose: a bold line per group, then one `usage: help` line per command."""
+    return fit("\n\n".join(f"<b>{esc(g)}</b>\n" + "\n".join(f"{esc(u.rstrip())}: {esc(h)}" for u, h in cmds)
                            for g, cmds in groups.items()))

@@ -311,8 +311,8 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert (bdir(demo) / f"{b}.stop").exists()
     with Ledger(demo / "data" / "edr.db") as led:
         assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
-    assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4 · 0m", "⚪ <code>a@demo</code> done · 0m",
-                                               "<i>1 running · 1 done</i>"]
+    assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4, 0m", "⚪ <code>a@demo</code> done, 0m",
+                                               "<i>1 running, 1 done</i>"]
     with Ledger(demo / "data" / "edr.db") as led:
         assert len(led.get_kv("last_board")) == 2
     one = acts.status_text("b_nodw@demo").splitlines()
@@ -326,8 +326,8 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
-    assert acts.hosts_text().startswith("<b>local</b> · ")
-    assert acts.lic_text() == "<b>demo</b> · 2/10 seats used"
+    assert acts.hosts_text().startswith("<b>local</b> ")
+    assert acts.lic_text() == "<b>demo</b> 2/10 seats used"
     info = acts.run_info("a@demo")
     assert info["handle"] == "a@demo" and info["run_id"] == a and info["host"] == "local" and info["run_root"].endswith(a)
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
@@ -486,8 +486,8 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     assert data["local"]["marks"]["gpu"] == "-" and set(data["hostB"]["marks"].values()) == {"⚫"}
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     text = acts.hosts_text().splitlines()
-    assert ("<b>hostA</b> · 🟠 cores 52/64 · 🟢 ram 136/256 GB · 🟢 scratch 1200/2000 GB · 🟡 gpu 3/4" in text
-            and "⚫ <b>hostB</b> · <i>no answer</i>" in text and text[0].startswith("⚫"))
+    assert ("<b>hostA</b> 🟠 cores 52/64, 🟢 ram 136/256 GB, 🟢 scratch 1200/2000 GB, 🟡 gpu 3/4" in text
+            and "⚫ <b>hostB</b> <i>no answer</i>" in text and text[0].startswith("⚫"))
 
 
 def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
@@ -759,7 +759,7 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
 
 def test_notify_sends_one_message_through_every_notifier(demo: Path, capsys, monkeypatch) -> None:
     code, out, _ = edr(capsys, "notify", "--dry-run", "session x: <done>")
-    assert code == 0 and out == "<b>demo · note</b>\nsession x: &lt;done&gt;\n(dry)\n"
+    assert code == 0 and out == "<b>demo: note</b>\nsession x: &lt;done&gt;\n(dry)\n"
     code, _, err = edr(capsys, "notify", "hi")
     assert code == 1 and "no notifier is configured" in err and not (demo / "data" / "edr.db").exists()
     posts: list[tuple] = []

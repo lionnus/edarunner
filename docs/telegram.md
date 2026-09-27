@@ -52,6 +52,9 @@ reply is formatted text: one short line per item, a run handle in
 monospace, and a count or a note in italics. A tap on a handle copies
 it, so you can paste it into `/status <handle>`.
 
+The first line is `<project>: <title>`. Inside a line, commas separate
+the parts; no text uses a middle dot.
+
 Each run line starts with one mark for its state:
 
 | Mark | States |
@@ -76,7 +79,7 @@ same class and run edits that message in place, so an alert never
 repeats. An alert looks like this:
 
 ```
-🔴 demo · dead b_nodw@demo
+🔴 demo: dead b_nodw@demo
 heartbeat older than 90 s, driver 4711 gone on local
 edr run b_nodw@demo --stage synth --from elaborate
 ```
@@ -105,11 +108,11 @@ of the total. Live runs come first. The last line, in italics, holds
 the count per state:
 
 ```
-demo · board 14:05
-🔴 a@demo dead · synth 3/13 · 1h
-🟢 c@demo pnr 4/13 · 0m
-⚪ b@demo done · 1h
-1 dead · 1 running · 1 done
+demo: board 14:05
+🔴 a@demo dead, synth 3/13, 1h
+🟢 c@demo pnr 4/13, 0m
+⚪ b@demo done, 1h
+1 dead, 1 running, 1 done
 ```
 
 The board shows at most 30 runs and then a line `… and N more`. When
@@ -146,12 +149,12 @@ shows one line per host, with the mark of `edr hosts` and the used of
 total of every resource:
 
 ```
-hostA · 🟢 cores 21/32 · 🟡 ram 93/376 GB · 🟢 scratch 195/1538 GB · 🟢 gpu 0/1
+hostA 🟢 cores 21/32, 🟡 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0/1
 ```
 
 The hosts come in the order of `edr hosts`, the worst mark first. A host
 without a GPU has no `gpu` part, and a host that fails the probe shows
-`⚫ no answer`. `/lic` shows `demo · 3/8 seats used` per licence.
+`⚫ no answer`. `/lic` shows `demo 3/8 seats used` per licence.
 `/help` is prose, so a tap on a command sends it. `/compare` and
 `/metric` reply with a `<pre>` block of aligned columns.
 
