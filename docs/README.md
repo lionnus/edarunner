@@ -13,6 +13,7 @@ what. The same pages are published at <https://lionnus.github.io/edarunner/>.
 | [configure.md](configure.md) | turn your own flow into a project: the project file, the site file, a batch |
 | [run.md](run.md) | launch a batch, read the board, run the watcher, resume, and clear the hosts |
 | [results.md](results.md) | get the numbers out: the database, `edr metrics`, the compare board, `edr export` and what reads a snapshot |
+| [notify.md](notify.md) | get the alerts by Telegram, ntfy or mail |
 | [telegram.md](telegram.md) | get the alerts and the board on your phone, and act on a run from there |
 | [guarantees.md](guarantees.md) | know what `edr` never does, what a dry run and a guard promise, and how a stop works |
 | [reference/](reference/README.md) | look up a command, a flag, a config key, a placeholder, a run state or a bot command; generated from the code |

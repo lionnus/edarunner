@@ -97,6 +97,29 @@ class Telegram:
 
 
 @dataclass
+class Ntfy:
+    """An ntfy topic: one push message per alert, with a priority by alert kind; `docs/notify.md`
+    explains the setup."""
+
+    topic: str = doc("the topic; anyone who knows the name can read it, so pick a long random one")
+    url: str = doc("the ntfy server", "https://ntfy.sh")
+    token_file: Path | None = doc("an access token for a protected topic, mode 600", None)
+
+
+@dataclass
+class Mail:
+    """An SMTP server: one mail per alert and per `edr notify`. The board is never mailed."""
+
+    host: str = doc("the SMTP server")
+    sender: str = doc("the From address", key="from")
+    to: list[str] = doc("the recipients")
+    port: int = doc("the SMTP port", 587)
+    starttls: bool = doc("upgrade the connection with STARTTLS before the login", True)
+    user: str = doc("the login name", "", shown="the `from` address")
+    password_file: Path | None = doc("the password, mode 600; without it there is no login", None)
+
+
+@dataclass
 class Marks:
     """The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
     fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
@@ -125,6 +148,8 @@ class Site:
     hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
     telegram: Telegram | None = None
+    ntfy: Ntfy | None = None
+    mail: Mail | None = None
     marks: Marks = field(default_factory=Marks)
 
 
@@ -203,9 +228,9 @@ class Stage:
 
 @dataclass
 class Metric:
-    """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `expr`.
-    `expr` allows numbers, metric names, `+ - * /` and a unary minus, nothing else; it is computed
-    once every input exists, and with `stage` set only for those stages.
+    """A metric holds exactly one of the four parsers: `regex`, `csv`, `json` or `python`. A number
+    the flow does not print, such as an energy from a power and a window, comes from a `python`
+    hook that reads the input files itself.
 
     A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
     row per step directory found, under the stage that owns that step number. A file that does not
@@ -214,17 +239,15 @@ class Metric:
 
     name: str
     stage: list[str] = doc("a stage name or a list: the stages whose files hold the number", factory=list,
-                           shown="`[]`; required without `expr`")
+                           shown="required")
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
     file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
-                    shown="required without `expr`")
-    regex: str = doc("a regex; group 1 is the value", "", shown="one of the five")
+                    shown="required")
+    regex: str = doc("a regex; group 1 is the value", "", shown="one of the four")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
-                                        "`where`", None, shown="one of the five")
-    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
-    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the five")
-    expr: str = doc("an expression over other metrics of the same run, stage, step and task", "",
-                    shown="one of the five")
+                                        "`where`", None, shown="one of the four")
+    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the four")
+    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the four")
     unit: str = doc("unit text", "")
     canonical: str = doc("a name shared across projects, such as `area.cell`", "")
 
@@ -356,13 +379,15 @@ class Job:
     """
 
     label: str = doc("the run label; unique in the batch")
-    config: str = doc("the configuration name the flow takes; `{config}`")
+    config: str = doc("the configuration name the flow takes; `{config}`. Without it the build tag hook gets `\"\"` "
+                      "and the run id drops the empty part", "")
     host: str = doc("a host name, or `\"auto\"`", "auto")
     stages: list[str] = doc("the stages to run, a subset of `edr.toml` in file order", factory=list,
                             shown="every stage")
     tasks: list[str] = doc("the task ids of the task groups", factory=list)
     overrides: dict[str, str] = doc("`KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens", factory=dict)
-    netlist_stage: int | None = doc("a number the flow needs to find its netlist; `{netlist_stage}`", None)
+    vars: dict[str, str] = doc("`{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; "
+                               "`{vars.<name>}` in the stage strings, `[env]` and `collect`", factory=dict)
     reuse: dict[str, object] | None = doc(
         "`{ run_id = \"...\" }` or `{ label = \"...\", latest = true }`: start on the tree of that run. With "
         "`restore = \"<name>\"`, start on a fresh tree with the `collect_on_request.<name>` files of that run "
