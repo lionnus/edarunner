@@ -822,7 +822,20 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
-    """Write a frozen snapshot of one design."""
+    """Write a frozen snapshot of one design, or the run database into an MLflow store."""
+    if a.mlflow:
+        if a.dry_run:
+            n = len([r for r in c.db.runs() if a.design is None or r.get("src") == a.design])
+            c.emit(f"{a.mlflow}: {n} runs (dry)", {"runs": n})
+            return Exit.DONE
+        from .mlflow_export import export_mlflow
+
+        res = export_mlflow(c.project, c.db, Path(a.mlflow), a.design)
+        c.db.add_event("user", "", "export", f"mlflow {a.design or 'every design'} -> {a.mlflow}")
+        c.emit(f"{res['tracking_uri']}: {len(res['written'])} runs written, {len(res['skipped'])} already there", res)
+        return Exit.DONE
+    if not a.design or not a.out:
+        raise Refuse("export needs --design and --out, or --mlflow DIR")
     labels = a.labels.split(",") if a.labels else None
     manifest = export.export(c.project, c.db, a.design, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
@@ -1340,9 +1353,17 @@ def _parser() -> argparse.ArgumentParser:
         --design matches the source tag exactly. log/ and *.log stay out unless
         --with-logs. Refuses a DIR that exists and is not empty. docs/results.md
         explains the layout.
+
+        --mlflow DIR writes the run database into a local MLflow tracking store
+        in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
+        per run, of every design or of --design, with the parameters, the
+        metrics at their step, the stage and step times, and the collected
+        files up to 1 MiB. A run already in the store is skipped. It needs the
+        mlflow extra: pip install 'edarunner[mlflow]'.
         """, write=True)
-    s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
-    s.add_argument("--out", required=True, metavar="DIR", help="the directory to write; it must be absent or empty")
+    s.add_argument("--design", metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--out", metavar="DIR", help="the directory to write; it must be absent or empty")
+    s.add_argument("--mlflow", metavar="DIR", help="write an MLflow tracking store in DIR instead")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")
     s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
     s = command("stop", "stop one run", """

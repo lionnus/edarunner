@@ -285,3 +285,33 @@ def test_ingest_keeps_one_sample_per_heartbeat_and_the_detail_shows_them(demo: P
     code, out, _ = edr(capsys, "status", a)
     tree = next(ln for ln in out.splitlines() if ln.startswith("tree "))
     assert code == 0 and "from run_samples" in out and tree.split()[-4:] == ["3", "3", "GB", "3"]
+
+
+def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
+    import sys
+
+    a, b = seed(demo, "a", "done"), seed(demo, "b", "STOPPED")
+    _metric(demo, a, "wns_ns", 2, -0.1)
+    _metric(demo, a, "wns_ns", 3, 0.2)
+    res = demo / "data" / "results" / a / "reports" / "3"
+    res.mkdir(parents=True)
+    (res / "qor.rpt").write_text("slack 0.2\n")
+    (res / "big.rpt").write_bytes(b"x" * (2 << 20))  # over 1 MiB: not an artifact
+    monkeypatch.setitem(sys.modules, "mlflow", None)
+    code, _, err = edr(capsys, "export", "--mlflow", str(tmp_path / "ml"))
+    assert code == 1 and "edarunner[mlflow]" in err
+    monkeypatch.delitem(sys.modules, "mlflow")
+    mlflow = pytest.importorskip("mlflow")
+    monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
+    code, out, _ = edr(capsys, "--json", "export", "--mlflow", str(tmp_path / "ml"))
+    data = json.loads(out)["data"]
+    assert code == 0 and [w["run_id"] for w in data["written"]] == [a, b]
+    assert data["written"][0]["artifacts"] == 1
+    client = mlflow.tracking.MlflowClient(tracking_uri=data["tracking_uri"])
+    run = client.get_run(data["written"][0]["mlflow_run"])
+    assert run.data.tags["edr.design"] == "abc1234" and run.data.params["config"] == "demo"
+    assert [(m.step, m.value) for m in client.get_metric_history(run.info.run_id, "wns_ns")] == [(2, -0.1), (3, 0.2)]
+    assert client.get_run(data["written"][1]["mlflow_run"]).info.status == "KILLED"
+    code, out, _ = edr(capsys, "--json", "export", "--mlflow", str(tmp_path / "ml"))
+    assert json.loads(out)["data"]["skipped"] == [a, b]
+    assert edr(capsys, "export", "--design", "abc1234")[0] == 1
