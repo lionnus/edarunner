@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -93,7 +94,8 @@ def test_run_remote_builds_ssh_argv(ssh: Ssh, monkeypatch) -> None:
     ssh.run("hostx", "nproc")
     ssh.run("hostx", ["ls", "a b"])
     opts = ssh.site.ssh_options
-    assert seen == [["ssh", *opts, "hostx", "nproc"], ["ssh", *opts, "hostx", "ls 'a b'"]]
+    # sh -c keeps a tcsh login shell out of the command.
+    assert seen == [["ssh", *opts, "hostx", "sh -c nproc"], ["ssh", *opts, "hostx", "sh -c " + shlex.quote("ls 'a b'")]]
 
 
 # probe
