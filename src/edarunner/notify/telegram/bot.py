@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 REPLY_DAYS = 7  # how long a reply to an alert still finds its run
+MAX_DOCUMENT = 20 * 2**20  # the upload limit of the Bot API is 50 MB; a phone needs far less
 
 
 class TelegramBot(Notifier):
@@ -215,10 +216,19 @@ class TelegramBot(Notifier):
 
     def _reply(self, r: Reply, thread: int | None = None) -> None:
         """Send a reply under the bold first line, into the project's topic or the thread of the command."""
+        thread = self.topic or thread
+        for d in r.documents:
+            if len(d.data) > MAX_DOCUMENT:
+                self._reply(Reply(r.title, f"{d.name}: {len(d.data) / 2**20:.1f} MB is over the limit of "
+                                           f"{MAX_DOCUMENT // 2**20} MB", ok=False), thread)
+                continue
+            caption = fmt.head(self.project.project, r.title) + (f"\n{fmt.esc(r.body)}" if r.body else "")
+            self._call(self.api.send_document, self.chat_id, d.name, d.data, caption, thread_id=thread)
+        if r.documents:
+            return
         body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
         full = fmt.head(self.project.project, r.title) + "\n" + body
-        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full),
-                   thread_id=self.topic or thread)
+        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full), thread_id=thread)
 
     def _callback(self, q: dict) -> None:
         """Act on a button press, answer it, and append the result to the message."""

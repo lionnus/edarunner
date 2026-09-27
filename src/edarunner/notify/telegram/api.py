@@ -88,6 +88,13 @@ class BotApi:
         params.update({"entities": entities} if entities is not None else {"parse_mode": "HTML"})
         self.call("editMessageText", params)
 
+    def send_document(self, chat_id: int, name: str, data: bytes, caption: str = "",
+                      thread_id: int | None = None) -> int:
+        """Upload `data` as a file called `name` with an HTML caption; return the message id."""
+        r = self.call("sendDocument", {"chat_id": chat_id, "message_thread_id": thread_id, "caption": caption or None,
+                                       "parse_mode": "HTML"}, files={"document": (name, data)})
+        return int(r["message_id"])
+
     def pin(self, chat_id: int, msg_id: int) -> None:
         """Pin a message without a notification."""
         self.call("pinChatMessage", {"chat_id": chat_id, "message_id": msg_id, "disable_notification": True})
