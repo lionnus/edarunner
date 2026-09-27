@@ -396,10 +396,11 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
     return states
 
 
-def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier], once: bool = False) -> None:
-    """A cycle every limits.heartbeat_s; the notifier threads start once."""
+def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier], once: bool = False) -> int:
+    """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed."""
     for n in notifiers:
         n.start()
+    failed = False
     try:
         while True:
             t0 = time.time()
@@ -413,10 +414,12 @@ def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Noti
                 cycle(project, ssh, ledger, notifiers)
             except config.ConfigError as e:  # a config edit mid-way: skip this cycle, keep the service
                 log.error("config not loadable, cycle skipped: %s", e)
+                failed = True
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
+                failed = True
             if once:
-                return
+                return int(failed)
             time.sleep(max(1.0, project.limits.heartbeat_s - (time.time() - t0)))
     finally:
         for n in notifiers:
