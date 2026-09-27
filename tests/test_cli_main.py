@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from edarunner import cli
@@ -34,3 +35,15 @@ def test_project_is_found_from_a_subdirectory(demo: Path, capsys, monkeypatch) -
     monkeypatch.chdir(demo.parent)
     code, _, err = edr(capsys, "status")
     assert code == 1 and f"no edr.toml in {demo.parent} or above; run edr init" in err
+
+
+def test_check_names_the_missing_head_node_tools(demo: Path, capsys, monkeypatch, tmp_path: Path) -> None:
+    thin = tmp_path / "bin"
+    thin.mkdir()
+    (thin / "git").symlink_to(shutil.which("git"))
+    monkeypatch.setenv("PATH", str(thin))
+    code, out, _ = edr(capsys, "--json", "check")
+    problems = json.loads(out)["data"]["problems"]
+    assert code == 1 and "local: rsync not on PATH" in problems and "local: ssh not on PATH" in problems
+    assert "local: git not on PATH" not in problems
+

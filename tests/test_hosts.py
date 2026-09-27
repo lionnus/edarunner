@@ -195,6 +195,10 @@ def test_tool_processes_local(ssh: Ssh) -> None:
     assert isinstance(mine[0][1], int) and isinstance(mine[0][2], float)
 
 
+def test_check_local_finds_every_tool_here(ssh: Ssh) -> None:
+    assert ssh.check_local() == []
+
+
 def test_scratch_free_gb(ssh: Ssh, tmp_path: Path, monkeypatch) -> None:
     assert ssh.scratch_free_gb("local", str(tmp_path)) > 0
     fake_run(monkeypatch, {"df": (0, "", "")})

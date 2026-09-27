@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass, replace
 
@@ -16,6 +17,8 @@ from .guards import Refuse
 from .model import Job, Needs, Placement, Project, Site
 
 TIMEOUT_RC = 255
+# What the head node runs itself: the controller calls the first four, the `local` host the rest.
+HEAD_TOOLS = ("ssh", "rsync", "git", "python3", "nproc", "df", "ps", "awk", "stat", "readlink")
 _SEP = "@@"
 _SIG_RE = re.compile(r"^[A-Z0-9]+$")
 
@@ -221,6 +224,19 @@ class Ssh:
             if len(parts) == 5 and rx.search(parts[3]):
                 rows.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3], parts[4]))
         return rows
+
+    def check_local(self) -> list[str]:
+        """The faults of the head node, as `local: ...` lines; see docs/requirements.md."""
+        missing = [t for t in HEAD_TOOLS if shutil.which(t) is None]
+        problems = [f"local: {t} not on PATH" for t in missing]
+        if "local" not in self.site.hosts:  # else the host probe of the caller covers it
+            try:
+                self.probe("local")
+            except HostError as e:
+                problems.append(str(e))
+        if "ps" not in missing and self.run("local", "ps -o etimes=,pcpu=,cputimes= -p $$")[0] != 0:
+            problems.append("local: ps has no etimes, pcpu or cputimes column; procps-ng 3.3.10 or newer")
+        return problems
 
     def scratch_free_gb(self, host: str, path: str) -> float:
         """Free GB of the filesystem under `path` on `host`."""

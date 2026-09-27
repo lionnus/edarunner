@@ -471,6 +471,7 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
             problems.append(str(e))
     hosts = _probe_rows(c)
     problems += [f"{r['host']}: {r['error']}" for r in hosts if "error" in r]
+    problems += [p for p in c.ssh.check_local() if p not in problems]
     for b in batches:
         bad = [f"{b.batch}: job {j.label} names unknown host {j.host}" for j in b.jobs
                if j.host != "auto" and j.host not in project.site.hosts]
