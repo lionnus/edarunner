@@ -67,7 +67,7 @@ write that file. The template then points at
 
 ### 2. Write the site file
 
-The site file holds the hosts, the licences and the bot. It stays outside
+The site file holds the hosts, the tools and the bot. It stays outside
 the project and outside git, because it names your machines.
 
 ```toml
@@ -83,9 +83,10 @@ cores = 128
 ram_gb = 512
 ```
 
-Add `[licences.<name>]` when a stage has to wait for seats, and
-`[telegram]` when you want alerts on your phone. `docs/configuration.md`
-lists every key.
+Add `[tools.<name>]` when not every host has a tool, or when a stage has
+to wait for seats, and `[telegram]` when you want alerts on your phone.
+`examples/site/` shows both with placeholder names, and
+`docs/configuration.md` lists every key.
 
 ### 3. Declare the flow
 
