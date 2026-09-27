@@ -1,5 +1,13 @@
 nav:
   - README.md
-  - getting-started.md
-  - ...
-  - architecture.md
+  - Get started:
+      - install.md
+      - concepts.md
+  - Guides:
+      - configure.md
+      - run.md
+      - results.md
+      - telegram.md
+      - guarantees.md
+  - reference
+  - dev

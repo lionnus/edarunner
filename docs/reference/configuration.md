@@ -59,7 +59,7 @@ The copy of the checked-out tree to the host, by `rsync --delete` behind the gua
 
 ### [safety]
 
-The guard on every delete target; `docs/safety.md` explains it.
+The guard on every delete target; `docs/guarantees.md` explains it.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -68,8 +68,8 @@ The guard on every delete target; `docs/safety.md` explains it.
 
 ### [limits]
 
-The clocks and floors of the driver and the watcher; `docs/running.md` and `docs/watcher.md`
-say what each one does.
+The clocks and floors of the driver and the watcher; `docs/run.md` says what each
+one does.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -127,7 +127,7 @@ the previous end. A stage without `steps` owns no numbered step.
 A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
 `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
 tasks of a run go through a queue in the state directory, so a second run with the same queue
-takes tasks from the same pool; `docs/running.md` explains the queue and shards.
+takes tasks from the same pool; `docs/run.md` explains the queue and shards.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -316,7 +316,7 @@ flow's own variables, so a key the flow ignores passes.
 A job with `reuse` runs on the host and the tree of the reused run, and takes its build tag and
 `{tree_id}`; a glob in `label` is an error. With `restore`, the job takes the source tag, the
 build tag and `{tree_id}` of the reused run but is placed like a new job, so it runs after the
-tree was retired; `docs/running.md` shows the rerun. A task group in a job without `tasks` is a
+tree was retired; `docs/run.md` shows the rerun. A task group in a job without `tasks` is a
 plan problem.
 
 | Key | Meaning | Default |

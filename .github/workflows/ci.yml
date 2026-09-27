@@ -80,7 +80,7 @@ jobs:
       - run: uv run tools/gen_docs.py --check
 
   status:
-    # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/ci.md.
+    # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/dev/testing.md.
     needs: [tests, driver, openroad, docs]
     if: always()
     # One run at a time writes the branch; two pushes at once made one fail.
