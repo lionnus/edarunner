@@ -8,6 +8,8 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=$project_root
+# A user service starts with a bare PATH; the tools of the user live in ~/.local/bin.
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=$edr watch
 Restart=always
 RestartSec=60
