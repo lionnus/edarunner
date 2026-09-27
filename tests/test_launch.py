@@ -17,6 +17,7 @@ import pytest
 import edarunner
 from edarunner import config, launch, sync
 from edarunner.backend import Handle, Request, SshBackend
+from edarunner.config import ConfigError
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.db import Database
@@ -198,6 +199,9 @@ def test_a_job_without_config(env, tmp_path: Path) -> None:
     hook.write_text("def build_tag(config, overrides):\n    return repr(config)\n")
     project.source.build_tag = f"python:{hook}:build_tag"
     assert launch.build_tag(project, job) == "''"
+    hook.write_text("def build_tag(config, overrides, worktree):\n    return len(None)\n")
+    with pytest.raises(ConfigError, match="object of type 'NoneType' has no len"):
+        launch.build_tag(project, job)  # the hook's own fault, not a second call with two arguments
     assert launch.render_run_id("{build_tag}_{label}-{config}", {"build_tag": "", "label": "a", "config": ""}) == "a"
 
 
@@ -211,6 +215,9 @@ def test_plan_reuses_a_database_run(env) -> None:
     assert a.problems == [] and a.reuse == f"{DATE}_a_demo_gOLD" and a.src == "OLD"
     assert a.root == "/x/edr/old" and a.run_id == f"{DATE}_a_demo_gOLD"
     assert a.spec["start_at"]["stage"] == "pnr" and a.spec["stages"][0]["cwd"] == "/x/edr/old"
+    batch.jobs[0].reuse = {"label": "nope", "latest": True}
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
+    assert a.problems == ["reuse label=nope latest=True: no run with a host and a root in the database"]
 
 
 # launch and stop

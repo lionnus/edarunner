@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import os
 import re
 import string
@@ -15,7 +16,7 @@ from . import __version__, board, checkout, collect, config, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
-from .db import Database
+from .db import Database, NotFound
 from .model import SCHEDULERS, Batch, Budget, Job, Project, Stage, Task
 
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
@@ -72,11 +73,13 @@ def build_tag(project: Project, job: Job, src: str = "") -> str:
         if src:
             candidate = project.source.worktrees / src
             worktree = str(candidate) if candidate.is_dir() else None
+        args = (job.config, job.overrides, worktree)
         try:
-            try:
-                return str(fn(job.config, job.overrides, worktree))
-            except TypeError:
-                return str(fn(job.config, job.overrides))
+            inspect.signature(fn).bind(*args)
+        except TypeError:
+            args = args[:2]  # a hook of the form (config, overrides)
+        try:
+            return str(fn(*args))
         except Exception as e:  # a hook fault is a plan problem, never a traceback
             raise ConfigError(f"build_tag hook {name}: {e}") from e
     return "_".join([job.config] * bool(job.config) + [f"{k}{v}" for k, v in job.overrides.items()])
@@ -204,7 +207,8 @@ def _reuse_row(db: Database, reuse: dict[str, object], need_tree: bool = True) -
         rows = [r for r in db.runs() if r["label"] == reuse["label"]]
         row = rows[-1] if rows else None
     if row is None or (need_tree and not (row.get("root") and row.get("host"))):
-        raise KeyError(f"reuse {reuse}: no run{' with a host and a root' if need_tree else ''} in the database")
+        what = " ".join(f"{k}={v}" for k, v in reuse.items())
+        raise NotFound(f"reuse {what}: no run{' with a host and a root' if need_tree else ''} in the database")
     return row
 
 

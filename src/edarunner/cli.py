@@ -175,7 +175,7 @@ class Ctx:
         try:
             run_id = self.db.resolve(handle, self.db.get_store("last_board"))
         except KeyError as e:
-            raise Refuse(str(e.args[0])) from None
+            raise Refuse(str(e)) from None
         row = self.db.run(run_id)
         if row is None:
             raise Refuse(f"{handle}: no run {run_id}")
