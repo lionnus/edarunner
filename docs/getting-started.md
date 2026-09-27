@@ -203,4 +203,18 @@ edr retire --batch sweep1 --why "exported"
 
 `retire` removes the run trees on the hosts after a guard on every path,
 and refuses a tree whose results are not collected. The ledger keeps the
-runs, the metrics and the events.
+runs, the metrics and the events. `--collect netlist` copies the larger
+files of a `collect_on_request` list to the head node first; the section
+"Archive, then clear the hosts" in `docs/running.md` shows the whole
+sequence and the rerun from the archive.
+
+### 12. A second project
+
+One project is one directory with an `edr.toml`. A second flow, on
+another repository, gets its own directory, and with it its own ledger
+and results under `data/`, its own state directory `~/.edr/<project>`,
+its own trees under `<scratch>/<user>/edr/<project>/` and its own
+watcher unit. The site file is shared. Nothing of one project appears in
+the tables of another, and `edr` in a directory sees that project only.
+With one Telegram bot for both, set `telegram_poll = false` in one of
+them; `docs/telegram.md` says why.

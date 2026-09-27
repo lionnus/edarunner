@@ -197,6 +197,7 @@ class Project:
     env: dict[str, str] = field(default_factory=dict)  # the flow's own additions, rendered per run
     tasks: dict[str, Task] = field(default_factory=dict)
     task_resolver: str = ""  # "python:file.py:function" or ""
+    telegram_poll: bool = True  # false: alerts and the board only; another project polls the bot
 
 
 @dataclass
