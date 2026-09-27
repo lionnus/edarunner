@@ -26,7 +26,7 @@ and every command with the mark (dry) or the prefix dry: and writes
 nothing: no date pin, no spec, no file on a host, no database row, no
 event, not even an empty database.
 
---why <text> is required on stop and retire, and optional on import. The
+--why &lt;text&gt; is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
 A read command (brief, check, compare, events, hosts, metrics, notify, runtime, status, tools) never creates
@@ -56,6 +56,34 @@ to the newest batch directory in the state.
 | 130 | interrupted |
 
 A command below says where it refines a code.
+
+## Commands
+
+| Command | Summary |
+|---|---|
+| [brief](#brief) | what a session reads first: the project, its flow, site and state |
+| [status](#status) | the board, or one run |
+| [events](#events) | the last events |
+| [hosts](#hosts) | probe every host |
+| [tools](#tools) | every site tool: free seats and hosts |
+| [metrics](#metrics) | the metrics of one design or one run |
+| [extract](#extract) | extract the metrics of runs again from their collected files |
+| [compare](#compare) | two or more runs side by side |
+| [runtime](#runtime) | stage, step and task times |
+| [init](#init) | write edr.toml and the watch unit here |
+| [check](#check) | load everything, probe the hosts, check the hooks |
+| [checkout](#checkout) | check out a ref as a worktree, or a dirty tree as a snapshot |
+| [plan](#plan) | render the run specs of a batch; writes no spec |
+| [launch](#launch) | start one driver per job of a batch |
+| [continue](#continue) | more work on the tree of an existing run |
+| [track](#track) | run a command under the driver here, as a run of the project |
+| [keep](#keep) | add hours to the running stage or task; --ack cancels a pending kill |
+| [import](#import) | record a run tree that edr did not make, or its collected results |
+| [export](#export) | a frozen snapshot of one design |
+| [stop](#stop) | stop one run |
+| [retire](#retire) | remove the run tree, or its prune targets |
+| [notify](#notify) | send one message, the board or the digest through every notifier |
+| [watch](#watch) | the watcher |
 
 ## brief
 
@@ -199,7 +227,6 @@ directory as {root}. hosts lists the hosts that have the tool, with
 their versions. A tool without a probe shows - for the seats. --json
 gives tool, free, total, hosts (host to version) and note.
 
-
 | Exit | Meaning |
 |---|---|
 | 3 | a probe failed, or printed no number |
@@ -230,7 +257,7 @@ has one. --instance takes that instance and every instance below it.
 | `--design SRC` | the exact source tag of the runs, as in the run id |
 | `--run HANDLE` | one run: label@batch, a run id prefix, or #n from the last board |
 | `--metric NAME` | one metric, by name or canonical name |
-| `--over OVER` | with --run: the metrics along the steps |
+| `--over {steps}` | with --run: the metrics along the steps |
 | `--stage S` | the metrics of one stage |
 | `--step N` | the metrics of one step number |
 | `--csv` | CSV on stdout |
@@ -292,7 +319,7 @@ the table.
 
 | Flag | Meaning |
 |---|---|
-| `handles` | label@batch, a run id prefix, or #n from the last board |
+| `HANDLE ...` | label@batch, a run id prefix, or #n from the last board |
 | `--area` | the hierarchical area per instance |
 | `--metric NAME` | this metric, by name or canonical name; repeatable |
 | `--depth N` | the instance depth; default 1 |
@@ -323,7 +350,7 @@ each stage, attempts summed, and the total.
 
 | Flag | Meaning |
 |---|---|
-| `handles` | label@batch, a run id prefix, or #n from the last board |
+| `HANDLE ...` | label@batch, a run id prefix, or #n from the last board |
 | `--batch B` | every run of the batch |
 
 | Exit | Meaning |
@@ -356,7 +383,6 @@ hook, checks the driver file, probes every host once, names every tool
 the head node lacks, and plans every batch with those probes. Prints one
 problem: line per fault, or an ok: line with the counts.
 
-
 | Exit | Meaning |
 |---|---|
 | 1 | a problem was found |
@@ -368,11 +394,11 @@ edr checkout [--dry-run] [--dirty DIR] [ref]
 ```
 
 Fetches, then adds a detached worktree of ref (default source.ref) at
-<worktrees>/<short hash>, and clones each source.nested repository into
-it at the HEAD the repository copy has. Prints <src> <path>.
+&lt;worktrees&gt;/&lt;short hash&gt;, and clones each source.nested repository into
+it at the HEAD the repository copy has. Prints &lt;src&gt; &lt;path&gt;.
 
 --dirty DIR copies a working tree instead, with its diff in source.diff;
-the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
+the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt; and prints with (dirty). A clean tree
 under --dirty is checked out as a worktree.
 
 | Flag | Meaning |
@@ -388,13 +414,13 @@ edr plan [--dry-run] [batch]
 ```
 
 Renders every job of the batch into a run spec and prints
-<run id>: <host or queued> <root> per job, with problem: lines under a
+&lt;run id&gt;: &lt;host or queued&gt; &lt;root&gt; per job, with problem: lines under a
 job that cannot run. With --json, data[].spec is the full spec of each
 job.
 
 If the batch's source is a clean ref that has not been checked out
 yet, plan checks it out first, the same way edr checkout does, and
-prints a checkout <src> <path> line. With --dry-run it prints that line
+prints a checkout &lt;src&gt; &lt;path&gt; line. With --dry-run it prints that line
 and the git commands but checks nothing out. Apart from that checkout,
 plan writes nothing. A dirty source that has not been checked out is
 refused; add it with edr checkout --dirty DIR.
@@ -418,7 +444,7 @@ Checks out a missing clean source the way plan does, then pins the date
 of the batch, publishes the driver into the state directory, syncs the
 checked-out tree to each host, writes one spec per run
 and starts one driver per run, stagger_s apart. Prints
-<n> started, <n> queued, <n> with problems. A job that no host fits is
+&lt;n&gt; started, &lt;n&gt; queued, &lt;n&gt; with problems. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec
 exists is already launched; a batch name is used once.
 
@@ -442,13 +468,13 @@ edr continue [--dry-run] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [
 ```
 
 More work on the tree of an existing run: one stage, on the same tree,
-as a new run in the batch of that run with the label <label>.<stage>.
+as a new run in the batch of that run with the label &lt;label&gt;.&lt;stage&gt;.
 --tasks names the tasks of a task group, --parallel its width, --on the
 host (default: the tree's host). --from fills {checkpoint} in the
 stage's resume command, and is refused when the stage has none.
 
 --collect NAME instead copies the collect_on_request list NAME of every
-stage from the tree into data/results/<run id>/.
+stage from the tree into data/results/&lt;run id&gt;/.
 
 | Flag | Meaning |
 |---|---|
@@ -480,7 +506,7 @@ the metrics and export then see the run.
 The run is one stage named --stage. A stage of edr.toml with that name
 gives its steps, progress, budget, retry and tools, so the gate and the
 budget work; the command replaces its cmd. The tree is --root, default
-the current directory, and the driver writes log/<stage>.log there. The
+the current directory, and the driver writes log/&lt;stage&gt;.log there. The
 run id follows source.run_id with the label as config, track as the
 build tag, and --src (default the source tag of the tree) as src.
 
@@ -530,14 +556,13 @@ cancels a pending kill or stop of the watcher.
 ## import
 
 ```
-edr import [--dry-run] --run-id RUN_ID --label LABEL --config CONFIG --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE]
-                  [--build-tag TAG] [--why WHY]
+edr import [--dry-run] --run-id RUN_ID --label LABEL --config CONFIG --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
 ```
 
 Records a run the package did not make. With --host and --root, the tree
 on that host, so reuse and edr continue can use it. With --results DIR,
 a directory of collected files of a run whose tree is gone: it is linked
-as data/results/<run id> and the project's metrics are extracted from
+as data/results/&lt;run id&gt; and the project's metrics are extracted from
 it; --tasks names the tasks whose files it holds. The run id must start
 with YYYYMMDD_HHMM_.
 
@@ -550,7 +575,7 @@ with YYYYMMDD_HHMM_.
 | `--src SRC` | the source tag of the tree, required |
 | `--host HOST` | the host of the tree |
 | `--root PATH` | the tree on the host |
-| `--results DIR` | collected files in the run layout; linked as data/results/<run id> |
+| `--results DIR` | collected files in the run layout; linked as data/results/&lt;run id&gt; |
 | `--tasks ID ...` | the tasks whose files the results hold |
 | `--batch BATCH` | the batch to record it in; default imported |
 | `--phase PHASE` | the terminal phase; default done |
@@ -623,10 +648,10 @@ edr retire [--dry-run] --why WHY [--batch B] [--collect NAMES] [--prune T] [--un
 Removes the run tree on the host, or with --prune T the paths that
 prune.T names in the stages, after the guard on every target. --batch
 retires every run of the batch and marks it RETIRED, so the watcher
-skips it. A live run gets the phase ABANDONED:<why>.
+skips it. A live run gets the phase ABANDONED:&lt;why&gt;.
 
 --collect NAME,... first copies the named collect_on_request lists of
-every run into data/results/<run id>/, and removes nothing when one copy
+every run into data/results/&lt;run id&gt;/, and removes nothing when one copy
 failed.
 
 retire refuses a run whose driver is alive, a live run that has no
