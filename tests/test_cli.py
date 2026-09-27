@@ -561,7 +561,7 @@ def test_bad_input_exits_1(capsys) -> None:
 
 
 def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> None:
-    root = tmp_path / "scratch" / "lkesting" / "edr" / "old" / "20260904_0411_ref_x_gabc1234"
+    root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_x_gabc1234"
     root.mkdir(parents=True)
     argv = ["import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
             "--host", "local", "--root", str(root), "--why", "reference"]
@@ -606,7 +606,7 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
 
 
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
-    root = tmp_path / "scratch" / "lkesting" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
+    root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
     root.mkdir(parents=True)
     assert edr(capsys, "import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
                "--host", "local", "--root", str(root))[0] == 0
