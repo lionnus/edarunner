@@ -1,13 +1,7 @@
 :root > * {
-  --md-primary-fg-color: #3b7dd8;
-  --md-primary-fg-color--light: #6a9ee3;
-  --md-primary-fg-color--dark: #2d62ad;
-}
-
-/* The logo strokes are the primary blue, so the header takes the page colours. */
-.md-header {
-  background-color: var(--md-default-bg-color);
-  color: var(--md-default-fg-color);
-  --md-primary-bg-color: var(--md-default-fg-color);
-  --md-primary-bg-color--light: var(--md-default-fg-color--light);
+  --md-primary-fg-color: #2ea043;
+  --md-primary-fg-color--light: #3fb950;
+  --md-primary-fg-color--dark: #238636;
+  --md-primary-bg-color: #0d1117;
+  --md-primary-bg-color--light: #0d1117b3;
 }
