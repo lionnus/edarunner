@@ -104,23 +104,23 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
 
     code, out, _ = edr(capsys, "--json", "run", "a@demo", "--stage", "export", "--on", "local")
     new = json.loads(out)["data"]
-    assert code == 0 and new["batch"].startswith("run_") and new["root"] == str(roots["a"])
-    assert new["run_id"] == f"{new['batch'][4:]}_a.export_demo_g{src}"
+    assert code == 0 and new["batch"] == "demo" and new["root"] == str(roots["a"])
+    assert re.fullmatch(rf"\d{{8}}_\d{{4}}_a\.export_demo_g{src}", new["run_id"]) and new["run_id"] != ids["a"]
     rows = wait_terminal(capsys, 3)
     assert {r["run_id"]: (r["label"], r["phase"]) for r in rows}[new["run_id"]] == ("a.export", "done")
     assert (roots["a"] / "out" / "11" / "netlist.v").is_file() and (results / new["run_id"] / "log" / "export.log").is_file()
 
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--why", "test", "--dry-run")
     assert code == 0 and all(p.is_dir() for p in roots.values()) and not (state / "demo" / "RETIRED").exists()
-    assert out.count("rm -rf ") == 2 and "(dry)" in out
+    assert out.count("rm -rf ") == 3 and "(dry)" in out  # the export run names the tree of a again
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--why", "test")
     assert code == 0 and not any(p.exists() for p in roots.values()) and (state / "demo" / "RETIRED").is_file()
     assert (state / "demo" / f"{ids['a']}.json").is_file()  # the state outlives the tree
-    assert {r["batch"] for r in runs(capsys)} == {new["batch"]}
+    assert runs(capsys) == []  # the export run went with its batch
     code, out, _ = edr(capsys, "--json", "events", "-n", "100")
     kinds = [(e["actor"], e["kind"]) for e in json.loads(out)["data"]]
     assert kinds.count(("user", "launch")) == 2 and ("user", "keep") in kinds and ("user", "run") in kinds
-    assert kinds.count(("user", "retire")) == 2 and ("user", "export") in kinds and ("watch", "done") in kinds
+    assert kinds.count(("user", "retire")) == 3 and ("user", "export") in kinds and ("watch", "done") in kinds
 
 
 def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:

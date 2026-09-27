@@ -536,12 +536,11 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         job.tasks = a.tasks
     if a.parallel:
         project.stages[a.stage].parallel = a.parallel
-    # The stage in the label and a batch per call keep the new run id apart from the reused one.
+    # The run joins the batch of the tree it continues; the stage in the label and the time keep its id apart.
     job.label = f"{job.label}.{a.stage}"
-    batch.batch, batch.jobs = f"run_{time.strftime(launch.DATE_FMT)}", [job]
+    batch.batch, batch.jobs = str(row["batch"]), [job]
     state = project.state
-    date = launch.pin_date(state, batch.batch, a.dry_run)
-    (p,) = launch.plan(project, batch, c.ssh, c.ledger, date=date)
+    (p,) = launch.plan(project, batch, c.ssh, c.ledger, date=time.strftime(launch.DATE_FMT))
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
         return 1
@@ -556,7 +555,6 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
     if a.dry_run:
         return 0
     now = int(time.time())
-    c.ledger.upsert_batch({"batch": batch.batch, "project": project.project, "source": p.src, "run_date": date})
     c.ledger.upsert_run({"run_id": p.run_id, "batch": batch.batch, "label": job.label, "config": job.config,
                          "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
                          "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
