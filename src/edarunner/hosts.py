@@ -244,10 +244,6 @@ class Ssh:
         out = self._run_ok(host, _probe_cmd(self.scratch_dirs(host)))
         return _parse_probe(host, out, self.site.tool_procs)
 
-    def pid_alive(self, host: str, pid: int) -> bool:
-        """True when `pid` runs on `host`; HostError when the host did not answer."""
-        return int(pid) in self.pids_alive(host, [pid])
-
     def pids_alive(self, host: str, pids: list[int]) -> set[int]:
         """The pids of `pids` that run on `host`, by one `ps`; HostError when the host did not answer."""
         wanted = {int(p) for p in pids}

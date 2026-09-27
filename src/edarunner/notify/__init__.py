@@ -39,9 +39,6 @@ class Notifier:
         """Send one alert of `kind` for `run_id`: a title line, the reason, and the command to run next; return its message id."""
         return None
 
-    def edit(self, msg_id: str, text: str) -> None:
-        """Rewrite a sent message in place."""
-
     def board(self, text: str) -> None:
         """Rewrite the one pinned board message in place; `text` is Telegram HTML."""
 

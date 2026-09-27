@@ -426,7 +426,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         if p.spec and not p.problems and spec_path.exists():
             p.problems.append(f"already launched: {spec_path} exists")
         if p.queued and not dry_run:
-            db.upsert_run({**_run_row(p, batch), "state": "queued"})
+            db.upsert_run({**run_row(p, batch), "state": "queued"})
         if p.queued or p.problems:
             print(f"{p.run_id}: " + ("queued" if p.queued else "; ".join(p.problems)))
             continue
@@ -451,7 +451,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         print(f"{p.run_id}: {p.host or backend.name} {p.root}" + (" (dry)" if dry_run else ""))
         if dry_run:
             continue
-        db.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
+        db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
         try:
             handle = submit(backend, db, project, p.run_id, p.host, path, driver)
@@ -468,7 +468,8 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
     return out
 
 
-def _run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
+def run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
+    """The `runs` row of a planned run, before the driver starts."""
     return {"run_id": p.run_id, "batch": batch.batch, "label": p.label, "config": p.spec.get("config") or p.values.get("config"),
             "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host, "root": p.root or None,
             "tree_id": p.values.get("tree_id") or p.run_id, "created": int(time.time())}

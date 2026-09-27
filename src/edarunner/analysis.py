@@ -245,8 +245,7 @@ def _log_steps(project: Project, run: Row, stage: str, first: int) -> list[Row]:
 def runtime(project: Project, db: Database, run: Row) -> Row:
     """Stage, step and task times of one run, from stage_runs, step_runs and the step_log files."""
     run_id = run["run_id"]
-    rows = [dict(r) for r in db.conn.execute(
-        "SELECT * FROM stage_runs WHERE run_id=? ORDER BY started, stage, task, attempt", (run_id,))]
+    rows = db.stage_runs(run_id)
     order = {n: i for i, n in enumerate(project.stages)}
     stages = sorted((r for r in rows if not r["task"]), key=lambda r: (order.get(r["stage"], len(order)), r["attempt"]))
     for r in stages:
@@ -254,8 +253,7 @@ def runtime(project: Project, db: Database, run: Row) -> Row:
         r["source"] = "stage_runs"
     ended = {s["stage"]: s["ended"] for s in stages if s.get("ended")}
     owned = owned_steps(project)
-    steps = [{**dict(r), "source": "step_runs"} for r in db.conn.execute(
-        "SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))]
+    steps = [{**r, "source": "step_runs"} for r in db.step_runs(run_id)]
     have = {s["stage"] for s in steps}
     for name, st in project.stages.items():
         if st.step_log and name not in have:

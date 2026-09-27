@@ -109,19 +109,10 @@ def collect_on_request(
 ) -> CollectResult:
     """Copy the `collect_on_request` list `name` of every stage; the artifact class is `name`."""
     spec = load_spec(project, run)
-    only = spec_stages(spec)
     c = _Copier(project, ssh, db, run, {}, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), spec.get("vars"))
     if c.result.failures:
         return c.result
-    tasks = list(run.get("tasks") or [])
-    paths: list[str] = []
-    for stage in project.stages.values():
-        if only is not None and stage.name not in only:
-            continue
-        paths += c.render(stage, stage.collect_on_request.get(name, []), tasks)
-    if not paths and not c.result.failures:
-        c.result.failures.append(f"no stage has collect_on_request.{name}")
-    c.copy_all(paths, name)
+    c.copy_all(_on_request_paths(project, c, spec, run, name), name)
     return c.result
 
 
@@ -134,20 +125,25 @@ def restore_on_request(
     `job_vars` fill `{vars.<name>}` where the spec of `run` lacks them.
     """
     spec = load_spec(project, run)
-    heartbeat = load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
     c = _Copier(project, ssh, db, {**run, "host": host, "root": root}, {}, dry_run,
                 spec_task_dirs(spec, str(run.get("root") or "")), {**(job_vars or {}), **spec.get("vars", {})})
     if c.result.failures:
         return c.result
-    only = spec_stages(spec)
+    for entry in dict.fromkeys(_on_request_paths(project, c, spec, run, name)):
+        c.push(entry)
+    return c.result
+
+
+def _on_request_paths(project: Project, c: _Copier, spec: dict, run: dict, name: str) -> list[str]:
+    """The rendered `collect_on_request.<name>` entries of the stages the spec ran, for the tasks of the heartbeat."""
+    heartbeat = load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
     tasks = list(heartbeat.get("tasks") or {})
+    only = spec_stages(spec)
     paths = [p for stage in project.stages.values() if only is None or stage.name in only
              for p in c.render(stage, stage.collect_on_request.get(name, []), tasks)]
     if not paths and not c.result.failures:
         c.result.failures.append(f"no stage has collect_on_request.{name}")
-    for entry in dict.fromkeys(paths):
-        c.push(entry)
-    return c.result
+    return paths
 
 
 class _Copier:

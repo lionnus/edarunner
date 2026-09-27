@@ -354,8 +354,6 @@ def test_alert_send_edits_a_repeat(bot):
     assert bot.send("hung", "run1", "no progress for 3 h") == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
     assert bot.send("hung", "run2", "x") == "2"
-    bot.edit("2", "resolved <ok>")
-    assert bot.api.of("editMessageText")[-1]["text"] == "<b>demo: resolved &lt;ok&gt;</b>"
 
 
 def test_board_is_created_once_then_edited(bot, tmp_path):

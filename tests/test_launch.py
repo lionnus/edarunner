@@ -257,7 +257,7 @@ def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
     assert launch.stop(ssh, db, run_row, hb, now=True, grace_s=15, why="test", state=project.state_dir)
     hb = wait_for({"state_file": str(hb_path)}, lambda h: h["exit"] is not None, timeout=20)
     assert hb["phase"] in ("KILLED:SIGTERM", "STOPPED") and hb["exit"] == 10 and hb["pgids"] == []
-    assert not ssh.pid_alive("local", hb["driver_pid"])
+    assert not ssh.pids_alive("local", [hb["driver_pid"]])
     assert [e["kind"] for e in db.events(run_id=row["run_id"])] == ["launch", "stop"]
     assert launch.stop(ssh, db, run_row, hb, after_task=True, why="later", state=project.state_dir)
     assert (hb_path.with_name(f"{row['run_id']}.stop")).read_text().strip() == "after-task"
@@ -479,4 +479,4 @@ def test_tree_id_survives_a_chain_of_reuse(env) -> None:
     batch.jobs[0].stages = ["pnr"]
     a = next(p for p in launch.plan(project, batch, ssh, db, date=DATE) if p.label == "a")
     assert a.reuse == "20260102_0000_a_demo_gOLD" and a.values["tree_id"] == "20260101_0000_a_demo_gOLD"
-    assert launch._run_row(a, batch)["tree_id"] == "20260101_0000_a_demo_gOLD"
+    assert launch.run_row(a, batch)["tree_id"] == "20260101_0000_a_demo_gOLD"

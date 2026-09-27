@@ -60,8 +60,7 @@ def export_mlflow(project: Project, db: Database, out: Path, design: str | None 
                 "edr.phase": r.get("phase") or "", "mlflow.runName": r.get("label") or r["run_id"]}
         run = client.create_run(exp_id, start_time=started or None, tags=tags)
         rid = run.info.run_id
-        params = {p["key"]: p["value"] for p in db.conn.execute(
-            "SELECT key, value FROM parameters WHERE run_id=?", (r["run_id"],))}
+        params = {p["key"]: p["value"] for p in db.parameters(r["run_id"])}
         params.update({k: r.get(k) for k in ("config", "build_tag", "src") if r.get(k) and k not in params})
         metrics = []
         for m in db.metrics(run_ids=[r["run_id"]]):

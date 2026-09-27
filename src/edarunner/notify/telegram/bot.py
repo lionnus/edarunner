@@ -94,10 +94,6 @@ class TelegramBot(Notifier):
             hit = self._state.get("replies", {}).get(str(target))
         return hit[0] if hit and time.time() - hit[1] < REPLY_DAYS * 86400 else None
 
-    def edit(self, msg_id: str, text: str) -> None:
-        """Rewrite one message; this drops its buttons."""
-        self._call(self.api.edit_message, self.chat_id, int(msg_id), fmt.alert(self.project.project, text))
-
     def board(self, text: str) -> None:
         """Rewrite the pinned board silently; create and pin it once. `text` is Telegram HTML."""
         title = fmt.head(self.project.project, "board " + time.strftime("%H:%M"))

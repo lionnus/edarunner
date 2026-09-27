@@ -163,11 +163,6 @@ def help_text(groups: dict[str, list[tuple[str, str]]]) -> str:
                            for g, cmds in groups.items()))
 
 
-def plain(text: str) -> str:
-    """Telegram HTML as terminal text: no tags, no entities."""
-    return html.unescape(re.sub(r"<[^>]+>", "", text))
-
-
 def _section(title: str, lines: list[str], most: int = 10) -> str:
     body = lines[:most] + ([f"<i>… and {len(lines) - most} more</i>"] if len(lines) > most else [])
     return f"<b>{esc(title)}</b>\n" + ("\n".join(body) or "<i>none</i>")

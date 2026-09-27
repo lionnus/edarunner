@@ -278,6 +278,19 @@ class Database:
 
     # queries
 
+    def stage_runs(self, run_id: str) -> list[Row]:
+        """The stage and task rows of one run, oldest first; a stage row has task ''."""
+        return self._rows("SELECT * FROM stage_runs WHERE run_id=? ORDER BY started, stage, task, attempt", (run_id,))
+
+    def step_runs(self, run_id: str) -> list[Row]:
+        """The step start times of one run, by stage and step."""
+        return self._rows("SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))
+
+    def parameters(self, run_id: str | None = None) -> list[Row]:
+        """The parameter rows of one run, or of every run."""
+        where, args = (" WHERE run_id=?", (run_id,)) if run_id else ("", ())
+        return self._rows("SELECT run_id, key, value, source FROM parameters" + where, args)
+
     def _rows(self, sql: str, args: tuple | list = ()) -> list[Row]:
         return [dict(r) for r in self.conn.execute(sql, args)]
 

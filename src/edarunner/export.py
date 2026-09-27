@@ -49,8 +49,8 @@ def export(
     metrics = db.metrics(run_ids=ids)
 
     plan: list[tuple[str, Path | bytes]] = [
-        ("runs.csv", _csv(RUN_COLUMNS, [_run_row(r) for r in runs])),
-        ("metrics.csv", _csv(METRIC_COLUMNS, [_metric_row(m) for m in metrics])),
+        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r) for r in runs])),
+        ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics])),
     ]
     for r in runs:
         results = Path(project.data) / "results" / r["run_id"]
@@ -97,8 +97,8 @@ def export(
 def _record(project: Project, db: Database, r: Row) -> dict[str, Any]:
     """What made a run, as far as edarunner knows it: host, start and end, versions, and each stage's times."""
     spec = collect.load_spec(project, r).get("record") or {}
-    stages = [{k: s[k] for k in ("stage", "task", "attempt", "status", "started", "ended")} for s in db.conn.execute(
-        "SELECT * FROM stage_runs WHERE run_id=? AND task='' ORDER BY started, attempt", (r["run_id"],))]
+    stages = [{k: s[k] for k in ("stage", "task", "attempt", "status", "started", "ended")}
+              for s in db.stage_runs(r["run_id"]) if not s["task"]]
     return {"host": r.get("host"), "started": r.get("started"), "ended": None if is_live(r) else r.get("updated"),
             "edarunner": spec.get("edarunner"), "driver_sha256": spec.get("driver_sha256"), "tools": spec.get("tools") or {},
             "stages": stages}
@@ -119,12 +119,14 @@ def _run_row(r: Row) -> list[Any]:
             r.get("started"), ended]
 
 
-def _metric_row(m: Row) -> list[Any]:
+def metric_row(m: Row) -> list[Any]:
+    """One metrics.csv row in the order of METRIC_COLUMNS."""
     return [m["run_id"], m.get("label"), m.get("config"), m.get("src"), m.get("stage"), m.get("step"), m.get("task"),
             m.get("name"), m.get("canonical"), m.get("value"), m.get("unit"), m.get("source_file")]
 
 
-def _csv(head: list[str], rows: list[list[Any]]) -> bytes:
+def to_csv(head: list[str], rows: list[list[Any]]) -> bytes:
+    """CSV with a header line; None becomes an empty field."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(head)

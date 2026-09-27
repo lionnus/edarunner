@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import csv
 import functools
 import io
 import json
@@ -39,7 +38,7 @@ from .db import Database, network_fs
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
 from .model import SCHEDULERS, Batch, Job, Project, Stage
-from .notify import make_notifiers
+from .notify import make_notifiers, untag
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
 
@@ -451,15 +450,14 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
     """The board, one run with its stages, metrics and log tail, or the daily digest."""
     if a.digest:
         text = Actions(c).digest_text()
-        c.emit(tgfmt.plain(text), {"digest": text})
+        c.emit(untag(text), {"digest": text})
         return Exit.DONE
     if a.handle:
         row = c.resolve(a.handle)
         c.refresh(str(row["batch"]))
         row = c.db.run(row["run_id"]) or row
         hb, run_id = c.heartbeat(row), row["run_id"]
-        stages = [dict(r) for r in c.db.conn.execute(
-            "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
+        stages = c.db.stage_runs(run_id)
         mets = c.db.metrics(run_ids=[run_id])
         samples = c.db.run_samples(run_id)
         c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples),
@@ -543,13 +541,7 @@ def cmd_tools(c: Ctx, a: argparse.Namespace) -> int:
 
 def _metrics_csv(rows: list[Row]) -> str:
     """Metric rows as CSV with the columns of an export."""
-    out = io.StringIO()
-    w = csv.writer(out, lineterminator="\n")
-    w.writerow(export.METRIC_COLUMNS)
-    w.writerows([m["run_id"], m.get("label"), m.get("config"), m.get("src"), m["stage"], m.get("step"),
-                 m.get("task"), m["name"], m.get("canonical"), m["value"], m.get("unit"), m.get("source_file")]
-                for m in rows)
-    return out.getvalue()
+    return export.to_csv(export.METRIC_COLUMNS, [export.metric_row(m) for m in rows]).decode()
 
 
 def _area_table(rows: list[Row]) -> Table | str:
@@ -770,8 +762,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
     row = c.resolve(a.handle)
     project, run_id = c.project, row["run_id"]
     if a.collect:
-        tasks = list(c.heartbeat(row).get("tasks") or [])
-        res = collect.collect_on_request(project, c.ssh, c.db, {**row, "tasks": tasks}, a.collect, a.dry_run)
+        res = collect.collect_on_request(project, c.ssh, c.db, row, a.collect, a.dry_run)
         if not a.dry_run:
             c.db.add_event("user", run_id, "collect", f"{a.collect}: {res.files} files, {len(res.failures)} failed")
         c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
@@ -813,11 +804,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
            {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
     if a.dry_run:
         return Exit.DONE
-    now = int(time.time())
-    c.db.upsert_run({"run_id": p.run_id, "batch": batch.batch, "label": job.label, "config": job.config,
-                         "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
-                         "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
-                         "tree_id": p.values.get("tree_id") or p.run_id})
+    c.db.upsert_run({**launch.run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
     c.db.add_event("user", p.run_id, "continue", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
     launch.submit(c.backend, c.db, project, p.run_id, p.host, spec_path, driver)
     return Exit.DONE
@@ -1014,8 +1001,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
     # The archive step: every named list is on the head node before any rm runs.
     for row, hb, host, root, targets in checked:
         for name in (a.collect.split(",") if a.collect and root else []):
-            run = {**row, "tasks": list(hb.get("tasks") or {})}
-            res = collect.collect_on_request(project, c.ssh, c.db, run, name, a.dry_run)
+            res = collect.collect_on_request(project, c.ssh, c.db, row, name, a.dry_run)
             print(f"{row['run_id']}: collect {name}: {res.files} files{dry}")
             if res.failures:
                 raise Refuse(f"{row['run_id']}: collect {name}: {res.failures[0]}; nothing removed")
@@ -1147,13 +1133,13 @@ def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
     else:
         title, html = "note", tgfmt.esc(a.text)
     if a.dry_run:
-        c.emit(tgfmt.head(c.project.project, title) + "\n" + html + "\n(dry)", {"sent": 0, "text": tgfmt.plain(html)})
+        c.emit(tgfmt.head(c.project.project, title) + "\n" + html + "\n(dry)", {"sent": 0, "text": untag(html)})
         return Exit.DONE
     notifiers = make_notifiers(c.project.site, c.project, c.db, Actions(c))
     if not notifiers:
         raise Refuse("no notifier is configured; see docs/notify.md")
     sent = sum(n.post(title, html, a.silent) for n in notifiers)
-    c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": tgfmt.plain(html)})
+    c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": untag(html)})
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
 
 

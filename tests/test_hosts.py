@@ -1,4 +1,4 @@
-"""hosts.py: the ssh wrapper on `local`, the probe, pid_alive, kill_pgid, placement."""
+"""hosts.py: the ssh wrapper on `local`, the probe, pids_alive, kill_pgid, placement."""
 
 from __future__ import annotations
 
@@ -174,20 +174,19 @@ def test_scratch_dirs_prefers_host_list(ssh: Ssh) -> None:
     assert ssh.scratch_dirs("local") == ssh.site.scratch
 
 
-# pid_alive, kill_pgid, tool_processes
+# pids_alive, kill_pgid, tool_processes
 
 
-def test_pid_alive_local(ssh: Ssh) -> None:
-    assert ssh.pid_alive("local", os.getpid())
-    assert not ssh.pid_alive("local", 4194303)
+def test_pids_alive_local(ssh: Ssh) -> None:
+    assert ssh.pids_alive("local", [os.getpid(), 4194303]) == {os.getpid()}
 
 
-def test_pid_alive_canned(ssh: Ssh, monkeypatch) -> None:
-    fake_run(monkeypatch, {"ps -p 42": (0, "42\n", ""), "ps -p 43": (1, "", "")})
-    assert ssh.pid_alive("h", 42) and not ssh.pid_alive("h", 43)
+def test_pids_alive_canned(ssh: Ssh, monkeypatch) -> None:
+    fake_run(monkeypatch, {"ps -p 42,43": (0, "42\n", "")})
+    assert ssh.pids_alive("h", [42, 43]) == {42}
     fake_run(monkeypatch, {"ps -p": (255, "", "lost")})
     with pytest.raises(HostError):
-        ssh.pid_alive("h", 42)
+        ssh.pids_alive("h", [42])
 
 
 def test_kill_pgid_local(ssh: Ssh) -> None:
