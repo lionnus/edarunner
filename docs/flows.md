@@ -4,6 +4,8 @@ Two flows have run through `edr` on real hosts. They differ in shape, and
 the two configs below show both patterns. The names and paths are
 examples; the site names live in the private site file.
 
+![How a flow plugs in: the core, the project file and the private site file](diagrams/site-layer.svg)
+
 ## One tool session, many steps inside
 
 A commercial place-and-route flow runs its stages inside one tool

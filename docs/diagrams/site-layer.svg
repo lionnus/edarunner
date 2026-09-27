@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="620" viewBox="0 0 960 620" role="img" aria-label="How a flow plugs into edarunner: the core, the project edr.toml and the private site.toml">
+<style>
+  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
+  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
+  .run { fill: #f28c38; }
+  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
+  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .m.key { fill: #6e7781; }
+  .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
+  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  @media (prefers-color-scheme: dark) {
+    .box { fill: #0d1117; }
+    .frame-fill { fill: #161b22; }
+    .t, .m { fill: #c9d1d9; }
+  }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="#6e7781"/>
+  </marker>
+</defs>
+
+<!-- Core -->
+<rect class="frame-fill" x="24" y="24" width="912" height="104" rx="10"/>
+<text class="h" x="40" y="48">CORE · KNOWS NO EDA TOOL</text>
+<text class="m" x="920" y="48" text-anchor="end">edarunner</text>
+<rect class="box" x="40" y="64" width="160" height="44" rx="7"/>
+<text class="t" x="120" y="91" text-anchor="middle">Stages</text>
+<rect class="box" x="220" y="64" width="160" height="44" rx="7"/>
+<text class="t" x="309" y="91" text-anchor="middle">Driver</text>
+<rect class="box" x="400" y="64" width="160" height="44" rx="7"/>
+<text class="t" x="480" y="91" text-anchor="middle">Watcher</text>
+<rect class="box" x="580" y="64" width="160" height="44" rx="7"/>
+<text class="t" x="660" y="91" text-anchor="middle">Ledger</text>
+<rect class="box" x="760" y="64" width="160" height="44" rx="7"/>
+<text class="t" x="840" y="91" text-anchor="middle">Export</text>
+<path class="run" d="M270 79v14l11-7z"/>
+
+<!-- Project -->
+<rect class="frame" x="24" y="176" width="536" height="240" rx="10"/>
+<text class="h" x="40" y="200">PROJECT · IN GIT</text>
+<text class="m" x="544" y="200" text-anchor="end">edr.toml</text>
+<rect class="box" x="40" y="216" width="504" height="52" rx="7"/>
+<text class="t" x="54" y="238">Each stage</text>
+<text class="m" x="54" y="256" xml:space="preserve">cmd  progress  steps  collect  collect_on_request  needs  budget</text>
+<rect class="box" x="40" y="280" width="504" height="52" rx="7"/>
+<text class="t" x="54" y="302">Each metric</text>
+<text class="m" x="54" y="320" xml:space="preserve">file + regex | csv | json | python, or expr</text>
+<rect class="box" x="40" y="344" width="504" height="52" rx="7"/>
+<text class="t" x="54" y="366">Shared environment</text>
+<text class="m" x="54" y="384">[env]</text>
+
+<!-- Site -->
+<rect class="frame" x="656" y="176" width="280" height="240" rx="10"/>
+<text class="h" x="672" y="200">PRIVATE · NOT IN GIT</text>
+<text class="m" x="920" y="200" text-anchor="end">site.toml</text>
+<rect class="box" x="672" y="216" width="248" height="52" rx="7"/>
+<text class="t" x="686" y="238">FlexLM licence probes</text>
+<text class="m" x="686" y="256">[licences.&lt;name&gt;]</text>
+<rect class="box" x="672" y="280" width="248" height="52" rx="7"/>
+<text class="t" x="686" y="302">Hosts and scratch</text>
+<text class="m" x="686" y="320" xml:space="preserve">scratch  [hosts.&lt;name&gt;]</text>
+<rect class="box" x="672" y="344" width="248" height="52" rx="7"/>
+<text class="t" x="686" y="366">Env, Telegram, commands</text>
+<text class="m" x="686" y="384" xml:space="preserve">env  [telegram.*]</text>
+
+<!-- Layers to core -->
+<path class="a" d="M210 176V128"/>
+<text class="al" x="218" y="157">the flow</text>
+<path class="a" d="M750 176V128"/>
+<text class="al" x="758" y="157">the machines</text>
+<path class="a" d="M544 242H672"/>
+<text class="al" x="608" y="235" text-anchor="middle">needs.licence</text>
+
+<!-- Examples -->
+<rect class="frame" x="24" y="440" width="912" height="156" rx="10"/>
+<text class="h" x="40" y="464">TWO EXAMPLE FLOWS</text>
+<text class="s" x="920" y="464" text-anchor="end">same edr.toml keys, other values</text>
+<text class="t" x="220" y="494">Fusion Compiler and PrimePower</text>
+<text class="t" x="580" y="494">Yosys and OpenROAD</text>
+<text class="s" x="220" y="512">a make target, a licence seat</text>
+<text class="s" x="580" y="512">a container command, no licence</text>
+<text class="m key" x="40" y="536">cmd</text>
+<text class="m" x="220" y="536">make … pnr</text>
+<text class="m" x="580" y="536">oseda ./run_synthesis.sh</text>
+<text class="m key" x="40" y="554">needs.licence</text>
+<text class="m" x="220" y="554">"fc"</text>
+<text class="s" x="580" y="554">none</text>
+<text class="m key" x="40" y="572">metric file</text>
+<text class="m" x="220" y="572">area_hier.rpt</text>
+<text class="m" x="580" y="572">synth_stat.rpt</text>
+</svg>

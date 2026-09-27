@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="490" viewBox="0 0 960 490" role="img" aria-label="The lifecycle of one edarunner run, from a commit to a paper">
+<style>
+  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
+  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
+  .run { fill: #f28c38; }
+  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
+  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
+  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  @media (prefers-color-scheme: dark) {
+    .box { fill: #0d1117; }
+    .frame-fill { fill: #161b22; }
+    .t, .m { fill: #c9d1d9; }
+  }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="#6e7781"/>
+  </marker>
+</defs>
+
+<!-- Frames -->
+<rect class="frame" x="24" y="24" width="152" height="152" rx="10"/>
+<text class="h" x="40" y="48">GIT</text>
+<rect class="frame-fill" x="187" y="24" width="530" height="442" rx="10"/>
+<text class="h" x="203" y="48">HEAD NODE</text>
+<rect class="frame-fill" x="728" y="24" width="208" height="322" rx="10"/>
+<text class="h" x="744" y="48">COMPUTE HOST</text>
+
+<!-- Out: from a commit to a running driver -->
+<rect class="box" x="38" y="64" width="124" height="96" rx="7"/>
+<text class="t" x="100" y="106" text-anchor="middle">Source</text>
+<text class="s" x="100" y="126" text-anchor="middle">one commit</text>
+
+<rect class="box" x="201" y="64" width="150" height="96" rx="7"/>
+<text class="t" x="276" y="88" text-anchor="middle">edr stage</text>
+<text class="s" x="276" y="108" text-anchor="middle">worktree per source</text>
+<text class="m" x="276" y="126" text-anchor="middle">wt/&lt;src&gt;/</text>
+
+<rect class="box" x="377" y="64" width="150" height="96" rx="7"/>
+<text class="t" x="452" y="88" text-anchor="middle">edr plan</text>
+<text class="s" x="452" y="108" text-anchor="middle">names each run</text>
+<text class="m" x="452" y="126" text-anchor="middle">&lt;run_id&gt;</text>
+<text class="s" x="452" y="144" text-anchor="middle">picks a host</text>
+
+<rect class="box" x="553" y="64" width="150" height="96" rx="7"/>
+<text class="t" x="628" y="88" text-anchor="middle">edr launch</text>
+<text class="s" x="628" y="108" text-anchor="middle">writes the spec</text>
+<text class="s" x="628" y="126" text-anchor="middle">syncs the tree</text>
+<text class="s" x="628" y="144" text-anchor="middle">starts the driver</text>
+
+<rect class="box" x="742" y="64" width="180" height="140" rx="7"/>
+<path class="run" d="M800 79v14l11-7z"/>
+<text class="t" x="819" y="91">Driver</text>
+<text class="m" x="832" y="114" text-anchor="middle">edr_driver.py</text>
+<text class="s" x="832" y="140" text-anchor="middle">stages in order</text>
+<text class="s" x="832" y="158" text-anchor="middle">shared task queue</text>
+<text class="s" x="832" y="176" text-anchor="middle">heartbeat every minute</text>
+
+<path class="a" d="M162 112H201"/>
+<path class="a" d="M351 112H377"/>
+<path class="a" d="M527 112H553"/>
+<path class="a" d="M703 112H742"/>
+
+<!-- Host: the run tree -->
+<rect class="box" x="742" y="250" width="180" height="80" rx="7"/>
+<text class="t" x="832" y="273" text-anchor="middle">Run tree</text>
+<text class="m" x="832" y="295" text-anchor="middle">&lt;scratch&gt;/&lt;user&gt;/edr/</text>
+<text class="m" x="832" y="313" text-anchor="middle">&lt;project&gt;/&lt;run_id&gt;/</text>
+<path class="a" d="M832 204V250"/>
+
+<!-- Back: from the heartbeat to a paper -->
+<path class="a" d="M742 186H628V250"/>
+<text class="al" x="676" y="179" text-anchor="middle">heartbeat</text>
+
+<rect class="box" x="553" y="250" width="150" height="80" rx="7"/>
+<text class="t" x="628" y="274" text-anchor="middle">edr watch</text>
+<text class="s" x="628" y="294" text-anchor="middle">classifies, collects,</text>
+<text class="s" x="628" y="312" text-anchor="middle">extracts metrics</text>
+<path class="a" d="M742 290H703"/>
+
+<rect class="box" x="377" y="250" width="150" height="80" rx="7"/>
+<text class="t" x="452" y="274" text-anchor="middle">Ledger</text>
+<text class="m" x="452" y="294" text-anchor="middle">data/edr.db</text>
+<text class="s" x="452" y="313" text-anchor="middle">runs and metrics</text>
+<path class="a" d="M553 290H527"/>
+
+<rect class="box" x="201" y="250" width="150" height="80" rx="7"/>
+<text class="t" x="276" y="274" text-anchor="middle">edr export</text>
+<text class="s" x="276" y="294" text-anchor="middle">snapshot per source</text>
+<text class="s" x="276" y="312" text-anchor="middle">manifest, CSVs, files</text>
+<path class="a" d="M377 290H351"/>
+
+<rect class="box" x="38" y="250" width="124" height="80" rx="7"/>
+<text class="t" x="100" y="284" text-anchor="middle">Paper</text>
+<text class="s" x="100" y="304" text-anchor="middle">reads snapshots</text>
+<path class="a" d="M201 290H162"/>
+
+<!-- End: archive, then clear the host -->
+<rect class="box" x="553" y="370" width="150" height="80" rx="7"/>
+<text class="t" x="628" y="394" text-anchor="middle">edr retire</text>
+<text class="s" x="628" y="414" text-anchor="middle">archives large files</text>
+<text class="s" x="628" y="432" text-anchor="middle">removes the tree</text>
+<path class="a" d="M628 330V370"/>
+<text class="al" x="636" y="354">after collect</text>
+<path class="a" d="M703 410H832V330"/>
+</svg>
