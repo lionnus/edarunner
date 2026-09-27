@@ -1,21 +1,36 @@
 """The data model shared by every module.
 
-`config.py` fills these from the TOML files. Nothing here reads a file.
+`config.py` fills these from the TOML files. Nothing here reads a file. A field made with `doc`
+carries the meaning of its key and the default the loader applies; the reference page reads both.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import MISSING, dataclass, field
 from pathlib import Path
+from typing import Any
+
+
+def doc(text: str, default: Any = MISSING, factory: Callable[[], Any] | None = None, key: str = "",
+        shown: str = "") -> Any:
+    """A config field with its meaning; `key` is the TOML key when it differs, `shown` a default in prose."""
+    meta = {"doc": text, **({"key": key} if key else {}), **({"default": shown} if shown else {})}
+    return field(default=default, default_factory=MISSING if factory is None else factory, metadata=meta)
 
 
 @dataclass
 class Host:
+    """The host `local` is the head node itself, reached without ssh. A job that names a host outside
+    this table is a `check` problem. A tool in `tools` must be declared under `[tools]`."""
+
     name: str
-    cores: int
-    ram_gb: int
-    scratch: list[str] | None = None  # None: the site default
-    tools: dict[str, str] | None = None  # tool -> version, "" when unknown; None: every tool
+    cores: int = doc("the cores of the host")
+    ram_gb: int = doc("the RAM of the host, in GB")
+    scratch: list[str] | None = doc("the scratch roots of this host", None, shown="the site `scratch`")
+    tools: dict[str, str] | None = doc("the tools the host has: a list of names, or `{ name = version }`; the "
+                                       "version is text the flow may use as `{tool.<name>.version}`", None,
+                                       shown="every tool of `[tools]`")
 
     def has(self, tool: str) -> bool:
         """True when the host has `tool`; a host without a `tools` key has every tool."""
@@ -24,101 +39,157 @@ class Host:
 
 @dataclass
 class Tool:
-    """A tool of the site: an optional seat total, and a probe whose first line is `free` or `free total`."""
+    """A tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
+    the probe on the host and reads the first line it prints, `free` or `free total`, and waits while
+    `free` is below the seats the stage needs. A probe that fails or prints no number counts as
+    unknown and lets the stage run. A hook that keeps a reserve for others subtracts it before it
+    prints. A tool without a probe is present or not, with no gate. A name that no `[tools]` table
+    declares is an error where it appears. The core knows no licence manager;
+    `examples/site/hooks/flexlm_free.sh` turns `lmutil lmstat` output into the `free total` line."""
+
     name: str
-    seats: int | None = None
-    probe: list[str] = field(default_factory=list)  # argv, run on the host with the run placeholders filled
+    seats: int | None = doc("the seat total, for `edr tools`", None)
+    probe: list[str] = doc("an argv list that prints the free seats; it runs on the host with the run placeholders "
+                           "filled", factory=list)
 
 
 @dataclass
 class BotCommand:
+    """One custom command of the bot: `[telegram.commands.<name>]` in `site.toml`.
+
+    Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
+    `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. No shell runs between the bot and
+    `run[0]`. A program that parses its argument itself, such as `tmux new-session <cmd>`,
+    `ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so gate every placeholder
+    inside such a token with an exact allowlist regex. Every value must match its regex in full, or
+    the bot replies `refused: <name> must match <regex>`, records the refusal and runs nothing.
+    """
+
     name: str
-    help: str
-    run: list[str]
-    args: dict[str, str] = field(default_factory=dict)  # arg name -> regex
-    skip_if: list[str] | None = None
-    skip_reply: str = ""
-    reply: str = ""
-    detach: bool = False
-    timeout_s: int = 60
-    cwd: str = ""
-    dry_run: bool = False
+    help: str = doc("the line in the `/` menu and in `/help`")
+    run: list[str] = doc("the argv list; never a shell string")
+    args: dict[str, str] = doc("argument name to regex, in order; the last argument takes the rest of the message",
+                               factory=dict)
+    skip_if: list[str] | None = doc("an argv list; exit 0 makes the bot reply `skip_reply` and run nothing", None)
+    skip_reply: str = doc("the reply when `skip_if` passes", "skipped")
+    reply: str = doc("the reply on exit 0 instead of the output", "")
+    detach: bool = doc("start the command in its own session and reply with the pid; the output goes to "
+                       "`data/telegram-<name>.log`", False)
+    timeout_s: int = doc("kill the command after this many seconds", 60)
+    cwd: str = doc("the working directory of `run`", "{root}")
+    dry_run: bool = doc("reply with the rendered argv and run nothing", False)
 
 
 @dataclass
 class Telegram:
-    token_file: Path
-    chat_id: int
+    """The bot, the one chat it answers, and the custom commands; `docs/telegram.md` explains the setup."""
+
+    chat_id: int = doc("the one chat the bot answers; a group id is negative")
+    token_file: Path = doc("the bot token, mode 600", Path("~/.config/edarunner/telegram.token"))
     commands: dict[str, BotCommand] = field(default_factory=dict)
-    user_id: int | None = None  # None: the chat is the only gate
+    user_id: int | None = doc("the one user whose messages and buttons the bot obeys", None,
+                              shown="none; the chat is the only gate")
 
 
 @dataclass
 class Marks:
-    """The used fractions at which a resource mark of `edr hosts` turns yellow, orange and red."""
+    """The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
+    fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
+    Below the first it is 🟢. Any other list stops at load with the key in the message. In `edr.toml`
+    the table replaces the site's keys for this project only."""
 
-    cores: list[float] = field(default_factory=lambda: [0.6, 0.8, 0.9])
-    ram: list[float] = field(default_factory=lambda: [0.6, 0.8, 0.9])
-    scratch: list[float] = field(default_factory=lambda: [0.7, 0.85, 0.95])
-    gpu: list[float] = field(default_factory=lambda: [0.6, 0.8, 0.9])  # the fraction of GPUs busy
+    cores: list[float] = doc("the load average over the cores", factory=lambda: [0.6, 0.8, 0.9])
+    ram: list[float] = doc("the RAM in use over the total", factory=lambda: [0.6, 0.8, 0.9])
+    scratch: list[float] = doc("the used part of the scratch mount", factory=lambda: [0.7, 0.85, 0.95])
+    gpu: list[float] = doc("the busy GPUs over all GPUs", factory=lambda: [0.6, 0.8, 0.9])
 
 
 @dataclass
 class Site:
+    """`site.toml` lives outside the project: the hosts, the tools and the bot of a site. Every
+    remote command runs through `sh -c`, so the login shell of a host may be `csh` or `tcsh`."""
+
     path: Path
-    scratch: list[str]
-    env: dict[str, str]
-    ssh_options: list[str]
-    ssh_timeout_s: int
-    tool_procs: str
-    hosts: dict[str, Host]
+    scratch: list[str] = doc("scratch roots, in order; the largest writable one is the mount")
+    env: dict[str, str] = doc("environment for every command on every host", factory=dict)
+    ssh_options: list[str] = doc("the options of every ssh call", key="ssh.options",
+                                 factory=lambda: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+    ssh_timeout_s: int = doc("seconds a remote command may take", 45, key="ssh.timeout_s")
+    tool_procs: str = doc("a regex over process names, for the orphan check and the host table", "")
+    nfs_export: str = doc("a path the head node reads when ssh to a host fails at collect", "")
+    hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
-    nfs_export: str = ""
     telegram: Telegram | None = None
     marks: Marks = field(default_factory=Marks)
 
 
 @dataclass
 class Needs:
-    cores: int = 1
-    disk_gb: float = 0.0
-    tools: dict[str, int] = field(default_factory=dict)  # tool -> seats
+    """What a stage, or a task with its own `needs`, needs before it starts."""
+
+    cores: int = doc("the cores; `{cores}` in the stage strings", 1)
+    disk_gb: float = doc("free space at the run tree, in GB; below it a task is skipped, and the run fails at "
+                         "its first stage", 0.0)
+    tools: dict[str, int] = doc("a list of names, or `{ name = seats }`, from the site `[tools]`", factory=dict)
 
 
 @dataclass
 class Budget:
-    hours: float | None = None
-    disk_gb: float | None = None
-    kill: bool = False
-    per: str = "stage"  # "stage" or "task"
+    """A limit the driver applies while the command runs; at the limit the phase becomes
+    `OVER_BUDGET:<stage>`."""
+
+    hours: float | None = doc("hours the stage may run, or each task with `per = \"task\"`", None)
+    disk_gb: float | None = doc("GB the run tree may grow to", None)
+    kill: bool = doc("`SIGTERM` to the process group at the limit; else the command runs to its end", False)
+    per: str = doc("`\"stage\"` or `\"task\"`: what `hours` counts", "stage")
 
 
 @dataclass
 class Retry:
-    match: str
-    wait_s: int = 900
-    max: int = 3
+    """A stage that fails runs again when `match` is found in the last 80 lines of its log."""
+
+    match: str = doc("a regex over the last 80 log lines")
+    wait_s: int = doc("seconds before the next attempt", 900)
+    max: int = doc("attempts after the first", 3)
 
 
 @dataclass
 class Stage:
+    """A stage is one command of the flow. Stages run in the order of the file. A job runs every
+    stage, or the subset its `stages` list names, in that same order.
+
+    A flow that runs several steps inside one tool session stays one stage, and `edr` tracks the
+    steps. The driver runs `progress` every 5 s in the stage's `cwd` and takes the first number it
+    prints as the current step. `steps[step]` is the step name in the heartbeat and on the board,
+    and the checkpoint the watcher resumes from. A numbered step belongs to one stage. The `steps`
+    list of a stage is indexed by the step number and continues the list of the stage before it,
+    so a flow with two sessions over one numbering lists all names in the second stage. A list
+    that is not longer than the steps before it names the stage's own steps and continues from
+    the previous end. A stage without `steps` owns no numbered step.
+
+    A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
+    `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
+    tasks of a run go through a queue in the state directory, so a second run with the same queue
+    takes tasks from the same pool; `docs/running.md` explains the queue and shards.
+    """
+
     name: str
-    cmd: str = ""
-    resume: str = ""
-    cwd: str = "."
-    steps: list[str] = field(default_factory=list)
-    progress: str = ""
-    needs: Needs = field(default_factory=Needs)
-    budget: Budget = field(default_factory=Budget)
-    retry: Retry | None = None
-    collect: list[str] = field(default_factory=list)
-    collect_on_request: dict[str, list[str]] = field(default_factory=dict)
-    prune: dict[str, list[str]] = field(default_factory=dict)
-    foreach: str = ""  # "" or "tasks"
-    parallel: int = 1
-    prepare: str = ""
-    task_dir: str = ""
-    after_each: str = ""
+    cmd: str = doc("the command; in a task group it runs once per task", "", shown="required")
+    resume: str = doc("the command with `{checkpoint}`, for a resume", "")
+    cwd: str = doc("the working directory, relative to the run tree", ".")
+    steps: list[str] = doc("the step names the flow passes, indexed by step number", factory=list)
+    progress: str = doc("a command that prints the current step number", "")
+    needs: Needs = doc("`{ cores, disk_gb, tools }`; the table below", factory=Needs)
+    budget: Budget = doc("`{ hours, disk_gb, kill, per }`; the table below", factory=Budget)
+    retry: Retry | None = doc("`{ match, wait_s, max }`; the table below", None)
+    collect: list[str] = doc("paths under the run tree the watcher copies when the stage ends", factory=list)
+    collect_on_request: dict[str, list[str]] = doc("named path sets for `edr run --collect <name>`", factory=dict)
+    prune: dict[str, list[str]] = doc("named path sets for `edr retire --prune <name>`", factory=dict)
+    foreach: str = doc("`\"tasks\"` makes the stage a task group", "")
+    parallel: int = doc("tasks at once in a group", 1)
+    prepare: str = doc("a command once before a group starts", "")
+    task_dir: str = doc("the directory of a task, relative to the tree; required in a group", "")
+    after_each: str = doc("a command after each task, with `{task_dir}`", "")
 
     @property
     def is_group(self) -> bool:
@@ -127,109 +198,179 @@ class Stage:
 
 @dataclass
 class Metric:
+    """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `expr`.
+    `expr` allows numbers, metric names, `+ - * /` and a unary minus, nothing else; it is computed
+    once every input exists, and with `stage` set only for those stages.
+
+    A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
+    row per step directory found, under the stage that owns that step number. A file that does not
+    parse gives a row with an empty value and the error in `source_file`, never a crash.
+    """
+
     name: str
-    stage: list[str]
-    step: str | None = None  # "*", a number as text, or None
-    file: str = ""
-    regex: str = ""
-    csv: dict[str, object] | None = None  # {"where": {...}, "column": "..."}
-    json: str = ""
-    python: str = ""  # "module.py:function"
-    expr: str = ""
-    unit: str = ""
-    canonical: str = ""
+    stage: list[str] = doc("a stage name or a list: the stages whose files hold the number", factory=list,
+                           shown="`[]`; required without `expr`")
+    step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
+    file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
+                    shown="required without `expr`")
+    regex: str = doc("a regex; group 1 is the value", "", shown="one of the five")
+    csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
+                                        "`where`", None, shown="one of the five")
+    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
+    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the five")
+    expr: str = doc("an expression over other metrics of the same run, stage, step and task", "",
+                    shown="one of the five")
+    unit: str = doc("unit text", "")
+    canonical: str = doc("a name shared across projects, such as `area.cell`", "")
 
 
 @dataclass
 class Task:
+    """`tasks.toml` is optional. A task is a table `[tasks.<id>]`, and every key of a task is a
+    placeholder `{task.<key>}` in the strings of a task group.
+
+    ```toml
+    [tasks.softmax_197]
+    kernel = "softmax"
+    args = "ROWS=197 COLS=197"
+    test = "SOFTMAX_R197_C197"
+    needs = { disk_gb = 60 }
+    budget = { hours = 8 }
+    ```
+    """
+
     id: str
-    fields: dict[str, str]  # every key of the task table, for {task.<key>}
-    needs: Needs | None = None
-    budget: Budget | None = None
+    fields: dict[str, str] = doc("any key; `{task.<key>}` in the stage strings", key="tasks.<id>.<key>", shown="none")
+    needs: Needs | None = doc("`{ cores, disk_gb, tools }`; replaces the stage's", None, key="tasks.<id>.needs")
+    budget: Budget | None = doc("`{ hours, disk_gb, kill, per }`; replaces the stage's", None, key="tasks.<id>.budget")
 
 
 @dataclass
 class Source:
-    repo: Path
-    worktrees: Path
-    ref: str
-    nested: list[str]
-    run_id: str
-    build_tag: str  # "" or "python:file.py:function"
+    """The git repository of the flow, and how `edr stage` pins a version of it."""
+
+    repo: Path = doc("the git repository of the flow")
+    worktrees: Path = doc("where `edr stage` adds a worktree per commit")
+    ref: str = doc("the ref `edr stage` takes without an argument", "HEAD")
+    nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
+                            factory=list)
+    run_id: str = doc("the run id template", "{date}_{label}_{build_tag}_g{src}")
+    build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)`; `\"\"` gives "
+                         "`{config}` plus `_KEYVALUE` per override", "")
 
 
 @dataclass
 class Sync:
-    exclude: list[str]
-    after: str = ""
+    """The copy of the staged tree to the host, by `rsync --delete` behind the guard."""
+
+    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree", factory=list)
+    after: str = doc("a command on the head node after each sync, with the run placeholders", "")
 
 
 @dataclass
 class Safety:
-    marker: str
-    min_depth: int = 4
+    """The guard on every delete target; `docs/safety.md` explains it."""
+
+    marker: str = doc("a substring every delete target must hold", "/edr/")
+    min_depth: int = doc("the smallest path depth of a delete target", 4)
 
 
 @dataclass
 class Limits:
-    stagger_s: int = 120
-    stale_s: int = 600
-    dead_s: int = 2700
-    hung_s: int = 21600
-    grace_s: int = 3600
-    host_free_min_gb: float = 100.0
-    streak: int = 3
-    heartbeat_s: int = 60
-    gate_max_s: int = 14400
-    kill_hung: bool = False
-    kill_orphan: bool = False
+    """The clocks and floors of the driver and the watcher; `docs/running.md` and `docs/watcher.md`
+    say what each one does."""
+
+    stagger_s: int = doc("pause between two launches of one batch", 120)
+    stale_s: int = doc("heartbeat age that marks a run `stale`", 600)
+    dead_s: int = doc("heartbeat age that marks a run `dead`", 2700)
+    hung_s: int = doc("time without progress that marks a run `hung`", 21600)
+    grace_s: int = doc("wait between an alert and the watcher's stop or kill", 3600)
+    host_free_min_gb: float = doc("free space below which the driver starts nothing new", 100.0)
+    streak: int = doc("equal failure signatures in a row that stop a task group", 3)
+    heartbeat_s: int = doc("period of the heartbeat and of the watcher cycle", 60)
+    gate_max_s: int = doc("longest wait at a tool gate", 14400)
+    kill_hung: bool = doc("the watcher kills a hung run after `grace_s`", False)
+    kill_orphan: bool = doc("the watcher kills an orphan tool process after `grace_s`", False)
 
 
 @dataclass
 class Placement:
-    max_per_host: int = 2
-    min_free_cores: int = 16
-    min_free_ram_gb: int = 60
-    avoid: list[str] = field(default_factory=list)
-    prefer: list[str] = field(default_factory=list)
+    """A job with `host = "auto"` goes to the first host, preferred ones first and then the one with
+    the most free cores, that is not avoided, runs fewer than `max_per_host`, has the free cores, RAM
+    and disk the job's first stage needs, and has every tool the job's stages need. No such host means
+    the job is queued. When no host of the site has a tool the job needs, `plan` reports it as a
+    problem."""
+
+    max_per_host: int = doc("our runs per host", 2)
+    min_free_cores: int = doc("free cores a host needs to take a run", 16)
+    min_free_ram_gb: int = doc("free RAM a host needs, in GB", 60)
+    avoid: list[str] = doc("hosts `auto` never picks", factory=list)
+    prefer: list[str] = doc("hosts `auto` tries first, in order", factory=list)
 
 
 @dataclass
 class Project:
+    """`edr.toml`: the project, its flow and its limits. `site`, `state`, `data`, `source.repo` and
+    `source.worktrees` render at load time with `{project}`, `{project_root}`, `{user}` and
+    `{site_dir}`. Every other string keeps its placeholders until `plan`."""
+
     root: Path  # the project directory
-    project: str
-    site: Site
-    state: Path
-    data: Path
-    run_prefix: str
-    source: Source
-    sync: Sync
-    safety: Safety
-    limits: Limits
-    placement: Placement
-    stages: dict[str, Stage]  # in file order
-    metrics: dict[str, Metric]
-    env: dict[str, str] = field(default_factory=dict)  # the flow's own additions, rendered per run
+    project: str = doc("the project name; `{project}`")
+    site: Site = doc("the path of `site.toml`")
+    source: Source = field()
+    sync: Sync = field(default_factory=Sync)
+    safety: Safety = field(default_factory=Safety)
+    limits: Limits = field(default_factory=Limits)
+    placement: Placement = field(default_factory=Placement)
+    stages: dict[str, Stage] = field(default_factory=dict)  # in file order
+    metrics: dict[str, Metric] = field(default_factory=dict)
+    state: Path = doc("the state directory, on a filesystem every host mounts", Path("~/.edr/{project}"))
+    data: Path = doc("the head-node data directory: `edr.db`, `results/`, `board/`", Path("data"))
+    run_prefix: str = doc("the run tree prefix under the host scratch", "{user}/edr/{project}")
+    telegram_poll: bool = doc("`false`: this project's watcher sends alerts and the board but does not poll "
+                              "for commands; one project per bot token polls", True)
+    env: dict[str, str] = doc("the variables every command of every stage needs, on top of the site `env`; "
+                              "a value takes the run placeholders, and `$VAR` expands on the host", factory=dict)
     tasks: dict[str, Task] = field(default_factory=dict)
-    task_resolver: str = ""  # "python:file.py:function" or ""
-    telegram_poll: bool = True  # false: alerts and the board only; another project polls the bot
+    task_resolver: str = doc("a hook `id -> table` for ids the file does not list", "", key="pattern.resolver")
 
 
 @dataclass
 class Job:
-    label: str
-    config: str
-    host: str = "auto"
-    stages: list[str] = field(default_factory=list)  # [] means every stage
-    tasks: list[str] = field(default_factory=list)
-    overrides: dict[str, str] = field(default_factory=dict)
-    netlist_stage: int | None = None
-    reuse: dict[str, object] | None = None  # {"run_id": ...} or {"label": ..., "latest": True}
+    """One run of a batch. `check` and `plan` verify that an override key is an identifier, and that
+    a stage of the job uses `{overrides}` in `cmd`, `resume` or `prepare`. They do not know the
+    flow's own variables, so a key the flow ignores passes.
+
+    A job with `reuse` runs on the host and the tree of the reused run, and takes its build tag and
+    `{tree_id}`; a glob in `label` is an error. With `restore`, the job takes the source tag, the
+    build tag and `{tree_id}` of the reused run but is placed like a new job, so it runs after the
+    tree was retired; `docs/running.md` shows the rerun. A task group in a job without `tasks` is a
+    plan problem.
+    """
+
+    label: str = doc("the run label; unique in the batch")
+    config: str = doc("the configuration name the flow takes; `{config}`")
+    host: str = doc("a host name, or `\"auto\"`", "auto")
+    stages: list[str] = doc("the stages to run, a subset of `edr.toml` in file order", factory=list,
+                            shown="every stage")
+    tasks: list[str] = doc("the task ids of the task groups", factory=list)
+    overrides: dict[str, str] = doc("`KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens", factory=dict)
+    netlist_stage: int | None = doc("a number the flow needs to find its netlist; `{netlist_stage}`", None)
+    reuse: dict[str, object] | None = doc(
+        "`{ run_id = \"...\" }` or `{ label = \"...\", latest = true }`: start on the tree of that run. With "
+        "`restore = \"<name>\"`, start on a fresh tree with the `collect_on_request.<name>` files of that run "
+        "copied back from `data/results/`", None)
 
 
 @dataclass
 class Batch:
-    batch: str
-    source: str  # a short hash, or "<hash>-dirty-<8 hex>"
-    jobs: list[Job]
-    path: Path
+    """`jobs/<batch>.toml`: the jobs of one batch on one source. A tag is a short hash, or
+    `<hash>-dirty-<8 hex>` for a snapshot of a tree with uncommitted changes. The date is pinned once
+    per batch in `<state>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
+    ids. A batch name is used once; a second launch of the same batch finds its specs and does
+    nothing."""
+
+    batch: str = doc("the batch name", shown="the file stem")
+    source: str = doc("a tag from `edr stage`, or a ref that `edr stage` has staged")
+    jobs: list[Job] = field()
+    path: Path = field()

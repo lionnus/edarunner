@@ -46,3 +46,25 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | ack | `ack:<handle>` |
 
 ## Custom commands
+
+One custom command of the bot: `[telegram.commands.<name>]` in `site.toml`.
+
+Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
+`{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. No shell runs between the bot and
+`run[0]`. A program that parses its argument itself, such as `tmux new-session <cmd>`,
+`ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so gate every placeholder
+inside such a token with an exact allowlist regex. Every value must match its regex in full, or
+the bot replies `refused: <name> must match <regex>`, records the refusal and runs nothing.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `help` | the line in the `/` menu and in `/help` | required |
+| `run` | the argv list; never a shell string | required |
+| `args` | argument name to regex, in order; the last argument takes the rest of the message | `{}` |
+| `skip_if` | an argv list; exit 0 makes the bot reply `skip_reply` and run nothing | `none` |
+| `skip_reply` | the reply when `skip_if` passes | `"skipped"` |
+| `reply` | the reply on exit 0 instead of the output | `""` |
+| `detach` | start the command in its own session and reply with the pid; the output goes to `data/telegram-<name>.log` | `false` |
+| `timeout_s` | kill the command after this many seconds | `60` |
+| `cwd` | the working directory of `run` | `"{root}"` |
+| `dry_run` | reply with the rendered argv and run nothing | `false` |
