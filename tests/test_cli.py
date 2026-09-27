@@ -18,6 +18,8 @@ import pytest
 from edarunner import board, cli, config, launch
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.ledger import Ledger
+from edarunner.model import Telegram
+from edarunner.notify.telegram import TelegramBot
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
@@ -328,6 +330,22 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
 
+
+
+def test_a_button_press_records_one_event(demo: Path, tmp_path: Path) -> None:
+    b = seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
+    token = tmp_path / "token"
+    token.write_text("1:A")
+    ctx = cli.Ctx(argparse.Namespace(json=False, dry_run=False))
+    ctx.project.site.telegram = Telegram(token_file=token, chat_id=42)
+    bot = TelegramBot(ctx.project.site, ctx.project, ctx.ledger, cli.Actions(ctx), str(token))
+    bot.api = lambda method, params, files=None: {}
+    press = {"id": "q", "from": {"id": 7}, "data": "ack:b_nodw@demo",
+             "message": {"message_id": 1, "chat": {"id": 42}, "text": "dead b_nodw@demo"}}
+    bot.handle_update({"update_id": 1, "callback_query": press})
+    events = ctx.ledger.events()
+    assert [(e["actor"], e["run_id"], e["kind"]) for e in events] == [("telegram", b, "keep")]
+    ctx.close()
 
 # retire
 

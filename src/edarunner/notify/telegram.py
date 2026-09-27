@@ -48,6 +48,8 @@ GROUPS = {
                 ("help", "", "this list")],
 }
 BUILTINS = {c: f"{h}: /{c} {a}" if a else h for g in GROUPS.values() for c, a, h in g}
+# These verbs write their own ledger event.
+SELF_LOGGED = {"keep", "ack", "stop"}
 
 
 class ApiError(Exception):
@@ -273,7 +275,8 @@ class TelegramBot(Notifier):
                 out = self._custom(self.tg.commands[name], args)
             else:
                 out = getattr(self, "_cmd_" + name)(args)
-                self._event("command", text[:200])
+                if name not in SELF_LOGGED:
+                    self._event("command", text[:200])
         except Exception as e:  # a refused handle is an answer, not a crash
             out = f"error: {e}"
             self._event("refused", f"{text[:200]}: {e}")
@@ -348,7 +351,8 @@ class TelegramBot(Notifier):
                 note = "unknown button"
         except Exception as e:
             note = f"error: {e}"
-        self._event("button", f"{q.get('data')}: {note}")
+        if note == "unknown button" or note.startswith("error:"):
+            self._event("refused", f"button {q.get('data')}: {note}")
         self._call("answerCallbackQuery", {"callback_query_id": q["id"], "text": str(note)[:200]})
         m = q.get("message")
         if m:

@@ -248,9 +248,10 @@ def test_callback_buttons(bot):
     assert edits[-1]["message_id"] == 5 and edits[-1]["text"] == "hung a@demo\nack ok"
     assert edits[-1]["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]  # the bold title stays
     assert edits[-1]["reply_markup"]["inline_keyboard"]  # the buttons stay
-    assert [e["kind"] for e in bot.ledger.events] == ["button", "button"]
+    assert bot.ledger.events == []  # the action records its own event
     bot.handle_update(callback("retire:a@demo"))
     assert bot.api.of("answerCallbackQuery")[-1]["text"] == "unknown button"
+    assert [e["kind"] for e in bot.ledger.events] == ["refused"]
     assert len(bot.actions.calls) == 2
     bot.handle_update(callback("ack:a@demo", chat=7))
     assert len(bot.actions.calls) == 2
@@ -390,6 +391,7 @@ def test_api_retries_idempotent_methods_only(tmp_path, monkeypatch):
 def test_builtin_commands_land_in_events(bot):
     bot.handle_update(msg("/board"))
     bot.handle_update(msg("/keep 'a;rm' 3"))
+    bot.handle_update(msg("/ack a@demo"))  # the action records its own event
     assert [(e["kind"], e["text"][:6]) for e in bot.ledger.events] == [("command", "/board"), ("refused", "/keep ")]
 
 
