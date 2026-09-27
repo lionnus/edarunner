@@ -1,7 +1,8 @@
 # Testing and CI
 
-After this page you can run the suite, the driver tests on Python 3.6 and
-the OpenROAD example, and read a CI result without the Actions UI.
+This page explains how to run the test suite, the driver tests on
+Python 3.6 and the OpenROAD example, and how to read a CI result without
+the Actions UI.
 
 ## Run the tests
 
@@ -21,8 +22,8 @@ CI measures the coverage and fails under 88 %:
 A test writes under `tmp_path` only, uses the host `local` only, and
 starts a driver only through `tests/helpers_driver.py`. No test reaches
 `api.telegram.org`; `tests/conftest.py` refuses every call, and a test
-that needs HTTP patches `urlopen` itself. A change to a module comes
-with a test in `tests/test_<module>.py`.
+that needs HTTP patches `urlopen` itself. A change to a module needs a
+test in `tests/test_<module>.py`.
 
 `tests/helpers_backend.py` holds `FakeBackend`. It records every submit
 and stop, and answers `alive` from a scripted list of states per handle.
@@ -84,8 +85,8 @@ Wait for the run of the checked-out commit; a run takes several minutes:
 until git fetch -q origin ci-status && git show origin/ci-status:status.json | grep -q "$(git rev-parse HEAD)"; do sleep 60; done
 ```
 
-Every branch writes the same branch, so `ci-status` shows the newest run
-of the repository, not the newest run of one branch.
+CI on every branch writes to the same `ci-status` branch, so it shows the
+newest run in the repository, whatever branch that run was on.
 
 ## The documentation site
 

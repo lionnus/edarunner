@@ -22,8 +22,8 @@ runner may lack it.
 | `site.toml` | one host, `local`, with the scratch `/tmp` |
 | `jobs/gcd.toml` | one job, `gcd`, config `nangate45`, on `local` |
 | `design/config.mk` | the design config of the run tree; it includes the ORFS one |
-| `setup.sh` | makes `repo/`, a git repository with `config.mk`; the source the batch stages |
-| `run.sh` | the whole run for CI: `setup.sh`, `stage`, `check`, `plan`, `launch`, `watch --once` until the run ends, `status`, `metrics`, `export` |
+| `setup.sh` | creates `repo/`, a git repository that holds `config.mk`; the batch checks out its source from it |
+| `run.sh` | the whole run for CI: `setup.sh`, `checkout`, `check`, `plan`, `launch`, `watch --once` until the run ends, `status`, `metrics`, `export` |
 
 `repo/`, `wt/` and `data/` are made by the run, and git ignores them.
 

@@ -9,7 +9,7 @@ CAP_S=${CAP_S:-900}
 rm -rf wt data
 bash setup.sh
 
-src=$($EDR --json stage HEAD | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["src"])')
+src=$($EDR --json checkout HEAD | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["src"])')
 $EDR check
 $EDR plan gcd
 $EDR launch gcd

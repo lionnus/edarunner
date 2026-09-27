@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The fake kernel: kernel.sh <kernel> <test> [KEY=VALUE ...]
+# The stand-in kernel: kernel.sh <kernel> <test> [KEY=VALUE ...]
 # Writes simulation/tests/<config>/<test>/power/{reports/power.csv,phases.json}
-# after a short sleep and a fake VCD. The kernel "bad" fails with "boom".
+# after a short sleep, and a placeholder VCD. The kernel "bad" fails with "boom".
 set -uo pipefail
 kernel=$1 test=$2; shift 2
 config=${DEMO_CONFIG:-demo}

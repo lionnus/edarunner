@@ -89,7 +89,7 @@ edr stop a@demo --after-task --why "hung: no progress since 14:02, log stops at 
 edr retire a@demo --why "superseded by a@demo2, results collected"
 ```
 
-The text lands in the events table with the actor. `edr events --run
+The text goes into the event log together with who acted. `edr events --run
 <handle>` shows the history of a run; read it before you act on a run you
 did not start.
 
@@ -98,13 +98,11 @@ project; send it when a long task ends or needs a person.
 
 ## Read a number before you use it
 
-- `edr metrics --design <src>` gives one design. Never put two hashes in
-  one table, and say the hash in every caption.
-- Compare energy, not power, and measure the whole busy window. A fixed
-  window measures a different fraction of each kernel and can invert a
-  ranking.
-- Every metric row carries `source_file`. Read the source of a number
-  before it goes in a table.
+- `edr metrics --design <src>` gives the numbers of one source tag. Keep
+  numbers from different tags out of one table, and name the tag in every
+  caption.
+- Every metric row carries `source_file`. Check which file a number came
+  from before you put it in a table.
 
 ## What an agent never does
 
@@ -114,8 +112,8 @@ project; send it when a long task ends or needs a person.
   `edr watch --once`, so the results are in `data/results/` first.
 - Never use `--now` as the first move. Try `--after-task` first, then a
   plain `stop`, then `--now`.
-- Never pass more than one handle to a stop. Do not widen the blast radius
-  past the run.
+- Never pass more than one handle to a stop, so that one mistake costs at
+  most one run.
 - Never trust the board for a running count. `edr status --live` asks the
   hosts.
 - Never write under `<state_dir>`, a run tree or the driver copy by hand.
@@ -127,4 +125,5 @@ project; send it when a long task ends or needs a person.
 - Never stop `edr watch` to make the board quiet. Use `edr keep <handle>
   --ack` on the run instead.
 - Never write a site string into the public repository: a host name, a
-  licence server, a user name, a chat id. See `CONTRIBUTING.md`.
+  licence server, a user name, a chat id. See
+  [docs/dev/conventions.md](docs/dev/conventions.md).

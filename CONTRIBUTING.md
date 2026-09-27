@@ -9,16 +9,18 @@ Open an issue at https://github.com/lionnus/edarunner/issues for a bug.
 Give the `edr` version, the Python version, the command, and its output
 with `--json`. Remove every host name, user name and token first.
 
-For a question, write to Lionnus Kesting, lkesting@iis.ee.ethz.ch.
+Ask a question in an issue as well. If it cannot be public, write to
+Lionnus Kesting, lkesting@iis.ee.ethz.ch.
 
 ## Propose a change
 
 Open an issue before a large change, so we can agree on the approach. A
 small fix can go straight to a pull request.
 
-`docs/dev/architecture.md` names the modules, and `docs/dev/conventions.md`
-the rules every change keeps and how a change is documented. A change in
-behaviour updates the page under `docs/` that describes it.
+[docs/dev/architecture.md](docs/dev/architecture.md) explains which module
+does what, and [docs/dev/conventions.md](docs/dev/conventions.md) lists the
+rules every change follows and how to document it. When a change alters
+behaviour, update the page under `docs/` that describes that behaviour.
 
 ## Set up a development environment
 
@@ -46,9 +48,9 @@ CI measures the coverage and fails under 88 %:
 `EDR_DRIVER_PYTHON`, else `python3.6` on `PATH`, else `/usr/bin/python3`,
 and skips without a 3.6. CI runs the driver tests in a `python:3.6`
 container. CI also runs the OpenROAD example `examples/openroad-gcd` in a
-container. `docs/dev/testing.md` describes each job.
+container. [docs/dev/testing.md](docs/dev/testing.md) describes each job.
 
-A change to a module comes with a test in `tests/test_<module>.py`.
+Add a test for a change to a module in `tests/test_<module>.py`.
 
 ## Commit messages
 
@@ -72,20 +74,19 @@ The scope is the module or the doc page. Examples from the history:
 Say what the change does, not how you got there. Keep each commit atomic,
 and run the tests green before each one.
 
-A commit carries no AI co-author trailer and no session link. A change
-that you make with an AI assistant is your own change. Describe it in the
-message like any other.
+Don't add co-author or tool trailers. You are responsible for every change
+you submit, whatever tools helped you write it.
 
 ## Pull requests
 
-Open the pull request against the branch `devel`. CI must be
-green: the tests on Python 3.11 and 3.12, the driver on 3.6, the OpenROAD
-example, and the docs build once it exists.
+Open the pull request against the `devel` branch. CI must pass;
+[docs/dev/testing.md](docs/dev/testing.md) lists the jobs, including the
+strict docs build.
 
-Write a short body that says what the change does and why. Put no
-trailer in the body.
+Keep the description short: what the change does and why. Leave out
+trailers there too.
 
 ## Licence
 
-edarunner is under the Apache-2.0 licence. A contribution is under the
-same licence. See `LICENSE`.
+edarunner is under the Apache-2.0 licence, and so is every contribution.
+See [LICENSE](LICENSE).
