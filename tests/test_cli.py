@@ -500,6 +500,21 @@ def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path
     assert "(dry)" in out and "ref.power" in out
 
 
+def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> None:
+    n = seed(demo, "n", None, started=int(time.time()))  # the demo dead_s is 90 s
+    (bdir(demo) / f"{n}.json").unlink()
+    root = Path(config.load_project(demo).site.scratch[0]) / getpass.getuser() / "edr" / "demo" / n
+    code, _, err = edr(capsys, "retire", "n@demo", "--uncollected", "--why", "x")
+    assert code == 1 and "no heartbeat yet" in err and root.is_dir()
+    code, _, err = edr(capsys, "retire", "n@demo", "--prune", "netlist", "--why", "x")
+    assert code == 1 and "no heartbeat yet" in err and (root / "out").is_dir()
+    with Ledger(demo / "data" / "edr.db") as led:
+        led.upsert_run({"run_id": n, "started": int(time.time()) - 3000})
+    code, _, err = edr(capsys, "retire", "n@demo", "--uncollected", "--why", "x")
+    assert code == 0, err
+    assert not root.exists()
+
+
 def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     with Ledger(demo / "data" / "edr.db") as led:
