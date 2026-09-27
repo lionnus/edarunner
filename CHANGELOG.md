@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-27)
 
 - The SQLite ledger is now the run database: `ledger.py` is `db.py`,
   `Ledger` is `Database`, and every page says database. The file stays
