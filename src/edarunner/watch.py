@@ -192,7 +192,8 @@ def actions(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
             handle = board.handle(run)
             cmd = board.triage_cmd(run, state, _hb(project, run) if state == "dead" else {})
             # A repeat send edits the earlier message in place and keeps its buttons.
-            ids = [n.send(state, run.get("key") or run_id, f"{state} {handle}\n{text}",
+            reason = text if reasons else run.get("phase") or state
+            ids = [n.send(state, run.get("key") or run_id, f"{state} {handle}\n{reason}",
                           alert_buttons(handle) if run_id else None, cmd) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
