@@ -467,3 +467,36 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     code, out, err = edr(capsys, "retire", "--batch", "demo", "--why", "t", "--uncollected")
     assert code == 0, err
     assert not Path(row["root"]).exists()
+
+
+def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -> None:
+    run_id = "20260904_0411_ref_demo_gabc1234"
+    src = tmp_path / "legacy" / run_id
+    (src / "reports" / "3").mkdir(parents=True)
+    (src / "reports" / "3" / "area.rpt").write_text("i_top 1000.0\n")
+    p = src / "simulation" / "tests" / "demo" / "GEMM_M64_N64" / "power"
+    (p / "reports").mkdir(parents=True)
+    (p / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.250\n")
+    (p / "phases.json").write_text('{"window_ns": 3400}')
+    base = ["import", "--run-id", run_id, "--label", "ref", "--config", "demo", "--src", "abc1234"]
+    assert edr(capsys, *base)[0] == 1  # neither a tree nor results
+    assert edr(capsys, *base, "--results", str(src), "--tasks", "nope")[0] == 1
+    code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small", "--dry-run")
+    assert code == 0 and "(dry)" in out and not (demo / "data").exists()
+    code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small")
+    link = demo / "data" / "results" / run_id
+    assert code == 0 and "4 metrics" in out and link.is_symlink() and link.resolve() == src.resolve()
+    code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--csv")
+    got = {ln.split(",")[7]: ln.split(",")[9] for ln in out.splitlines()[1:]}
+    assert code == 0 and got == {"area_cell_um2": "1000.0", "power_w": "0.25", "window_ns": "3400.0", "energy_nj": "850.0"}
+    with Ledger(demo / "data" / "edr.db") as led:
+        row = led.run(run_id)
+        assert row["root"] is None and row["host"] == "" and row["state"] == "imported"
+        assert led.events()[-1]["text"].endswith("4 metrics")
+    other = tmp_path / "other"
+    other.mkdir()
+    assert edr(capsys, *base, "--results", str(other))[0] == 1  # never replaces a linked tree
+    assert edr(capsys, "run", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local", "--dry-run")[0] == 1
+    exp = tmp_path / "exp"
+    code, out, _ = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
+    assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()

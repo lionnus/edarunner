@@ -479,7 +479,7 @@ row. Every CLI action that changes something inserts an event with
 `edr export --design SRC --out DIR [--labels a,b]` writes `DIR/manifest.json`
 (producer, created, schema, sources with commits, runs, tables, files
 with size and sha256, incomplete), `DIR/runs.csv`
-(`run_id,label,config,design,host,phase,started,ended`), `DIR/metrics.csv`
+(`run_id,label,config,build_tag,design,host,phase,started,ended`), `DIR/metrics.csv`
 (`run_id,label,config,design,stage,step,task,metric,canonical,value,unit,source`)
 and the `collect` files of the chosen runs under `DIR/<label>/`. The
 directory is written under a temporary name and renamed at the end.
@@ -501,9 +501,11 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 [--ack]`, `export ...`, `stop HANDLE [--after-task] [--now] --why`,
 `retire HANDLE|--batch B [--prune T] [--uncollected] --why`, `watch
 [--once] [--check] [--serve PORT]`, `import --run-id R --label L --config C
---src H --host HOST --root PATH [--batch B] [--phase P] [--build-tag T]`
-(records a tree that edr did not make, so `reuse` can continue it; it is
-never a delete target unless its path carries the marker).
+--src H (--host HOST --root PATH | --results DIR [--tasks ID...]) [--batch B]
+[--phase P] [--build-tag T]` (records a tree that edr did not make, so
+`reuse` can continue it, or links collected files as `data/results/R` and
+extracts the metrics of the project from them; a tree is never a delete
+target unless its path carries the marker).
 
 The narrow board fits 48 columns: two lines per live run, dead first.
 
