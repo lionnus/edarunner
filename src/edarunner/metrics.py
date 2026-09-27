@@ -1,4 +1,4 @@
-"""Metric extraction from collected files, and the FlexLM probe parser."""
+"""Metric extraction from collected files."""
 
 from __future__ import annotations
 
@@ -15,19 +15,12 @@ from .config import load_hook
 from .model import Metric, Project, Stage, Task
 
 _PLACEHOLDER = re.compile(r"\{([\w.]+)\}")
-_FLEXLM = r"Users of {}:\s*\(Total of (\d+) licenses? issued;\s*Total of (\d+) licenses? in use\)"
 _OPS: dict[type, Callable[[float, float], float]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
 }
-
-
-def parse_flexlm(text: str, feature: str) -> tuple[int, int] | None:
-    """Return (issued, used) of `feature` from lmstat output, or None when the line is absent."""
-    m = re.search(_FLEXLM.format(re.escape(feature)), text)
-    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def evaluate(expr: str, names: dict[str, float]) -> float:

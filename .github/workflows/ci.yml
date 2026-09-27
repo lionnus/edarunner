@@ -72,6 +72,10 @@ jobs:
     # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/ci.md.
     needs: [tests, driver, openroad]
     if: always()
+    # One run at a time writes the branch; two pushes at once made one fail.
+    concurrency:
+      group: ci-status
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -119,4 +123,4 @@ jobs:
           cd _status
           git --git-dir=../.git add -A .
           git --git-dir=../.git commit -qm "status of $GITHUB_SHA"
-          git --git-dir=../.git push -qf origin ci-status
+          for i in 1 2 3; do git --git-dir=../.git push -qf origin ci-status && break; sleep $((i * 5)); done

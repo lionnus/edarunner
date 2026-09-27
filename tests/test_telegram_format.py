@@ -41,7 +41,7 @@ def test_events_newest_first_with_handles():
     assert fmt.events([], {}) == "<i>no events</i>"
 
 
-def test_hosts_and_licences():
+def test_hosts_and_tools():
     probe = {"host": "hostA", "cores": 32, "load": 20.6, "free_ram_gb": 283.0, "total_ram_gb": 376.0,
              "free_gb": 1343.0, "total_gb": 1538.0, "gpus": 1, "gpus_idle": 1}
     probe["marks"] = {"cores": "🟡", "ram": "🟢", "scratch": "🟢", "gpu": "🟢"}
@@ -50,8 +50,11 @@ def test_hosts_and_licences():
         "⚫ <b>hostB</b> <i>no answer</i>",
         "<b>hostA</b> 🟡 cores 21/32, 🟢 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0/1",
         "<b>hostC</b> 🟡 cores 21/32, 🟢 ram 93/376 GB, 🟢 scratch 195/1538 GB"]
-    assert fmt.licences([{"licence": "demo", "used": 5, "pool": 8}, {"licence": "x", "note": "unknown: <none>"}]) == (
-        "<b>demo</b> 5/8 seats used\n<b>x</b> <i>unknown: &lt;none&gt;</i>")
+    rows = [{"tool": "fc", "hosts": {"hostA": "", "hostB": "2024.09"}, "free": 5, "total": 8},
+            {"tool": "vcs", "hosts": {"hostA": ""}, "free": 3}, {"tool": "gpu", "hosts": {}, "total": 2},
+            {"tool": "x", "hosts": {}, "note": "unknown: <none>"}, {"tool": "sh", "hosts": {}}]
+    assert fmt.tools(rows).splitlines() == ["<b>fc</b> 3/8 seats used, hostA, hostB", "<b>vcs</b> 3 seats left, hostA",
+                                            "<b>gpu</b> 2 seats", "<b>x</b> <i>unknown: &lt;none&gt;</i>", "<b>sh</b>"]
 
 
 def test_run_detail_strips_colour_codes_from_the_log_line():
