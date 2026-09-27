@@ -20,7 +20,7 @@ for ((n=lo; n<=hi; n++)); do
   fi
   sleep 1
   mkdir -p "reports/$n"
-  printf 'i_top %.1f\n' "$(echo "1000 + $n * 10.5" | bc -l)" > "reports/$n/area.rpt"
+  awk -v n="$n" 'BEGIN { printf "i_top %.1f\n", 1000 + n * 10.5 }' > "reports/$n/area.rpt"
   printf 'Critical Path Slack: %s\n' "-0.0$n" > "reports/$n/qor.rpt"
   if [ "$name" = export ]; then mkdir -p out/11 && echo "module top; endmodule" > out/11/netlist.v; fi
 done
