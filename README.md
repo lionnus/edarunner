@@ -86,8 +86,8 @@ when a host fits, and notifies. It never deletes anything.
 
 The ledger is one SQLite file, `data/edr.db`, with the batches, runs,
 stages, params, metrics, artifacts and events. Every verb that changes
-something writes an event with the actor and the reason. `docs/config.md`
-lists every key of the four config files: `edr.toml`, `tasks.toml`,
+something writes an event with the actor and the reason.
+`docs/configuration.md` lists every key of the four config files: `edr.toml`, `tasks.toml`,
 `jobs/<batch>.toml`, and the private `site.toml` with the hosts and the
 bot.
 
@@ -119,16 +119,19 @@ incident behind each rule.
 
 ## Documents
 
-- `docs/design.md`, the contract between the modules: the file formats,
-  the driver protocol and the CLI.
-- `docs/config.md`, every key of the four TOML files.
-- `docs/flows.md`, two real flows declared: one tool session with steps
-  inside, and one command per step.
-- `docs/driver.md`, the driver: the spec, the heartbeat, the phases and
-  exit codes, the task queue, and how to run it by hand.
-- `docs/safety.md`, the rules, the incident behind each one, and the code
-  that holds it.
+`docs/README.md` is the index. The pages:
+
+- `docs/getting-started.md`, install, the demo, and a first project.
+- `docs/configuration.md`, every key of the four TOML files.
+- `docs/cli.md`, every verb with its flags and exit codes.
+- `docs/running.md`, the driver, the run tree, phases, budgets, resume,
+  shards, import and retire.
+- `docs/watcher.md`, the cycle, the run states, the boards, the service.
+- `docs/results.md`, the ledger, `metrics`, `export` and the snapshot.
 - `docs/telegram.md`, the bot, from BotFather to custom commands.
+- `docs/flows.md`, two real flows declared.
+- `docs/safety.md`, the rules, the incident behind each one, the guards.
+- `docs/architecture.md`, for contributors: the modules and the rules.
 - `AGENTS.md`, how an agent operates the farm through `edr`.
 - `examples/local-demo/README.md`, the demo project.
 
