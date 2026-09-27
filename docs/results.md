@@ -32,7 +32,7 @@ edr metrics --design 3f9a2c1 --stage pnr --step 12
 edr metrics --design 3f9a2c1 --csv > metrics.csv
 ```
 
-One design per table. `--design` is the source tag exactly as `edr stage`
+One design per table. `--design` is the source tag exactly as `edr checkout`
 printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs that full tag.
 The text form shows label, design, stage, step, task, metric, value and
 unit; `--csv` writes the columns of `metrics.csv` below. Every row

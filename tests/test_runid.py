@@ -1,4 +1,4 @@
-"""runid.py and stagectl.py against a copy of examples/local-demo. Every write goes to tmp_path."""
+"""runid.py and checkout.py against a copy of examples/local-demo. Every write goes to tmp_path."""
 
 import json
 import re
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import config, runid, stagectl
+from edarunner import config, runid, checkout
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
@@ -55,8 +55,8 @@ def test_stage_head_twice_is_idempotent(project):
     repo = project.source.repo
     head = git("rev-parse", "--short", "HEAD", cwd=repo)
     nested_head = git("rev-parse", "--short", "HEAD", cwd=repo / "nonfree")
-    a = stagectl.stage(project, "HEAD")
-    assert a == stagectl.stage(project, "HEAD")
+    a = checkout.checkout(project, "HEAD")
+    assert a == checkout.checkout(project, "HEAD")
     assert a.path == project.source.worktrees / head and a.src == head and not a.dirty
     assert git("rev-parse", "HEAD", cwd=a.path) == git("rev-parse", "HEAD", cwd=repo)
     assert (a.path / "flow" / "flow.sh").exists() and (a.path / "README").exists()
@@ -64,13 +64,13 @@ def test_stage_head_twice_is_idempotent(project):
     assert (a.path / "nonfree" / "secret.txt").read_text() == "42\n"
     assert git("rev-parse", "--short", "HEAD", cwd=a.path / "nonfree") == nested_head
     assert runid.src_tag(a.path) == head
-    assert stagectl.find(project, head) == a.path and stagectl.find(project, "HEAD") == a.path
-    assert stagectl.stage(project, dirty_dir=repo) == a  # a clean tree pins its commit
-    old = stagectl.stage(project, "HEAD~1")
+    assert checkout.find(project, head) == a.path and checkout.find(project, "HEAD") == a.path
+    assert checkout.checkout(project, dirty_dir=repo) == a  # a clean tree pins its commit
+    old = checkout.checkout(project, "HEAD~1")
     assert old.path != a.path and not (old.path / "README").exists()
-    assert stagectl.stage(project) == a  # source.ref of the demo is HEAD
-    with pytest.raises(stagectl.StageError, match="not staged"):
-        stagectl.find(project, "0000000")
+    assert checkout.checkout(project) == a  # source.ref of the demo is HEAD
+    with pytest.raises(checkout.CheckoutError, match="not checked out"):
+        checkout.find(project, "0000000")
 
 
 def test_dirty_snapshot_tag_is_stable(project):
@@ -78,8 +78,8 @@ def test_dirty_snapshot_tag_is_stable(project):
     head = git("rev-parse", "--short", "HEAD", cwd=repo)
     (repo / "README").write_text("changed\n")
     (repo / "notes.txt").write_text("untracked\n")
-    a = stagectl.stage(project, dirty_dir=repo)
-    assert a == stagectl.stage(project, dirty_dir=repo) and a.dirty
+    a = checkout.checkout(project, dirty_dir=repo)
+    assert a == checkout.checkout(project, dirty_dir=repo) and a.dirty
     assert re.fullmatch(rf"{head}-dirty-[0-9a-f]{{8}}", a.src)
     assert a.path == project.source.worktrees / a.src
     assert (a.path / "README").read_text() == "changed\n"
@@ -90,9 +90,9 @@ def test_dirty_snapshot_tag_is_stable(project):
     assert meta["src"] == a.src and meta["base"] == head and meta["nested"] == a.nested and meta["dirty"]
     assert a.nested == {"nonfree": git("rev-parse", "--short", "HEAD", cwd=repo / "nonfree")}
     assert runid.src_tag(a.path) == a.src
-    assert stagectl.find(project, a.src) == a.path
+    assert checkout.find(project, a.src) == a.path
     (repo / "README").write_text("changed again\n")
-    assert stagectl.stage(project, dirty_dir=repo).src != a.src
+    assert checkout.checkout(project, dirty_dir=repo).src != a.src
 
 
 
@@ -100,12 +100,12 @@ def test_dirty_snapshot_tag_is_stable(project):
 
 def test_dry_run_writes_nothing(project, tmp_path, capsys):
     repo = project.source.repo
-    a = stagectl.stage(project, "HEAD")
+    a = checkout.checkout(project, "HEAD")
     (repo / "README").write_text("changed\n")
     runid.src_tag(repo)  # git refreshes its index stat cache on the first diff
     before = listing(tmp_path)
-    old = stagectl.stage(project, "HEAD~1", dry_run=True)
-    dirty = stagectl.stage(project, dirty_dir=repo, dry_run=True)
+    old = checkout.checkout(project, "HEAD~1", dry_run=True)
+    dirty = checkout.checkout(project, dirty_dir=repo, dry_run=True)
     assert listing(tmp_path) == before
     assert not old.path.exists() and old.nested == {"nonfree": a.nested["nonfree"]}
     assert "-dirty-" in dirty.src and not dirty.path.exists() and dirty.dirty

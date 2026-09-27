@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-from edarunner import cli, launch, stagectl
+from edarunner import cli, launch, checkout
 from edarunner.hosts import HostProbe, Ssh
 from test_cli import demo, edr  # noqa: F401 - the fixture and the runner of test_cli
 
@@ -67,10 +67,10 @@ def test_check_probes_each_host_once_and_resolves_the_source(demo: Path, capsys,
     jobs = demo / "jobs"
     shutil.copy(jobs / "demo.toml", jobs / "second.toml")
     assert edr(capsys, "check")[0] == 0
-    # Two batches, one probe; the ref stays as written while nothing is staged.
+    # Two batches, one probe; the ref stays as written while nothing is checked out.
     assert probed == ["local"] and planned == [("HEAD", ["local"])] * 2
-    staged = demo / "wt" / "deadbee"
-    staged.mkdir(parents=True)
-    (staged / "source.json").write_text('{"src": "deadbee"}')
-    monkeypatch.setattr(stagectl, "find", lambda project, src: staged)
+    tree = demo / "wt" / "deadbee"
+    tree.mkdir(parents=True)
+    (tree / "source.json").write_text('{"src": "deadbee"}')
+    monkeypatch.setattr(checkout, "find", lambda project, src: tree)
     assert edr(capsys, "check")[0] == 0 and planned[2:] == [("deadbee", ["local"])] * 2

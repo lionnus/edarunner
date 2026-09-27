@@ -320,10 +320,10 @@ def _src_dir(project: Project, src: str, src_dir: Path | None) -> Path:
     if src_dir is not None:
         return Path(src_dir)
     try:
-        from . import stagectl
+        from . import checkout
     except ImportError:
-        raise Refuse("no src_dir given and stagectl is missing") from None
-    return Path(stagectl.find(project, src))
+        raise Refuse("no src_dir given and checkout is missing") from None
+    return Path(checkout.find(project, src))
 
 
 def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run: bool = False,

@@ -51,7 +51,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     monkeypatch.chdir(demo)
     code, out, _ = edr(capsys, "check")
     assert code == 0 and out.startswith("ok:")
-    code, out, _ = edr(capsys, "--json", "stage", "HEAD")
+    code, out, _ = edr(capsys, "--json", "checkout", "HEAD")
     src = json.loads(out)["data"]["src"]
     assert code == 0 and re.fullmatch(r"[0-9a-f]{7,}", src) and (demo / "wt" / src / "flow" / "flow.sh").is_file()
     state = tmp_path / ".edr" / "demo"
@@ -135,11 +135,11 @@ def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeyp
     monkeypatch.chdir(fresh)
     assert edr(capsys, "init", "--site", str(demo), "--dry-run")[0] == 0 and list(fresh.iterdir()) == []
     monkeypatch.chdir(demo)
-    assert edr(capsys, "stage", "HEAD", "--dry-run")[0] == 0 and not (demo / "wt").exists()
-    src = json.loads(edr(capsys, "--json", "stage", "HEAD")[1])["data"]["src"]  # the fixture worktree
+    assert edr(capsys, "checkout", "HEAD", "--dry-run")[0] == 0 and not (demo / "wt").exists()
+    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]  # the fixture worktree
     state, scratch = tmp_path / ".edr", tmp_path / "scratch"
     wt = listing(demo / "wt")
-    assert edr(capsys, "stage", "HEAD", "--dry-run")[0] == 0
+    assert edr(capsys, "checkout", "HEAD", "--dry-run")[0] == 0
     assert edr(capsys, "plan", "demo", "--dry-run")[0] == 0
     code, out, _ = edr(capsys, "launch", "demo", "--dry-run")
     assert code == 0 and "(dry)" in out and "rsync -a --delete" in out

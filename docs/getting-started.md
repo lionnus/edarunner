@@ -35,13 +35,13 @@ needs no tool, no licence and no second host.
 ```sh
 git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
 bash setup.sh                 # a small git repository with the fake flow
-edr stage HEAD                # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned worktree of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan demo                 # run ids, hosts, every path; writes nothing
 edr launch demo               # one driver per run on the host `local`
 edr status                    # the board
 edr watch --once              # collect, extract metrics, classify
-edr metrics --design <src> --csv   # <src> is the hash that `edr stage` printed
+edr metrics --design <src> --csv   # <src> is the hash that `edr checkout` printed
 ```
 
 The two runs end `done` within a minute. `examples/local-demo/README.md`
@@ -107,16 +107,16 @@ every tool the head node lacks, and plans every batch under `jobs/`. It
 prints one `problem:` line per fault and exits 1, or `ok: 2 hosts, 3
 stages, 5 metrics, 1 batches` and exits 0.
 
-### 5. Stage the source
+### 5. Check out the source
 
 ```sh
-edr stage origin/main
+edr checkout origin/main
 ```
 
 This prints `<src> <path>`: the short hash of the commit and a detached
 worktree at `<worktrees>/<src>`. Every run of that source works on a copy
 of this tree, so a later commit never changes a running flow. A tree
-with uncommitted changes goes in with `edr stage --dirty <dir>`; its tag
+with uncommitted changes goes in with `edr checkout --dirty <dir>`; its tag
 is `<hash>-dirty-<8 hex>`, and `launch` needs `--allow-dirty` for it.
 
 ### 6. Write a batch
@@ -136,7 +136,7 @@ config = "base"
 overrides = { DW = 0 }
 ```
 
-`source` is the tag that `edr stage` printed. A job is one run: a label,
+`source` is the tag that `edr checkout` printed. A job is one run: a label,
 a configuration name the flow understands, optional overrides that
 become `KEY=VALUE` tokens in the command, and optional `stages` and
 `tasks` lists. The run id is `<date>_<label>_<build_tag>_g<src>`.
@@ -150,7 +150,7 @@ edr launch sweep1
 ```
 
 Read every path of the dry run before the real launch. `launch` copies
-the driver into the state directory, syncs the staged tree to each host,
+the driver into the state directory, syncs the checked-out tree to each host,
 writes one spec per run and starts one driver per run. A job that no host
 fits is queued, and the watcher starts it when a host frees up. Confirm
 within a minute that `edr status` shows a phase past `setup`.

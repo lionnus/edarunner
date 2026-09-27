@@ -1,4 +1,4 @@
-"""The git wrapper and the source tag of a staged tree."""
+"""The git wrapper and the source tag of a checked-out tree."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def src_tag(tree: Path) -> str:
     tree = Path(tree)
     meta = tree / "source.json"
     if not (tree / ".git").exists() and meta.exists():
-        # A snapshot has no .git; its tag is in the file `stagectl` wrote.
+        # A snapshot has no .git; its tag is in the file `checkout` wrote.
         return str(json.loads(meta.read_text())["src"])
     head = git("rev-parse", "--short", "HEAD", cwd=tree)
     text = diff(tree)

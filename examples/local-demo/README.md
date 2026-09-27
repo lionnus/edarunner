@@ -42,7 +42,7 @@ The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 cd examples/local-demo
 bash setup.sh                 # repo/ with one commit
 edr check                     # ok: 1 hosts, 4 stages, 5 metrics, 1 batches
-edr stage HEAD                # <src> and the path of the pinned worktree
+edr checkout HEAD             # <src> and the path of the pinned worktree
 edr plan demo                 # one run id, host and root per job; writes nothing
 edr launch demo               # 2 started, 0 queued, 0 with problems
 edr status --watch            # redraws every 5 s; Ctrl-C to leave
@@ -58,14 +58,14 @@ edr export --design <src> --out data/exports/<src>
 edr retire --batch demo --why "demo done"
 ```
 
-`<src>` is the short hash that `edr stage` printed. `edr metrics` needs
+`<src>` is the short hash that `edr checkout` printed. `edr metrics` needs
 it, because one table holds one design.
 
 Where things land:
 
 | Path | Holds |
 |---|---|
-| `wt/<src>/` | the staged worktree |
+| `wt/<src>/` | the checked-out worktree |
 | `/tmp/edr-demo/<user>/edr/demo/<run_id>/` | the run tree; `log/` holds one file per stage and task |
 | `~/.edr/demo/demo/` | `RUN_DATE`, the specs, the heartbeats, the queues, the driver log |
 | `~/.edr/demo/bin/demo/edr_driver.py` | the driver copy of the batch |

@@ -38,13 +38,13 @@ installed there.
 ```sh
 git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
 bash setup.sh                 # a fake flow in a small git repository
-edr stage HEAD                # a pinned worktree of the source; prints its short hash
+edr checkout HEAD             # a pinned worktree of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
 edr plan demo                 # run ids, hosts, every path; writes nothing
 edr launch demo               # one driver per run on the `local` host
 edr status                    # the board
 edr watch --once              # collect, extract metrics, classify
-edr metrics --design <src> --csv   # <src> is the hash that `edr stage` printed
+edr metrics --design <src> --csv   # <src> is the hash that `edr checkout` printed
 ```
 
 The flow is fake and needs no EDA tool or licence. The two runs end

@@ -173,7 +173,7 @@ edr metrics --design SRC [--stage S] [--step N] [--csv]
 ```
 
 Every metric of one design: label, design, stage, step, task, name,
-value and unit. --design is the source tag exactly as edr stage printed
+value and unit. --design is the source tag exactly as edr checkout printed
 it, -dirty-... included. It has no default, because one table holds one
 design. --csv writes the columns of metrics.csv (docs/results.md) to
 stdout.
@@ -220,10 +220,10 @@ problem: line per fault, or an ok: line with the counts.
 |---|---|
 | 1 | a problem was found |
 
-## stage
+## checkout
 
 ```
-edr stage [--dry-run] [--dirty DIR] [ref]
+edr checkout [--dry-run] [--dirty DIR] [ref]
 ```
 
 Fetches, then adds a detached worktree of ref (default source.ref) at
@@ -232,7 +232,7 @@ it at the HEAD the repository copy has. Prints <src> <path>.
 
 --dirty DIR copies a working tree instead, with its diff in source.diff;
 the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
-under --dirty is staged as a worktree.
+under --dirty is checked out as a worktree.
 
 | Flag | Meaning |
 |---|---|
@@ -267,7 +267,7 @@ edr launch [--dry-run] [--only L] [--allow-dirty] [batch]
 ```
 
 Pins the date of the batch, publishes the driver into the state
-directory, syncs the staged tree to each host, writes one spec per run
+directory, syncs the checked-out tree to each host, writes one spec per run
 and starts one driver per run, stagger_s apart. Prints
 <n> started, <n> queued, <n> with problems. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec

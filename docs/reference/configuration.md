@@ -37,20 +37,20 @@ hold for every file:
 
 ### [source]
 
-The git repository of the flow, and how `edr stage` pins a version of it.
+The git repository of the flow, and how `edr checkout` pins a version of it.
 
 | Key | Meaning | Default |
 |---|---|---|
 | `repo` | the git repository of the flow | required |
-| `worktrees` | where `edr stage` adds a worktree per commit | required |
-| `ref` | the ref `edr stage` takes without an argument | `"HEAD"` |
+| `worktrees` | where `edr checkout` adds a worktree per commit | required |
+| `ref` | the ref `edr checkout` takes without an argument | `"HEAD"` |
 | `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has | `[]` |
 | `run_id` | the run id template | `"{date}_{label}_{build_tag}_g{src}"` |
 | `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)`; `""` gives `{config}` plus `_KEYVALUE` per override | `""` |
 
 ### [sync]
 
-The copy of the staged tree to the host, by `rsync --delete` behind the guard.
+The copy of the checked-out tree to the host, by `rsync --delete` behind the guard.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -305,7 +305,7 @@ nothing.
 | Key | Meaning | Default |
 |---|---|---|
 | `batch` | the batch name | the file stem |
-| `source` | a tag from `edr stage`, or a ref that `edr stage` has staged | required |
+| `source` | a tag from `edr checkout`, or a ref that `edr checkout` has checked out | required |
 
 ### [[job]]
 

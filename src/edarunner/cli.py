@@ -31,7 +31,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, board, collect, config, export, launch, metrics, runid, stagectl, sync, watch
+from . import __version__, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
@@ -128,9 +128,9 @@ class Ctx:
         return self.resolve_source(config.load_batch(self.project, self.batch_name(name)))
 
     def resolve_source(self, b: Batch) -> Batch:
-        """A ref as source becomes the src tag of its staged tree; StageError when it is not staged."""
-        if not stagectl.SRC_RE.match(b.source):
-            b.source = runid.src_tag(stagectl.find(self.project, b.source))
+        """A ref as source becomes the src tag of its checked-out tree; CheckoutError when it is not checked out."""
+        if not checkout.SRC_RE.match(b.source):
+            b.source = runid.src_tag(checkout.find(self.project, b.source))
         return b
 
     def refresh(self, batch: str | None = None) -> None:
@@ -579,8 +579,8 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
         except ConfigError as e:
             problems.append(str(e))
             continue
-        # The same src tag as plan; check runs before stage, so a ref that is not staged stays as written.
-        with contextlib.suppress(stagectl.StageError):
+        # The same src tag as plan; check runs before checkout, so a ref that is not checked out stays as written.
+        with contextlib.suppress(checkout.CheckoutError):
             c.resolve_source(b)
         batches.append(b)
     hosts = _probe_rows(c)
@@ -600,9 +600,11 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.REFUSED if problems else Exit.DONE
 
 
-def cmd_stage(c: Ctx, a: argparse.Namespace) -> int:
-    """Stage a ref as a worktree, or a dirty tree as a snapshot."""
-    res = stagectl.stage(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
+def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
+    """Check out a ref as a worktree, or copy a dirty tree as a snapshot; `stage` is the old name."""
+    if a.command == "stage":
+        print("edr: stage is deprecated; use edr checkout", file=sys.stderr)
+    res = checkout.checkout(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
     c.emit(Text.assemble((res.src, "bold"), " ", (str(res.path), "dim"), (" (dirty)" if res.dirty else "", "yellow")),
            {"src": res.src, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
     return Exit.DONE
@@ -871,7 +873,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def _worktree_target(c: Ctx, batch: str) -> Path | None:
-    """The staged tree of the batch's source, when no other batch that is not retired has it; guarded."""
+    """The checked-out tree of the batch's source, when no other batch that is not retired has it; guarded."""
     rows = {b["batch"]: b for b in c.db.batches()}
     src = str((rows.get(batch) or {}).get("source") or "")
     if not src or any(b["batch"] != batch and not b.get("retired") and b.get("source") == src for b in rows.values()):
@@ -1110,7 +1112,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("lic").set_defaults(fn=cmd_lic)  # no help: the old name stays out of the listing
     s = command("metrics", "the metrics of one design", """
         Every metric of one design: label, design, stage, step, task, name,
-        value and unit. --design is the source tag exactly as edr stage printed
+        value and unit. --design is the source tag exactly as edr checkout printed
         it, -dirty-... included. It has no default, because one table holds one
         design. --csv writes the columns of metrics.csv (docs/results.md) to
         stdout.
@@ -1130,17 +1132,21 @@ def _parser() -> argparse.ArgumentParser:
         the head node lacks, and plans every batch with those probes. Prints one
         problem: line per fault, or an ok: line with the counts.
         """, exits={Exit.REFUSED: "a problem was found"})
-    s = command("stage", "stage a ref as a worktree, or a dirty tree as a snapshot", """
+    s = command("checkout", "check out a ref as a worktree, or a dirty tree as a snapshot", """
         Fetches, then adds a detached worktree of ref (default source.ref) at
         <worktrees>/<short hash>, and clones each source.nested repository into
         it at the HEAD the repository copy has. Prints <src> <path>.
 
         --dirty DIR copies a working tree instead, with its diff in source.diff;
         the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
-        under --dirty is staged as a worktree.
+        under --dirty is checked out as a worktree.
         """, write=True)
-    s.add_argument("ref", nargs="?", help="default: source.ref")
-    s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
+    old = sub.add_parser("stage")  # the old name; no help keeps it out of the listing; gone in the next release
+    old.set_defaults(fn=cmd_checkout)
+    old.add_argument("--dry-run", action="store_true")
+    for each in (s, old):
+        each.add_argument("ref", nargs="?", help="default: source.ref")
+        each.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
     command("plan", "render the run specs of a batch; writes nothing", """
         Renders every job of the batch into a run spec and prints
         <run id>: <host or queued> <root> per job, with problem: lines under a
@@ -1150,7 +1156,7 @@ def _parser() -> argparse.ArgumentParser:
         "batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s = command("launch", "start one driver per job of a batch", """
         Pins the date of the batch, publishes the driver into the state
-        directory, syncs the staged tree to each host, writes one spec per run
+        directory, syncs the checked-out tree to each host, writes one spec per run
         and starts one driver per run, stagger_s apart. Prints
         <n> started, <n> queued, <n> with problems. A job that no host fits is
         queued; the watcher starts it when a host frees up. A job whose spec
@@ -1285,7 +1291,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with contextlib.redirect_stdout(buf) if a.json else contextlib.nullcontext():
             code = a.fn(c, a)
-    except (Refuse, ConfigError, stagectl.StageError, runid.GitError) as e:
+    except (Refuse, ConfigError, checkout.CheckoutError, runid.GitError) as e:
         print(f"edr: {e}", file=sys.stderr)
         code = Exit.REFUSED
     except HostError as e:

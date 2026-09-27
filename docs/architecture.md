@@ -24,7 +24,7 @@ commands, the report files and the numbers in them.
 | `config.py` | loading and validation of the four TOML files, the type check against the model, placeholders, hooks |
 | `guards.py` | `assert_safe_target`, `assert_run_id` and `Refuse` |
 | `runid.py` | the git calls, the source tag, the run id template |
-| `stagectl.py` | `edr stage`: worktrees, nested repositories, the dirty snapshot |
+| `checkout.py` | `edr checkout`: worktrees, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe, placement, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
 | `launch.py` | spec rendering, `plan`, `launch`, `stop` |
@@ -58,7 +58,7 @@ A channel never imports `cli` or `watch`; it gets its commands through the
 2. `launch.plan` pins the date, computes the build tag and the run id,
    places each job on a host, and renders every string of the job into
    a spec. A problem lands in the plan, not in an exception.
-3. `launch.launch` publishes the driver, syncs the staged tree with
+3. `launch.launch` publishes the driver, syncs the checked-out tree with
    `rsync --delete` behind the guard, writes the spec by rename, records
    the run and an event, and starts the driver. A job without a host is
    a `queued` row.

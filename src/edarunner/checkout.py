@@ -1,4 +1,4 @@
-"""`edr stage`: a detached worktree per ref, or a snapshot of a dirty tree.
+"""`edr checkout`: a detached worktree per ref, or a snapshot of a dirty tree.
 
 A dry run prints and writes nothing.
 """
@@ -19,29 +19,29 @@ from .model import Project
 SRC_RE = re.compile(r"^[0-9a-f]+(-dirty-[0-9a-f]{8})?$")
 
 
-class StageError(Exception):
-    """The source cannot be staged or found. The message says why."""
+class CheckoutError(Exception):
+    """The source cannot be checked out or found. The message says why."""
 
 
 @dataclass
-class StageResult:
+class CheckoutResult:
     path: Path
     src: str
     nested: dict[str, str] = field(default_factory=dict)
     dirty: bool = False
 
 
-def stage(
+def checkout(
     project: Project, ref: str | None = None, dirty_dir: Path | None = None, dry_run: bool = False
-) -> StageResult:
-    """Stage a ref as a worktree, or a dirty directory as a snapshot."""
+) -> CheckoutResult:
+    """Check out a ref as a worktree, or copy a dirty directory as a snapshot."""
     if dirty_dir is not None:
         return _snapshot(project, Path(os.path.abspath(Path(dirty_dir).expanduser())), dry_run)
     return _worktree(project, ref or project.source.ref, dry_run)
 
 
 def find(project: Project, src: str) -> Path:
-    """The staged tree of a src tag; a ref resolves to its short hash."""
+    """The checked-out tree of a src tag; a ref resolves to its short hash."""
     wts = project.source.worktrees
     if SRC_RE.match(src) and (wts / src).is_dir():
         return wts / src
@@ -51,7 +51,7 @@ def find(project: Project, src: str) -> Path:
         short = ""
     if short and (wts / short).is_dir():
         return wts / short
-    raise StageError(f"'{src}' is not staged; run: edr stage {src}")
+    raise CheckoutError(f"'{src}' is not checked out; run: edr checkout {src}")
 
 
 # --- internals
@@ -61,7 +61,7 @@ def _short(repo: Path, ref: str) -> str:
     return runid.git("rev-parse", "--short", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=repo)
 
 
-def _worktree(project: Project, ref: str, dry_run: bool) -> StageResult:
+def _worktree(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
     repo, wts = project.source.repo, project.source.worktrees
     if runid.git("remote", cwd=repo):
         if dry_run:
@@ -80,7 +80,7 @@ def _worktree(project: Project, ref: str, dry_run: bool) -> StageResult:
         runid.git("worktree", "prune", cwd=repo)
         runid.git("worktree", "add", "-q", "--detach", str(path), src, cwd=repo)
     nested = {n: _nested(repo / n, path / n, dry_run) for n in project.source.nested}
-    return StageResult(path, src, {k: v for k, v in nested.items() if v}, False)
+    return CheckoutResult(path, src, {k: v for k, v in nested.items() if v}, False)
 
 
 def _nested(src: Path, dst: Path, dry_run: bool) -> str:
@@ -105,7 +105,7 @@ def _nested(src: Path, dst: Path, dry_run: bool) -> str:
     return head
 
 
-def _snapshot(project: Project, tree: Path, dry_run: bool) -> StageResult:
+def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     src = runid.src_tag(tree)
     if "-dirty-" not in src:
         # A clean tree pins its commit; a snapshot would collide with that worktree.
@@ -120,11 +120,11 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> StageResult:
     cmd = ["rsync", "-a", *excludes, f"{tree}/", f"{path}/"]
     if dry_run:
         print(f"dry-run: {' '.join(cmd)}")
-        return StageResult(path, src, nested, True)
+        return CheckoutResult(path, src, nested, True)
     path.parent.mkdir(parents=True, exist_ok=True)
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     if r.returncode:
-        raise StageError(f"{' '.join(cmd)}: {r.stdout.strip()}")
+        raise CheckoutError(f"{' '.join(cmd)}: {r.stdout.strip()}")
     meta = {
         "src": src,
         "base": src.split("-dirty-")[0],
@@ -135,4 +135,4 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> StageResult:
     }
     (path / "source.diff").write_text(runid.diff(tree) + "\n")
     (path / "source.json").write_text(json.dumps(meta, indent=1) + "\n")
-    return StageResult(path, src, nested, True)
+    return CheckoutResult(path, src, nested, True)

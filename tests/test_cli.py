@@ -717,10 +717,16 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     assert not Path(row["root"]).exists()
 
 
-def test_retire_batch_removes_the_staged_tree_no_other_batch_uses(demo: Path, capsys) -> None:
+def test_stage_is_the_old_name_of_checkout(demo: Path, capsys) -> None:
+    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
+    code, out, err = edr(capsys, "--json", "stage", "HEAD", "--dry-run")
+    assert code == 0 and json.loads(out)["data"]["src"] and "deprecated" in err and not (demo / "wt").exists()
+
+
+def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Path, capsys) -> None:
     subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
     repo = demo / "repo"
-    src = json.loads(edr(capsys, "--json", "stage", "HEAD")[1])["data"]["src"]
+    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]
     wt = demo / "wt" / src
     seed(demo, "a", "done", src=src)
     seed(demo, "b", "done", src=src, batch="other")
@@ -734,7 +740,7 @@ def test_retire_batch_removes_the_staged_tree_no_other_batch_uses(demo: Path, ca
     assert str(wt) not in listed
     with open(repo / "flow" / "flow.sh", "a") as f:
         f.write("# dirty\n")
-    dirty = json.loads(edr(capsys, "--json", "stage", "--dirty", str(repo))[1])["data"]["src"]
+    dirty = json.loads(edr(capsys, "--json", "checkout", "--dirty", str(repo))[1])["data"]["src"]
     snap = demo / "wt" / dirty
     assert "-dirty-" in dirty and snap.is_dir() and not (snap / ".git").exists()
     seed(demo, "c", "done", src=dirty, batch="snap")

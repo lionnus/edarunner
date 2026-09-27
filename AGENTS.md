@@ -56,7 +56,7 @@ last phase after the driver dies.
 
 ## Dry run first
 
-Run the dry twin before every write: `--dry-run` on `stage`, `plan`,
+Run the dry twin before every write: `--dry-run` on `checkout`, `plan`,
 `launch`, `run`, `keep`, `export`, `stop` and `retire`. Read every path in
 the output. A launch shows the run id, the host and the root of every job,
 and a retire shows every `rm -rf` target. Then run the command without the

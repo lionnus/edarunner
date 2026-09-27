@@ -251,11 +251,11 @@ class Task:
 
 @dataclass
 class Source:
-    """The git repository of the flow, and how `edr stage` pins a version of it."""
+    """The git repository of the flow, and how `edr checkout` pins a version of it."""
 
     repo: Path = doc("the git repository of the flow")
-    worktrees: Path = doc("where `edr stage` adds a worktree per commit")
-    ref: str = doc("the ref `edr stage` takes without an argument", "HEAD")
+    worktrees: Path = doc("where `edr checkout` adds a worktree per commit")
+    ref: str = doc("the ref `edr checkout` takes without an argument", "HEAD")
     nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
                             factory=list)
     run_id: str = doc("the run id template", "{date}_{label}_{build_tag}_g{src}")
@@ -265,7 +265,7 @@ class Source:
 
 @dataclass
 class Sync:
-    """The copy of the staged tree to the host, by `rsync --delete` behind the guard."""
+    """The copy of the checked-out tree to the host, by `rsync --delete` behind the guard."""
 
     exclude: list[str] = doc("rsync exclude patterns for the copy of the tree", factory=list)
     after: str = doc("a command on the head node after each sync, with the run placeholders", "")
@@ -376,6 +376,6 @@ class Batch:
     nothing."""
 
     batch: str = doc("the batch name", shown="the file stem")
-    source: str = doc("a tag from `edr stage`, or a ref that `edr stage` has staged")
+    source: str = doc("a tag from `edr checkout`, or a ref that `edr checkout` has checked out")
     jobs: list[Job] = field()
     path: Path = field()
