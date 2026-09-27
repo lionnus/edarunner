@@ -1,7 +1,6 @@
 """The Telegram bot: alerts with buttons, a pinned board, commands.
 
-See docs/design.md section 11 and docs/telegram.md. Long polling over
-outbound HTTPS only; one chat id is obeyed, and one user id when
+Long polling over outbound HTTPS only; one chat id is obeyed, and one user id when
 `user_id` is set. Every HTTP call goes through `TelegramBot.api`, so a
 test replaces that one method.
 """

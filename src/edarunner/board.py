@@ -1,7 +1,6 @@
 """Boards: 48-column text, the wide table, one run's detail, status.html and compare.html.
 
-See docs/design.md sections 7 and 10. A row is a `runs` row of the ledger;
-`counts` may be a dict or JSON text.
+A row is a `runs` row of the ledger; `counts` may be a dict or JSON text.
 """
 
 from __future__ import annotations

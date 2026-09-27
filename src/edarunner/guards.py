@@ -1,7 +1,6 @@
 """The two guards every delete and every `rsync --delete` call first.
 
 A wrong variable then stops the command instead of removing the wrong tree.
-See docs/design.md section 12.
 """
 
 from __future__ import annotations

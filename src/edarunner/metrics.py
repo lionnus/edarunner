@@ -1,7 +1,4 @@
-"""Metric extraction from collected files, and the FlexLM probe parser.
-
-See docs/design.md section 3.1 (metrics) and section 3.2 (the probe line).
-"""
+"""Metric extraction from collected files, and the FlexLM probe parser."""
 
 from __future__ import annotations
 

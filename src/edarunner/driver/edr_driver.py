@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Run one run from a spec: python3 edr_driver.py <spec.json>.
 
-Section 5 of docs/design.md. Python 3.6, standard library only, no import
-of the package.
+Python 3.6, standard library only, no import of the package.
 """
 import json
 import os

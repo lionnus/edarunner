@@ -1,4 +1,4 @@
-"""Copy the collect paths of a run into data/results. See docs/design.md section 7, step 3.
+"""Copy the collect paths of a run into data/results.
 
 Every copy is one `rsync -a` from the host to the same relative path under
 `data/results/<run_id>/`. A failure is counted and returned, never raised.

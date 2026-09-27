@@ -1,4 +1,4 @@
-"""The `edr` command: the sixteen verbs of docs/design.md section 10.
+"""The `edr` command: seventeen verbs.
 
 Every verb wires the modules; nothing here knows a file format. Exit
 codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
@@ -780,7 +780,7 @@ def _notifiers(c: Ctx) -> list:
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> None:  # type: ignore[override]
-        # Bad input is exit 1 in section 10, not the 2 of argparse.
+        # Bad input exits 1 like a refused guard, not the 2 of argparse.
         self.print_usage(sys.stderr)
         print(f"edr: {message}", file=sys.stderr)
         raise SystemExit(1)
