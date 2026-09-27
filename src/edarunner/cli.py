@@ -31,7 +31,7 @@ from typing import Any
 from . import __version__, board, collect, config, export, launch, metrics, runid, stagectl, sync, watch
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
-from .hosts import HostError, Ssh
+from .hosts import HostError, HostProbe, Ssh
 from .ledger import Ledger
 from .model import Batch, Job, Project
 from .notify import make_notifiers
@@ -132,8 +132,11 @@ class Ctx:
         return max(dirs, key=lambda p: p.stat().st_mtime).name
 
     def batch(self, name: str | None) -> Batch:
-        """Load a batch; a ref as source becomes the src tag of its staged tree."""
-        b = config.load_batch(self.project, self.batch_name(name))
+        """Load a batch with its source resolved."""
+        return self.resolve_source(config.load_batch(self.project, self.batch_name(name)))
+
+    def resolve_source(self, b: Batch) -> Batch:
+        """A ref as source becomes the src tag of its staged tree; StageError when it is not staged."""
         if not stagectl.SRC_RE.match(b.source):
             b.source = runid.src_tag(stagectl.find(self.project, b.source))
         return b
@@ -466,18 +469,24 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
     batches: list[Batch] = []
     for f in sorted((project.root / "jobs").glob("*.toml")):
         try:
-            batches.append(config.load_batch(project, str(f)))
+            b = config.load_batch(project, str(f))
         except ConfigError as e:
             problems.append(str(e))
+            continue
+        # The same src tag as plan; check runs before stage, so a ref that is not staged stays as written.
+        with contextlib.suppress(stagectl.StageError):
+            c.resolve_source(b)
+        batches.append(b)
     hosts = _probe_rows(c)
     problems += [f"{r['host']}: {r['error']}" for r in hosts if "error" in r]
     problems += [p for p in c.ssh.check_local() if p not in problems]
+    probes = {r["host"]: HostProbe(**r) for r in hosts if "error" not in r}
     for b in batches:
         bad = [f"{b.batch}: job {j.label} names unknown host {j.host}" for j in b.jobs
                if j.host != "auto" and j.host not in project.site.hosts]
         problems += bad
         if not bad:
-            for p in launch.plan(project, b, c.ssh, c.ledger):
+            for p in launch.plan(project, b, c.ssh, c.ledger, probes=probes):
                 problems += [f"{b.batch}/{p.label}: {x}" for x in p.problems]
     text = "\n".join(f"problem: {p}" for p in problems) or (
         f"ok: {len(hosts)} hosts, {len(project.stages)} stages, {len(project.metrics)} metrics, {len(batches)} batches")

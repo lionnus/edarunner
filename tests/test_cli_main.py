@@ -6,7 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
-from edarunner import cli
+from edarunner import cli, launch, stagectl
+from edarunner.hosts import HostProbe, Ssh
 from test_cli import demo, edr  # noqa: F401 - the fixture and the runner of test_cli
 
 
@@ -47,3 +48,29 @@ def test_check_names_the_missing_head_node_tools(demo: Path, capsys, monkeypatch
     assert code == 1 and "local: rsync not on PATH" in problems and "local: ssh not on PATH" in problems
     assert "local: git not on PATH" not in problems
 
+
+def test_check_probes_each_host_once_and_resolves_the_source(demo: Path, capsys, monkeypatch) -> None:
+    probed: list[str] = []
+    planned: list[tuple[str, list[str]]] = []
+    real_plan = launch.plan
+
+    def probe(self, host):
+        probed.append(host)
+        return HostProbe(host, 4.0, 8.0, "/tmp/x", 50.0)
+
+    def plan(project, batch, ssh, ledger, *a, **kw):
+        planned.append((batch.source, sorted(kw.get("probes") or {})))
+        return real_plan(project, batch, ssh, ledger, *a, **kw)
+
+    monkeypatch.setattr(Ssh, "probe", probe)
+    monkeypatch.setattr(launch, "plan", plan)
+    jobs = demo / "jobs"
+    shutil.copy(jobs / "demo.toml", jobs / "second.toml")
+    assert edr(capsys, "check")[0] == 0
+    # Two batches, one probe; the ref stays as written while nothing is staged.
+    assert probed == ["local"] and planned == [("HEAD", ["local"])] * 2
+    staged = demo / "wt" / "deadbee"
+    staged.mkdir(parents=True)
+    (staged / "source.json").write_text('{"src": "deadbee"}')
+    monkeypatch.setattr(stagectl, "find", lambda project, src: staged)
+    assert edr(capsys, "check")[0] == 0 and planned[2:] == [("deadbee", ["local"])] * 2
