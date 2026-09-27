@@ -1,8 +1,9 @@
 """The notifier interface.
 
-The watcher calls `make_notifiers` once and then `send`, `edit` and `board`
-on every channel: Telegram, ntfy and mail. The channels never import `cli` or `watch` at run time;
-they get their commands through the `cli.Actions` object the CLI hands in.
+The watcher calls `make_notifiers` once and then `send`, `board` and `post`
+on every channel: Telegram, ntfy and mail. docs/notify.md lists what each
+channel gets. The channels never import `cli` or `watch` at run time; they
+get their commands through the `cli.Actions` object the CLI hands in.
 """
 
 from __future__ import annotations
@@ -58,14 +59,19 @@ def alert_buttons(handle: str) -> list[Button]:
 BUTTON_CMDS = {"keep12": "edr keep {} --hours 12", "ack": "edr keep {} --ack", "stop": "edr stop {} --after-task"}
 
 
-def plain(text: str, buttons: list[Button] | None = None, cmd: str | None = None) -> str:
-    """An alert body as plain text: `text`, the command to run next, and one line per button."""
-    lines = [text, *([cmd] if cmd else [])]
+def button_cmds(buttons: list[Button] | None) -> list[tuple[str, str]]:
+    """(label, shell command) of each alert button, for a channel without callback buttons."""
+    out = []
     for label, data in buttons or []:
         action, _, handle = data.partition(":")
         if action in BUTTON_CMDS:
-            lines.append(f"{label}: {BUTTON_CMDS[action].format(handle)}")
-    return "\n".join(lines)
+            out.append((label, BUTTON_CMDS[action].format(handle)))
+    return out
+
+
+def plain(text: str, buttons: list[Button] | None = None, cmd: str | None = None) -> str:
+    """An alert body as plain text: `text`, the command to run next, and one line per button."""
+    return "\n".join([text, *([cmd] if cmd else []), *(f"{label}: {c}" for label, c in button_cmds(buttons))])
 
 
 def untag(text: str) -> str:

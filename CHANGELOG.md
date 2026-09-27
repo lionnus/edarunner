@@ -15,6 +15,14 @@
   HTCondor pool and on a Slurm cluster in containers;
   `tools/harness/` holds the scripts. LSF has rendering and contract
   tests only.
+- `edr notify --board` and `edr notify --digest` send the board or the
+  daily digest through every channel, so a cron line can mail either.
+  TEXT is now optional; give exactly one of TEXT, `--board` and
+  `--digest`.
+- An ntfy alert carries the keep, ack and stop commands as three copy
+  buttons, next to the command lines. A server that refuses the buttons
+  with a 400 gets the push again without them.
+- docs/notify.md lists every message kind and what each channel gets.
 
 ## 0.3.0 (2026-09-27)
 
