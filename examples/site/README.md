@@ -6,5 +6,5 @@ A site file for a farm with a FlexLM licence server, with placeholder names.
 the `free total` line a tool probe prints. `docs/reference/configuration.md` lists
 every key.
 
-The core knows no licence manager. A site hook does that work, and the
-driver reads one integer from it.
+edarunner knows no licence manager itself. A site hook does that work,
+and the driver reads one number from its output.

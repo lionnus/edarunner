@@ -3,6 +3,8 @@ schema = 1
 scratch = ["/tmp/edr-demo"]
 env = {}
 ssh = { options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"], timeout_s = 20 }
+# The demo scripts stand in for tools with `sleep`, so the orphan check looks
+# for `sleep`. It also reports any other `sleep` of yours outside a run tree.
 tool_procs = "^(sleep)$"
 
 [hosts.local]
