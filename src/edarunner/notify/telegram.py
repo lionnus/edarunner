@@ -41,7 +41,7 @@ RETRIES = {"getUpdates", "editMessageText", "answerCallbackQuery"}
 # The built-in commands by purpose: (name, arguments, help).
 GROUPS = {
     "Look": [("status", "[handle]", "the board, or one run"), ("events", "[n]", "the last events, newest first"),
-             ("hosts", "", "used cores, free scratch, idle GPUs"), ("lic", "", "free licence seats"),
+             ("hosts", "", "used cores, free scratch, idle GPUs"), ("tools", "", "free seats and hosts per tool"),
              ("board", "", "pin a new board message")],
     "Act on a run": [("keep", "<handle> [hours]", "add hours, default 12"), ("ack", "<handle>", "cancel a pending kill"),
                      ("stop", "<handle> [why]", "stop after the running task")],
@@ -49,8 +49,9 @@ GROUPS = {
                 ("help", "", "this list")],
 }
 BUILTINS = {c: f"{h}: /{c} {a}" if a else h for g in GROUPS.values() for c, a, h in g}
+ALIASES = {"lic": "tools"}  # old names, gone in the next release
 # Replies in Telegram HTML, and replies of aligned columns; any other reply is escaped prose.
-HTML = {"status", "events", "hosts", "lic", "help"}
+HTML = {"status", "events", "hosts", "tools", "help"}
 COLUMNS = {"compare", "metric"}
 # These verbs write their own ledger event.
 SELF_LOGGED = {"keep", "ack", "stop"}
@@ -286,6 +287,7 @@ class TelegramBot(Notifier):
     def _command(self, text: str) -> None:
         parts = text.split()
         name, args = parts[0][1:].split("@")[0], parts[1:]
+        name = ALIASES.get(name, name)
         if name not in self.tg.commands and name not in BUILTINS:
             name = "help"
         kind = "pre" if name in self.tg.commands or name in COLUMNS else "html" if name in HTML else "text"
@@ -315,8 +317,8 @@ class TelegramBot(Notifier):
     def _cmd_hosts(self, args: list[str]) -> str:
         return self.actions.hosts_text()
 
-    def _cmd_lic(self, args: list[str]) -> str:
-        return self.actions.lic_text()
+    def _cmd_tools(self, args: list[str]) -> str:
+        return self.actions.tools_text()
 
     def _cmd_board(self, args: list[str]) -> str:
         with self._lock:
