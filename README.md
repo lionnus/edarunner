@@ -107,7 +107,7 @@ once per task, the tasks run in parallel on the host, each with its own
 directory, budget and result, and shards claim tasks from one queue.
 
 `edr launch` renders one spec per job, copies the one-file driver to the
-host and starts it. The driver runs the stages, waits for licence seats,
+host and starts it. The driver runs the stages, waits for tool seats,
 applies budgets and retries, and writes a heartbeat file every minute.
 
 `edr watch` on the head node reads the heartbeats, classifies every run
@@ -136,7 +136,7 @@ as root, and nothing is installed on a compute host.
 | `git worktree` | one pinned checkout per source tag under `wt/`; an uncommitted tree becomes a snapshot commit |
 | `sqlite3`, through Python | the ledger |
 | `systemd --user` or tmux, and cron | the watcher, and the check that it is still there |
-| `lmutil` | the seats of a FlexLM licence server; optional |
+| a site hook, such as `examples/site/hooks/flexlm_free.sh` | the free seats of a tool; optional, and the core reads one number from it |
 
 `edr launch` copies the driver, one Python file, into the state directory
 on the shared filesystem, writes the spec of the run next to it, and
