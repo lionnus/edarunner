@@ -689,6 +689,16 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         if root:
             _refuse_shared_root(c, row, str(host), str(root), retiring, bool(a.prune))
         checked.append((row, hb, host, root, targets))
+    # The archive step: every named list is on the head node before any rm runs.
+    for row, hb, host, root, targets in checked:
+        for name in (a.collect.split(",") if a.collect and root else []):
+            run = {**row, "tasks": list(hb.get("tasks") or {})}
+            res = collect.collect_on_request(project, c.ssh, c.ledger, run, name, a.dry_run)
+            print(f"{row['run_id']}: collect {name}: {res.files} files{dry}")
+            if res.failures:
+                raise Refuse(f"{row['run_id']}: collect {name}: {res.failures[0]}; nothing removed")
+            if not a.dry_run:
+                c.ledger.add_event("user", row["run_id"], "collect", f"{name}: {res.files} files")
     failed, done = 0, []
     for row, hb, host, root, targets in checked:
         run_id = row["run_id"]
@@ -868,6 +878,7 @@ def _parser() -> argparse.ArgumentParser:
     s = verb("retire", "remove the run tree, or its prune targets", write=True, why=True)
     s.add_argument("handle", nargs="?", help="label@batch, a run id prefix, or #n from the last board")
     s.add_argument("--batch", metavar="B", help="every run of the batch, then mark it RETIRED")
+    s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
     s = verb("watch", "the watcher", write=True)

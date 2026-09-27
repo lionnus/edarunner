@@ -268,14 +268,18 @@ driver is still alive after the wait, the verb prints `still alive; use
 ## retire
 
 ```
-edr retire HANDLE --why TEXT [--prune T] [--uncollected] [--dry-run]
-edr retire --batch B --why TEXT [--prune T] [--uncollected] [--dry-run]
+edr retire HANDLE --why TEXT [--collect NAME,...] [--prune T] [--uncollected] [--dry-run]
+edr retire --batch B --why TEXT [--collect NAME,...] [--prune T] [--uncollected] [--dry-run]
 ```
 
 Removes the run tree on the host, or with `--prune T` the paths that
 `prune.T` names in the stages, after the guard on every target. `--batch`
 retires every run of the batch and marks it `RETIRED`, so the watcher
 skips it. A live run gets the phase `ABANDONED:<why>`.
+
+`--collect NAME,...` first copies the named `collect_on_request` lists of
+every run into `data/results/<run id>/`, and removes nothing when one
+copy failed. It is the archive step of `docs/running.md`.
 
 `retire` refuses a run whose driver is alive, a live run that has no
 heartbeat yet and started less than `dead_s` ago, a tree that another
