@@ -48,3 +48,17 @@ The first release.
 - Remote commands run through `sh -c`, so a csh login shell works.
 - A compute host needs a POSIX `sh`, `ssh`, `rsync`, procps-ng and its
   own `python3` 3.6 or newer; nothing is installed there.
+- `edr retire --collect NAME,...` copies the named `collect_on_request`
+  lists to the head node before the tree goes, and removes nothing when
+  a copy failed. `retire --batch` also drops the staged tree that no
+  other batch uses.
+- `reuse = { ..., restore = "NAME" }` in a job starts on a fresh tree
+  with the archived list of the reused run copied back, so a stage runs
+  again after the tree was retired.
+- `edr run` joins the batch of the run it continues; the driver is
+  published once per version as `<state>/bin/edr_driver-<hash>.py`; the
+  watcher keeps its side state in the ledger's `kv` table.
+- The export manifest names the project.
+- `telegram_poll = false` in `edr.toml` makes a project's watcher send
+  alerts and the board without polling the bot, so several projects can
+  share one token.
