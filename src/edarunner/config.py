@@ -344,7 +344,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         site = load_site(root / Path(site_path).expanduser())
     values["site_dir"] = str(site.path.parent)
     if "telegram" in raw:
-        site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id"})
+        site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id", "topic_id"})
     if "marks" in raw:
         site.marks = _marks(raw["marks"], file, site.marks)
 
@@ -369,7 +369,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         source=source,
         sync=_build(Sync, raw.get("sync", {}), file, "sync"),
         safety=_build(Safety, raw.get("safety", {}), file, "safety"),
-        limits=_build(Limits, raw.get("limits", {}), file, "limits"),
+        limits=_limits(raw.get("limits", {}), file),
         placement=_build(Placement, raw.get("placement", {}), file, "placement"),
         stages=stages,
         metrics=metrics,
@@ -377,6 +377,13 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         tasks=tasks,
         task_resolver=resolver,
     )
+
+
+def _limits(raw: object, file: Path) -> Limits:
+    limits = _build(Limits, raw, file, "limits")
+    if limits.digest_at and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", limits.digest_at):
+        raise ConfigError(f"{file}: limits.digest_at must be HH:MM or empty, not {limits.digest_at!r}")
+    return limits
 
 
 def _stage(name: str, raw: object, file: Path) -> Stage:

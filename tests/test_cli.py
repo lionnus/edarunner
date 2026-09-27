@@ -16,9 +16,11 @@ from pathlib import Path
 import pytest
 
 from edarunner import board, cli, config, launch
+from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.ledger import Ledger
 from edarunner.model import Telegram
+from edarunner.notify import Notifier
 from edarunner.notify.telegram import TelegramBot
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -310,8 +312,8 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert (bdir(demo) / f"{b}.stop").exists()
     with Ledger(demo / "data" / "edr.db") as led:
         assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
-    assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4 · 0m", "⚪ <code>a@demo</code> done · 0m",
-                                               "<i>1 running · 1 done</i>"]
+    assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4, 0m", "⚪ <code>a@demo</code> done, 0m",
+                                               "<i>1 running, 1 done</i>"]
     with Ledger(demo / "data" / "edr.db") as led:
         assert len(led.get_kv("last_board")) == 2
     one = acts.status_text("b_nodw@demo").splitlines()
@@ -325,8 +327,18 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
-    assert acts.hosts_text().split(" ", 1)[1].startswith("<b>local</b> · ")
-    assert acts.tools_text() == "<b>demo</b> · 8/10 seats free · 1 host"
+    assert acts.hosts_text().startswith("<b>local</b> ")
+    assert acts.tools_text() == "<b>demo</b> 2/10 seats used, local"
+    assert acts.metrics_csv("abc1234").decode().splitlines()[0].startswith("run_id,label,")
+    assert len(acts.metrics_csv("abc1234").decode().splitlines()) == 5 and acts.metrics_csv("zzz").count(b"\n") == 1
+    assert acts.board_files() == []
+    (demo / "data" / "board").mkdir(parents=True)
+    (demo / "data" / "board" / "status.html").write_text("<html></html>")
+    assert [p.name for p in acts.board_files()] == ["status.html"]
+    with pytest.raises(Refuse, match="names no log"):
+        acts.log_tail("a@demo", 5)
+    info = acts.run_info("a@demo")
+    assert info["handle"] == "a@demo" and info["run_id"] == a and info["host"] == "local" and info["run_root"].endswith(a)
     for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
@@ -340,7 +352,7 @@ def test_a_button_press_records_one_event(demo: Path, tmp_path: Path) -> None:
     ctx = cli.Ctx(argparse.Namespace(json=False, dry_run=False))
     ctx.project.site.telegram = Telegram(token_file=token, chat_id=42)
     bot = TelegramBot(ctx.project.site, ctx.project, ctx.ledger, cli.Actions(ctx), str(token))
-    bot.api = lambda method, params, files=None: {}
+    bot.api.call = lambda method, params, files=None: {}
     press = {"id": "q", "from": {"id": 7}, "data": "ack:b_nodw@demo",
              "message": {"message_id": 1, "chat": {"id": 42}, "text": "dead b_nodw@demo"}}
     bot.handle_update({"update_id": 1, "callback_query": press})
@@ -448,7 +460,7 @@ def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None
     assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 3, "total": 10, "hosts": {"local": "1.0"}},
                                                      {"tool": "plain", "hosts": {}}]  # local lists demo only
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
-    assert acts.tools_text().splitlines() == ["<b>demo</b> · 3/10 seats free · 1 host", "<b>plain</b> · 0 hosts"]
+    assert acts.tools_text().splitlines() == ["<b>demo</b> 7/10 seats used, local", "<b>plain</b>"]
 
 
 # run (reuse), watch, bad input
@@ -494,7 +506,8 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     assert data["local"]["marks"]["gpu"] == "-" and set(data["hostB"]["marks"].values()) == {"⚫"}
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     text = acts.hosts_text().splitlines()
-    assert "🟠 <b>hostA</b> · 52/64 cores · 800/2000 GB free · gpu 1/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
+    assert ("<b>hostA</b> 🟠 cores 52/64, 🟢 ram 136/256 GB, 🟢 scratch 1200/2000 GB, 🟡 gpu 3/4" in text
+            and "⚫ <b>hostB</b> <i>no answer</i>" in text and text[0].startswith("⚫"))
 
 
 def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
@@ -762,3 +775,46 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
     assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()
+
+
+def test_notify_sends_one_message_through_every_notifier(demo: Path, capsys, monkeypatch) -> None:
+    code, out, _ = edr(capsys, "notify", "--dry-run", "session x: <done>")
+    assert code == 0 and out == "<b>demo: note</b>\nsession x: &lt;done&gt;\n(dry)\n"
+    code, _, err = edr(capsys, "notify", "hi")
+    assert code == 1 and "no notifier is configured" in err and not (demo / "data" / "edr.db").exists()
+    posts: list[tuple] = []
+
+    class Rec(Notifier):
+        def __init__(self, ok: bool) -> None:
+            self.ok = ok
+
+        def post(self, title, html, silent=False):
+            posts.append((title, html, silent))
+            return self.ok
+
+    monkeypatch.setattr(cli, "make_notifiers", lambda *a: [Rec(True), Rec(True)])
+    code, out, _ = edr(capsys, "--json", "notify", "--silent", "a & b")
+    assert code == 0 and json.loads(out)["data"] == {"sent": 2, "text": "a & b"}
+    assert posts == [("note", "a &amp; b", True)] * 2
+    monkeypatch.setattr(cli, "make_notifiers", lambda *a: [Rec(True), Rec(False)])
+    assert edr(capsys, "notify", "x")[0] == 1
+
+
+def test_log_tail_fetches_the_last_lines_from_the_host(demo: Path) -> None:
+    log = demo.parent / "synth.log"
+    log.write_text("".join(f"line {n}\n" for n in range(10)))
+    hb_file = bdir(demo) / f"{seed(demo, 'a', 'stage:synth', pid=os.getpid())}.json"
+    hb_file.write_text(json.dumps({**json.loads(hb_file.read_text()), "log": str(log)}))
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert acts.log_tail("a@demo", 3) == ("a@demo.log", b"line 7\nline 8\nline 9\n")
+    log.unlink()
+    with pytest.raises(HostError, match="tail"):
+        acts.log_tail("a@demo", 3)
+
+
+def test_status_digest_prints_the_digest_as_text(demo: Path, capsys) -> None:
+    seed(demo, "a", "done")
+    code, out, _ = edr(capsys, "status", "--digest")
+    assert code == 0 and out.startswith("Ended since ") and "⚪ a@demo done" in out and "<" not in out
+    code, out, _ = edr(capsys, "--json", "status", "--digest")
+    assert code == 0 and "<code>a@demo</code>" in json.loads(out)["data"]["digest"]

@@ -58,7 +58,8 @@ class BotCommand:
     """One custom command of the bot: `[telegram.commands.<name>]` in `site.toml`.
 
     Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
-    `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. No shell runs between the bot and
+    `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. A command sent as a reply to an alert
+    also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run. No shell runs between the bot and
     `run[0]`. A program that parses its argument itself, such as `tmux new-session <cmd>`,
     `ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so gate every placeholder
     inside such a token with an exact allowlist regex. Every value must match its regex in full, or
@@ -74,7 +75,8 @@ class BotCommand:
     skip_reply: str = doc("the reply when `skip_if` passes", "skipped")
     reply: str = doc("the reply on exit 0 instead of the output", "")
     detach: bool = doc("start the command in its own session and reply with the pid; the output goes to "
-                       "`data/telegram-<name>.log`", False)
+                       "`data/telegram-<name>.log`. A command that ends within 5 s replies `ended with rc N: "
+                       "<last output line>` instead", False)
     timeout_s: int = doc("kill the command after this many seconds", 60)
     cwd: str = doc("the working directory of `run`", "{root}")
     dry_run: bool = doc("reply with the rendered argv and run nothing", False)
@@ -89,6 +91,8 @@ class Telegram:
     commands: dict[str, BotCommand] = field(default_factory=dict)
     user_id: int | None = doc("the one user whose messages and buttons the bot obeys", None,
                               shown="none; the chat is the only gate")
+    topic_id: int | None = doc("the forum topic of every message; a command from another topic is ignored", None,
+                               shown="none; the main thread")
 
 
 @dataclass
@@ -291,6 +295,7 @@ class Limits:
     gate_max_s: int = doc("longest wait at a tool gate", 14400)
     kill_hung: bool = doc("the watcher kills a hung run after `grace_s`", False)
     kill_orphan: bool = doc("the watcher kills an orphan tool process after `grace_s`", False)
+    digest_at: str = doc("the local time, `HH:MM`, of the daily digest; empty is off", "")
 
 
 @dataclass

@@ -84,6 +84,7 @@ say what each one does.
 | `gate_max_s` | longest wait at a tool gate | `14400` |
 | `kill_hung` | the watcher kills a hung run after `grace_s` | `false` |
 | `kill_orphan` | the watcher kills an orphan tool process after `grace_s` | `false` |
+| `digest_at` | the local time, `HH:MM`, of the daily digest; empty is off | `""` |
 
 ### [placement]
 
@@ -103,7 +104,7 @@ problem.
 
 ### [telegram]
 
-In `edr.toml` the table takes `token_file`, `chat_id` and `user_id` of the site's `[telegram]` table and replaces them for this project only. A key it leaves out keeps the site's value. Without a `[telegram]` table in `site.toml`, the table here needs `chat_id`. The custom commands stay in `site.toml`.
+In `edr.toml` the table takes `token_file`, `chat_id`, `user_id` and `topic_id` of the site's `[telegram]` table and replaces them for this project only. A key it leaves out keeps the site's value. Without a `[telegram]` table in `site.toml`, the table here needs `chat_id`. The custom commands stay in `site.toml`.
 
 ### [marks]
 
@@ -266,6 +267,7 @@ The bot, the one chat it answers, and the custom commands; `docs/telegram.md` ex
 | `chat_id` | the one chat the bot answers; a group id is negative | required |
 | `token_file` | the bot token, mode 600 | `"~/.config/edarunner/telegram.token"` |
 | `user_id` | the one user whose messages and buttons the bot obeys | none; the chat is the only gate |
+| `topic_id` | the forum topic of every message; a command from another topic is ignored | none; the main thread |
 
 ### [telegram.commands.<name>]
 

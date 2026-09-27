@@ -1,4 +1,4 @@
-"""The `edr` command: seventeen verbs.
+"""The `edr` command: eighteen verbs.
 
 Every verb wires the modules; nothing here knows a file format. Exit
 codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import posixpath
-import re
 import shlex
 import shutil
 import sys
@@ -24,7 +23,6 @@ import textwrap
 import time
 from dataclasses import asdict
 from enum import IntEnum
-from html import escape as esc
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -40,6 +38,8 @@ from .hosts import HostError, HostProbe, Ssh
 from .ledger import Ledger
 from .model import Batch, Job, Project
 from .notify import make_notifiers
+from .notify.digest import Digest
+from .notify.telegram import format as tgfmt
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 Row = dict[str, Any]
@@ -58,7 +58,8 @@ def _since(text: str) -> int:
     return int(time.time() - secs)
 
 
-_READ_VERBS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check"})
+# These verbs never create data/edr.db; `notify` reads the bot's message ids only.
+_READ_VERBS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check", "notify"})
 
 
 class Ctx:
@@ -326,6 +327,12 @@ class Actions:
     def __init__(self, c: Ctx) -> None:
         self.c = c
 
+    def run_info(self, handle: str) -> dict[str, str]:
+        """The handle, run id, run root and host of one run, for the placeholders of a custom command."""
+        row = self.c.resolve(handle)
+        return {"handle": board.handle(row), "run_id": row["run_id"], "run_root": str(row.get("root") or ""),
+                "host": str(row.get("host") or "")}
+
     def keep(self, handle: str, hours: int, actor: str) -> str:
         row = self.c.resolve(handle)
         return f"{board.handle(row)}: " + _keep(self.c, row, hours, None, actor)
@@ -346,59 +353,48 @@ class Actions:
         if handle is None:
             rows = self.c.rows()
             self.c.save_board(rows)
-            return board.phone(rows, totals=metrics.step_totals(self.c.project))
+            return tgfmt.board(rows, totals=metrics.step_totals(self.c.project))
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.ledger.run(row["run_id"]) or row
-        hb = self.c.heartbeat(row)
-        state = board.state_of(row)
-        step = " ".join(str(v) for v in (hb.get("step") or row.get("step"), hb.get("step_name")) if v not in (None, ""))
-        age = board.hm(None if row.get("updated") is None else time.time() - row["updated"])
-        log_line = next((ln for ln in reversed(str(hb.get("last_log") or "").splitlines()) if ln.strip()), "-")
-        log_line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", log_line)
-        cmd = board.triage_cmd(row, state, hb)
-        lines = [f"{board.MARK.get(state, '⚪')} <code>{esc(board.handle(row))}</code> {esc(state)}",
-                 esc(f"stage {row.get('stage') or '-'}, step {step or '-'}"), esc(f"on {row.get('host') or '-'}, {age}")]
-        lines += [f"<code>{esc(cmd)}</code>"] if cmd else []
-        return "\n".join(lines + [f"<pre>{esc(log_line[-300:])}</pre>"])
+        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time())
 
     def events_text(self, n: int) -> str:
-        """Newest first: `HH:MM kind handle`, the reason indented under it in italics, run ids replaced by handles."""
-        names = {r["run_id"]: board.handle(r) for r in self.c.ledger.runs()}
-        lines = []
-        for e in reversed(self.c.ledger.events(n=n)):
-            text = str(e["text"] or "")
-            for run_id, h in names.items():
-                text = text.replace(run_id, h)
-            who = names.get(e["run_id"])
-            lines.append(f"{time.strftime('%H:%M', time.localtime(e['ts']))} <b>{esc(e['kind'])}</b>"
-                         + (f" <code>{esc(who)}</code>" if who else ""))
-            if text and text != e["kind"]:
-                lines.append(f"    <i>{esc(textwrap.shorten(text, 200, placeholder=' …'))}</i>")
-        return "\n".join(lines) or "<i>no events</i>"
+        """The last `n` events, newest first."""
+        return tgfmt.events(self.c.ledger.events(n=n), {r["run_id"]: board.handle(r) for r in self.c.ledger.runs()})
 
     def hosts_text(self) -> str:
-        """`host · used/total cores · free/total GB free · gpu idle/total` per host."""
-        lines = []
-        for r in _probe_rows(self.c):
-            if "error" in r:
-                lines.append(f"<b>{esc(r['host'])}</b> · <i>no answer</i>")
-                continue
-            used = max(0, min(r["cores"], round(r["load"])))
-            gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
-            lines.append(f"{board.worst_mark(board.host_marks(HostProbe(**r), self.c.project.site.marks).values())} <b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
-                         f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB free · gpu {gpu}")
-        return "\n".join(lines) or "<i>no hosts</i>"
+        """One line per host, the worst mark first."""
+        return tgfmt.hosts(_mark_hosts(self.c, _probe_rows(self.c)))
 
     def tools_text(self) -> str:
-        """`tool · free/total seats free · n hosts` per tool; a failed probe shows its note."""
-        lines = []
-        for r in _tool_rows(self.c):
-            seats = (f"{r['free']}/{r['total']} seats free" if "total" in r else f"{r['free']} seats free") if "free" in r \
-                else f"<i>{esc(r['note'])}</i>" if "note" in r else ""
-            n = len(r["hosts"])
-            lines.append(" · ".join(filter(None, [f"<b>{esc(r['tool'])}</b>", seats, f"{n} host{'s' if n != 1 else ''}"])))
-        return "\n".join(lines) or "<i>no tools</i>"
+        """One line per tool."""
+        return tgfmt.tools(_tool_rows(self.c))
+
+    def digest_text(self) -> str:
+        """The daily digest now, as Telegram HTML."""
+        self.c.refresh()
+        return Digest(self.c.project, self.c.ledger).text(time.time())
+
+    def log_tail(self, handle: str, n: int) -> tuple[str, bytes]:
+        """The last `n` lines of the log of the running or last stage, fetched from the host: (file name, bytes)."""
+        row = self.c.resolve(handle)
+        log = self.c.heartbeat(row).get("log")
+        if not log:
+            raise Refuse(f"{board.handle(row)}: the heartbeat names no log")
+        rc, out, err = self.c.ssh.run(str(row["host"]), ["tail", "-n", str(n), str(log)])
+        if rc != 0:
+            raise HostError(f"{row['host']}: tail {log}: rc {rc}: {err.strip()}")
+        return f"{board.handle(row)}.log", out.encode()
+
+    def board_files(self) -> list[Path]:
+        """compare.html and status.html of the last watcher cycle, the ones that exist."""
+        bdir = self.c.project.data / "board"
+        return [p for p in (bdir / "compare.html", bdir / "status.html") if p.is_file()]
+
+    def metrics_csv(self, design: str) -> bytes:
+        """The CSV of `edr metrics --design <design> --csv`."""
+        return _metrics_csv(self.c.ledger.metrics(design=design)).encode()
 
     def compare_text(self, handles: list[str]) -> str:
         """One block per metric: its name, then one `label value` line per run."""
@@ -424,7 +420,11 @@ class Actions:
 # --- verbs
 
 def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
-    """The board, or one run with its stages, metrics and log tail."""
+    """The board, one run with its stages, metrics and log tail, or the daily digest."""
+    if a.digest:
+        text = Actions(c).digest_text()
+        c.emit(tgfmt.plain(text), {"digest": text})
+        return Exit.DONE
     if a.handle:
         row = c.resolve(a.handle)
         c.refresh(str(row["batch"]))
@@ -505,6 +505,17 @@ def cmd_tools(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.HOSTS if any("note" in r for r in rows) else Exit.DONE
 
 
+def _metrics_csv(rows: list[Row]) -> str:
+    """Metric rows as CSV with the columns of an export."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(export.METRIC_COLUMNS)
+    w.writerows([m["run_id"], m.get("label"), m.get("config"), m.get("src"), m["stage"], m.get("step"),
+                 m.get("task"), m["name"], m.get("canonical"), m["value"], m.get("unit"), m.get("source_file")]
+                for m in rows)
+    return out.getvalue()
+
+
 def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
     """`edr tools` under its old name; gone in the next release."""
     print("edr: lic is deprecated; use edr tools", file=sys.stderr)
@@ -515,11 +526,7 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
     """The metrics of one design, as a table or CSV."""
     rows = c.ledger.metrics(design=a.design, stage=a.stage, step=a.step)
     if a.csv and not a.json:
-        w = csv.writer(sys.stdout, lineterminator="\n")
-        w.writerow(export.METRIC_COLUMNS)
-        w.writerows([m["run_id"], m.get("label"), m.get("config"), m.get("src"), m["stage"], m.get("step"),
-                     m.get("task"), m["name"], m.get("canonical"), m["value"], m.get("unit"), m.get("source_file")]
-                    for m in rows)
+        sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
         c.emit(_metrics_table(rows), rows)
@@ -926,6 +933,20 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     return watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
 
 
+def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
+    """Send one message through every configured notifier."""
+    html = tgfmt.esc(a.text)
+    if a.dry_run:
+        c.emit(tgfmt.head(c.project.project, "note") + "\n" + html + "\n(dry)", {"sent": 0, "text": a.text})
+        return Exit.DONE
+    notifiers = make_notifiers(c.project.site, c.project, c.ledger, Actions(c))
+    if not notifiers:
+        raise Refuse("no notifier is configured; see docs/telegram.md")
+    sent = sum(n.post("note", html, a.silent) for n in notifiers)
+    c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": a.text})
+    return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
+
+
 def _notifiers(c: Ctx) -> list:
     project = c.project
     bot = Ctx(c.a)
@@ -1040,6 +1061,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s seconds; Ctrl-C ends it")
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
+    s.add_argument("--digest", action="store_true", help="the daily digest that the watcher sends, as plain text")
     s = verb("events", "the last events", """
         The last N events in time order: time, actor (user, watch or telegram),
         run, kind and text.
@@ -1231,6 +1253,14 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
+    s = verb("notify", "send one message through every notifier", """
+        Sends one message through every notifier that the site configures. The
+        first line names the project and the word note, as in every message of
+        the bot; TEXT follows as plain text. docs/telegram.md shows a Claude Code
+        hook that calls it.
+        """, write=True, exits={Exit.REFUSED: "no notifier is configured, or a send failed"})
+    s.add_argument("text", help="the message, as plain text")
+    s.add_argument("--silent", action="store_true", help="send without a sound on the phone")
     s = verb("watch", "the watcher", """
         The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
         bot as a thread when the site file configures it. --once runs one cycle.

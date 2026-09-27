@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- A daily digest at `[limits] digest_at`: the runs that ended, the live
+  and queued runs, the hosts with the least free scratch, and the open
+  alerts. `/digest` and `edr status --digest` show it on demand.
+- A custom command with `detach` that ends within 5 seconds replies
+  `ended with rc N: <last output line>` instead of its `reply`.
+- The bot reacts to a command message: 👀 when a slow command starts,
+  then 👍 when the reply went out or 👎 when the command failed.
+- `/start` and `/keyboard` show a reply keyboard with `Status`, `Hosts`,
+  `Events`, `Tools` and `Digest`; `/keyboard off` removes it.
+- An alert has a third button, `stop`, which stops the run after its
+  task. It asks `Stop <handle>?` first and acts only on `Yes, stop`
+  within 10 minutes.
+- The bot sends files: `/log <handle> [n]` the log tail of a run,
+  `/board` the two HTML boards, and `/csv <design>` the metrics, each
+  up to 20 MB. `/pin` now pins a new board message, which `/board` did
+  before.
+- No bot text uses a middle dot as a separator: the first line is
+  `<project>: <title>`, and a run line, a host line and the counts
+  separate their parts with commas.
+- `edr notify TEXT [--silent] [--dry-run]` sends one message through
+  every notifier, for example from a Claude Code hook.
+- A command sent as a reply to an alert acts on the run of the alert:
+  `/keep 24`, `/ack`, `/stop` and `/status` need no handle, and a custom
+  command gets `{handle}`, `{run_id}`, `{run_root}` and `{host}`.
+- `[telegram] topic_id` puts every message of a project into one topic
+  of a forum group; the bot ignores a command from another topic.
+- `/hosts` shows every resource as used of total, in one order:
+  `cores 21/32, ram 93/376 GB, scratch 195/1538 GB, gpu 0/1`. `/tools`
+  shows the seats used of the total and the hosts of each tool.
 - `docs/reference/` is generated from the code by `tools/gen_docs.py`:
   every verb with its flags and exit codes, every config key and
   placeholder, every run state, the bot commands. `docs/cli.md` and
@@ -23,7 +52,8 @@
   new `[marks]` table in `site.toml`, which `edr.toml` may override. A
   new first column `ok` holds the worst mark, and the rows go by it.
   `--json` gives the marks of each host in `marks`.
-- The `/hosts` reply of the bot starts each host with its worst mark.
+- The `/hosts` reply of the bot puts the mark of each resource in front
+  of it, and lists the hosts by their worst mark.
 
 ## 0.1.1 (2026-09-27)
 

@@ -53,6 +53,9 @@ reply is formatted text: one short line per item, a run handle in
 monospace, and a count or a note in italics. A tap on a handle copies
 it, so you can paste it into `/status <handle>`.
 
+The first line is `<project>: <title>`. Inside a line, commas separate
+the parts; no text uses a middle dot.
+
 Each run line starts with one mark for its state;
 `docs/reference/states.md` lists them.
 
@@ -68,7 +71,7 @@ same class and run edits that message in place, so an alert never
 repeats. An alert looks like this:
 
 ```
-🔴 demo · dead b_nodw@demo
+🔴 demo: dead b_nodw@demo
 heartbeat older than 90 s, driver 4711 gone on local
 edr run b_nodw@demo --stage synth --from elaborate
 ```
@@ -76,16 +79,24 @@ edr run b_nodw@demo --stage synth --from elaborate
 The first line holds the mark of the state, the project and the state
 in bold, and the handle in monospace. The second line is the reason.
 The third line is the one command that `edr status --triage` proposes
-for the run, in monospace. The alert carries two inline buttons:
+for the run, in monospace. The alert carries three inline buttons:
 
 | Button | `callback_data` | Action |
 |---|---|---|
 | keep 12h | `keep12:<handle>` | `edr keep <handle> --hours 12` |
 | ack | `ack:<handle>` | `edr keep <handle> --ack` |
+| stop | `stop:<handle>` | asks first, then `edr stop <handle> --after-task` |
 
 The bot answers every press, appends the result to the alert text, and
-keeps the buttons. A press records one ledger event: the `keep` event of
-the action, with the actor `telegram`.
+keeps the buttons. A press records one ledger event: the `keep` or the
+`stop` event of the action, with the actor `telegram`.
+
+The stop button acts only on a second tap. The first tap adds the line
+`Stop <handle>?` to the alert and shows two buttons, `Yes, stop` and
+`No`. `No` restores the three buttons. A question older than 10 minutes
+is stale: `Yes, stop` then restores the buttons and stops nothing. The
+bot reads the age from the edit date of the message, so a question
+survives a restart of the watcher.
 
 ## The board
 
@@ -97,17 +108,17 @@ of the total. Live runs come first. The last line, in italics, holds
 the count per state:
 
 ```
-demo · board 14:05
-🔴 a@demo dead · synth 3/13 · 1h
-🟢 c@demo pnr 4/13 · 0m
-⚪ b@demo done · 1h
-1 dead · 1 running · 1 done
+demo: board 14:05
+🔴 a@demo dead, synth 3/13, 1h
+🟢 c@demo pnr 4/13, 0m
+⚪ b@demo done, 1h
+1 dead, 1 running, 1 done
 ```
 
 The board shows at most 30 runs and then a line `… and N more`. When
 no run is live, a line `nothing live` comes before the counts. Its message id lives in the
 ledger's `kv` table under `telegram`, so a restart edits the same message.
-`/board` unpins the old message and pins a new one at the bottom of the
+`/pin` unpins the old message and pins a new one at the bottom of the
 chat.
 
 ## Built-in commands
@@ -120,11 +131,18 @@ stage and step, the host and the age, the proposed command in monospace,
 and the last log line in a `<pre>` block. `/events` shows one line
 `HH:MM kind handle` per event, the kind in bold, and the reason indented
 under it in italics; it shows a handle in place of a run id. `/hosts`
-shows one line per host, `🟢 hostA · 21/32 cores · 195/1538 GB free · gpu -`,
-and `no answer` for a host that fails the probe. `/tools` shows
-`demo · 3/8 seats free · 2 hosts` per tool. `/help` is prose, so a tap on a
-command sends it. `/compare` and `/metric` reply with a `<pre>` block
-of aligned columns.
+shows one line per host, with the mark of `edr hosts` and the used of
+total of every resource:
+
+```
+hostA 🟢 cores 21/32, 🟡 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0/1
+```
+
+The hosts come in the order of `edr hosts`, the worst mark first. A host
+without a GPU has no `gpu` part, and a host that fails the probe shows
+`⚫ no answer`. `/tools` shows `fc 3/8 seats used, hostA, hostB` per tool.
+`/help` is prose, so a tap on a command sends it. `/compare` and
+`/metric` reply with a `<pre>` block of aligned columns.
 
 A custom command replies with the output of its program as it is. Give
 the program a narrow format, or the phone wraps the lines.
@@ -136,7 +154,7 @@ in `site.toml`, one table per command:
 
 ```toml
 [telegram.commands.survey]
-help = "free cores, RAM and scratch on every host"
+help = "cores, RAM and scratch on every host"
 run = ["edr", "hosts", "--narrow"]
 timeout_s = 60
 
@@ -152,6 +170,162 @@ reply = "session claude-{project}-{dir} started; open the Claude app"
 `docs/reference/bot.md` lists every key, the placeholders a string
 renders, and the regex gate on every argument. Write each regex as an
 allowlist of the exact values you expect, as the `claude` example does.
+
+A command with `detach` is watched for 5 seconds after the start. When
+it ends in that window, the reply is `ended with rc N: <last output
+line>` instead of `reply`, so a program that refuses to start, such as a
+Claude session in a directory that is not trusted, says why.
+
+## The keyboard
+
+`/start` and `/keyboard` show a reply keyboard under the text field. It
+stays until `/keyboard off` removes it. Its buttons are five words:
+
+```
+Status   Hosts
+Events   Tools   Digest
+```
+
+A tap sends the word as a plain message, and the bot runs the command
+of that name: `Status` runs `/status`. The case and spaces around the
+word do not matter; any other plain text gets no answer.
+
+In a group, a bot sees plain text only when it is an admin, or when
+@BotFather turned its privacy mode off with `/setprivacy`.
+
+## Reactions
+
+The bot reacts to the message of a command:
+
+| Reaction | Meaning |
+|---|---|
+| 👀 | a command that can take more than a second started: a custom command, `/log` or `/hosts` |
+| 👍 | the reply went out |
+| 👎 | the command failed or was refused, or the reply did not go out |
+
+Telegram accepts only a fixed set of reaction emoji, and ⏳, ✅ and ❌
+are not in it. A chat or a client without reactions makes the call
+fail; the bot ignores that failure and answers as usual.
+
+## The daily digest
+
+With `digest_at = "08:00"` in `[limits]` of `edr.toml`, the watcher
+sends one message a day, at its first cycle after 08:00 local time. The
+message has five parts:
+
+- the runs that ended since the last digest, with their states;
+- the live runs, with the stage and the time since the start;
+- the queued runs;
+- the three hosts with the least free scratch, as used of total;
+- the open alerts: live runs in an alert state without an `ack`.
+
+```
+demo: digest
+Ended since 14.01 03:00
+⚪ a@demo done
+
+Live
+🔴 h@demo synth, 2h
+🟢 c@demo synth, 2h
+
+Queued
+🔵 q@demo
+
+Least free scratch
+local scratch 50/100 GB
+hostA scratch 900/1000 GB
+
+Open alerts
+🔴 h@demo hung
+```
+
+The host figures come from `data/board/board.json` of the last cycle,
+so the digest runs no probe. The day and the time of the last digest
+live in the ledger's `kv` table under `digest`; the first digest covers
+the last 24 hours. `/digest` sends the same text at any time, and
+`edr status --digest` prints it on the terminal. Neither moves the start
+of the next digest.
+
+## Files
+
+Three commands answer with a file instead of a message. The phone opens
+an HTML file in its browser and a CSV file in a sheet app.
+
+- `/log <handle> [n]` fetches the last `n` lines, default 200, of the
+  log of the running or last stage from the host, with the same ssh
+  wrapper as `edr`. The file is `<handle>.log`.
+- `/board` sends `data/board/compare.html` and `data/board/status.html`
+  of the last watcher cycle.
+- `/csv <design>` sends `metrics.csv`, the output of
+  `edr metrics --design <design> --csv`.
+
+A file over 20 MB is not sent; the bot answers with its size and the
+limit instead.
+
+## Reply to an alert
+
+A command sent as a reply to an alert acts on the run of that alert, so
+it needs no handle. The bot keeps the message id and the run id of every
+alert of the last 7 days in the ledger's `kv` table, under `telegram`.
+
+| Reply | Same as |
+|---|---|
+| `/keep 24` | `/keep <run> 24` |
+| `/ack` | `/ack <run>` |
+| `/stop disk full` | `/stop <run> disk full` |
+| `/status` | `/status <run>` |
+
+A reply that names the run itself, such as `/keep <run> 6`, keeps its
+arguments. A reply to an older alert, or to a message that is not an
+alert, works like a message without a reply.
+
+A custom command sent as a reply gets four more placeholders from the
+run: `{handle}`, `{run_id}`, `{run_root}` and `{host}`. The values come
+from the ledger, not from the phone. This entry opens a Claude session
+in the tree of the run:
+
+```toml
+[telegram.commands.claude_run]
+help = "as a reply to an alert: a Claude session in the run tree"
+run = ["tmux", "new-session", "-d", "ssh -t {host} 'cd {run_root} && claude remote-control'"]
+reply = "Claude session for {handle} started on {host}"
+```
+
+The same command without a reply answers `bad placeholder 'host'` and
+runs nothing.
+
+## edr notify
+
+`edr notify TEXT` sends one message to the chat, or to the topic of the
+project, with the project name in the bold first line:
+
+```sh
+edr notify "session backend: the sweep is done"
+edr notify --silent "session backend: waiting for input"
+edr notify --dry-run "test"       # prints the message, sends nothing
+```
+
+It exits 1 when no bot is configured or the send failed. It runs from
+any directory below `edr.toml`.
+
+A Claude Code hook can call it, so a session reports to the phone. Put
+this into `.claude/settings.json` of the repository where the session
+runs, and replace the path with the project directory:
+
+```json
+{
+  "hooks": {
+    "Notification": [{"hooks": [{"type": "command",
+      "command": "cd ~/work/backend && edr notify \"session $(basename \"$CLAUDE_PROJECT_DIR\"): $(jq -r .message)\""}]}],
+    "Stop": [{"hooks": [{"type": "command",
+      "command": "cd ~/work/backend && edr notify --silent \"session $(basename \"$CLAUDE_PROJECT_DIR\"): turn ended\""}]}]
+  }
+}
+```
+
+The `Notification` hook gets a JSON object on stdin, and `jq` takes its
+`message`. The `Stop` hook runs at the end of every turn, so it sends
+silently.
 
 ## One chat, or one per project
 
@@ -186,9 +360,46 @@ up:
    group to stderr. A group id is negative. Put it in `chat_id` and
    restart the watcher again.
 
-The table in `edr.toml` replaces `token_file`, `chat_id` and `user_id`
+The table in `edr.toml` replaces `token_file`, `chat_id`, `user_id` and `topic_id`
 of the site for this project only; the custom commands stay in
 `site.toml`. Keep `telegram_poll = true` in a project with its own bot.
+
+## Topics: one group, one thread per project
+
+A Telegram group with Topics on is a forum: each topic is a thread with
+its own id. `topic_id` in `[telegram]` puts every message of a project
+into one thread: the alerts, the board, the replies and the pinned
+board. The bot then obeys a command or a button press only when it
+comes from that thread. It ignores a command from another thread
+without an event, because the watcher of another project answers it.
+
+To set it up:
+
+1. Make a group and turn on Topics in the group settings.
+2. Add the bot of each project and make it an admin with the right to
+   pin messages. An admin bot also receives the plain words of the
+   reply keyboard.
+3. Make one topic per project.
+4. Start the watcher of the project without `topic_id` and send
+   `/status` in its topic. The watcher prints the id of the topic to
+   stderr:
+
+   ```
+   telegram: a message came from topic 17 of chat -1001234; set topic_id = 17 in [telegram] of edr.toml
+   ```
+
+5. Put the id into `edr.toml` of that project and restart its watcher:
+
+   ```toml
+   [telegram]
+   chat_id = -1001234
+   topic_id = 17
+   ```
+
+Without `topic_id`, the bot answers a command in the thread it came
+from, and it sends its alerts and its board to the main thread. Each
+project that answers commands still needs its own bot, because one
+token has one poller.
 
 ## Security
 

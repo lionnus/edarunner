@@ -21,6 +21,8 @@ from .hosts import HostError, Ssh
 from .ledger import Ledger
 from .model import Project, Task
 from .notify import Notifier, alert_buttons
+from .notify.digest import Digest
+from .notify.telegram import format as tgfmt
 
 log = logging.getLogger(__name__)
 Row = dict[str, Any]
@@ -388,7 +390,7 @@ def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     params = [dict(r) for r in ledger.db.execute("SELECT run_id, key, value, source FROM params")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
     config.save_text(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly))
-    text = board.phone(rows, now=now, totals=metrics.step_totals(project))
+    text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)
 
@@ -424,6 +426,12 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
         return states
     _launch_queued(project, ssh, ledger)
     _boards(project, ssh, ledger, notifiers, now)
+    digest = Digest(project, ledger)
+    if digest.due(now):
+        text = digest.text(now)
+        for n in notifiers:
+            n.post("digest", text)
+        digest.mark_sent(now)
     ledger.set_kv("progress", progress)
     ledger.set_kv("notified", notes)
     n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1

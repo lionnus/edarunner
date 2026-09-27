@@ -5,7 +5,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-from edarunner import board, watch
+from edarunner import watch
+from edarunner.notify.telegram import format as fmt
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("gen_docs", ROOT / "tools" / "gen_docs.py")
@@ -23,7 +24,7 @@ def test_pages_cover_every_verb_table_and_state(tmp_path: Path) -> None:
         assert f"\n{heading}\n" in pages["configuration.md"]
     for state in watch.STATES:
         assert f"`{state}`" in pages["states.md"]
-    assert set(watch.STATES) <= set(board.MARK)
+    assert set(watch.STATES) <= set(fmt.MARK)
     assert " · " not in "".join(pages.values())
 
 

@@ -29,7 +29,7 @@ event, not even an empty database.
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read verb (check, events, hosts, lic, metrics, status, tools) never creates
+A read verb (check, events, hosts, lic, metrics, notify, status, tools) never creates
 data/edr.db. Without a database it reads an empty ledger in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
@@ -60,7 +60,7 @@ A verb below says where it refines a code.
 ## status
 
 ```
-edr status [--batch B] [--narrow] [--watch] [--live] [--triage] [handle]
+edr status [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [handle]
 ```
 
 Without a handle, the board: one line per run of every batch that is not
@@ -82,6 +82,7 @@ task row, the metrics, and the log tail from the heartbeat.
 | `--watch` | redraw every heartbeat_s seconds; Ctrl-C ends it |
 | `--live` | ask each host whether the driver exists; a gone driver shows dead |
 | `--triage` | every run not running, with one proposed command |
+| `--digest` | the daily digest that the watcher sends, as plain text |
 
 | Exit | Meaning |
 |---|---|
@@ -451,6 +452,27 @@ not collected unless --uncollected.
 |---|---|
 | 2 | the batch has no run |
 | 3 | an rm failed |
+
+## notify
+
+```
+edr notify [--dry-run] [--silent] text
+```
+
+Sends one message through every notifier that the site configures. The
+first line names the project and the word note, as in every message of
+the bot; TEXT follows as plain text. docs/telegram.md shows a Claude Code
+hook that calls it.
+
+| Flag | Meaning |
+|---|---|
+| `text` | the message, as plain text |
+| `--dry-run` | print what would happen and write nothing |
+| `--silent` | send without a sound on the phone |
+
+| Exit | Meaning |
+|---|---|
+| 1 | no notifier is configured, or a send failed |
 
 ## watch
 
