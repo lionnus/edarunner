@@ -22,7 +22,7 @@ def demo_project(root: Path) -> Project:
     """Build a Project from the demo edr.toml with the parts extract reads."""
     cfg = tomllib.loads((DEMO / "edr.toml").read_text())
     stages = {
-        n: Stage(name=n, foreach=s.get("foreach", ""), task_dir=s.get("task_dir", ""))
+        n: Stage(name=n, foreach=s.get("foreach", ""), task_dir=s.get("task_dir", ""), steps=s.get("steps", []))
         for n, s in cfg["stages"].items()
     }
     metrics = {}
@@ -57,9 +57,9 @@ def demo_tasks() -> dict[str, Task]:
 
 
 def results_tree(results: Path) -> Path:
-    """Write what flow.sh and kernel.sh write, for steps 0..3 and two tasks."""
+    """Write what flow.sh and kernel.sh write: steps 0..3 of synth, 4..5 of pnr, two tasks."""
     run = results / RUN_ID
-    for n in range(4):
+    for n in range(6):
         d = run / "reports" / str(n)
         d.mkdir(parents=True)
         (d / "area.rpt").write_text(f"i_top {1000 + n * 10.5:.1f}\n")
@@ -84,7 +84,8 @@ def test_demo_metrics(tmp_path):
     assert [(r["step"], r["value"]) for r in area] == [(0, 1000.0), (1, 1010.5), (2, 1021.0), (3, 1031.5)]
     assert area[0]["task"] == "" and area[0]["unit"] == "um2" and area[0]["canonical"] == "area.cell"
     assert area[0]["source_file"] == "reports/0/area.rpt"
-    assert [r["value"] for r in by_name(rows, "wns_ns", "pnr")] == [-0.0, -0.01, -0.02, -0.03]
+    assert [r["value"] for r in by_name(rows, "wns_ns", "pnr")] == [-0.04, -0.05]
+    assert [r["step"] for r in by_name(rows, "area_cell_um2", "pnr")] == [4, 5]
     assert {r["task"]: r["value"] for r in by_name(rows, "power_w")} == {"k_small": 0.25, "k_big": 0.25}
     power = by_name(rows, "power_w")[0]
     assert power["stage"] == "power" and power["step"] is None and power["canonical"] == "power.total"
@@ -94,7 +95,7 @@ def test_demo_metrics(tmp_path):
     assert {r["task"]: r["value"] for r in energy} == {"k_small": 850.0, "k_big": 850.0}
     assert energy[0]["stage"] == "power" and energy[0]["step"] is None
     assert energy[0]["unit"] == "nJ" and energy[0]["canonical"] == "energy"
-    assert len(rows) == 8 + 8 + 2 + 2 + 2
+    assert len(rows) == 8 + 4 + 2 + 2 + 2
 
 
 def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
@@ -147,3 +148,28 @@ def test_parse_flexlm():
     assert parse_flexlm(text, "other") is None
     one = "Users of Fusion-Compiler-FE-NX:  (Total of 1 license issued;  Total of 1 license in use)\n"
     assert parse_flexlm(one, "Fusion-Compiler-FE-NX") == (1, 1)
+
+
+def test_a_numbered_step_belongs_to_one_stage(tmp_path):
+    run = tmp_path / "results" / RUN_ID
+    for n in range(9):
+        (run / "reports" / str(n)).mkdir(parents=True)
+        (run / "reports" / str(n) / "area.rpt").write_text(f"i_top {n}\n")
+    project = demo_project(tmp_path)
+    project.stages = {
+        "synth": Stage(name="synth", steps=["a", "b", "c", "d"]),
+        "pnr": Stage(name="pnr", steps=["a", "b", "c", "d", "e", "f"]),
+        "export": Stage(name="export", steps=["x", "y", "z"]),
+        "nosteps": Stage(name="nosteps"),
+    }
+    project.metrics = {
+        "area": Metric(name="area", stage=list(project.stages), step="*", file="reports/{step}/area.rpt",
+                       regex=r"i_top (\S+)"),
+        "fixed": Metric(name="fixed", stage=["synth", "pnr"], step="2", file="reports/{step}/area.rpt",
+                        regex=r"i_top (\S+)"),
+    }
+    rows = extract(project, RUN, tmp_path / "results", {})
+    steps = lambda stage, name="area": [r["step"] for r in by_name(rows, name, stage)]
+    assert steps("synth") == [0, 1, 2, 3] and steps("pnr") == [4, 5]
+    assert steps("export") == [6, 7, 8] and steps("nosteps") == []
+    assert steps("synth", "fixed") == [2] and steps("pnr", "fixed") == []
