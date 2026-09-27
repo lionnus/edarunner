@@ -28,6 +28,7 @@ only works for a clean ref. A dirty snapshot has to be added with
 
 ```sh
 edr plan sweep1               # run id, host and root per job; writes no spec
+edr plan sweep1 --show-spec   # also the env, commands and collect paths of each run
 edr launch sweep1 --dry-run   # every path and command, nothing written
 edr launch sweep1
 ```
