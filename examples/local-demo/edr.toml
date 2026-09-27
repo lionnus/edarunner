@@ -43,7 +43,7 @@ cmd = "bash {root}/flow/flow.sh synth {run_id} {config} LAST_STAGE=synth {overri
 resume = "bash {root}/flow/flow.sh synth {run_id} {config} FIRST_STAGE={checkpoint} LAST_STAGE=synth {overrides}"
 steps = ["setup", "analyze", "elaborate", "synth"]
 progress = "ls reports 2>/dev/null | grep -cE '^[0-9]+$'"
-needs = { cores = 1, disk_gb = 0.1, licence = "demo" }
+needs = { cores = 1, disk_gb = 0.1, tools = ["demo"] }
 budget = { hours = 1, disk_gb = 1 }
 retry = { match = "licen[cs]e", wait_s = 1, max = 2 }
 collect = ["reports/"]
@@ -70,7 +70,7 @@ parallel = 2
 task_dir = "simulation/tests/{config}/{task.test}"
 cmd = "DEMO_CONFIG={config} bash {root}/flow/kernel.sh {task.kernel} {task.test} {task.args}"
 after_each = "rm -f {task_dir}/wave.vcd"
-needs = { cores = 1, disk_gb = 0.05, licence = { demo = 1 } }
+needs = { cores = 1, disk_gb = 0.05, tools = { demo = 1 } }
 budget = { hours = 1, per = "task" }
 collect = ["{task_dir}/power/"]
 

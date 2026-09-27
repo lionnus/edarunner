@@ -128,7 +128,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/status <handle>` | the state, stage, step, age, host and last log line of one run |
 | `/events [n]` | the last `n` events, default 8, at most 30, newest first |
 | `/hosts` | the worst mark of `edr hosts`, used cores, free scratch GB and idle GPUs per host, each of the total |
-| `/lic` | free licence seats |
+| `/tools` | free seats and hosts per tool |
 | `/board` | pin a new board message |
 | `/keep <handle> [hours]` | add hours to the running stage or task, default 12 |
 | `/ack <handle>` | cancel a pending kill |
@@ -143,8 +143,8 @@ and the last log line in a `<pre>` block. `/events` shows one line
 `HH:MM kind handle` per event, the kind in bold, and the reason indented
 under it in italics; it shows a handle in place of a run id. `/hosts`
 shows one line per host, `🟢 hostA · 21/32 cores · 195/1538 GB free · gpu -`,
-and `no answer` for a host that fails the probe. `/lic` shows
-`demo · 3/8 seats free` per licence. `/help` is prose, so a tap on a
+and `no answer` for a host that fails the probe. `/tools` shows
+`demo · 3/8 seats free · 2 hosts` per tool. `/help` is prose, so a tap on a
 command sends it. `/compare` and `/metric` reply with a `<pre>` block
 of aligned columns.
 
