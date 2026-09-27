@@ -43,7 +43,7 @@ def demo_project(root: Path) -> Project:
     site = Site(path=DEMO / "site.toml", scratch=[], env={}, ssh_options=[], ssh_timeout_s=1, tool_procs="", hosts={})
     source = Source(repo=root, worktrees=root, ref="HEAD", nested=[], run_id="", build_tag="")
     return Project(
-        root=root, project="demo", site=site, state=root, data=root, run_prefix="", source=source,
+        root=root, project="demo", site=site, state_dir=root, data=root, run_prefix="", source=source,
         sync=Sync(exclude=[]), safety=Safety(marker="/edr/"), limits=Limits(), placement=Placement(),
         stages=stages, metrics=metrics,
     )

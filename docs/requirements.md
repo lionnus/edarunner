@@ -17,7 +17,7 @@ The machine that runs `edr` and the watcher.
 - `rsync`, `git` and `python3` on `PATH`, and `nproc`, `df`, `ps`, `awk`,
   `stat` and `readlink` for the host `local`. `check` names each one
   that is missing.
-- The `state` directory of `edr.toml` on a filesystem that every host
+- The `state_dir` directory of `edr.toml` on a filesystem that every host
   mounts. The hosts read the driver and the spec from it; the head node
   reads the heartbeats.
 

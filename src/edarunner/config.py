@@ -42,7 +42,7 @@ PathLike = str | os.PathLike[str]
 # `${VAR}` belongs to the shell, so a `$` before the brace is not a placeholder.
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
-    "schema", "project", "site", "state", "data", "run_prefix", "telegram_poll", "telegram",
+    "schema", "project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "telegram",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
@@ -334,7 +334,10 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     """Load edr.toml, the site it names (or `site_path`, relative to the project), and tasks.toml."""
     root = Path(os.path.abspath(Path(project_dir).expanduser()))
     file = root / "edr.toml"
-    raw = _table(_read(file), _PROJECT_KEYS, file, "")
+    raw = _read(file)
+    if "state" in raw:
+        raise ConfigError(f"{file}: 'state' is now 'state_dir'")
+    raw = _table(raw, _PROJECT_KEYS, file, "")
     _schema(raw, file)
     name = _need(raw, "project", file, "")
     values: dict[str, object] = {"project": name, "project_root": str(root), "user": getpass.getuser()}
@@ -362,7 +365,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         root=root,
         project=name,
         site=site,
-        state=_path(raw.get("state", str(_default(Project, "state"))), file, values),
+        state_dir=_path(raw.get("state_dir", str(_default(Project, "state_dir"))), file, values),
         data=_path(raw.get("data", str(_default(Project, "data"))), file, values),
         run_prefix=raw.get("run_prefix", _default(Project, "run_prefix")),
         telegram_poll=_flag(raw, "telegram_poll", file),

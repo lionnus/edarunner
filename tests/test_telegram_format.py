@@ -29,7 +29,7 @@ def test_run_detail_of_a_dead_run():
     hb = {"step": 3, "step_name": "elaborate", "stage": "synth", "last_log": "step 3 <elaborate>\n\n"}
     assert fmt.run_detail(row, hb, NOW).splitlines() == [
         "🔴 <code>a@demo</code> dead", "stage synth, step 3 elaborate", "on local, 1h",
-        "<code>edr run a@demo --stage synth --from elaborate</code>", "<pre>step 3 &lt;elaborate&gt;</pre>"]
+        "<code>edr continue a@demo --stage synth --from elaborate</code>", "<pre>step 3 &lt;elaborate&gt;</pre>"]
 
 
 def test_events_newest_first_with_handles():

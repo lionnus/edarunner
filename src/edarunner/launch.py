@@ -153,7 +153,7 @@ def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
 
 def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: list[Task],
           v: dict[str, object]) -> dict[str, Any]:
-    state_dir = project.state / batch.batch
+    state_dir = project.state_dir / batch.batch
     run_id = str(v["run_id"])
     return {
         "schema": 1, "run_id": run_id, "batch": batch.batch, "project": project.project,
@@ -264,7 +264,7 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
 
     `probes` are the results of a caller who probed already; the hosts are then not probed again.
     """
-    date = date or pin_date(project.state, batch.batch, dry_run=True)
+    date = date or pin_date(project.state_dir, batch.batch, dry_run=True)
     jobs = [j for j in batch.jobs if not only or j.label in only]
     wanted = {j.host for j in jobs if _fresh(j)}
     names = (set(project.site.hosts) if "auto" in wanted else set()) | (wanted - {"auto"})
@@ -286,7 +286,7 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
 # --- launch
 
 def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: bool = False) -> Path:
-    """Write <state>/<batch>/<run_id>.spec.json by a temporary file and rename; the spec records `driver`."""
+    """Write <state_dir>/<batch>/<run_id>.spec.json by a temporary file and rename; the spec records `driver`."""
     plan_.spec["driver"] = str(driver)
     path = Path(state) / batch / f"{plan_.run_id}.spec.json"
     if not dry_run:
@@ -332,7 +332,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
     """Pin the date, publish the driver, sync, write the specs and start one driver per run."""
     if "-dirty" in batch.source and not allow_dirty:
         raise Refuse(f"source {batch.source} is dirty; pass --allow-dirty")
-    state = project.state
+    state = project.state_dir
     date = pin_date(state, batch.batch, dry_run)
     plans = plan(project, batch, ssh, db, date=date, only=only)
     driver = sync.publish_driver(state, DRIVER_SRC, dry_run)

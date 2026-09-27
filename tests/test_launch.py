@@ -41,7 +41,7 @@ class FakeProbeSsh(Ssh):
 @pytest.fixture
 def env(tmp_path: Path):
     project = config.load_project(DEMO)
-    project.state = tmp_path / "state"
+    project.state_dir = tmp_path / "state"
     project.limits.heartbeat_s = 1
     batch = config.load_batch(project, "demo")
     ssh = FakeProbeSsh(project.site, tmp_path / "scratch")
@@ -233,12 +233,12 @@ def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
     hb_path = tmp_path / "state" / "demo" / f"{row['run_id']}.json"
     hb = wait_hb(hb_path, lambda h: h["phase"] == "stage:synth")
     run_row = db.run(row["run_id"])
-    assert launch.stop(ssh, db, run_row, hb, now=True, grace_s=15, why="test", state=project.state)
+    assert launch.stop(ssh, db, run_row, hb, now=True, grace_s=15, why="test", state=project.state_dir)
     hb = wait_hb(hb_path, lambda h: h["exit"] is not None, timeout=20)
     assert hb["phase"] in ("KILLED:SIGTERM", "STOPPED") and hb["exit"] == 10 and hb["pgids"] == []
     assert not ssh.pid_alive("local", hb["driver_pid"])
     assert [e["kind"] for e in db.events(run_id=row["run_id"])] == ["launch", "stop"]
-    assert launch.stop(ssh, db, run_row, hb, after_task=True, why="later", state=project.state)
+    assert launch.stop(ssh, db, run_row, hb, after_task=True, why="later", state=project.state_dir)
     assert (hb_path.with_name(f"{row['run_id']}.stop")).read_text().strip() == "after-task"
 
 
@@ -263,7 +263,7 @@ def listing(root: Path) -> dict[str, bytes | None]:
 
 def test_dry_run_writes_nothing(env, tmp_path: Path, capsys) -> None:
     project, batch, ssh, db = env
-    state = project.state
+    state = project.state_dir
     state.mkdir()
     (state / "demo").mkdir()
     (state / "demo" / "RUN_DATE").write_text(DATE + "\n")

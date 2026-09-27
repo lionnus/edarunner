@@ -11,11 +11,11 @@ frozen snapshot of one design from it for a paper.
 | `batches` | batch | the project, the source tag, the pinned date, when it was retired |
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id` |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
-| `params` | key of a run | `config`, `build_tag`, `src` and each override, as text |
+| `parameters` | key of a run | `config`, `build_tag`, `src` and each override, as text |
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
-| `kv` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and the `telegram` message ids |
+| `store` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and the `telegram` message ids |
 
 `data/results/<run_id>/` holds the collected files in the layout of the
 run tree, so a metric's `source_file` is a path under it.
