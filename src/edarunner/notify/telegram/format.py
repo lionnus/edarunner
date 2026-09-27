@@ -1,4 +1,4 @@
-"""Telegram HTML from ledger rows: the marks, the run line, the board, the lists and the alert.
+"""Telegram HTML from database rows: the marks, the run line, the board, the lists and the alert.
 
 Every function is pure and returns text under the message limit of 4096 characters.
 """

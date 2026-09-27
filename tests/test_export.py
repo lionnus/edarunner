@@ -1,4 +1,4 @@
-"""export.py against a seeded ledger and a fake results tree in tmp_path."""
+"""export.py against a seeded database and a fake results tree in tmp_path."""
 
 import csv
 import hashlib
@@ -10,7 +10,7 @@ import pytest
 
 from edarunner import config, export
 from edarunner.guards import Refuse
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 
@@ -28,20 +28,20 @@ def world(tmp_path):
     root = tmp_path / "demo"
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     project = config.load_project(root)
-    led = Ledger(project.data / "edr.db")
+    db = Database(project.data / "edr.db")
     for run_id, label, src, phase, failed in (
         (RUN_A_OLD, "a", "aaa111", "done", 0),
         (RUN_A, "a", "aaa111", "done", 0),
         (RUN_B, "b_nodw", "aaa111", "stage:pnr", 0),
         (RUN_C, "a", "bbb222", "INCOMPLETE:1f0s", 1),
     ):
-        led.upsert_run({"run_id": run_id, "batch": "demo", "label": label, "config": "demo", "src": src, "host": "local",
+        db.upsert_run({"run_id": run_id, "batch": "demo", "label": label, "config": "demo", "src": src, "host": "local",
                         "phase": phase, "state": "running", "started": 100, "updated": 200,
                         "counts": {"done": 1, "failed": failed}})
     for run_id, value in ((RUN_A_OLD, 900.0), (RUN_A, 1000.0), (RUN_C, 2000.0)):
-        led.add_metric({"run_id": run_id, "stage": "synth", "step": 3, "name": "area_cell_um2", "canonical": "area.cell",
+        db.add_metric({"run_id": run_id, "stage": "synth", "step": 3, "name": "area_cell_um2", "canonical": "area.cell",
                         "value": value, "unit": "um2", "source_file": "reports/3/area.rpt"})
-    led.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.25, "unit": "W"})
+    db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.25, "unit": "W"})
     results = project.data / "results"
     (results / RUN_A / "reports" / "3").mkdir(parents=True)
     (results / RUN_A / "reports" / "3" / "area.rpt").write_text("i_top 1000.0\n")
@@ -54,8 +54,8 @@ def world(tmp_path):
     (results / RUN_B / "reports" / "0" / "power.csv").write_text(POWER_FLAT)
     (results / RUN_C / "reports").mkdir(parents=True)
     (results / RUN_C / "reports" / "area.rpt").write_text("other design\n")
-    yield project, led
-    led.close()
+    yield project, db
+    db.close()
 
 
 def _read_csv(path):
@@ -64,9 +64,9 @@ def _read_csv(path):
 
 
 def test_export_one_design(world, tmp_path):
-    project, led = world
+    project, db = world
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, led, "aaa111", out)
+    manifest = export.export(project, db, "aaa111", out)
 
     assert [r["run_id"] for r in manifest["runs"]] == [RUN_A, RUN_B]
     assert manifest["runs"][0] == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "src": "aaa111",
@@ -105,40 +105,40 @@ def test_export_one_design(world, tmp_path):
 
 
 def test_labels_and_refusals(world, tmp_path):
-    project, led = world
-    manifest = export.export(project, led, "aaa111", tmp_path / "x", labels=["a"])
+    project, db = world
+    manifest = export.export(project, db, "aaa111", tmp_path / "x", labels=["a"])
     assert [r["label"] for r in manifest["runs"]] == ["a"] and manifest["incomplete"] == []
-    assert export.export(project, led, "bbb222", tmp_path / "y")["incomplete"] == [RUN_C]
+    assert export.export(project, db, "bbb222", tmp_path / "y")["incomplete"] == [RUN_C]
     with pytest.raises(Refuse, match="not empty"):
-        export.export(project, led, "aaa111", tmp_path / "x")
+        export.export(project, db, "aaa111", tmp_path / "x")
     with pytest.raises(Refuse, match="no run"):
-        export.export(project, led, "zzz", tmp_path / "z")
+        export.export(project, db, "zzz", tmp_path / "z")
     with pytest.raises(Refuse, match="no run"):  # a prefix of a source tag is not a match
-        export.export(project, led, "aaa", tmp_path / "z")
+        export.export(project, db, "aaa", tmp_path / "z")
     with pytest.raises(Refuse, match="no run"):
-        export.export(project, led, "aaa111", tmp_path / "z", labels=["nope"])
+        export.export(project, db, "aaa111", tmp_path / "z", labels=["nope"])
     with pytest.raises(Refuse, match="empty design"):
-        export.export(project, led, "", tmp_path / "z")
+        export.export(project, db, "", tmp_path / "z")
     assert not (tmp_path / "z").exists()
 
 
 def test_dry_run_writes_nothing(world, tmp_path, capsys):
-    project, led = world
+    project, db = world
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, led, "aaa111", out, dry_run=True)
+    manifest = export.export(project, db, "aaa111", out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
     assert paths == ["runs.csv", "metrics.csv", "a/reports/3/area.rpt", "a/sim/power/reports/power.csv",
                      "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
-    real = export.export(project, led, "aaa111", out)
+    real = export.export(project, db, "aaa111", out)
     assert [(f["path"], f["sha256"]) for f in manifest["files"]] == [(f["path"], f["sha256"]) for f in real["files"]]
 
 
 def test_with_logs_copies_the_logs(world, tmp_path):
-    project, led = world
+    project, db = world
     out = tmp_path / "with_logs"
-    manifest = export.export(project, led, "aaa111", out, labels=["a"], with_logs=True)
+    manifest = export.export(project, db, "aaa111", out, labels=["a"], with_logs=True)
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
     assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "a/log/synth.log",

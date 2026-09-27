@@ -1,7 +1,7 @@
 # Getting started
 
 edarunner runs a flow you already have, a Makefile or a script, on hosts
-you reach over ssh, and keeps one ledger of every run. This page goes from
+you reach over ssh, and keeps one database of every run. This page goes from
 an empty head node to a first batch with a watcher behind it.
 
 ## Install
@@ -92,7 +92,7 @@ to wait for seats, and `[telegram]` when you want alerts on your phone.
 
 Edit `edr.toml`: the repository under `[source]`, one `[stages.<name>]`
 per command of the flow, and the `[metrics.<name>]` you want in the
-ledger. Stages run in file order. `docs/flows.md` shows two real flows,
+database. Stages run in file order. `docs/flows.md` shows two real flows,
 and `docs/reference/configuration.md` explains stages, steps, task
 groups and metrics.
 
@@ -195,7 +195,7 @@ edr export --design 3f9a2c1 --out exports/3f9a2c1
 ```
 
 One table holds one design, so `--design` has no default. `docs/results.md`
-explains the ledger and the snapshot.
+explains the database and the snapshot.
 
 ### 11. Clean up
 
@@ -205,7 +205,7 @@ edr retire --batch sweep1 --why "exported"
 ```
 
 `retire` removes the run trees on the hosts after a guard on every path,
-and refuses a tree whose results are not collected. The ledger keeps the
+and refuses a tree whose results are not collected. The database keeps the
 runs, the metrics and the events. `--collect netlist` copies the larger
 files of a `collect_on_request` list to the head node first; the section
 "Archive, then clear the hosts" in `docs/running.md` shows the whole
@@ -214,7 +214,7 @@ sequence and the rerun from the archive.
 ### 12. A second project
 
 One project is one directory with an `edr.toml`. A second flow, on
-another repository, gets its own directory, and with it its own ledger
+another repository, gets its own directory, and with it its own database
 and results under `data/`, its own state directory `~/.edr/<project>`,
 its own trees under `<scratch>/<user>/edr/<project>/` and its own
 watcher unit. The site file is shared. Nothing of one project appears in

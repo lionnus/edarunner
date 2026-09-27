@@ -88,7 +88,7 @@ for the run, in monospace. The alert carries three inline buttons:
 | stop | `stop:<handle>` | asks first, then `edr stop <handle> --after-task` |
 
 The bot answers every press, appends the result to the alert text, and
-keeps the buttons. A press records one ledger event: the `keep` or the
+keeps the buttons. A press records one event in the run database: the `keep` or the
 `stop` event of the action, with the actor `telegram`.
 
 The stop button acts only on a second tap. The first tap adds the line
@@ -117,7 +117,7 @@ demo: board 14:05
 
 The board shows at most 30 runs and then a line `… and N more`. When
 no run is live, a line `nothing live` comes before the counts. Its message id lives in the
-ledger's `kv` table under `telegram`, so a restart edits the same message.
+database's `kv` table under `telegram`, so a restart edits the same message.
 `/pin` unpins the old message and pins a new one at the bottom of the
 chat.
 
@@ -241,7 +241,7 @@ Open alerts
 
 The host figures come from `data/board/board.json` of the last cycle,
 so the digest runs no probe. The day and the time of the last digest
-live in the ledger's `kv` table under `digest`; the first digest covers
+live in the database's `kv` table under `digest`; the first digest covers
 the last 24 hours. `/digest` sends the same text at any time, and
 `edr status --digest` prints it on the terminal. Neither moves the start
 of the next digest.
@@ -266,7 +266,7 @@ limit instead.
 
 A command sent as a reply to an alert acts on the run of that alert, so
 it needs no handle. The bot keeps the message id and the run id of every
-alert of the last 7 days in the ledger's `kv` table, under `telegram`.
+alert of the last 7 days in the database's `kv` table, under `telegram`.
 
 | Reply | Same as |
 |---|---|
@@ -281,7 +281,7 @@ alert, works like a message without a reply.
 
 A custom command sent as a reply gets four more placeholders from the
 run: `{handle}`, `{run_id}`, `{run_root}` and `{host}`. The values come
-from the ledger, not from the phone. This entry opens a Claude session
+from the database, not from the phone. This entry opens a Claude session
 in the tree of the run:
 
 ```toml
@@ -407,7 +407,7 @@ token has one poller.
   refuses any other mode.
 - The bot obeys one `chat_id`, and one `user_id` when it is set. Every
   other chat or user gets no answer, and the first message from it makes
-  one ledger event `rejected`.
+  one database event `rejected`.
 - The command set, the argument shapes and the working directory come
   from `site.toml` on the head node. The phone chooses among those
   entries and fills the gated slots.

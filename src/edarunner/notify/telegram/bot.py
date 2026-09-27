@@ -34,20 +34,20 @@ REACTIONS = {"busy": "👀", "ok": "👍", "failed": "👎"}
 class TelegramBot(Notifier):
     """One bot, one chat, one poll thread."""
 
-    def __init__(self, site: Site, project: Project, ledger: Any, actions: Actions, token_file: str) -> None:
+    def __init__(self, site: Site, project: Project, db: Any, actions: Actions, token_file: str) -> None:
         assert site.telegram is not None
         self.site = site
         self.tg = site.telegram
         self.project = project
-        self.ledger = ledger
+        self.db = db
         self.actions = actions
         self.api = BotApi(Path(token_file).read_text().strip())
-        self.commands = Commands(actions, ledger, self.tg, lambda: self.project, self.repin)
+        self.commands = Commands(actions, db, self.tg, lambda: self.project, self.repin)
         self.buttons = Buttons(actions, self.commands.event)
         self.chat_id = int(self.tg.chat_id)
         self.user_id = self.tg.user_id or None
         self.topic = self.tg.topic_id
-        self._state: dict = ledger.get_kv("telegram", {})
+        self._state: dict = db.get_kv("telegram", {})
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -85,7 +85,7 @@ class TelegramBot(Notifier):
             runs = {k: v for k, v in self._state.get("replies", {}).items() if now - v[1] < REPLY_DAYS * 86400}
             runs[str(msg_id)] = [run_id, now]
             self._state["replies"] = runs
-            self.ledger.set_kv("telegram", self._state)
+            self.db.set_kv("telegram", self._state)
 
     def _replied_run(self, msg: dict) -> str | None:
         """The run id of the alert that `msg` replies to, or None."""
@@ -135,7 +135,7 @@ class TelegramBot(Notifier):
             self.api.pin(self.chat_id, mid)
         with self._lock:
             self._state[key] = mid
-            self.ledger.set_kv("telegram", self._state)
+            self.db.set_kv("telegram", self._state)
         return mid
 
     # The poll thread

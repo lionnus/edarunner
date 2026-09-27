@@ -32,13 +32,13 @@ commands, the report files and the numbers in them.
 | `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the four parsers, `expr`, extraction |
-| `ledger.py` | the SQLite schema, upserts, queries, `board.json` |
+| `db.py` | the run database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
 | `notify/__init__.py` | the notifier interface and `make_notifiers` |
 | `notify/digest.py` | `Digest`, the daily summary that the watcher sends and `/digest` shows |
 | `notify/telegram/api.py` | `BotApi`, the HTTPS client: one method per Bot API call, the retry and the 429 wait |
-| `notify/telegram/format.py` | pure functions that turn ledger rows into Telegram HTML |
+| `notify/telegram/format.py` | pure functions that turn database rows into Telegram HTML |
 | `notify/telegram/commands.py` | the built-in command table and one handler per command |
 | `notify/telegram/custom.py` | the custom argv commands of `[telegram.commands.*]` |
 | `notify/telegram/buttons.py` | the inline buttons of an alert, the action of a press, the confirmation of a stop |
@@ -69,7 +69,7 @@ A channel never imports `cli` or `watch`; it gets its verbs through the
    `metrics`, writes `params`, resumes, launches queued rows, writes the
    boards.
 6. `export.export` selects the newest run per label of one source tag
-   from the ledger and copies its results with a manifest.
+   from the database and copies its results with a manifest.
 
 The read verbs (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
 ingest the heartbeats too, so the board follows the driver and not the
@@ -93,7 +93,7 @@ changes the driver and the tests in the same commit.
   guard refuses `/`, the home directory, a one-component path, a path
   without the marker and a path shallower than `min_depth`.
 - A dry run writes nothing: no date pin, no spec, no file on a host, no
-  ledger row, no event, no database. `tests/test_e2e_local.py::
+  database row, no event, not even the database file. `tests/test_e2e_local.py::
   test_dry_run_flow_writes_nothing` proves it for the whole flow.
 - A read verb creates nothing.
 - The watcher never deletes. A budget stops or kills; it never removes

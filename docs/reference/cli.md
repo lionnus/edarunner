@@ -6,7 +6,7 @@
 edr [--json] [--version] verb ...
 ```
 
-Run flows on hosts, keep a ledger, watch, export.
+Run flows on hosts, keep a run database, watch, export.
 
 | Flag | Meaning |
 |---|---|
@@ -23,14 +23,14 @@ output the text.
 
 --dry-run exists on every verb that writes. A dry run prints every path
 and every command with the mark (dry) or the prefix dry: and writes
-nothing: no date pin, no spec, no file on a host, no ledger row, no
+nothing: no date pin, no spec, no file on a host, no database row, no
 event, not even an empty database.
 
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
 A read verb (check, events, hosts, lic, metrics, notify, status, tools) never creates
-data/edr.db. Without a database it reads an empty ledger in memory.
+data/edr.db. Without the file it reads an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
 queued, yellow when stale, red when dead, hung, over budget, an orphan or

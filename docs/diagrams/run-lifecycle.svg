@@ -84,7 +84,7 @@
 <path class="a" d="M742 290H703"/>
 
 <rect class="box" x="377" y="250" width="150" height="80" rx="7"/>
-<text class="t" x="452" y="274" text-anchor="middle">Ledger</text>
+<text class="t" x="452" y="274" text-anchor="middle">Run database</text>
 <text class="m" x="452" y="294" text-anchor="middle">data/edr.db</text>
 <text class="s" x="452" y="313" text-anchor="middle">runs and metrics</text>
 <path class="a" d="M553 290H527"/>

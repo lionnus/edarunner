@@ -1,10 +1,10 @@
 # Results
 
-The ledger is one SQLite file, `data/edr.db`, on the head node. Every
+The run database is one SQLite file, `data/edr.db`, on the head node. Every
 run, every number and every action lands there. `edr export` writes a
 frozen snapshot of one design from it for a paper.
 
-## The ledger
+## The tables
 
 | Table | One row per | Holds |
 |---|---|---|
@@ -22,7 +22,7 @@ run tree, so a metric's `source_file` is a path under it.
 
 Read the tables with `sqlite3 data/edr.db` when a verb does not answer
 the question. Only the head node opens the file; a read verb without a
-database reads an empty ledger in memory and creates nothing.
+the file reads an empty database in memory and creates nothing.
 
 ## edr metrics
 
@@ -71,7 +71,7 @@ empty is refused. `--dry-run` lists the files.
 
 ## A paper reads snapshots
 
-A paper repository never reads the ledger. It keeps one snapshot per
+A paper repository never reads the database. It keeps one snapshot per
 design under its own `data/`, pinned by the source tag, and builds every
 table and figure from `runs.csv` and `metrics.csv`:
 
@@ -91,7 +91,7 @@ tag stays true.
 ## What goes in git
 
 In the project repository: `edr.toml`, `tasks.toml`, `jobs/`, `hooks/`,
-and `edr-watch.service`. Not in git: `data/` (the ledger, the results,
+and `edr-watch.service`. Not in git: `data/` (the database, the results,
 the boards), the state directory, the worktrees, the run trees on the
 hosts, `site.toml` and the Telegram token. Put `data/` in the project's
 `.gitignore`.

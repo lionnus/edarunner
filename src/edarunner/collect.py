@@ -16,7 +16,7 @@ from . import board
 from .config import ConfigError, load_json, placeholders, render, resolve_task
 from .guards import Refuse, assert_run_id
 from .hosts import Ssh
-from .ledger import Ledger
+from .db import Database
 from .model import Project, Stage
 
 _TASK_END = ("done", "failed")
@@ -73,7 +73,7 @@ def stage_state(project: Project, heartbeat: dict, only: list[str] | None = None
 def collect_run(
     project: Project,
     ssh: Ssh,
-    ledger: Ledger,
+    db: Database,
     run: dict,
     heartbeat: dict,
     dry_run: bool = False,
@@ -82,7 +82,7 @@ def collect_run(
     """Copy log/ and the collect paths of every finished stage and task of `run` into data/results."""
     spec = load_spec(project, run)
     only = spec_stages(spec)
-    c = _Copier(project, ssh, ledger, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
+    c = _Copier(project, ssh, db, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
     if c.result.failures:
         return c.result
     finished, running = stage_state(project, heartbeat, only)
@@ -99,12 +99,12 @@ def collect_run(
 
 
 def collect_on_request(
-    project: Project, ssh: Ssh, ledger: Ledger, run: dict, name: str, dry_run: bool = False
+    project: Project, ssh: Ssh, db: Database, run: dict, name: str, dry_run: bool = False
 ) -> CollectResult:
     """Copy the `collect_on_request` list `name` of every stage; the artifact class is `name`."""
     spec = load_spec(project, run)
     only = spec_stages(spec)
-    c = _Copier(project, ssh, ledger, run, {}, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
+    c = _Copier(project, ssh, db, run, {}, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
     if c.result.failures:
         return c.result
     tasks = list(run.get("tasks") or [])
@@ -120,12 +120,12 @@ def collect_on_request(
 
 
 def restore_on_request(
-    project: Project, ssh: Ssh, ledger: Ledger, run: dict, name: str, host: str, root: str, dry_run: bool = False
+    project: Project, ssh: Ssh, db: Database, run: dict, name: str, host: str, root: str, dry_run: bool = False
 ) -> CollectResult:
     """Copy the `collect_on_request` list `name` of `run` from data/results/<run_id>/ into <host>:<root>."""
     spec = load_spec(project, run)
     heartbeat = load_json(project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
-    c = _Copier(project, ssh, ledger, {**run, "host": host, "root": root}, {}, dry_run,
+    c = _Copier(project, ssh, db, {**run, "host": host, "root": root}, {}, dry_run,
                 spec_task_dirs(spec, str(run.get("root") or "")))
     if c.result.failures:
         return c.result
@@ -142,10 +142,10 @@ def restore_on_request(
 
 class _Copier:
     def __init__(
-        self, project: Project, ssh: Ssh, ledger: Ledger, run: dict, heartbeat: dict, dry_run: bool,
+        self, project: Project, ssh: Ssh, db: Database, run: dict, heartbeat: dict, dry_run: bool,
         task_dirs: dict[str, str] | None = None,
     ) -> None:
-        self.project, self.ssh, self.ledger, self.dry_run = project, ssh, ledger, dry_run
+        self.project, self.ssh, self.db, self.dry_run = project, ssh, db, dry_run
         self.task_dirs = task_dirs or {}
         self.result = CollectResult()
         scalars = {k: v for k, v in {**heartbeat, **run}.items() if isinstance(v, (str, int, float))}
@@ -269,4 +269,4 @@ class _Copier:
         self.result.files += 1
         self.result.copied.append(path)
         if not self.dry_run:
-            self.ledger.add_artifact({"run_id": self.run_id, "path": path, "bytes": size, "class": klass})
+            self.db.add_artifact({"run_id": self.run_id, "path": path, "bytes": size, "class": klass})

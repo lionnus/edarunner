@@ -58,9 +58,9 @@ def test_check_probes_each_host_once_and_resolves_the_source(demo: Path, capsys,
         probed.append(host)
         return HostProbe(host, 4.0, 8.0, "/tmp/x", 50.0)
 
-    def plan(project, batch, ssh, ledger, *a, **kw):
+    def plan(project, batch, ssh, db, *a, **kw):
         planned.append((batch.source, sorted(kw.get("probes") or {})))
-        return real_plan(project, batch, ssh, ledger, *a, **kw)
+        return real_plan(project, batch, ssh, db, *a, **kw)
 
     monkeypatch.setattr(Ssh, "probe", probe)
     monkeypatch.setattr(launch, "plan", plan)

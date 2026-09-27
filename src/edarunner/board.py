@@ -1,6 +1,6 @@
 """Boards: 48-column text, the wide table, one run's detail, status.html and compare.html.
 
-A row is a `runs` row of the ledger; `counts` may be a dict or JSON text.
+A row is a `runs` row of the database; `counts` may be a dict or JSON text.
 The tables are rich renderables; `plain` turns one into text for a bot.
 """
 

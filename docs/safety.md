@@ -62,7 +62,7 @@ the prefix `dry:`, and writes nothing:
 
 - no date pin in `<state>/<batch>/RUN_DATE`
 - no spec, no driver copy, no stop file, no keep file
-- no ledger row, no event, no database
+- no database row, no event, not even the database file
 - no `data/board/` and no `data/results/`
 
 `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` runs the whole

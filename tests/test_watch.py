@@ -12,7 +12,7 @@ import pytest
 from edarunner import board, collect, config, launch, watch
 from edarunner.config import load_project
 from edarunner.hosts import HostProbe, Ssh
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 from edarunner.notify import Notifier
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -81,7 +81,7 @@ class Env:
         lim = self.project.limits
         lim.stale_s, lim.dead_s, lim.hung_s, lim.grace_s = 30, 90, 3600, 10
         self.ssh = FakeSsh(self.project.site)
-        self.ledger = Ledger(tmp_path / "data" / "edr.db")
+        self.db = Database(tmp_path / "data" / "edr.db")
         self.notifier = Rec()
 
     def heartbeat(self, label: str, batch: str = "demo", phase: str = "stage:synth", age: float = 5,
@@ -100,14 +100,14 @@ class Env:
         (self.project.state / batch).mkdir(parents=True, exist_ok=True)
         (self.project.state / batch / f"{run_id}.json").write_text(json.dumps(hb))
         # launch writes src; the heartbeat has no src.
-        self.ledger.upsert_run({"run_id": run_id, "batch": batch, "label": label, "src": src})
+        self.db.upsert_run({"run_id": run_id, "batch": batch, "label": label, "src": src})
         return hb
 
     def cycle(self, now: float = NOW, **kw) -> dict[str, str]:
-        return watch.cycle(self.project, self.ssh, self.ledger, [self.notifier], now=now, **kw)
+        return watch.cycle(self.project, self.ssh, self.db, [self.notifier], now=now, **kw)
 
     def events(self) -> list[tuple[str, str]]:
-        return [(e["run_id"], e["kind"]) for e in self.ledger.events(n=500) if e["actor"] == "watch"]
+        return [(e["run_id"], e["kind"]) for e in self.db.events(n=500) if e["actor"] == "watch"]
 
 
 @pytest.fixture
@@ -115,7 +115,7 @@ def env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     e = Env(tmp_path)
     yield e
-    e.ledger.close()
+    e.db.close()
 
 
 def listing(root: Path) -> dict[str, int]:
@@ -148,8 +148,8 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert states == {rid("a"): "superseded", rid("a", NEW, "gdef5678"): "running", rid("r"): "running",
                       rid("s"): "stale", rid("d"): "dead", rid("l"): "looping", rid("o"): "over_budget",
                       rid("f"): "host_full", rid("g"): "done"}
-    assert {r: env.ledger.run(r)["state"] for r in states} == states
-    assert env.ledger.run(rid("a"))["counts"] == a["counts"] and env.ledger.run(rid("g"))["exit"] == 0
+    assert {r: env.db.run(r)["state"] for r in states} == states
+    assert env.db.run(rid("a"))["counts"] == a["counts"] and env.db.run(rid("g"))["exit"] == 0
     assert sorted(env.events()) == sorted([(rid("a"), "superseded"), (rid("s"), "stale"), (rid("d"), "dead"),
                                            (rid("l"), "looping"), (rid("o"), "over_budget"), (rid("f"), "host_full"),
                                            (rid("g"), "done"), (rid("g"), "collect")])
@@ -162,7 +162,7 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert env.notifier.texts[rid("d")][1].startswith("edr run d@demo --stage ")
     bdir = env.project.data / "board"
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
-    assert set(env.ledger.get_kv("progress")) == set(states) and rid("d") in env.ledger.get_kv("notified")
+    assert set(env.db.get_kv("progress")) == set(states) and rid("d") in env.db.get_kv("notified")
     assert len(json.loads((bdir / "board.json").read_text())["runs"]) == 9
     assert f'<script src="{board.PLOTLY_URL}">' in (bdir / "compare.html").read_text()
     assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 1
@@ -196,7 +196,7 @@ def test_host_full_stops_the_newest_after_grace(env: Env, monkeypatch) -> None:
     env.heartbeat("a", host_full=True)
     b = env.heartbeat("b", date=NEW)
     stops: list[dict] = []
-    monkeypatch.setattr(launch, "stop", lambda ssh, ledger, run, hb, **kw: stops.append({**kw, "run_id": run["run_id"]}) or True)
+    monkeypatch.setattr(launch, "stop", lambda ssh, db, run, hb, **kw: stops.append({**kw, "run_id": run["run_id"]}) or True)
     keep = env.project.state / "demo" / f"{b['run_id']}.keep.json"
     assert env.cycle()[rid("a")] == "host_full" and stops == []
     keep.write_text('{"hours": 1, "ack": true}')
@@ -243,15 +243,15 @@ def test_collect_extract_and_params_once(env: Env, monkeypatch) -> None:
     run_id = hb["run_id"]
     results = env.project.data / "results" / run_id
     assert (results / "reports" / "3" / "area.rpt").is_file() and (results / "log" / "synth.log").is_file()
-    rows = env.ledger.metrics(run_ids=[run_id])
+    rows = env.db.metrics(run_ids=[run_id])
     by = {(r["stage"], r["step"], r["name"]): r["value"] for r in rows}
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
     assert len(by) == 8 and all(v is not None for v in by.values())
-    params = {r["key"]: r["value"] for r in env.ledger.db.execute("SELECT key, value FROM params WHERE run_id=?", (run_id,))}
+    params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM params WHERE run_id=?", (run_id,))}
     assert params == {"config": "demo", "DW": "0", "src": "gabc1234"}
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
-    assert calls == [run_id] and len(env.ledger.metrics(run_ids=[run_id])) == 8
+    assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 8
 
 
 def test_a_failed_stage_yields_no_metrics(env: Env) -> None:
@@ -263,7 +263,7 @@ def test_a_failed_stage_yields_no_metrics(env: Env) -> None:
         (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
     env.cycle()
     assert (env.project.data / "results" / hb["run_id"] / "reports" / "5" / "area.rpt").is_file()
-    rows = env.ledger.metrics(run_ids=[hb["run_id"]])
+    rows = env.db.metrics(run_ids=[hb["run_id"]])
     assert [(r["stage"], r["step"]) for r in rows] == [("synth", 0), ("synth", 1), ("synth", 2), ("synth", 3)]
 
 
@@ -282,7 +282,7 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     assert env.cycle()[hb["run_id"]] == "dead"
     assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate"}
     assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
-    rows = [tuple(r) for r in env.ledger.db.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
+    rows = [tuple(r) for r in env.db.conn.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
     assert rows == [("synth", 1, "running"), ("synth", 2, "resumed")]
     assert env.events().count((hb["run_id"], "resume")) == 2
     env.cycle(NOW + 1)
@@ -290,11 +290,11 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
 
 
 def test_queued_runs_are_relaunched(env: Env, monkeypatch) -> None:
-    env.ledger.upsert_run({"run_id": rid("a"), "batch": "demo", "label": "a", "state": "queued"})
+    env.db.upsert_run({"run_id": rid("a"), "batch": "demo", "label": "a", "state": "queued"})
     calls: list[tuple] = []
-    monkeypatch.setattr(launch, "launch", lambda project, batch, ssh, ledger, **kw: calls.append((batch.batch, kw)) or [])
+    monkeypatch.setattr(launch, "launch", lambda project, batch, ssh, db, **kw: calls.append((batch.batch, kw)) or [])
     env.cycle()
-    env.ledger.upsert_run({"run_id": rid("b"), "batch": "demo", "label": "b_nodw", "state": "queued"})
+    env.db.upsert_run({"run_id": rid("b"), "batch": "demo", "label": "b_nodw", "state": "queued"})
     env.cycle(NOW + 1)
     assert calls == [("demo", {"only": ["a"], "stagger_s": 0, "allow_dirty": True})] * 2  # one job per cycle
 
@@ -322,7 +322,7 @@ def test_dry_run_writes_nothing(env: Env, capsys) -> None:
     states = env.cycle(dry_run=True)
     assert states == {rid("a"): "running", rid("d"): "dead"}
     assert listing(env.project.state) == before and not (env.project.data / "board").exists()
-    assert [r["phase"] for r in env.ledger.runs()] == [None, None] and env.ledger.events() == []
+    assert [r["phase"] for r in env.db.runs()] == [None, None] and env.db.events() == []
     assert env.notifier.sent == []
     out = capsys.readouterr().out
     assert f"{rid('a')}: running" in out and f"{rid('d')}: dead" in out
@@ -347,7 +347,7 @@ def test_stage_rows_follow_the_stages_map(env) -> None:
               "power": {"status": "done", "attempt": 1, "started": NOW - 1000, "ended": NOW - 10, "exit": 0}}
     hb = env.heartbeat("s1", phase="done", stage="power", exit=0, stages=stages)
     env.cycle()
-    rows = {r[0]: tuple(r[1:]) for r in env.ledger.db.execute(
+    rows = {r[0]: tuple(r[1:]) for r in env.db.conn.execute(
         "SELECT stage, status, started, ended, exit FROM stage_runs WHERE run_id=? AND task=''", (hb["run_id"],))}
     assert rows["synth"] == ("done", NOW - 3000, NOW - 2000, 0)
     assert rows["pnr"] == ("done", NOW - 2000, NOW - 1000, 0)
@@ -357,9 +357,9 @@ def test_stage_rows_follow_the_stages_map(env) -> None:
     killed = {"synth": {"status": "running", "attempt": 1, "started": 1, "ended": None, "exit": None}}
     hb3 = env.heartbeat("s3", phase="KILLED:SIGTERM", stage="synth", exit=10, stages=killed)
     env.cycle()
-    assert tuple(env.ledger.db.execute("SELECT status, exit FROM stage_runs WHERE run_id=? AND stage='pnr'",
+    assert tuple(env.db.conn.execute("SELECT status, exit FROM stage_runs WHERE run_id=? AND stage='pnr'",
                                        (hb2["run_id"],)).fetchone()) == ("failed", 5)
-    assert env.ledger.db.execute("SELECT status FROM stage_runs WHERE run_id=? AND stage='synth'",
+    assert env.db.conn.execute("SELECT status FROM stage_runs WHERE run_id=? AND stage='synth'",
                                  (hb3["run_id"],)).fetchone()[0] == "killed"
 
 
@@ -379,7 +379,7 @@ def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
     results = env.project.data / "results" / hb["run_id"]
     assert (results / "simulation" / "tests" / "demo" / "NEW_TEST" / "power" / "reports" / "power.csv").is_file()
     assert not (results / "reports").exists()
-    rows = env.ledger.metrics(run_ids=[hb["run_id"]])
+    rows = env.db.metrics(run_ids=[hb["run_id"]])
     assert {(r["stage"], r["task"], r["name"]) for r in rows} == {
         ("power", "k_new", "power_w"), ("power", "k_new", "window_ns"), ("power", "k_new", "energy_nj")}
     assert (hb["run_id"], "collect") not in env.events() and (hb["run_id"], "extract") not in env.events()
@@ -404,7 +404,7 @@ def test_run_forever_reloads_the_project_each_cycle(env: Env, monkeypatch) -> No
     env.notifier.project = None
     env.notifier.stop = lambda: None
     with pytest.raises(KeyboardInterrupt):
-        watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier])
+        watch.run_forever(env.project, env.ssh, env.db, [env.notifier])
     assert calls == ["load", "cycle", "load", "load", "cycle"]
     assert env.notifier.project is env.project
 
@@ -415,6 +415,6 @@ def test_run_forever_once_returns_1_when_the_cycle_failed(env: Env, monkeypatch)
 
     monkeypatch.setattr(config, "load_project", lambda root: env.project)
     monkeypatch.setattr(watch, "cycle", lambda *a, **k: None)
-    assert watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier], once=True) == 0
+    assert watch.run_forever(env.project, env.ssh, env.db, [env.notifier], once=True) == 0
     monkeypatch.setattr(watch, "cycle", boom)
-    assert watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier], once=True) == 1
+    assert watch.run_forever(env.project, env.ssh, env.db, [env.notifier], once=True) == 1

@@ -14,7 +14,7 @@ restart; a config that does not load skips the cycle and keeps the
 service up.
 
 1. Read every heartbeat of every batch without `RETIRED`, and write the
-   runs and their stage rows into the ledger.
+   runs and their stage rows into the run database.
 2. Classify each live run (the table below), write the state, add an
    event on a change of state, send an alert for the states that
    notify, and after `grace_s` take the action of the state.
@@ -34,7 +34,7 @@ service up.
    `limits.digest_at`.
 9. Write `<state>/watch.json` with the time, the cycle count and the pid.
 
-Its memory between cycles is three rows of the ledger's `kv` table:
+Its memory between cycles is three rows of the database's `kv` table:
 `progress`, what each run looked like last time, `notified`, the
 states, the alerts sent and the grace clocks, and `digest`, the day and
 the time of the last digest.
@@ -44,7 +44,7 @@ the time of the last digest.
 `docs/reference/states.md` lists every state: the test that finds it,
 whether it alerts, what the watcher does after `grace_s`, its mark, and
 the command `edr status --triage` proposes. A live run gets its state
-from the heartbeat and the ledger; a finished run from its phase. A job
+from the heartbeat and the database; a finished run from its phase. A job
 without a host is `queued`, and a `queued` run that `edr stop` marked
 `stopped` never starts.
 
@@ -71,9 +71,9 @@ Every cycle writes `data/board/`:
 | `compare.html` | the runs with their params as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
 
 The row order of the last text board is the `last_board` row of the
-ledger's `kv` table, so `#n` resolves.
+database's `kv` table, so `#n` resolves.
 
-`compare.html` is one self-contained page over the ledger's runs, params
+`compare.html` is one self-contained page over the database's runs, params
 and metrics. Its tables work as they are. The plots (a metric over the
 steps, a scatter of any two columns, the power phases, parallel
 coordinates) need Plotly. The page loads `data/board/plotly.min.js` when

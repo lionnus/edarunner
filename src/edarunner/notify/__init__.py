@@ -11,7 +11,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 from edarunner.model import Project, Site
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def alert_buttons(handle: str) -> list[Button]:
     return [("keep 12h", f"keep12:{handle}"), ("ack", f"ack:{handle}"), ("stop", f"stop:{handle}")]
 
 
-def make_notifiers(site: Site, project: Project, ledger: Ledger, actions: Actions) -> list[Notifier]:
+def make_notifiers(site: Site, project: Project, db: Database, actions: Actions) -> list[Notifier]:
     """Build every configured channel. A channel without its secret is skipped."""
     out: list[Notifier] = []
     tg = site.telegram
@@ -65,5 +65,5 @@ def make_notifiers(site: Site, project: Project, ledger: Ledger, actions: Action
         else:
             from edarunner.notify.telegram import TelegramBot
 
-            out.append(TelegramBot(site, project, ledger, actions, token_file))
+            out.append(TelegramBot(site, project, db, actions, token_file))
     return out

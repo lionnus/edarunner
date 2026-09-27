@@ -18,7 +18,7 @@ import pytest
 from edarunner import board, cli, config, launch
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 from edarunner.model import Telegram
 from edarunner.notify import Notifier
 from edarunner.notify.telegram import TelegramBot
@@ -60,7 +60,7 @@ def bdir(root: Path, batch: str = "demo") -> Path:
 
 def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batch: str = "demo",
          src: str = "abc1234", date: str = DATE, tree: bool = True, **extra) -> str:
-    """A ledger row, a heartbeat and a run tree under the tmp scratch; returns the run id."""
+    """A database row, a heartbeat and a run tree under the tmp scratch; returns the run id."""
     run_id = f"{date}_{label}_demo_g{src}"
     project = config.load_project(root)
     now = int(time.time())
@@ -78,15 +78,15 @@ def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batc
               "tasks": {}, "exit": 0 if terminal else None, "last_log": "step 2 elaborate"}
         (project.state / batch).mkdir(parents=True, exist_ok=True)
         (project.state / batch / f"{run_id}.json").write_text(json.dumps(hb))
-    with Ledger(project.data / "edr.db") as led:
-        led.upsert_batch({"batch": batch, "project": "demo", "source": src})
-        led.upsert_run(row)
+    with Database(project.data / "edr.db") as db:
+        db.upsert_batch({"batch": batch, "project": "demo", "source": src})
+        db.upsert_run(row)
     return run_id
 
 
 def add_metric(root: Path, run_id: str, name: str, value: float, step: int | None = 3, task: str = "") -> None:
-    with Ledger(config.load_project(root).data / "edr.db") as led:
-        led.add_metric({"run_id": run_id, "stage": "synth", "step": step, "task": task, "name": name,
+    with Database(config.load_project(root).data / "edr.db") as db:
+        db.add_metric({"run_id": run_id, "stage": "synth", "step": step, "task": task, "name": name,
                         "canonical": "area.cell" if name == "area_cell_um2" else "", "value": value, "unit": "u"})
 
 
@@ -147,8 +147,8 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     q = seed(demo, "q", None, tree=False, state="queued")
     code, out, _ = edr(capsys, "status")
     assert code == 0 and "b_nodw" in out and "done" in out and out.startswith("#")
-    with Ledger(demo / "data" / "edr.db") as led:
-        last = led.get_kv("last_board")
+    with Database(demo / "data" / "edr.db") as db:
+        last = db.get_kv("last_board")
     assert last == [r["run_id"] for r in board.order([{"run_id": a, "phase": "done"}, {"run_id": b, "phase": "stage:synth", "label": "b_nodw"}, {"run_id": q, "state": "queued", "label": "q"}])]
     code, out, _ = edr(capsys, "status", "#1")
     assert code == 0 and out.startswith(last[0])
@@ -181,10 +181,10 @@ def test_events_filters(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "events")
     assert code == 2 and out == "no events\n"
     a = seed(demo, "a", "done")
-    with Ledger(demo / "data" / "edr.db") as led:
-        led.add_event("user", a, "launch", "local /x")
-        led.add_event("watch", a, "done", "")
-        led.add_event("user", "", "export", "x -> y")
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_event("user", a, "launch", "local /x")
+        db.add_event("watch", a, "done", "")
+        db.add_event("user", "", "export", "x -> y")
     code, out, _ = edr(capsys, "events", "-n", "2")
     assert code == 0 and len(out.splitlines()) == 4 and "launch" not in out and "export" in out
     code, out, _ = edr(capsys, "events", "--run", "a@demo")
@@ -210,8 +210,8 @@ def test_keep_merges_fields(demo: Path, capsys) -> None:
     assert edr(capsys, "keep", "b_nodw@demo")[0] == 0 and keep_file(demo, b) == {"hours": 12, "ack": True}
     code, out, _ = edr(capsys, "keep", "a@demo")
     assert code == 2 and "already done" in out
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert [(e["actor"], e["kind"], e["text"]) for e in led.events()] == [
+    with Database(demo / "data" / "edr.db") as db:
+        assert [(e["actor"], e["kind"], e["text"]) for e in db.events()] == [
             ("user", "keep", "keep 3 h"), ("user", "keep", "keep 3 h, ack"), ("user", "keep", "keep 12 h, ack")]
 
 
@@ -227,8 +227,8 @@ def test_stop_after_task_now_and_finished(demo: Path, capsys) -> None:
     assert code == 0 and (state / f"{b}.stop").read_text().strip() == "after-task"
     code, out, _ = edr(capsys, "--json", "stop", "b_nodw@demo", "--now", "--why", "gone")
     assert code == 0 and json.loads(out)["data"]["stopped"] and "TERM driver" in json.loads(out)["output"]
-    with Ledger(demo / "data" / "edr.db") as led:
-        texts = [e["text"] for e in led.events(run_id=b)]
+    with Database(demo / "data" / "edr.db") as db:
+        texts = [e["text"] for e in db.events(run_id=b)]
     assert len(texts) == 2 and texts[0] == "after-task: later" and texts[1].startswith("gone [driver")
 
 
@@ -280,20 +280,20 @@ def test_stop_waits_60_s_then_says_now(demo: Path, capsys, monkeypatch) -> None:
     code, out, _ = edr(capsys, "stop", "b_nodw@demo", "--now", "--why", "t")
     assert code == 3 and "use --now" not in out and clock.sleeps == [2] * 15
     assert cmds[0] == f"kill -TERM {os.getpid()}" and cmds[-2] == f"kill -KILL {os.getpid()}"
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert [e["text"].endswith(", alive]") for e in led.events(run_id=b)] == [True, True]
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["text"].endswith(", alive]") for e in db.events(run_id=b)] == [True, True]
 
 
 def test_stop_marks_a_queued_run_stopped(demo: Path, capsys) -> None:
     q = seed(demo, "q", None, tree=False, state="queued")
     code, out, _ = edr(capsys, "stop", "q@demo", "--why", "t", "--dry-run")
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert code == 0 and "(dry)" in out and led.run(q)["state"] == "queued"
+    with Database(demo / "data" / "edr.db") as db:
+        assert code == 0 and "(dry)" in out and db.run(q)["state"] == "queued"
     code, out, _ = edr(capsys, "--json", "stop", "q@demo", "--why", "t")
     assert code == 0 and json.loads(out)["data"] == {"run_id": q, "stopped": True}
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert led.run(q)["state"] == "stopped" and led.runs(state="queued") == []
-        assert [(e["kind"], e["text"]) for e in led.events(run_id=q)] == [("stop", "queued: t")]
+    with Database(demo / "data" / "edr.db") as db:
+        assert db.run(q)["state"] == "stopped" and db.runs(state="queued") == []
+        assert [(e["kind"], e["text"]) for e in db.events(run_id=q)] == [("stop", "queued: t")]
     code, _, err = edr(capsys, "stop", "q@demo", "--why", "t")
     assert code == 1 and "no driver pid" in err
 
@@ -310,12 +310,12 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert acts.stop_after_task("b_nodw@demo", "telegram", "why") == "b_nodw@demo stops after its task"
     assert acts.stop_after_task("a@demo", "telegram", "why") == "a@demo already done"
     assert (bdir(demo) / f"{b}.stop").exists()
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
+    with Database(demo / "data" / "edr.db") as db:
+        assert {e["actor"] for e in db.events()} == {"telegram"} and len(db.events()) == 3
     assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4, 0m", "⚪ <code>a@demo</code> done, 0m",
                                                "<i>1 running, 1 done</i>"]
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert len(led.get_kv("last_board")) == 2
+    with Database(demo / "data" / "edr.db") as db:
+        assert len(db.get_kv("last_board")) == 2
     one = acts.status_text("b_nodw@demo").splitlines()
     assert one == ["🟢 <code>b_nodw@demo</code> running", "stage synth, step 2 elaborate", "on local, 0m",
                    "<pre>step 2 elaborate</pre>"]
@@ -351,12 +351,12 @@ def test_a_button_press_records_one_event(demo: Path, tmp_path: Path) -> None:
     token.write_text("1:A")
     ctx = cli.Ctx(argparse.Namespace(json=False, dry_run=False))
     ctx.project.site.telegram = Telegram(token_file=token, chat_id=42)
-    bot = TelegramBot(ctx.project.site, ctx.project, ctx.ledger, cli.Actions(ctx), str(token))
+    bot = TelegramBot(ctx.project.site, ctx.project, ctx.db, cli.Actions(ctx), str(token))
     bot.api.call = lambda method, params, files=None: {}
     press = {"id": "q", "from": {"id": 7}, "data": "ack:b_nodw@demo",
              "message": {"message_id": 1, "chat": {"id": 42}, "text": "dead b_nodw@demo"}}
     bot.handle_update({"update_id": 1, "callback_query": press})
-    events = ctx.ledger.events()
+    events = ctx.db.events()
     assert [(e["actor"], e["run_id"], e["kind"]) for e in events] == [("telegram", b, "keep")]
     ctx.close()
 
@@ -397,10 +397,10 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     assert code == 0 and not roots[b].exists() and (state / "demo" / "RETIRED").exists()
     hb = json.loads((state / "demo" / f"{b}.json").read_text())
     assert hb["phase"] == "ABANDONED:gone" and hb["exit"] == 1
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert led.batches()[0]["retired"] and led.run(b)["phase"] == "ABANDONED:gone"
-        assert led.run(q)["state"] == "retired" and led.run(a)["phase"] == "done"
-        kinds = [(e["run_id"], e["kind"]) for e in led.events()]
+    with Database(demo / "data" / "edr.db") as db:
+        assert db.batches()[0]["retired"] and db.run(b)["phase"] == "ABANDONED:gone"
+        assert db.run(q)["state"] == "retired" and db.run(a)["phase"] == "done"
+        kinds = [(e["run_id"], e["kind"]) for e in db.events()]
     assert kinds == [(a, "prune"), (a, "retire"), (a, "retire"), (b, "retire"), (q, "retire")]
     assert edr(capsys, "status", "--batch", "demo")[1] == "no runs\n" and "c" in edr(capsys, "status")[1]
     assert edr(capsys, "retire", "--batch", "empty", "--why", "x")[0] == 2
@@ -432,8 +432,8 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
     assert code == 0 and manifest == json.loads((exp / "manifest.json").read_text()) and (exp / "a" / "reports" / "3" / "area.rpt").exists()
     code, _, err = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
     assert code == 1 and "not empty" in err
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert [e["kind"] for e in led.events()] == ["export"]
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["kind"] for e in db.events()] == ["export"]
 
 
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
@@ -545,8 +545,8 @@ def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
     assert code == 0 and "1 files" in out and (demo / "data" / "results" / a / "out" / "11").is_dir()
     code, out, _ = edr(capsys, "run", "a@demo", "--collect", "nope")
     assert code == 3
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert [e["kind"] for e in led.events()] == ["collect", "collect"]
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["kind"] for e in db.events()] == ["collect", "collect"]
 
 
 def test_watch_check_dry_and_once(demo: Path, capsys) -> None:
@@ -575,8 +575,8 @@ def _edr_bytes(demo: Path, *argv: str, **env: str) -> bytes:
 def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
     a = seed(demo, "a", "done")
     seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
-    with Ledger(demo / "data" / "edr.db") as led:
-        led.add_event("user", a, "launch", "local /x")
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_event("user", a, "launch", "local /x")
     for argv in (["status"], ["status", "--narrow"], ["status", "--triage"], ["status", "a@demo"], ["hosts"], ["tools"],
                  ["events"], ["check"]):
         assert b"\x1b" not in _edr_bytes(demo, *argv), argv
@@ -589,8 +589,8 @@ def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
 
 def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsys, monkeypatch) -> None:
     a = seed(demo, "a", "done")
-    with Ledger(demo / "data" / "edr.db") as led:
-        led.add_event("user", a, "launch", "local /x")
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_event("user", a, "launch", "local /x")
     # A live probe of the local host changes between two calls; a fixed one keeps the bytes comparable.
     monkeypatch.setattr(Ssh, "probe", lambda self, host: HostProbe(host, 4.0, 8.0, "/tmp/x", 50.0, cores=4, total_gb=60.0))
     for var in ("NO_COLOR", "FORCE_COLOR", "TTY_COMPATIBLE", "COLUMNS"):
@@ -620,11 +620,11 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
     code, out, _ = edr(capsys, *argv, "--dry-run")
     assert code == 0 and "(dry)" in out and not (demo / "data" / "edr.db").exists()
     assert edr(capsys, *argv)[0] == 0
-    with Ledger(demo / "data" / "edr.db") as led:
-        row = led.run(root.name)
+    with Database(demo / "data" / "edr.db") as db:
+        row = db.run(root.name)
         assert row["phase"] == "done" and row["state"] == "imported" and row["root"] == str(root)
-        assert [b["batch"] for b in led.batches()] == ["imported"]
-        assert led.events()[-1]["kind"] == "import"
+        assert [b["batch"] for b in db.batches()] == ["imported"]
+        assert db.events()[-1]["kind"] == "import"
     assert edr(capsys, "import", "--run-id", "bad", "--label", "r", "--config", "demo", "--src", "a",
                "--host", "local", "--root", str(root))[0] == 1
     assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--src", "a",
@@ -653,8 +653,8 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
     assert code == 0 and "incomplete" in out and "b_nodw@demo" in out
     code, out, _ = edr(capsys, "status", "b_nodw@demo")
     assert code == 0 and "INCOMPLETE:1f0s" in out
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert led.run(b)["phase"] == "INCOMPLETE:1f0s" and led.run(b)["exit"] == 8
+    with Database(demo / "data" / "edr.db") as db:
+        assert db.run(b)["phase"] == "INCOMPLETE:1f0s" and db.run(b)["exit"] == 8
 
 
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
@@ -679,8 +679,8 @@ def test_retire_collects_the_named_lists_first(demo: Path, capsys) -> None:
     assert code == 1 and "collect nope" in err and "nothing removed" in err and root.is_dir()
     code, out, _ = edr(capsys, "retire", "a@demo", "--collect", "netlist", "--why", "x")
     assert code == 0 and not root.exists() and (results / "out" / "11" / "netlist.v").is_file()
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert [e["kind"] for e in led.events(run_id=a)] == ["collect", "collect", "retire"]
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["kind"] for e in db.events(run_id=a)] == ["collect", "collect", "retire"]
 
 
 def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> None:
@@ -691,8 +691,8 @@ def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> N
     assert code == 1 and "no heartbeat yet" in err and root.is_dir()
     code, _, err = edr(capsys, "retire", "n@demo", "--prune", "netlist", "--why", "x")
     assert code == 1 and "no heartbeat yet" in err and (root / "out").is_dir()
-    with Ledger(demo / "data" / "edr.db") as led:
-        led.upsert_run({"run_id": n, "started": int(time.time()) - 3000})
+    with Database(demo / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": n, "started": int(time.time()) - 3000})
     code, _, err = edr(capsys, "retire", "n@demo", "--uncollected", "--why", "x")
     assert code == 0, err
     assert not root.exists()
@@ -700,9 +700,9 @@ def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> N
 
 def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
-    with Ledger(demo / "data" / "edr.db") as led:
-        row = led.run(a)
-        led.upsert_run({"run_id": f"{DATE}_b_nodw_demo_gabc1234", "batch": "demo", "label": "b_nodw", "config": "demo",
+    with Database(demo / "data" / "edr.db") as db:
+        row = db.run(a)
+        db.upsert_run({"run_id": f"{DATE}_b_nodw_demo_gabc1234", "batch": "demo", "label": "b_nodw", "config": "demo",
                         "host": row["host"], "root": row["root"], "src": "abc1234", "phase": "done", "state": "done"})
     code, out, err = edr(capsys, "retire", "a@demo", "--why", "t", "--uncollected")
     assert code == 1 and "results are not collected" in err
@@ -740,8 +740,8 @@ def test_retire_batch_removes_the_staged_tree_no_other_batch_uses(demo: Path, ca
     seed(demo, "c", "done", src=dirty, batch="snap")
     code, out, _ = edr(capsys, "retire", "--batch", "snap", "--uncollected", "--why", "y")
     assert code == 0 and f"rm -rf {snap}" in out and not snap.exists() and (repo / "flow").is_dir()
-    with Ledger(demo / "data" / "edr.db") as led:
-        assert [e["text"] for e in led.events() if e["run_id"] == ""] == [f"x: worktree {wt}", f"y: worktree {snap}"]
+    with Database(demo / "data" / "edr.db") as db:
+        assert [e["text"] for e in db.events() if e["run_id"] == ""] == [f"x: worktree {wt}", f"y: worktree {snap}"]
 
 
 def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -> None:
@@ -764,10 +764,10 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--csv")
     got = {ln.split(",")[7]: ln.split(",")[9] for ln in out.splitlines()[1:]}
     assert code == 0 and got == {"area_cell_um2": "1000.0", "power_w": "0.25", "window_ns": "3400.0", "energy_nj": "850.0"}
-    with Ledger(demo / "data" / "edr.db") as led:
-        row = led.run(run_id)
+    with Database(demo / "data" / "edr.db") as db:
+        row = db.run(run_id)
         assert row["root"] is None and row["host"] == "" and row["state"] == "imported"
-        assert led.events()[-1]["text"].endswith("4 metrics")
+        assert db.events()[-1]["text"].endswith("4 metrics")
     other = tmp_path / "other"
     other.mkdir()
     assert edr(capsys, *base, "--results", str(other))[0] == 1  # never replaces a linked tree

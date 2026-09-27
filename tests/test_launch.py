@@ -18,7 +18,7 @@ import pytest
 from edarunner import config, launch, sync
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
-from edarunner.ledger import Ledger
+from edarunner.db import Database
 from edarunner.model import Needs
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -45,8 +45,8 @@ def env(tmp_path: Path):
     project.limits.heartbeat_s = 1
     batch = config.load_batch(project, "demo")
     ssh = FakeProbeSsh(project.site, tmp_path / "scratch")
-    with Ledger(tmp_path / "edr.db") as ledger:
-        yield project, batch, ssh, ledger
+    with Database(tmp_path / "edr.db") as db:
+        yield project, batch, ssh, db
 
 
 def strings(obj) -> list[str]:
@@ -87,8 +87,8 @@ def wait_hb(path: Path, pred, timeout: float = 60) -> dict:
 
 
 def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
-    plans = launch.plan(project, batch, ssh, ledger, date=DATE)
+    project, batch, ssh, db = env
+    plans = launch.plan(project, batch, ssh, db, date=DATE)
     a, b = plans
     assert [p.problems for p in plans] == [[], []] and not a.queued
     assert a.run_id == f"{DATE}_a_demo_gHEAD" and b.run_id == f"{DATE}_b_nodw_demo_DW0_gHEAD"
@@ -121,54 +121,54 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
 
 
 def test_plan_takes_the_probes_of_the_caller(env, tmp_path: Path, monkeypatch) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     monkeypatch.setattr(ssh, "probe", lambda host: pytest.fail(f"plan probed {host}"))
     given = {"local": HostProbe("local", 4.0, 8.0, str(tmp_path / "given"), 50.0)}
-    a, b = launch.plan(project, batch, ssh, ledger, date=DATE, probes=given)
+    a, b = launch.plan(project, batch, ssh, db, date=DATE, probes=given)
     assert a.problems == [] and b.problems == [] and a.root.startswith(f"{tmp_path}/given/")
-    a, b = launch.plan(project, batch, ssh, ledger, date=DATE, probes={})
+    a, b = launch.plan(project, batch, ssh, db, date=DATE, probes={})
     assert a.problems == ["local: no probe of the host"] and a.host is None and not a.queued
 
 
 def test_plan_reports_problems(env) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     batch.jobs[1].overrides = {"bad key": "1"}
     project.stages["export"].cmd += " {nope}"
-    a, b = launch.plan(project, batch, ssh, ledger, date=DATE)
+    a, b = launch.plan(project, batch, ssh, db, date=DATE)
     assert any("nope" in p for p in a.problems) and a.spec == {} and not a.queued
     assert any("'bad key'" in p for p in b.problems)
     batch.jobs[1].overrides = {"DW": "0"}
     batch.jobs[1].stages = ["export"]
     project.stages["export"].cmd = "true"
-    _, b = launch.plan(project, batch, ssh, ledger, date=DATE)
+    _, b = launch.plan(project, batch, ssh, db, date=DATE)
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
 
 
 def test_plan_needs_the_tools_of_the_host(env) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     synth_only(batch)
     project.stages["synth"].cmd += " TOOL={tool.demo.version}"
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == [] and p.spec["stages"][0]["cmd"].endswith(" TOOL=1.0")
     project.site.hosts["local"].tools = {}
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == ["local lacks the tools: demo"] and p.spec == {}
     batch.jobs[0].host = "auto"
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == ["no host has the tools: demo"] and p.host is None and not p.queued
     project.site.hosts["hostB"] = replace(project.site.hosts["local"], name="hostB", tools=None)
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == [] and p.host == "hostB" and p.spec["stages"][0]["cmd"].endswith(" TOOL=")
     project.site.hosts["local"].tools = None
     project.tasks["k_big"].needs = Needs(tools={"demo": 2})
     batch.jobs[0].stages, batch.jobs[0].tasks, batch.jobs[0].host = ["power"], ["k_small", "k_big"], "local"
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     small, big = p.spec["stages"][0]["tasks"]
     assert "tools" not in small and big["tools"] == [{"name": "demo", "seats": 2, "probe": ["bash", f"{p.root}/flow/seats.sh"]}]
 
 
 def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     a, b = batch.jobs
     assert launch.build_tag(project, a) == "demo" and launch.build_tag(project, b) == "demo_DW0"
     b.overrides = {"N": "8", "DW": "0"}
@@ -180,23 +180,23 @@ def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
 
 
 def test_netlist_stage_is_a_plain_job_field(env) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     synth_only(batch)
     project.stages["synth"].cmd += " NETLIST={netlist_stage}"
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == [f"missing placeholder {{netlist_stage}} in '{project.stages['synth'].cmd}'"]
     batch.jobs[0].netlist_stage = 7
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == [] and p.spec["stages"][0]["cmd"].endswith(" NETLIST=7")
 
 
-def test_plan_reuses_a_ledger_run(env) -> None:
-    project, batch, ssh, ledger = env
-    ledger.upsert_run({"run_id": f"{DATE}_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
+def test_plan_reuses_a_database_run(env) -> None:
+    project, batch, ssh, db = env
+    db.upsert_run({"run_id": f"{DATE}_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
                        "root": "/x/edr/old", "src": "OLD"})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
-    a = launch.plan(project, batch, ssh, ledger, date=DATE)[0]
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
     assert a.problems == [] and a.reuse == f"{DATE}_a_demo_gOLD" and a.src == "OLD"
     assert a.root == "/x/edr/old" and a.run_id == f"{DATE}_a_demo_gOLD"
     assert a.spec["start_at"]["stage"] == "pnr" and a.spec["stages"][0]["cwd"] == "/x/edr/old"
@@ -206,9 +206,9 @@ def test_plan_reuses_a_ledger_run(env) -> None:
 
 
 def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     synth_only(batch)
-    out = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path))
+    out = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path))
     (row,) = out
     assert row["started"] and row["pid"] and row["problems"] == []
     run_id = row["run_id"]
@@ -218,40 +218,40 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     assert Path(spec["driver"]).parent == tmp_path / "state" / "bin" and Path(spec["driver"]).is_file()
     assert [s["name"] for s in spec["stages"]] == ["synth"]
     assert (Path(row["root"]) / "flow" / "flow.sh").exists()
-    assert ledger.run(run_id)["state"] == "running" and ledger.batches()[0]["batch"] == "demo"
-    assert [e["kind"] for e in ledger.events(run_id=run_id)] == ["launch"]
+    assert db.run(run_id)["state"] == "running" and db.batches()[0]["batch"] == "demo"
+    assert [e["kind"] for e in db.events(run_id=run_id)] == ["launch"]
     hb = wait_hb(state / f"{run_id}.json", lambda h: h["phase"] == "done")
     assert hb["exit"] == 0 and (Path(row["root"]) / "reports" / "3" / "qor.rpt").exists()
-    again = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path / "again"))
+    again = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "again"))
     assert not again[0]["started"] and "already launched" in again[0]["problems"][0]
 
 
 def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     synth_only(batch)
-    (row,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path))
+    (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path))
     hb_path = tmp_path / "state" / "demo" / f"{row['run_id']}.json"
     hb = wait_hb(hb_path, lambda h: h["phase"] == "stage:synth")
-    run_row = ledger.run(row["run_id"])
-    assert launch.stop(ssh, ledger, run_row, hb, now=True, grace_s=15, why="test", state=project.state)
+    run_row = db.run(row["run_id"])
+    assert launch.stop(ssh, db, run_row, hb, now=True, grace_s=15, why="test", state=project.state)
     hb = wait_hb(hb_path, lambda h: h["exit"] is not None, timeout=20)
     assert hb["phase"] in ("KILLED:SIGTERM", "STOPPED") and hb["exit"] == 10 and hb["pgids"] == []
     assert not ssh.pid_alive("local", hb["driver_pid"])
-    assert [e["kind"] for e in ledger.events(run_id=row["run_id"])] == ["launch", "stop"]
-    assert launch.stop(ssh, ledger, run_row, hb, after_task=True, why="later", state=project.state)
+    assert [e["kind"] for e in db.events(run_id=row["run_id"])] == ["launch", "stop"]
+    assert launch.stop(ssh, db, run_row, hb, after_task=True, why="later", state=project.state)
     assert (hb_path.with_name(f"{row['run_id']}.stop")).read_text().strip() == "after-task"
 
 
 def test_stop_kills_a_process_group_by_pgid(env) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     p = subprocess.Popen(["sleep", "300"], start_new_session=True)
     assert os.getpgid(p.pid) == p.pid
     row = {"run_id": "r", "host": "local", "batch": "demo"}
-    assert launch.stop(ssh, ledger, row, {"driver_pid": None, "pgids": [p.pid]}, why="test")
+    assert launch.stop(ssh, db, row, {"driver_pid": None, "pgids": [p.pid]}, why="test")
     assert p.wait(timeout=10) == -signal.SIGTERM
     with pytest.raises(ProcessLookupError):
         os.killpg(p.pid, 0)
-    assert ledger.events()[-1]["text"] == f"test [driver None, pgids [{p.pid}], term, ended]"
+    assert db.events()[-1]["text"] == f"test [driver None, pgids [{p.pid}], term, ended]"
 
 
 # dry run and guards
@@ -262,28 +262,28 @@ def listing(root: Path) -> dict[str, bytes | None]:
 
 
 def test_dry_run_writes_nothing(env, tmp_path: Path, capsys) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     state = project.state
     state.mkdir()
     (state / "demo").mkdir()
     (state / "demo" / "RUN_DATE").write_text(DATE + "\n")
     before = listing(state)
-    out = launch.launch(project, batch, ssh, ledger, dry_run=True, src_dir=src_tree(tmp_path))
+    out = launch.launch(project, batch, ssh, db, dry_run=True, src_dir=src_tree(tmp_path))
     assert listing(state) == before and not (tmp_path / "scratch").exists()
-    assert ledger.runs() == [] and ledger.events() == [] and ledger.batches() == []
+    assert db.runs() == [] and db.events() == [] and db.batches() == []
     assert [r["run_id"] for r in out] == [f"{DATE}_a_demo_gHEAD", f"{DATE}_b_nodw_demo_DW0_gHEAD"]
     assert all(not r["started"] and r["problems"] == [] for r in out)
     text = capsys.readouterr().out
     assert "rsync -a --delete --exclude=.git" in text and f"{DATE}_a_demo_gHEAD" in text
-    assert launch.stop(ssh, ledger, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": 1, "pgids": [2]},
-                       dry_run=True) and ledger.events() == []
+    assert launch.stop(ssh, db, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": 1, "pgids": [2]},
+                       dry_run=True) and db.events() == []
 
 
 def test_launch_refuses_a_dirty_source(env) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     batch.source = "abc1234-dirty-deadbeef"
     with pytest.raises(Refuse):
-        launch.launch(project, batch, ssh, ledger, dry_run=True)
+        launch.launch(project, batch, ssh, db, dry_run=True)
 
 
 def test_guard_refuses_a_root_a_top_level_directory_and_home() -> None:
@@ -312,14 +312,14 @@ def test_pin_date_treats_an_empty_pin_as_missing(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("pid", [0, 1, -1, "7", 4242.0, None])
 def test_stop_refuses_a_bad_driver_pid(env, pid) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     with pytest.raises(Refuse):
-        launch.stop(ssh, ledger, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": pid, "pgids": []})
-    assert ledger.events() == []
+        launch.stop(ssh, db, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": pid, "pgids": []})
+    assert db.events() == []
 
 
 def test_sync_tree_guards_the_target(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     with pytest.raises(Refuse):
         sync.sync_tree(ssh, "local", tmp_path, str(tmp_path / "no-marker"), [], "/edr/", 3)
     assert sync.sync_tree(ssh, "local", tmp_path, str(tmp_path / "a" / "edr" / "b"), [], "/edr/", 3, dry_run=True)
@@ -327,7 +327,7 @@ def test_sync_tree_guards_the_target(env, tmp_path: Path) -> None:
 
 
 def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     src = tmp_path / "src"
     src.mkdir()
     (src / "keep.txt").write_text("k")
@@ -355,12 +355,12 @@ def test_publish_driver_one_copy_per_version(tmp_path: Path) -> None:
 
 
 def test_reuse_renders_tree_id_of_the_old_run(env) -> None:
-    project, batch, ssh, ledger = env
-    ledger.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
+    project, batch, ssh, db = env
+    db.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
                        "root": "/x/edr/old", "src": "OLD"})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
-    plans = launch.plan(project, batch, ssh, ledger, date=DATE)
+    plans = launch.plan(project, batch, ssh, db, date=DATE)
     a = next(p for p in plans if p.label == "a")
     assert a.values["tree_id"] == "20260101_0000_a_demo_gOLD" and a.values["run_id"] != a.values["tree_id"]
     b = next(p for p in plans if p.label != "a")
@@ -368,26 +368,26 @@ def test_reuse_renders_tree_id_of_the_old_run(env) -> None:
 
 
 def test_restore_launches_a_fresh_tree_from_the_archive(env, tmp_path: Path) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     project.data = tmp_path / "data"
     old = "20260101_0000_a_demo_gOLD"
-    ledger.upsert_run({"run_id": old, "batch": "old", "label": "a", "src": "OLD", "build_tag": "demo", "state": "retired"})
+    db.upsert_run({"run_id": old, "batch": "old", "label": "a", "src": "OLD", "build_tag": "demo", "state": "retired"})
     archive = project.data / "results" / old / "out" / "11"
     archive.mkdir(parents=True)
     (archive / "netlist.v").write_text("module top; endmodule\n")
     synth_only(batch)
     batch.jobs[0].reuse = {"run_id": old, "restore": "netlist"}
-    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == [] and p.reuse == old and p.restore == "netlist" and p.src == "OLD"
     assert p.host == "local" and p.root and p.values["tree_id"] == old and p.build_tag == "demo"
-    (dry,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path), dry_run=True)
+    (dry,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path), dry_run=True)
     assert dry["problems"] == [] and not Path(p.root).exists()
-    (row,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path / "again"))
+    (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "again"))
     root = Path(row["root"])
     assert row["started"] and (root / "out" / "11" / "netlist.v").is_file() and (root / "flow" / "flow.sh").is_file()
     wait_hb(tmp_path / "state" / "demo" / f"{row['run_id']}.json", lambda h: h["phase"] == "done")
     batch.jobs[0].label, batch.jobs[0].reuse = "a_bad", {"run_id": old, "restore": "nope"}
-    (bad,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path / "bad"))
+    (bad,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "bad"))
     assert bad["problems"] == ["sync failed"] and not bad["started"]
 
 
@@ -405,9 +405,9 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
 
 
 def test_project_env_is_rendered_over_the_site_env(env) -> None:
-    project, batch, ssh, ledger = env
+    project, batch, ssh, db = env
     project.env = {"PATH": "{root}/.venv/bin:$PATH", "FLOW_TAG": "{build_tag}"}
-    a = launch.plan(project, batch, ssh, ledger, date=DATE)[0]
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
     e = a.spec["env"]
     assert e["PATH"] == f"{a.root}/.venv/bin:$PATH" and e["FLOW_TAG"] == a.values["build_tag"]
     for k, val in project.site.env.items():
@@ -415,13 +415,13 @@ def test_project_env_is_rendered_over_the_site_env(env) -> None:
 
 
 def test_tree_id_survives_a_chain_of_reuse(env) -> None:
-    project, batch, ssh, ledger = env
-    ledger.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
+    project, batch, ssh, db = env
+    db.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
                        "root": "/x/edr/old", "src": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
-    ledger.upsert_run({"run_id": "20260102_0000_a_demo_gOLD", "batch": "mid", "label": "a", "host": "local",
+    db.upsert_run({"run_id": "20260102_0000_a_demo_gOLD", "batch": "mid", "label": "a", "host": "local",
                        "root": "/x/edr/old", "src": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
-    a = next(p for p in launch.plan(project, batch, ssh, ledger, date=DATE) if p.label == "a")
+    a = next(p for p in launch.plan(project, batch, ssh, db, date=DATE) if p.label == "a")
     assert a.reuse == "20260102_0000_a_demo_gOLD" and a.values["tree_id"] == "20260101_0000_a_demo_gOLD"
     assert launch._run_row(a, batch)["tree_id"] == "20260101_0000_a_demo_gOLD"

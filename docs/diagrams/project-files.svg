@@ -61,7 +61,7 @@
 
 <rect class="gen" x="316" y="64" width="220" height="52" rx="7"/>
 <rect class="mark" x="317" y="74" width="4" height="32"/>
-<text class="t" x="330" y="86">Ledger</text>
+<text class="t" x="330" y="86">Run database</text>
 <text class="m" x="330" y="104">data/edr.db</text>
 
 <rect class="gen" x="316" y="128" width="220" height="52" rx="7"/>

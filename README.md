@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.svg" alt="edarunner" width="300"></p>
 
-<p align="center">Run the EDA flow you already have on the ssh hosts you already reach, and keep one ledger of every run.</p>
+<p align="center">Run the EDA flow you already have on the ssh hosts you already reach, and keep one database of every run.</p>
 
 <p align="center">
 <a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
@@ -14,7 +14,7 @@ edarunner runs, tracks and analyzes an EDA flow on shared ssh hosts.
 
 - Run: it starts the flow you already have as stages on the hosts. It
   queues jobs, applies budgets, and a watcher finds a dead or stuck run.
-- Track: one SQLite ledger holds every run with its source hashes, host,
+- Track: one SQLite database holds every run with its source hashes, host,
   events, metrics and artifacts. The board and a Telegram bot show it.
 - Analyze: it gives the metrics of one design, compares runs, and exports
   a snapshot that a paper reads.

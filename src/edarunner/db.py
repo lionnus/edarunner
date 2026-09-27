@@ -1,4 +1,4 @@
-"""The SQLite ledger: schema, upserts, queries, board.json."""
+"""The run database: schema, upserts, queries, board.json."""
 
 from __future__ import annotations
 
@@ -42,20 +42,20 @@ def _text(value: Any) -> Any:
     return json.dumps(value) if isinstance(value, (dict, list)) else value
 
 
-class Ledger:
+class Database:
     """One SQLite database, WAL mode, head node only. Use as a context manager."""
 
     def __init__(self, path: str | os.PathLike, threads: bool = False) -> None:
         """`threads=True` lets another thread use the connection; the caller serialises the calls."""
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, check_same_thread=not threads)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
+        self.conn = sqlite3.connect(self.path, check_same_thread=not threads)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.init_schema()
         self._columns = {t: self._table_columns(t) for t in ("batches", "runs", "stage_runs", "artifacts")}
 
-    def __enter__(self) -> Ledger:
+    def __enter__(self) -> Database:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -63,19 +63,19 @@ class Ledger:
 
     def close(self) -> None:
         """Commit and close the connection."""
-        self.db.commit()
-        self.db.close()
+        self.conn.commit()
+        self.conn.close()
 
     def init_schema(self) -> None:
         """Create every table that does not exist yet."""
-        self.db.executescript(DDL)
-        # A ledger made before a column existed gets it here; SQLite adds a NULL column in place.
+        self.conn.executescript(DDL)
+        # A database made before a column existed gets it here; SQLite adds a NULL column in place.
         if "tree_id" not in self._table_columns("runs"):
-            self.db.execute("ALTER TABLE runs ADD COLUMN tree_id TEXT")
-        self.db.commit()
+            self.conn.execute("ALTER TABLE runs ADD COLUMN tree_id TEXT")
+        self.conn.commit()
 
     def _table_columns(self, table: str) -> tuple[str, ...]:
-        return tuple(r["name"] for r in self.db.execute(f"PRAGMA table_info({table})"))
+        return tuple(r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})"))
 
     # writes
 
@@ -95,8 +95,8 @@ class Ledger:
             f"ON CONFLICT({', '.join(pk)}) DO "
             + (f"UPDATE SET {', '.join(f'{k}=excluded.{k}' for k in update)}" if update else "NOTHING")
         )
-        self.db.execute(sql, [_text(row[k]) for k in keys])
-        self.db.commit()
+        self.conn.execute(sql, [_text(row[k]) for k in keys])
+        self.conn.commit()
 
     def upsert_batch(self, row: Row) -> None:
         """Insert a batch, or update the columns given."""
@@ -112,24 +112,24 @@ class Ledger:
 
     def set_params(self, run_id: str, params: dict[str, Any], source: str) -> None:
         """Write the resolved configuration of a run. A key already present is replaced."""
-        self.db.executemany(
+        self.conn.executemany(
             "INSERT OR REPLACE INTO params(run_id, key, value, source) VALUES(?, ?, ?, ?)",
             [(run_id, k, v if isinstance(v, str) else json.dumps(v), source) for k, v in params.items()],
         )
-        self.db.commit()
+        self.conn.commit()
 
     def add_metric(self, row: Row) -> bool:
         """Insert one metric. Returns False when the key is already present."""
         r = {"task": "", "step": None, "canonical": "", "unit": "", "source_file": "", "extracted_at": _now(), **row}
         # An `IS` match sees a NULL step; the primary key does not.
-        cur = self.db.execute(
+        cur = self.conn.execute(
             "INSERT INTO metrics(run_id, stage, step, task, name, canonical, value, unit, source_file, extracted_at) "
             "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS "
             "(SELECT 1 FROM metrics WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?)",
             (r["run_id"], r["stage"], r["step"], r["task"], r["name"], r["canonical"], r["value"], r["unit"],
              r["source_file"], r["extracted_at"], r["run_id"], r["stage"], r["step"], r["task"], r["name"]),
         )
-        self.db.commit()
+        self.conn.commit()
         return cur.rowcount == 1
 
     def add_artifact(self, row: Row) -> None:
@@ -138,32 +138,32 @@ class Ledger:
 
     def add_event(self, actor: str, run_id: str | None, kind: str, text: str) -> int:
         """Append an event and return its id."""
-        cur = self.db.execute(
+        cur = self.conn.execute(
             "INSERT INTO events(ts, actor, run_id, kind, text) VALUES(?, ?, ?, ?, ?)", (_now(), actor, run_id, kind, text)
         )
-        self.db.commit()
+        self.conn.commit()
         return int(cur.lastrowid)
 
     def set_kv(self, key: str, value: Any) -> None:
         """Store `value` as JSON under `key`; a key already present is replaced."""
-        self.db.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?, ?)", (key, json.dumps(value)))
-        self.db.commit()
+        self.conn.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?, ?)", (key, json.dumps(value)))
+        self.conn.commit()
 
     def get_kv(self, key: str, default: Any = None) -> Any:
         """The value stored under `key`, or `default`."""
-        row = self.db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        row = self.conn.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
         return default if row is None else json.loads(row["value"])
 
     def mark_batch_retired(self, batch: str) -> None:
         """Set `retired` on a batch; the row is created when it is missing."""
-        self.db.execute("INSERT OR IGNORE INTO batches(batch, created) VALUES(?, ?)", (batch, _now()))
-        self.db.execute("UPDATE batches SET retired=? WHERE batch=?", (_now(), batch))
-        self.db.commit()
+        self.conn.execute("INSERT OR IGNORE INTO batches(batch, created) VALUES(?, ?)", (batch, _now()))
+        self.conn.execute("UPDATE batches SET retired=? WHERE batch=?", (_now(), batch))
+        self.conn.commit()
 
     # queries
 
     def _rows(self, sql: str, args: tuple | list = ()) -> list[Row]:
-        return [dict(r) for r in self.db.execute(sql, args)]
+        return [dict(r) for r in self.conn.execute(sql, args)]
 
     @staticmethod
     def _run_row(row: Row) -> Row:

@@ -1,4 +1,4 @@
-"""The daily digest on a fixed ledger, and its place in the watcher cycle."""
+"""The daily digest on a fixed db, and its place in the watcher cycle."""
 
 from __future__ import annotations
 
@@ -13,15 +13,15 @@ from test_watch import NOW, Env, env, rid  # noqa: F401  (the fixture of test_wa
 
 def fill(e: Env) -> None:
     """Five runs, one of them before the last digest, a keep file with ack, and four host probes."""
-    led = e.ledger
-    led.set_kv("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
+    db = e.db
+    db.set_kv("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
     alert = {"state": "hung", "msgs": {"hung": {"text": "no progress", "ids": ["1"]}}}
-    led.set_kv("notified", {rid("h"): alert, rid("k"): alert, rid("c"): {"state": "running"}})
+    db.set_kv("notified", {rid("h"): alert, rid("k"): alert, rid("c"): {"state": "running"}})
     rows = [("a", "done", None, NOW - 600), ("f", "FAILED:3", None, NOW - 2 * 86400),
             ("c", "stage:synth", "running", NOW - 60), ("h", "stage:pnr", "hung", NOW - 60),
             ("k", "stage:pnr", "hung", NOW - 60), ("q", None, "queued", None)]
     for label, phase, state, updated in rows:
-        led.upsert_run({"run_id": rid(label), "batch": "demo", "label": label, "phase": phase, "state": state,
+        db.upsert_run({"run_id": rid(label), "batch": "demo", "label": label, "phase": phase, "state": state,
                         "stage": "synth" if phase else None, "started": NOW - 7200 if phase else None,
                         "updated": updated})
     (e.project.state / "demo").mkdir(parents=True)
@@ -35,10 +35,10 @@ def fill(e: Env) -> None:
     (e.project.data / "board" / "board.json").write_text(json.dumps({"hosts": hosts}))
 
 
-def test_digest_text_on_a_fixed_ledger(env: Env) -> None:
+def test_digest_text_on_a_fixed_database(env: Env) -> None:
     fill(env)
     since = time.strftime("%d.%m %H:%M", time.localtime(NOW - 5 * 3600))
-    assert Digest(env.project, env.ledger).text(NOW) == "\n".join([
+    assert Digest(env.project, env.db).text(NOW) == "\n".join([
         f"<b>Ended since {since}</b>",
         "⚪ <code>a@demo</code> done",
         "",
@@ -61,25 +61,25 @@ def test_digest_text_on_a_fixed_ledger(env: Env) -> None:
 
 
 def test_an_empty_digest_says_none(env: Env) -> None:
-    text = Digest(env.project, env.ledger).text(NOW)
+    text = Digest(env.project, env.db).text(NOW)
     assert text.count("<i>none</i>") == 5 and fmt.plain(text).startswith("Ended since ")
 
 
 def test_the_digest_is_due_once_a_day_from_its_hour(env: Env) -> None:
-    d = Digest(env.project, env.ledger)
+    d = Digest(env.project, env.db)
     at = time.strftime("%H:%M", time.localtime(NOW))
     assert not d.due(NOW)
     env.project.limits.digest_at = at
     assert d.due(NOW) and not d.due(NOW - 60)
     d.mark_sent(NOW)
     assert not d.due(NOW + 60) and d.due(NOW + 86400)
-    assert env.ledger.get_kv("digest")["ts"] == NOW
+    assert env.db.get_kv("digest")["ts"] == NOW
 
 
 def test_the_cycle_sends_the_digest_once(env: Env) -> None:
     posts: list[tuple[str, str]] = []
     env.notifier.post = lambda title, html, silent=False: posts.append((title, html)) or True
     env.project.limits.digest_at = time.strftime("%H:%M", time.localtime(NOW))
-    watch.cycle(env.project, env.ssh, env.ledger, [env.notifier], now=NOW)
-    watch.cycle(env.project, env.ssh, env.ledger, [env.notifier], now=NOW + 60)
+    watch.cycle(env.project, env.ssh, env.db, [env.notifier], now=NOW)
+    watch.cycle(env.project, env.ssh, env.db, [env.notifier], now=NOW + 60)
     assert [t for t, _ in posts] == ["digest"] and posts[0][1].startswith("<b>Ended since ")

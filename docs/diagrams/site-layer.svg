@@ -35,7 +35,7 @@
 <rect class="box" x="400" y="64" width="160" height="44" rx="7"/>
 <text class="t" x="480" y="91" text-anchor="middle">Watcher</text>
 <rect class="box" x="580" y="64" width="160" height="44" rx="7"/>
-<text class="t" x="660" y="91" text-anchor="middle">Ledger</text>
+<text class="t" x="660" y="91" text-anchor="middle">Run database</text>
 <rect class="box" x="760" y="64" width="160" height="44" rx="7"/>
 <text class="t" x="840" y="91" text-anchor="middle">Export</text>
 <path class="run" d="M270 79v14l11-7z"/>
