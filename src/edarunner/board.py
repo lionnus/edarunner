@@ -8,16 +8,15 @@ from __future__ import annotations
 
 import html
 import json
-import os
 import time
-import urllib.request
 from collections import Counter
-from pathlib import Path
 from string import Template
 from typing import Any
 
 Row = dict[str, Any]
 
+# compare.html loads Plotly from this file in data/board when a user put a copy there, else from the CDN.
+PLOTLY_FILE = "plotly.min.js"
 PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED")
 # Sort rank on a board; the live rows go before the finished ones.
@@ -213,23 +212,6 @@ def compare_html(runs: list[Row], params: list[Row], metrics: list[Row], plotly_
     script = f'<script src="{_h(plotly_src)}"></script>' if plotly_src else ""
     return _COMPARE.substitute(plotly=script, runs=_json_block(enriched), params=_json_block(params),
                                metrics=_json_block(metrics))
-
-
-def ensure_plotly(data_dir: str | os.PathLike) -> Path | None:
-    """Download plotly into `data_dir/board/` once; None when the download fails."""
-    out = Path(data_dir) / "board" / PLOTLY_URL.rsplit("/", 1)[1]
-    if out.is_file():
-        return out
-    tmp = out.with_name(out.name + ".tmp")
-    try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(PLOTLY_URL, timeout=60) as resp:
-            tmp.write_bytes(resp.read())
-        os.replace(tmp, out)
-        return out
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        return None
 
 
 # templates

@@ -111,7 +111,6 @@ class Env:
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(board, "ensure_plotly", lambda d: None)
     e = Env(tmp_path)
     yield e
     e.ledger.close()
@@ -159,9 +158,12 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html", "progress.json",
                                                  "notified.json"}
     assert len(json.loads((bdir / "board.json").read_text())["runs"]) == 9
+    assert f'<script src="{board.PLOTLY_URL}">' in (bdir / "compare.html").read_text()
     assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 1
     n_events, n_sent = len(env.events()), len(env.notifier.sent)
+    (bdir / board.PLOTLY_FILE).write_text("// a local copy\n")
     assert env.cycle(NOW + 1) == states
+    assert f'<script src="{board.PLOTLY_FILE}">' in (bdir / "compare.html").read_text()
     assert (len(env.events()), len(env.notifier.sent)) == (n_events, n_sent)
     assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 2
     assert listing(env.tmp / "scratch") == roots

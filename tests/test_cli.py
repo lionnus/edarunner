@@ -33,7 +33,6 @@ def demo(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("EDR_BATCH", raising=False)
     monkeypatch.chdir(root)
-    monkeypatch.setattr(board, "ensure_plotly", lambda d: None)
     return root
 
 
