@@ -121,3 +121,47 @@ def test_area_hier_takes_a_depth_from_one(demo: Path) -> None:
     _area_metric(demo, True)
     with pytest.raises(config.ConfigError, match="area_hier"):
         config.load_project(demo)
+
+
+def _metric(root: Path, run_id: str, name: str, step: int, value: float, stage: str = "synth") -> None:
+    with Database(root / "data" / "edr.db") as db:
+        db.add_metric({"run_id": run_id, "stage": stage, "step": step, "name": name, "value": value, "unit": "ns",
+                       "source_file": f"reports/{step}/qor.rpt"})
+
+
+def test_compare_side_by_side_per_step(demo: Path, capsys) -> None:
+    a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
+    for run, wns in ((a, (-0.2, 0.1)), (b, (-0.1, -0.05))):
+        _metric(demo, run, "wns_ns", 2, wns[0])
+        _metric(demo, run, "wns_ns", 3, wns[1])
+        _metric(demo, run, "cells", 3, 1000 if run == a else 1100)
+    code, out, _ = edr(capsys, "compare", a, b)
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and lines[0][:5] == ["stage", "step", "name", "task", "metric"]
+    # Step names come from the stage's steps list; a percent across a sign change is left out.
+    assert ["synth", "2", "elaborate", "wns_ns", "-0.2", "-0.1", "0.1", "+50.0%"] in lines
+    assert ["synth", "3", "synth", "wns_ns", "0.1", "-0.05", "-0.15", "-"] in lines
+    assert ["synth", "3", "synth", "cells", "1000", "1100", "100", "+10.0%"] in lines
+    code, out, _ = edr(capsys, "--json", "compare", a, b, "--metric", "cells")
+    rows = json.loads(out)["data"]["rows"]
+    assert code == 0 and len(rows) == 1 and rows[0]["source_file"] == {a: "reports/3/qor.rpt", b: "reports/3/qor.rpt"}
+    assert edr(capsys, "compare", a, b, "--metric", "nothing")[0] == 2
+
+
+def test_metrics_over_the_steps_of_one_run(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    _metric(demo, a, "wns_ns", 1, -0.3)
+    _metric(demo, a, "wns_ns", 2, -0.1)
+    _metric(demo, a, "area_um2", 2, 500.0)
+    _metric(demo, a, "wns_ns", 4, 0.05, stage="pnr")
+    code, out, _ = edr(capsys, "metrics", "--run", a, "--over", "steps")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and lines[0] == ["stage", "step", "name", "area_um2", "wns_ns"]
+    assert lines[2:] == [["synth", "1", "analyze", "-", "-0.3"], ["synth", "2", "elaborate", "500", "-0.1"],
+                         ["pnr", "4", "cts", "-", "0.05"]]
+    code, out, _ = edr(capsys, "metrics", "--run", a, "--over", "steps", "--metric", "wns_ns")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert lines[0] == ["stage", "step", "name", "wns_ns", "Δ", "source"]
+    assert lines[4] == ["pnr", "4", "cts", "0.05", "0.15", "reports/4/qor.rpt"]
+    assert edr(capsys, "metrics", "--over", "steps", "--design", "abc1234")[0] == 1
+    assert edr(capsys, "metrics")[0] == 1

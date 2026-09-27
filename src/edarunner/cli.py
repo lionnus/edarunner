@@ -533,10 +533,21 @@ def _area_table(rows: list[Row]) -> Table | str:
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
     """The metrics of one design, as a table or CSV; with --instance or --depth, its area rows."""
     if a.instance is not None or a.depth is not None:
-        rows = c.db.area(design=a.design, stage=a.stage, step=a.step, instance=a.instance, depth=a.depth)
+        run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
+        rows = c.db.area(run_ids=run_ids, design=a.design, stage=a.stage, step=a.step, instance=a.instance,
+                         depth=a.depth)
         c.emit(_area_table(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    rows = c.db.metrics(design=a.design, stage=a.stage, step=a.step)
+    if not a.design and not a.run:
+        raise Refuse("metrics needs --design or --run")
+    run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
+    if a.over:
+        if not run_ids:
+            raise Refuse("--over steps needs --run")
+        rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
+        c.emit(analysis.over_steps_view(rows), rows)
+        return Exit.DONE if rows else Exit.NOTHING
+    rows = c.db.metrics(design=a.design, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
@@ -549,7 +560,11 @@ def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     """Two or more runs side by side."""
     runs = [c.resolve(h) for h in a.handles]
     if not a.area:
-        raise Refuse("compare needs --area")
+        mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage, step=a.step)
+                if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
+        rows = analysis.side_by_side(c.project, runs, mets)
+        c.emit(analysis.side_by_side_view(runs, rows), {"runs": runs, "rows": rows})
+        return Exit.DONE if rows else Exit.NOTHING
     picked, rows = analysis.area_delta(c.db, runs, a.depth, a.instance, a.stage, a.step)
     c.emit(analysis.area_view(picked, rows, a.depth), {"runs": picked, "depth": a.depth, "rows": rows})
     return Exit.DONE if rows else Exit.NOTHING
@@ -1134,26 +1149,38 @@ def _parser() -> argparse.ArgumentParser:
         the next release.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
     sub.add_parser("lic").set_defaults(fn=cmd_lic)  # no help: the old name stays out of the listing
-    s = command("metrics", "the metrics of one design", """
+    s = command("metrics", "the metrics of one design or one run", """
         Every metric of one design: label, design, stage, step, task, name,
         value and unit. --design is the source tag exactly as edr checkout printed
         it, -dirty-... included. It has no default, because one table holds one
-        design. --csv writes the columns of metrics.csv (docs/results.md) to
-        stdout.
+        design. --run takes one run instead. --csv writes the columns of
+        metrics.csv (docs/results.md) to stdout.
+
+        --run with --over steps prints the metrics along the steps of that run:
+        one row per step with its name, one column per metric. With --metric,
+        the one metric, its change from the step before, and its source file.
 
         --instance or --depth prints the area rows of an area_hier metric
         instead: label, design, stage, step, instance, depth, area with the
         children, local area without them, and the cell count when the report
         has one. --instance takes that instance and every instance below it.
         """, exits={Exit.NOTHING: "no metric row"})
-    s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--design", metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--run", metavar="HANDLE", help="one run: " + HANDLE)
+    s.add_argument("--metric", metavar="NAME", help="one metric, by name or canonical name")
+    s.add_argument("--over", choices=["steps"], help="with --run: the metrics along the steps")
     s.add_argument("--stage", metavar="S", help="the metrics of one stage")
     s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
     s.add_argument("--instance", metavar="PATH", help="the area rows of this instance and every instance below it")
     s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
     s = command("compare", "two or more runs side by side", """
-        Puts two or more runs side by side. --area compares the hierarchical
+        Puts two or more runs side by side. Without --area, one row per stage,
+        step, task and metric: the step name, the value of each run, and the
+        percent of each run to the first. --metric (repeatable), --stage and
+        --step narrow the rows; --json keeps the source file of every value.
+
+        --area compares the hierarchical
         area: one row per instance at --depth (default 1; the top is 0), one
         column per run, and the delta and the percent of each run to the
         first. Each run is compared at its last step with an area report, or
@@ -1162,10 +1189,11 @@ def _parser() -> argparse.ArgumentParser:
         """, exits={Exit.NOTHING: "no row to compare"})
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
     s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
+    s.add_argument("--metric", action="append", metavar="NAME", help="this metric, by name or canonical name; repeatable")
     s.add_argument("--depth", type=int, default=1, metavar="N", help="the instance depth; default 1")
     s.add_argument("--instance", metavar="PATH", help="only this instance and the instances below it")
-    s.add_argument("--stage", metavar="S", help="compare at this stage")
-    s.add_argument("--step", type=int, metavar="N", help="compare at this step number")
+    s.add_argument("--stage", metavar="S", help="this stage only; with --area, compare at this stage")
+    s.add_argument("--step", type=int, metavar="N", help="this step only; with --area, compare at this step number")
     command("init", "write edr.toml and the watch unit here", """
         Writes edr.toml and edr-watch.service into the current directory. --site
         is the directory or the file of the site file; init does not write that
