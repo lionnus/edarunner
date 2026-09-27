@@ -133,7 +133,7 @@ def test_check_reports_problems(demo: Path, capsys) -> None:
     assert code == 1 and "unknown host mars" in out and "nope" not in out
     jobs.write_text(jobs.read_text().replace('host = "mars"', 'host = "local"'))
     code, out, _ = edr(capsys, "check")
-    assert code == 1 and "demo/a: missing placeholder {nope}" in out
+    assert code == 1 and "demo/a: unknown placeholder {nope}" in out
 
 
 # status, events, handles
@@ -574,14 +574,21 @@ def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
     assert b"\x1b" in narrow.encode() and all(len(re.sub(r"\x1b\[[0-9;]*m", "", ln)) <= 48 for ln in narrow.splitlines())
 
 
-def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path) -> None:
+def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsys, monkeypatch) -> None:
     a = seed(demo, "a", "done")
     with Ledger(demo / "data" / "edr.db") as led:
         led.add_event("user", a, "launch", "local /x")
+    # A live probe of the local host changes between two calls; a fixed one keeps the bytes comparable.
+    monkeypatch.setattr(Ssh, "probe", lambda self, host: HostProbe(host, 4.0, 8.0, "/tmp/x", 50.0, cores=4, total_gb=60.0))
+    for var in ("NO_COLOR", "FORCE_COLOR", "TTY_COMPATIBLE", "COLUMNS"):
+        monkeypatch.delenv(var, raising=False)
     for argv in (["status"], ["hosts"], ["tools"], ["events"], ["check"], ["status", "a@demo"]):
-        plain = _edr_bytes(demo, "--json", *argv)
-        forced = _edr_bytes(demo, "--json", *argv, FORCE_COLOR="1", TERM="xterm-256color")
-        assert plain == forced and b"\x1b" not in plain, argv
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        plain = edr(capsys, "--json", *argv)[1]
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        monkeypatch.setenv("TERM", "xterm-256color")
+        forced = edr(capsys, "--json", *argv)[1]
+        assert plain == forced and "\x1b" not in plain, argv
         env = json.loads(plain)
         assert env["code"] == 0 and env["output"] == "" and env["data"], argv
 

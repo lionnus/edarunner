@@ -86,15 +86,15 @@ ram_gb = 512
 Add `[tools.<name>]` when not every host has a tool, or when a stage has
 to wait for seats, and `[telegram]` when you want alerts on your phone.
 `examples/site/` shows both with placeholder names, and
-`docs/configuration.md` lists every key.
+`docs/reference/configuration.md` lists every key.
 
 ### 3. Declare the flow
 
 Edit `edr.toml`: the repository under `[source]`, one `[stages.<name>]`
 per command of the flow, and the `[metrics.<name>]` you want in the
 ledger. Stages run in file order. `docs/flows.md` shows two real flows,
-and `docs/configuration.md` explains stages, steps, task groups and
-metrics.
+and `docs/reference/configuration.md` explains stages, steps, task
+groups and metrics.
 
 ### 4. Check
 

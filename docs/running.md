@@ -271,15 +271,8 @@ delete, both on the head node. The source repository is never a target.
 
 Every target passes the guard first: an absolute path with the safety
 marker and at least `min_depth` components, not `/`, not the home
-directory, not a one-component path. `retire` also refuses:
-
-- a run whose driver is alive on the host; stop it first
-- a live run with no heartbeat yet, for `dead_s` after its start
-- a tree that another live run uses
-- a tree shared with a run whose results are not collected; retire them
-  together with `--batch`
-- a tree whose own results are not in `data/results/`, unless
-  `--uncollected`
+directory, not a one-component path. `docs/reference/cli.md` lists what
+`retire` refuses and every flag.
 
 Run `edr watch --once` before a retire, so the results are on the head
 node, and `--dry-run` first, which prints every `rm -rf` target and the

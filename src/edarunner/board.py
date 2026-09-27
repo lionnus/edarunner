@@ -273,7 +273,7 @@ STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "
 def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
     """The one command a person runs next for a run in `state`; None for a running run or an orphan."""
     h = handle(row)
-    if state in ("running", "orphan"):
+    if state in ("running", "orphan", "retired", "abandoned"):
         return None
     if state == "queued":
         return f"edr launch {row['batch']} --only {row['label']}"

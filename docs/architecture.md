@@ -37,6 +37,7 @@ commands, the report files and the numbers in them.
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
 | `notify/__init__.py`, `notify/telegram.py` | the notifier interface and the bot |
 | `cli.py` | the verbs, the exit codes, `--json`, the project lookup |
+| `tools/gen_docs.py` | the pages under `docs/reference/`, from the parser, the model, `STATES`, the marks and the bot table |
 
 A channel never imports `cli` or `watch`; it gets its verbs through the
 `Actions` object the CLI hands in.
@@ -104,3 +105,6 @@ changes the driver and the tests in the same commit.
   `hostA`, `user`, `demo` and `k_small`.
 - Tests write under `tmp_path`, use the host `local` only, and start a
   driver only through `tests/helpers_driver.py`.
+- A verb, flag, config key, state or bot command is documented where it
+  is defined. `uv run tools/gen_docs.py` regenerates `docs/reference/`,
+  and CI refuses a stale page.

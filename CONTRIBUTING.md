@@ -74,6 +74,16 @@ A change to a module comes with a test in `tests/test_<module>.py`.
 Write documentation, comments and commit messages in plain technical
 English: short sentences, active voice, one instruction per sentence.
 
+## The reference pages are generated
+
+`docs/reference/` comes from the code. A verb, a flag and its exit codes
+come from the argparse definitions in `cli.py`; a config key from its
+`doc` field in `model.py`; a placeholder from `PLACEHOLDERS` in
+`config.py`; a run state from `STATES` in `watch.py`; a bot command from
+the command table in `notify/`. Document a new one where you define it,
+then run `uv run tools/gen_docs.py` before the commit. CI refuses a
+stale page.
+
 ## Commit messages
 
 Write one line with a shortcode from
