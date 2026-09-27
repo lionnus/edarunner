@@ -27,6 +27,8 @@ _FORMAT = "--out-format=%i %l %n"
 
 @dataclass
 class CollectResult:
+    """How many files one collection copied, and what failed."""
+
     files: int = 0
     failures: list[str] = field(default_factory=list)
     copied: list[str] = field(default_factory=list)

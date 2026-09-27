@@ -181,7 +181,7 @@ def owned_steps(project: Project) -> dict[str, range]:
     """The step numbers each stage owns, in stage order.
 
     A `steps` list is indexed by the step number and continues the previous stage's
-    list. A list that is shorter than the steps before it names this stage's own
+    list. A list that is not longer than the steps before it names this stage's own
     steps only, so it continues from the previous end. A stage without `steps`
     owns no numbered step.
     """

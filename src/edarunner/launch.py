@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, board, collect, config, hosts, sync
+from . import __version__, board, checkout, collect, config, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
@@ -26,6 +26,8 @@ _SPEC_LIMITS = ("host_free_min_gb", "streak", "heartbeat_s", "gate_max_s", "leas
 
 @dataclass
 class RunPlan:
+    """One job rendered into a run: its id, host, root and spec, and the problems that stop it."""
+
     run_id: str
     label: str
     host: str | None
@@ -261,7 +263,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             host = None
         if host:
             mount = probes[host].mount
-            # An empty mount once gave a root of /<user>/... and a delete target outside every tree.
+            # An empty mount would give a root, and a delete target, outside every tree.
             if not mount:
                 problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
@@ -387,10 +389,6 @@ def submit(backend: Backend, db: Database, project: Project, run_id: str, host: 
 def _src_dir(project: Project, src: str, src_dir: Path | None, dry_run: bool = False) -> Path:
     if src_dir is not None:
         return Path(src_dir)
-    try:
-        from . import checkout
-    except ImportError:
-        raise Refuse("no src_dir given and checkout is missing") from None
     try:
         return Path(checkout.find(project, src))
     except checkout.CheckoutError:

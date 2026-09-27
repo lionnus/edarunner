@@ -25,6 +25,8 @@ class CheckoutError(Exception):
 
 @dataclass
 class CheckoutResult:
+    """A checked-out source: its path, its tag, the short hash of each nested repository, and whether it is dirty."""
+
     path: Path
     src: str
     nested: dict[str, str] = field(default_factory=dict)
@@ -85,15 +87,14 @@ def _worktree(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
             runid.git("fetch", "-q", cwd=repo)
     src = _short(repo, ref)
     path = wts / src
-    if (path / ".git").exists():
-        pass
-    elif dry_run:
-        print(f"dry: git -C {repo} worktree add --detach {path} {src}")
-    else:
-        wts.mkdir(parents=True, exist_ok=True)
-        # A registered worktree whose directory is gone blocks `add`.
-        runid.git("worktree", "prune", cwd=repo)
-        runid.git("worktree", "add", "-q", "--detach", str(path), src, cwd=repo)
+    if not (path / ".git").exists():
+        if dry_run:
+            print(f"dry: git -C {repo} worktree add --detach {path} {src}")
+        else:
+            wts.mkdir(parents=True, exist_ok=True)
+            # A registered worktree whose directory is gone blocks `add`.
+            runid.git("worktree", "prune", cwd=repo)
+            runid.git("worktree", "add", "-q", "--detach", str(path), src, cwd=repo)
     nested = {n: _nested(repo / n, path / n, dry_run) for n in project.source.nested}
     return CheckoutResult(path, src, {k: v for k, v in nested.items() if v}, False)
 

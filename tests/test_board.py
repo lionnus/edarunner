@@ -41,7 +41,7 @@ def _rows():
         _row("run1", "c", "stage:synth", "running"),
         _row("fail", "b_nodw", "INCOMPLETE:1f0s", "running", age=7000, exit=8, stage="power", step=None,
              counts=json.dumps({"done": 1, "failed": 1})),
-        _row("run2", "d" * 40, "group:power_" * 3, None, host="hostB-long-name", batch="iccd2026_g10_long"),
+        _row("run2", "d" * 40, "group:power_" * 3, None, host="hostB-long-name", batch="sweep10_long_name"),
         _row("stale", "b_nodw", "stage:pnr", "stale", age=900),
         _row("dead", "a", "stage:synth", "dead", age=5000),
     ]
@@ -71,7 +71,7 @@ def test_narrow_width_and_order(width):
     if width == 48:
         assert lines[0].endswith(" DEAD:1 INC:1 stale:1 RUN:2 done:1")
         assert body[1] == "    demo           1h ago synth/3    0f/1d"
-        assert body[7] == "    026_g10_long   0m ago synth/3    0f/1d"
+        assert body[7] == "    10_long_name   0m ago synth/3    0f/1d"
     assert board.narrow([], now=NOW).splitlines()[-1] == "nothing live"
     assert board.narrow([_row("done", "a", "done")], now=NOW).endswith("nothing live")
 
