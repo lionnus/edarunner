@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.1 (2026-09-27)
+
+- Every Telegram reply fits 40 columns and names the project in its first
+  line: the board, `/status <run>`, `/events`, `/hosts`, `/lic`, `/help`
+  and the alerts, which now carry the proposed command.
+- A button press or a `/keep`, `/ack` or `/stop` records one event, with
+  the actor `telegram`.
+- `edr.toml` may carry a `[telegram]` table with `token_file`, `chat_id`
+  and `user_id` that override the site's values, so a project can have
+  its own bot and chat.
+- `edr stage` points a nested clone at the upstream of the repository
+  copy, not at the copy.
+
 ## 0.1.0 (2026-09-27)
 
 The first release.
