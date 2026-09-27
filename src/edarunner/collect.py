@@ -6,6 +6,7 @@ Every copy is one `rsync -a` from the host to the same relative path under
 
 from __future__ import annotations
 
+import json
 import posixpath
 import shlex
 import subprocess
@@ -33,11 +34,41 @@ class CollectResult:
     copied: list[str] = field(default_factory=list)
 
 
-def stage_state(project: Project, heartbeat: dict) -> tuple[list[str], str | None]:
-    """The finished stages of a run in project order, and the running one (None when terminal)."""
+def load_spec(project: Project, run: dict) -> dict:
+    """The run's spec from the state directory, or {} when it has none (an imported tree)."""
+    path = project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def spec_stages(spec: dict) -> list[str] | None:
+    """The stage names a run's spec lists, or None when there is no spec."""
+    names = [str(s["name"]) for s in spec.get("stages") or [] if s.get("name")]
+    return names or None
+
+
+def spec_task_dirs(spec: dict, root: str) -> dict[str, str]:
+    """Task id -> task directory relative to the run root, from the spec's task groups."""
+    out: dict[str, str] = {}
+    base = root.rstrip("/") + "/"
+    for stage in spec.get("stages") or []:
+        for task in stage.get("tasks") or []:
+            d = str(task.get("dir") or "")
+            out[str(task["id"])] = d[len(base):] if base != "/" and d.startswith(base) else d
+    return out
+
+
+def stage_state(project: Project, heartbeat: dict, only: list[str] | None = None) -> tuple[list[str], str | None]:
+    """The finished stages of a run in project order, and the running one (None when terminal).
+
+    `only` limits the stages to those the run's spec lists; the tree's earlier
+    stages belong to the run that made them.
+    """
     phase = str(heartbeat.get("phase") or "")
     current = heartbeat.get("stage")
-    names = list(project.stages)
+    names = [n for n in project.stages if only is None or n in only]
     if not current or current not in names:
         return [], None
     i = names.index(current)
@@ -56,10 +87,12 @@ def collect_run(
     step_final_s: int = 600,
 ) -> CollectResult:
     """Copy log/ and the collect paths of every finished stage and task of `run` into data/results."""
-    c = _Copier(project, ssh, ledger, run, heartbeat, dry_run)
+    spec = load_spec(project, run)
+    only = spec_stages(spec)
+    c = _Copier(project, ssh, ledger, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
     if c.result.failures:
         return c.result
-    finished, running = stage_state(project, heartbeat)
+    finished, running = stage_state(project, heartbeat, only)
     tasks = [t for t, e in (heartbeat.get("tasks") or {}).items() if e.get("phase") in _TASK_END]
     paths = ["log/"]
     for name in finished:
@@ -76,12 +109,16 @@ def collect_on_request(
     project: Project, ssh: Ssh, ledger: Ledger, run: dict, name: str, dry_run: bool = False
 ) -> CollectResult:
     """Copy the `collect_on_request` list `name` of every stage; the artifact class is `name`."""
-    c = _Copier(project, ssh, ledger, run, {}, dry_run)
+    spec = load_spec(project, run)
+    only = spec_stages(spec)
+    c = _Copier(project, ssh, ledger, run, {}, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
     if c.result.failures:
         return c.result
     tasks = list(run.get("tasks") or [])
     paths: list[str] = []
     for stage in project.stages.values():
+        if only is not None and stage.name not in only:
+            continue
         paths += c.render(stage, stage.collect_on_request.get(name, []), tasks)
     if not paths and not c.result.failures:
         c.result.failures.append(f"no stage has collect_on_request.{name}")
@@ -91,9 +128,11 @@ def collect_on_request(
 
 class _Copier:
     def __init__(
-        self, project: Project, ssh: Ssh, ledger: Ledger, run: dict, heartbeat: dict, dry_run: bool
+        self, project: Project, ssh: Ssh, ledger: Ledger, run: dict, heartbeat: dict, dry_run: bool,
+        task_dirs: dict[str, str] | None = None,
     ) -> None:
         self.project, self.ssh, self.ledger, self.dry_run = project, ssh, ledger, dry_run
+        self.task_dirs = task_dirs or {}
         self.result = CollectResult()
         scalars = {k: v for k, v in {**heartbeat, **run}.items() if isinstance(v, (str, int, float))}
         self.values = placeholders(project, **scalars)
@@ -120,9 +159,17 @@ class _Copier:
         return out
 
     def _task_values(self, stage: Stage, tid: str) -> dict[str, object]:
-        task = resolve_task(self.project, tid)
-        values = {**self.values, **{f"task.{k}": v for k, v in task.fields.items()}}
-        values["task_dir"] = render(stage.task_dir, values)
+        # The spec is the truth for a run: its task directory wins over the task table,
+        # which may have changed since the launch.
+        values = dict(self.values)
+        try:
+            task = resolve_task(self.project, tid)
+            values.update({f"task.{k}": v for k, v in task.fields.items()})
+        except ConfigError:
+            if tid not in self.task_dirs:
+                raise
+        values["task.id"] = tid
+        values["task_dir"] = self.task_dirs.get(tid) or render(stage.task_dir, values)
         return values
 
     def final_steps(self, entry: str, step_final_s: int) -> list[str]:

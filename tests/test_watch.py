@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import board, collect, launch, watch
+from edarunner import board, collect, config, launch, watch
 from edarunner.config import load_project
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.ledger import Ledger
@@ -339,3 +339,49 @@ def test_stage_rows_follow_the_stages_map(env) -> None:
                                        (hb2["run_id"],)).fetchone()) == ("failed", 5)
     assert env.ledger.db.execute("SELECT status FROM stage_runs WHERE run_id=? AND stage='synth'",
                                  (hb3["run_id"],)).fetchone()[0] == "killed"
+
+
+def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
+    hb = env.heartbeat("d", phase="done", exit=0, stage="power", tasks={"k_new": {"phase": "done"}})
+    root = Path(hb["root"])
+    for n in range(4):
+        (root / "reports" / str(n)).mkdir(parents=True)
+        (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
+    new = root / "simulation" / "tests" / "demo" / "NEW_TEST"
+    (new / "power" / "reports").mkdir(parents=True)
+    (new / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
+    (new / "power" / "phases.json").write_text('{"window_ns": 10}\n')
+    (env.project.state / "demo" / f"{hb['run_id']}.spec.json").write_text(json.dumps({"stages": [
+        {"name": "power", "tasks": [{"id": "k_new", "dir": str(new)}]}]}))
+    env.cycle()
+    results = env.project.data / "results" / hb["run_id"]
+    assert (results / "simulation" / "tests" / "demo" / "NEW_TEST" / "power" / "reports" / "power.csv").is_file()
+    assert not (results / "reports").exists()
+    rows = env.ledger.metrics(run_ids=[hb["run_id"]])
+    assert {(r["stage"], r["task"], r["name"]) for r in rows} == {
+        ("power", "k_new", "power_w"), ("power", "k_new", "window_ns"), ("power", "k_new", "energy_nj")}
+    assert (hb["run_id"], "collect") not in env.events() and (hb["run_id"], "extract") not in env.events()
+
+
+def test_run_forever_reloads_the_project_each_cycle(env: Env, monkeypatch) -> None:
+    calls: list[str] = []
+
+    def load(root):
+        calls.append("load")
+        if calls.count("load") == 2:
+            raise config.ConfigError("edited mid-way")
+        return env.project
+
+    def sleep(_s):
+        if calls.count("load") >= 3:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(config, "load_project", load)
+    monkeypatch.setattr(watch, "cycle", lambda *a, **k: calls.append("cycle"))
+    monkeypatch.setattr(watch.time, "sleep", sleep)
+    env.notifier.project = None
+    env.notifier.stop = lambda: None
+    with pytest.raises(KeyboardInterrupt):
+        watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier])
+    assert calls == ["load", "cycle", "load", "load", "cycle"]
+    assert env.notifier.project is env.project

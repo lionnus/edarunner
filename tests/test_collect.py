@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import replace
@@ -146,3 +147,24 @@ def test_nfs_export_fallback(env, monkeypatch) -> None:
     r = collect.collect_run(project, ssh, ledger, run_far, hb)
     assert r.failures == [] and r.files == 13
     assert any("far:" in a[-2] for a in calls) and any(a[-2] == f"{root}/reports/" for a in calls)
+
+
+def test_spec_tasks_and_stages_win_over_the_task_table(env) -> None:
+    project, ssh, ledger, run, root = env
+    run_tree(root)
+    new = root / "simulation" / "tests" / "demo" / "NEW_TEST"
+    write(new / "power" / "reports" / "power.csv", "phase,total_w\nWHOLE,0.5\n")
+    write(new / "power" / "phases.json", '{"window_ns": 10}\n')
+    spec_dir = project.state / "demo"
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    (spec_dir / f"{RUN_ID}.spec.json").write_text(json.dumps({"stages": [
+        {"name": "power", "tasks": [{"id": "k_new", "dir": str(new)}]}]}))
+    hb = heartbeat(run, "done", "power", {"k_new": "done"})
+    r = collect.collect_run(project, ssh, ledger, run, hb)
+    assert r.failures == [], r.failures
+    results = project.data / "results" / RUN_ID
+    assert (results / "simulation" / "tests" / "demo" / "NEW_TEST" / "power" / "reports" / "power.csv").is_file()
+    # The tree's synth reports belong to the run that made them, not to this power-only run.
+    assert not (results / "reports").exists()
+    assert collect.spec_task_dirs({"stages": [{"name": "power", "tasks": [{"id": "k_new", "dir": str(new)}]}]},
+                                  str(root)) == {"k_new": "simulation/tests/demo/NEW_TEST"}
