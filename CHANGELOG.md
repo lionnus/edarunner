@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-09-27)
+
+The first release.
 
 - `edr` draws its tables with `rich`, the one dependency of the
   controller: colour on a terminal, plain text in a pipe, under
@@ -8,11 +10,6 @@
 - `edr hosts` shows cores, RAM, scratch and GPUs as used or free of
   total, with a bar; the probe reports the totals and reads `nvidia-smi`
   when the host has it.
-
-## 0.1.0 (2026-09-27)
-
-The first release.
-
 - `edr`, the controller, with seventeen verbs; `docs/cli.md` lists them.
 - `edr_driver.py`, the one-file driver for Python 3.6 or newer: stages,
   task groups with a shared queue, licence gates, budgets, retries, the

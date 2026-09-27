@@ -373,7 +373,7 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
             self.cmd = cmd
             return 0, "4242\n", ""
     ssh = FakeSsh()
-    pid = launch.start_driver(ssh, "larain7", tmp_path / "d.py", tmp_path / "s.json", tmp_path / "l.log",
+    pid = launch.start_driver(ssh, "hostA", tmp_path / "d.py", tmp_path / "s.json", tmp_path / "l.log",
                               {"PATH": "/usr/sepp/bin:$PATH"})
     assert pid == 4242
     assert ssh.cmd.startswith("py=$(command -v python3); setsid nohup \"$py\" ")

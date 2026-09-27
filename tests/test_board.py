@@ -39,7 +39,7 @@ def _rows():
         _row("run1", "c", "stage:synth", "running"),
         _row("fail", "b_nodw", "INCOMPLETE:1f0s", "running", age=7000, exit=8, stage="power", step=None,
              counts=json.dumps({"done": 1, "failed": 1})),
-        _row("run2", "d" * 40, "group:power_" * 3, None, host="larain9-long-name", batch="iccd2026_g10_long"),
+        _row("run2", "d" * 40, "group:power_" * 3, None, host="hostB-long-name", batch="iccd2026_g10_long"),
         _row("stale", "b_nodw", "stage:pnr", "stale", age=900),
         _row("dead", "a", "stage:synth", "dead", age=5000),
     ]
@@ -128,14 +128,14 @@ def test_status_html():
     rows = _rows()
     events = [{"id": i, "ts": NOW - i, "actor": "watch", "run_id": RUN["dead"], "kind": "dead", "text": f"event {i}"}
               for i in range(60)]
-    hosts = {"local": {"free_cores": 3, "free_ram_gb": 6.5}, "larain9": {"free_cores": 100, "free_gb": 700}}
+    hosts = {"local": {"free_cores": 3, "free_ram_gb": 6.5}, "hostB": {"free_cores": 100, "free_gb": 700}}
     page = board.status_html(rows, events, hosts, now=NOW)
     assert 'name="viewport"' in page and "prefers-color-scheme:dark" in page
     for run_id in RUN.values():
         assert run_id in page
     assert page.index(RUN["dead"]) < page.index(RUN["stale"]) < page.index(RUN["run1"]) < page.index(RUN["done"])
     assert "event 59" in page and "event 10" in page and "event 9" not in page
-    assert "<th>free_gb</th>" in page and "<td>larain9</td>" in page and "<td>6.5</td>" in page
+    assert "<th>free_gb</th>" in page and "<td>hostB</td>" in page and "<td>6.5</td>" in page
     assert "&lt;" not in page.split("<body>")[0]
     assert board.status_html([], [], {}, now=NOW).count("<table>") == 3
 

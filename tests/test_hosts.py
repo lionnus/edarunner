@@ -266,5 +266,5 @@ def test_check_local_needs_ssh_only_with_a_remote_host(ssh: Ssh, monkeypatch) ->
     monkeypatch.setattr(_sh, "which", lambda t: None if t == "ssh" else real(t))
     ssh.site.hosts = {"local": ssh.site.hosts.get("local")} if "local" in ssh.site.hosts else {}
     assert not [p for p in ssh.check_local() if "ssh" in p]
-    ssh.site.hosts["larain9"] = ssh.site.hosts.get("local")
+    ssh.site.hosts["hostB"] = ssh.site.hosts.get("local")
     assert any("ssh not on PATH" in p for p in ssh.check_local())
