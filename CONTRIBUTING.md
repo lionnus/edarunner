@@ -9,7 +9,7 @@ Open an issue at https://github.com/lionnus/edarunner/issues for a bug.
 Give the `edr` version, the Python version, the command, and its output
 with `--json`. Remove every host name, user name and token first.
 
-For a question, write to Lionnus Kesting, user@example.com.
+For a question, write to Lionnus Kesting, lkesting@iis.ee.ethz.ch.
 
 ## Propose a change
 
