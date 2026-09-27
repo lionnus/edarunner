@@ -5,8 +5,9 @@
 <p align="center">
 <a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
 <img src="https://github.com/lionnus/edarunner/blob/ci-status/coverage.svg?raw=true" alt="coverage">
-<img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0"></a>
+<img src="https://img.shields.io/badge/python-3.11%2B-008000" alt="Python 3.11+">
+<a href="https://lionnus.github.io/edarunner/"><img src="https://img.shields.io/badge/docs-lionnus.github.io-008000" alt="docs"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-008000" alt="Apache-2.0"></a>
 </p>
 
 ## Why
@@ -185,7 +186,8 @@ incident behind each rule.
 
 ## Documents
 
-`docs/README.md` is the index. The pages:
+`docs/README.md` is the index. The same pages are published at
+<https://lionnus.github.io/edarunner/>. The pages:
 
 - `docs/getting-started.md`, install, the demo, and a first project.
 - `docs/reference/`, generated from the code: every verb with its flags

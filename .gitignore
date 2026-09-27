@@ -11,3 +11,4 @@ data/
 coverage.xml
 coverage.svg
 gmon.out
+site/

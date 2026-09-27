@@ -1,19 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="490" viewBox="0 0 960 490" role="img" aria-label="The lifecycle of one edarunner run, from a commit to a paper">
 <style>
-  .box { fill: #ffffff; stroke: #3b7dd8; stroke-width: 2; }
-  .frame { fill: none; stroke: #3b7dd8; stroke-width: 1.5; }
-  .frame-fill { fill: #f6f8fa; stroke: #3b7dd8; stroke-width: 1.5; }
-  .run { fill: #f28c38; }
-  .t { font-family: sans-serif; font-size: 14px; fill: #24292f; }
-  .s { font-family: sans-serif; font-size: 12px; fill: #6e7781; }
-  .h { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
-  .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #24292f; }
+  .box { fill: #ffffff; stroke: #0d1117; stroke-width: 2; }
+  .frame { fill: none; stroke: #0d1117; stroke-width: 1.5; }
+  .frame-fill { fill: #f6f8fa; stroke: #0d1117; stroke-width: 1.5; }
+  .run { fill: #008000; }
+  .t { font-family: Helvetica, Arial, sans-serif; font-size: 14px; fill: #0d1117; }
+  .s { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #6e7781; }
+  .h { font-family: Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #6e7781; letter-spacing: 0.6px; }
+  .m { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #0d1117; }
   .a { fill: none; stroke: #6e7781; stroke-width: 1.5; marker-end: url(#arrow); }
-  .al { font-family: sans-serif; font-size: 11px; fill: #6e7781; }
+  .al { font-family: Helvetica, Arial, sans-serif; font-size: 11px; fill: #6e7781; }
   @media (prefers-color-scheme: dark) {
     .box { fill: #0d1117; }
     .frame-fill { fill: #161b22; }
-    .t, .m { fill: #c9d1d9; }
+    .t, .m { fill: #e6edf3; }
+    .box, .frame, .frame-fill { stroke: #e6edf3; }
   }
 </style>
 <defs>
