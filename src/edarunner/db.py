@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS step_runs(run_id TEXT, stage TEXT, step INTEGER, started INTEGER, PRIMARY KEY(run_id, stage, step));
 CREATE TABLE IF NOT EXISTS host_samples(host TEXT, ts INTEGER, cores INTEGER, load REAL, ram_gb REAL, ram_used_gb REAL,
   scratch_gb REAL, scratch_used_gb REAL, gpus INTEGER, gpus_busy INTEGER, PRIMARY KEY(host, ts));
+CREATE TABLE IF NOT EXISTS run_samples(run_id TEXT, ts INTEGER, cpu_pct REAL, rss_gb REAL, tree_gb REAL, disk_free_gb REAL,
+  PRIMARY KEY(run_id, ts));
 CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT, instance TEXT, depth INTEGER, area REAL,
   local_area REAL, cells INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
@@ -184,6 +186,19 @@ class Database:
         if host is not None:
             where, args = where + " AND host=?", [since_s, host]
         return self._rows(f"SELECT * FROM host_samples WHERE {where} ORDER BY host, ts", args)
+
+    def add_run_sample(self, hb: dict) -> None:
+        """Keep the CPU, RSS, tree size and free disk of one heartbeat, once per heartbeat time."""
+        if hb.get("updated") is None:
+            return
+        self.conn.execute("INSERT OR IGNORE INTO run_samples VALUES(?, ?, ?, ?, ?, ?)",
+                          (hb["run_id"], int(hb["updated"]), hb.get("cpu_pct"), hb.get("rss_gb"), hb.get("tree_gb"),
+                           hb.get("disk_free_gb")))
+        self.conn.commit()
+
+    def run_samples(self, run_id: str) -> list[Row]:
+        """The samples of one run in time order."""
+        return self._rows("SELECT * FROM run_samples WHERE run_id=? ORDER BY ts", (run_id,))
 
     def add_artifact(self, row: Row) -> None:
         """Insert a collected file, or update its size and time."""

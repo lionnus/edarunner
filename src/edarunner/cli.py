@@ -433,8 +433,9 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         stages = [dict(r) for r in c.db.conn.execute(
             "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
         mets = c.db.metrics(run_ids=[run_id])
-        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or "")),
-               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets})
+        samples = c.db.run_samples(run_id)
+        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), samples=samples),
+               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples})
         return Exit.DONE
     code = Exit.DONE
     while True:
@@ -1114,7 +1115,8 @@ def _parser() -> argparse.ArgumentParser:
         done, incomplete, failed, over_budget, stopped or killed.
 
         With a handle, one run: identity, state, counts, disk, every stage and
-        task row, the metrics, and the log tail from the heartbeat.
+        task row, the CPU, RSS, tree size and free disk the driver sampled over
+        the run, the metrics, and the log tail from the heartbeat.
         """, exits={Exit.HOSTS: "with --live, a host did not answer"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH, else every batch")

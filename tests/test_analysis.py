@@ -252,3 +252,32 @@ def test_host_samples_history_and_the_status_chart(demo: Path, capsys) -> None:
     html = board.status_html([], [], {}, now, samples)
     assert html.count("<polyline") == 2 and "hosts, last day" in html and "<b>h1</b>" in html
     assert "hosts, last day" not in board.status_html([], [], {}, now, [])
+
+
+def test_driver_samples_its_process_groups() -> None:
+    import importlib.util
+    import os
+
+    spec = importlib.util.spec_from_file_location("edr_driver", Path(__file__).parents[1] / "src" / "edarunner" /
+                                                  "driver" / "edr_driver.py")
+    drv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(drv)
+    cpu, rss = drv.group_usage([os.getpgrp()])
+    assert cpu >= 0 and rss > 0
+    assert drv.group_usage([]) == (0, 0.0)
+
+
+def test_ingest_keeps_one_sample_per_heartbeat_and_the_detail_shows_them(demo: Path, capsys) -> None:
+    from edarunner import watch
+
+    a = seed(demo, "a", "stage:synth")
+    hb = {"run_id": a, "phase": "stage:synth", "updated": 1000, "cpu_pct": 350.0, "rss_gb": 2.5, "tree_gb": 1.0,
+          "disk_free_gb": 90.0}
+    with Database(demo / "data" / "edr.db") as db:
+        for k in range(3):
+            watch.ingest(db, [("demo", {**hb, "updated": 1000 + 60 * k, "tree_gb": 1.0 + k})])
+        watch.ingest(db, [("demo", {**hb, "updated": 1120, "tree_gb": 9.0})])  # the same heartbeat again
+        assert [s["tree_gb"] for s in db.run_samples(a)] == [1.0, 2.0, 3.0]
+    code, out, _ = edr(capsys, "status", a)
+    tree = next(ln for ln in out.splitlines() if ln.startswith("tree "))
+    assert code == 0 and "from run_samples" in out and tree.split()[-4:] == ["3", "3", "GB", "3"]

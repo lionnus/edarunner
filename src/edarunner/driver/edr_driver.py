@@ -17,6 +17,7 @@ import traceback
 
 POLL_S = 5
 TICK_S = 0.5
+DU_EVERY_S = 600
 TAIL_LINES = 80
 GB = 1024.0 ** 3
 
@@ -45,6 +46,24 @@ def du_gb(path):
         return round(int(out.split()[0]) / (1024.0 * 1024.0), 3)
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None
+
+
+def group_usage(pgids):
+    # type: (list) -> tuple
+    """(CPU seconds, RSS in GB) summed over the processes of `pgids`, or (None, None) when ps fails."""
+    try:
+        out = subprocess.run(["ps", "-e", "-o", "pgid=,cputimes=,rss="], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True,
+                             timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    want, cpu, rss = set(pgids), 0, 0
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) == 3 and f[0].isdigit() and int(f[0]) in want:
+            cpu += int(f[1]) if f[1].isdigit() else 0
+            rss += int(f[2]) if f[2].isdigit() else 0
+    return cpu, round(rss / (1024.0 * 1024.0), 3)
 
 
 def tail(path, n, size=65536):
@@ -99,6 +118,7 @@ class Driver(object):
         self.over_budget = None
         self.sigs = []
         self.stop_evt = threading.Event()
+        self.last_cpu = None  # (time, CPU seconds) of the last sample
         now = int(time.time())
         self.hb = {
             "schema": 1, "run_id": self.run_id, "batch": spec.get("batch"),
@@ -107,10 +127,27 @@ class Driver(object):
             "pgids": [], "phase": "setup", "stage": None, "step": None, "step_name": None,
             "tasks": {}, "stages": {}, "step_times": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0},
             "started": now, "updated": now, "elapsed_s": 0, "disk_free_gb": None,
-            "tree_gb": None, "exit": None, "killed_by": None, "last_cmd": None,
+            "tree_gb": None, "cpu_pct": None, "rss_gb": None, "exit": None, "killed_by": None, "last_cmd": None,
             "last_log": None, "log": None}
 
     # heartbeat
+
+    def sample(self):
+        # type: () -> None
+        """Put the CPU use since the last sample and the RSS of the process groups into the heartbeat."""
+        with self.lock:
+            pgids = sorted(self.procs)
+        cpu, rss = group_usage(pgids) if pgids else (0, 0.0)
+        now = time.time()
+        with self.lock:
+            if cpu is None:
+                self.hb["cpu_pct"], self.hb["rss_gb"] = None, None
+                return
+            last, self.last_cpu = self.last_cpu, (now, cpu)
+            # A process that ended takes its CPU seconds with it, so a drop reads as zero.
+            pct = max(0.0, (cpu - last[1]) / (now - last[0]) * 100) if last and now > last[0] else None
+            self.hb["cpu_pct"] = None if pct is None else round(pct, 1)
+            self.hb["rss_gb"] = rss
 
     def beat(self, tree=False):
         # type: (bool) -> None
@@ -142,10 +179,13 @@ class Driver(object):
 
     def beat_loop(self):
         period = float(self.limits.get("heartbeat_s") or 60)
-        n = 0
+        last_du = 0.0
         while not self.stop_evt.wait(period):
-            self.beat(tree=n % 10 == 0)
-            n += 1
+            self.sample()
+            du = time.time() - last_du >= DU_EVERY_S
+            if du:
+                last_du = time.time()
+            self.beat(tree=du)
 
     def set_phase(self, phase, **fields):
         with self.lock:

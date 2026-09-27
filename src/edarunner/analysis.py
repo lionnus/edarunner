@@ -297,23 +297,6 @@ def runtime_batch_view(project: Project, rts: list[Row]) -> RenderableType:
 
 # host and run samples
 
-SPARK = "▁▂▃▄▅▆▇█"
-
-
-def spark(points: list[tuple[int, float | None]], top: float | None = None, width: int = 24) -> str:
-    """(time, value) pairs as `width` block characters over the time span, 0 to `top`; a bin without a value is a space."""
-    vals = [v for _, v in points if v is not None]
-    if not vals:
-        return ""
-    t0, t1 = points[0][0], points[-1][0]
-    bins: list[list[float]] = [[] for _ in range(width)]
-    for ts, v in points:
-        if v is not None:
-            bins[min(width - 1, int((ts - t0) * width / (t1 - t0 or 1)))].append(v)
-    top = top or max(vals) or 1
-    return "".join(" " if not b else SPARK[min(7, max(0, round(sum(b) / len(b) / top * 7)))] for b in bins)
-
-
 def host_history(samples: list[Row]) -> list[Row]:
     """One row per host: the sample count, the time span, and the cores, RAM and scratch in use over it."""
     out: dict[str, Row] = {}
@@ -339,7 +322,7 @@ def host_history_view(rows: list[Row]) -> RenderableType:
 
     def cell(points: list, total: float | None) -> str:
         vals = [v for _, v in points if v is not None]
-        return f"{spark(points, total)} {max(vals):.0f}/{vals[-1]:.0f} of {total or 0:.0f}" if vals else "-"
+        return f"{board.spark(points, total)} {max(vals):.0f}/{vals[-1]:.0f} of {total or 0:.0f}" if vals else "-"
 
     body = [[h["host"], board._ts(h["first"]), board._ts(h["last"]), cell(h["cores_used"], h["cores"]),
              cell(h["ram_used_gb"], h["ram_gb"]), cell(h["scratch_used_gb"], h["scratch_gb"]),

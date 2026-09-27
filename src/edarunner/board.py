@@ -103,6 +103,23 @@ def host_marks(probe: HostProbe | None, marks: Marks) -> dict[str, str]:
     }
 
 
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def spark(points: list[tuple[int, float | None]], top: float | None = None, width: int = 24) -> str:
+    """(time, value) pairs as `width` block characters over the time span, 0 to `top`; a bin without a value is a space."""
+    vals = [v for _, v in points if v is not None]
+    if not vals:
+        return ""
+    t0, t1 = points[0][0], points[-1][0]
+    bins: list[list[float]] = [[] for _ in range(width)]
+    for ts, v in points:
+        if v is not None:
+            bins[min(width - 1, int((ts - t0) * width / (t1 - t0 or 1)))].append(v)
+    top = top or max(vals) or 1
+    return "".join(" " if not b else SPARK[min(7, max(0, round(sum(b) / len(b) / top * 7)))] for b in bins)
+
+
 def worst_mark(marks: Iterable[str]) -> str:
     """The most severe of `marks` by SEVERITY; '-' counts as green."""
     return min((m for m in marks if m in SEVERITY), key=SEVERITY.index, default=RESOURCE_MARKS[0])
@@ -268,8 +285,21 @@ def wide(rows: list[Row], now: float | None = None) -> Table | str:
                  styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "cost"))
 
 
-def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None) -> Group:
-    """One run: identity, state, counts, stage rows, metrics and the log tail."""
+def samples_table(samples: list[Row]) -> Table | None:
+    """CPU, RSS, tree size and free disk of a run over its life: a line each, with the peak and the last value."""
+    body = []
+    for key, name, unit in (("cpu_pct", "CPU", "%"), ("rss_gb", "RSS", "GB"), ("tree_gb", "tree", "GB"),
+                            ("disk_free_gb", "disk free", "GB")):
+        pts = [(s["ts"], s[key]) for s in samples if s.get(key) is not None]
+        if pts:
+            vals = [v for _, v in pts]
+            body.append([name, spark(pts), f"{max(vals):.4g}", f"{vals[-1]:.4g}", unit, len(pts)])
+    return table(["sample", "over the run", "peak", "last", "unit", "n"], body, right=("peak", "last", "n")) if body else None
+
+
+def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None,
+               samples: list[Row] | None = None) -> Group:
+    """One run: identity, state, counts, stage rows, samples, metrics and the log tail."""
     now = now or time.time()
     ex = row.get("exit")
     parts: list[RenderableType] = [
@@ -292,6 +322,10 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
             [[s.get("stage"), s.get("task"), s.get("attempt"), state_text(s.get("status")), s.get("exit"),
               _ts(s.get("started")), _ts(s.get("ended")), s.get("signature")] for s in stage_rows],
             styles={"started": "dim", "ended": "dim"})]
+    sample_tab = samples_table(samples or [])
+    if sample_tab is not None:
+        first, last = _ts(samples[0]["ts"]), _ts(samples[-1]["ts"])
+        parts += [Text(""), Text(f"samples {first} to {last}, from run_samples", style="bold"), sample_tab]
     if metrics:
         parts += [Text(""), Text("metrics", style="bold"), table(
             ["stage", "step", "task", "name", "value", "unit"],

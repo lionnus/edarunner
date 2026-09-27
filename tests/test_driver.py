@@ -35,6 +35,7 @@ def test_synth_only_reaches_done(tmp_path: Path) -> None:
         assert (root / "reports" / str(n) / "qor.rpt").exists()
     assert hb["step"] == 4 and hb["stage"] == "synth" and hb["pgids"] == []
     times = hb["step_times"]["synth"]
+    assert {"cpu_pct", "rss_gb", "tree_gb"} <= set(hb)
     assert "4" in times and sorted(times.values()) == [times[k] for k in sorted(times, key=int)]
     assert hb["last_cmd"].startswith("bash ") and "synth done" in hb["last_log"]
     assert (root / "log" / "synth.log").exists()
