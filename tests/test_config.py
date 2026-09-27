@@ -176,6 +176,28 @@ def test_project_telegram_overrides_the_site(tmp_path):
     edr.write_text(edr_text + "\n[telegram]\nchat_id = 5\n")
     assert config.load_project(root).site.telegram.chat_id == 5
 
+
+def test_marks_defaults_site_and_project_override(tmp_path):
+    root = demo_copy(tmp_path)
+    site, edr = root / "site.toml", root / "edr.toml"
+    site_text, edr_text = site.read_text(), edr.read_text()
+    m = config.load_project(root).site.marks
+    assert (m.cores, m.ram, m.scratch, m.gpu) == ([0.6, 0.8, 0.9], [0.6, 0.8, 0.9], [0.7, 0.85, 0.95], [0.6, 0.8, 0.9])
+    site.write_text(site_text + "\n[marks]\ncores = [0.5, 0.7, 0.8]\nram = [0, 0.5, 1]\n")
+    edr.write_text(edr_text + "\n[marks]\ncores = [0.1, 0.2, 0.3]\n")
+    m = config.load_project(root).site.marks
+    assert (m.cores, m.ram, m.scratch) == ([0.1, 0.2, 0.3], [0, 0.5, 1], [0.7, 0.85, 0.95])
+    for bad, match in (("gpu = [0.9, 0.8, 0.95]", "marks.gpu must be three ascending numbers between 0 and 1"),
+                       ("ram = [0.6, 0.8]", "marks.ram must be three ascending"),
+                       ("scratch = [0.5, 0.8, 1.2]", "marks.scratch must be three ascending"),
+                       ("cores = [0.5, 0.8, true]", "marks.cores must be three ascending"),
+                       ('cores = "0.5"', "marks.cores must be list, not str"),
+                       ("disk = [0.5, 0.8, 0.9]", "unknown key 'marks.disk'")):
+        edr.write_text(edr_text + f"\n[marks]\n{bad}\n")
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)
+
+
 def test_duplicate_label(tmp_path):
     root = demo_copy(tmp_path)
     jobs = root / "jobs" / "demo.toml"

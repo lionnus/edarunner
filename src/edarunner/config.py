@@ -16,7 +16,7 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    Batch, BotCommand, Budget, Host, Job, Limits, Metric, Needs, Placement,
+    Batch, BotCommand, Budget, Host, Job, Limits, Marks, Metric, Needs, Placement,
     Project, Retry, Safety, Site, Source, Stage, Sync, Task, Telegram, Tool,
 )
 
@@ -27,9 +27,9 @@ PathLike = str | os.PathLike[str]
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
     "schema", "project", "site", "state", "data", "run_prefix", "telegram_poll", "telegram",
-    "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env",
+    "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
-_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram"}
+_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks"}
 _SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 _EXTRACTORS = ("regex", "csv", "json", "python", "expr")
 
@@ -228,6 +228,7 @@ def load_site(path: PathLike) -> Site:
         tools=tools,
         nfs_export=raw.get("nfs_export", ""),
         telegram=telegram,
+        marks=_marks(raw.get("marks", {}), file, Marks()),
     )
 
 
@@ -247,6 +248,17 @@ def _check_tools(names: Mapping[str, object], tools: dict[str, Tool], file: Path
         if name not in tools:
             known = ", ".join(sorted(tools)) or "none"
             raise ConfigError(f"{file}: {at} names unknown tool '{name}' (site has: {known})")
+
+
+def _marks(raw: object, file: Path, base: Marks) -> Marks:
+    """The [marks] table of `file`; a key it leaves out keeps its value from `base`."""
+    marks = _build(Marks, {**{f.name: getattr(base, f.name) for f in fields(Marks)}, **_table(raw, None, file, "marks")},
+                   file, "marks")
+    for f in fields(Marks):
+        t = getattr(marks, f.name)
+        if not (len(t) == 3 and all(type(x) in (int, float) for x in t) and 0 <= t[0] < t[1] < t[2] <= 1):
+            raise ConfigError(f"{file}: marks.{f.name} must be three ascending numbers between 0 and 1, not {t!r}")
+    return marks
 
 
 def _telegram(raw: object, file: Path, base: Telegram | None, allowed: set[str]) -> Telegram:
@@ -283,6 +295,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     values["site_dir"] = str(site.path.parent)
     if "telegram" in raw:
         site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id"})
+    if "marks" in raw:
+        site.marks = _marks(raw["marks"], file, site.marks)
 
     src = _table(raw.get("source", {}), {f.name for f in fields(Source)}, file, "source")
     source = Source(
