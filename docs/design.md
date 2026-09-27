@@ -487,9 +487,11 @@ guard or bad input, 2 nothing to do, 3 some hosts failed. A handle is
 [--ack]`, `export ...`, `stop HANDLE [--after-task] [--now] --why`,
 `retire HANDLE|--batch B [--prune T] [--uncollected] --why`, `watch
 [--once] [--check] [--serve PORT]`, `import --run-id R --label L --config C
---src H --host HOST --root PATH [--batch B] [--phase P] [--build-tag T]`
-(records a tree that edr did not make, so `reuse` can continue it; it is
-never a delete target unless its path carries the marker).
+--src H (--host HOST --root PATH | --results DIR [--tasks ID...]) [--batch B]
+[--phase P] [--build-tag T]` (records a tree that edr did not make, so
+`reuse` can continue it, or links collected files as `data/results/R` and
+extracts the metrics of the project from them; a tree is never a delete
+target unless its path carries the marker).
 
 The narrow board fits 48 columns: two lines per live run, dead first.
 
