@@ -184,7 +184,7 @@ def test_help_groups_builtins_and_custom(bot):
     text = last_reply(bot)
     assert "<pre>" not in text and "/keep &lt;handle&gt; [hours]: add hours, default 12" in text
     assert "<b>Custom</b>\n/echo &lt;dir&gt;: echo a dir" in text
-    assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Files</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Custom</b>"]
+    assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Files</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Help</b>", "<b>Custom</b>"]
 
 
 def test_custom_good_argument_runs_argv(bot):
@@ -625,3 +625,21 @@ def test_the_stop_button_asks_and_acts_on_the_second_tap(bot):
     assert bot.actions.calls == [("stop_after_task", ("a@demo", "telegram", "stopped from a telegram button"), {})]
     edit = bot.api.of("editMessageText")[-1]
     assert edit["text"] == "hung a@demo\nstop_after_task ok" and len(edit["reply_markup"]["inline_keyboard"][0]) == 3
+
+
+def test_the_reply_keyboard_sends_plain_words(bot):
+    bot.handle_update(msg("/start"))
+    sent = bot.api.of("sendMessage")[-1]
+    assert sent["text"].startswith("<b>demo: help</b>\n<b>Look</b>")
+    assert sent["reply_markup"]["keyboard"] == [[{"text": "Status"}, {"text": "Hosts"}], [{"text": "Events"}, {"text": "Lic"}]]
+    assert sent["reply_markup"]["is_persistent"] is True
+    for word, call in (("Status", "status_text"), ("hosts", "hosts_text"), (" Events ", "events_text"), ("Lic", "lic_text")):
+        bot.handle_update(msg(word))
+        assert bot.actions.calls[-1][0] == call
+    bot.handle_update(msg("status please"))
+    assert bot.actions.calls[-1][0] == "lic_text"
+    bot.handle_update(msg("/keyboard off"))
+    assert bot.api.of("sendMessage")[-1]["reply_markup"] == {"remove_keyboard": True}
+    bot.handle_update(msg("/keyboard"))
+    assert last_reply(bot) == "keyboard on" and "keyboard" in bot.api.of("sendMessage")[-1]["reply_markup"]
+    assert [e["text"] for e in bot.ledger.events][:2] == ["/start", "/status"]

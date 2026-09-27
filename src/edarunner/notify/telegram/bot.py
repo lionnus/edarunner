@@ -18,7 +18,7 @@ from edarunner.notify import Button, Notifier
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import ApiError, BotApi
 from edarunner.notify.telegram.buttons import Buttons, markup
-from edarunner.notify.telegram.commands import Commands, Reply
+from edarunner.notify.telegram.commands import Commands, Reply, keyboard_word
 
 if TYPE_CHECKING:
     from edarunner.cli import Actions
@@ -203,6 +203,8 @@ class TelegramBot(Notifier):
             parts = msg["text"].split()
             name, run = parts[0][1:].split("@")[0], self._replied_run(msg)
             self._reply(self.commands.run(name, parts[1:], msg["text"], run), thread)
+        elif msg and (word := keyboard_word(msg.get("text", ""))):
+            self._reply(self.commands.run(word, [], "/" + word), thread)
 
     def _in_topic(self, thread: int | None) -> bool:
         """True when the bot obeys a message of forum thread `thread`; the first one of a thread prints its id."""
@@ -229,7 +231,8 @@ class TelegramBot(Notifier):
             return
         body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
         full = fmt.head(self.project.project, r.title) + "\n" + body
-        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full), thread_id=thread)
+        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full), markup=r.markup,
+                   thread_id=thread)
 
     def _press(self, q: dict) -> None:
         """Answer a button press and rewrite its alert."""

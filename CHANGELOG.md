@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `/start` and `/keyboard` show a reply keyboard with `Status`, `Hosts`,
+  `Events` and `Lic`; `/keyboard off` removes it.
 - An alert has a third button, `stop`, which stops the run after its
   task. It asks `Stop <handle>?` first and acts only on `Yes, stop`
   within 10 minutes.
