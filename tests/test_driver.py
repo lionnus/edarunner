@@ -155,3 +155,109 @@ def test_spec_env_expands_host_variables(tmp_path: Path) -> None:
     assert (rc, hb["phase"]) == (0, "done"), hb
     log = (Path(spec["root"]) / "log" / "synth.log").read_text()
     assert "command not found" not in log
+
+
+def test_streak_of_equal_signatures_sets_looping(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_bad", "k_small"), parallel=1)
+    tasks = spec["stages"][0]["tasks"]
+    tasks.insert(1, dict(tasks[0], id="k_bad2"))
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"], hb["looping"]) == (8, "INCOMPLETE:2f0s", True)
+    assert hb["tasks"]["k_bad"]["signature"] == hb["tasks"]["k_bad2"]["signature"] == "boom: kernel bad failed"
+    assert "k_small" not in hb["tasks"] and hb["counts"]["failed"] == 2
+    assert (Path(spec["queue_dir"]) / "power" / "pending" / "k_small").exists()
+
+
+def test_host_full_starts_nothing(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",), limits={"host_free_min_gb": 1e9})
+    proc = start(spec)
+    hb = wait_for(spec, lambda h: h.get("host_full") is True)
+    assert hb["phase"] == "setup" and hb["last_cmd"] is None
+    Path(spec["state_file"]).with_name(RUN_ID + ".stop").write_text("now")
+    rc, hb = finish(proc, spec, timeout=15)
+    assert (rc, hb["phase"], hb["killed_by"], hb["host_full"]) == (10, "STOPPED", "stop", True)
+    assert hb["stages"] == {} and not (Path(spec["root"]) / "log" / "synth.log").exists()
+
+
+def test_needs_disk_gb_refuses_a_stage_and_skips_a_task(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",))
+    spec["stages"][0]["needs"]["disk_gb"] = 1e9
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"], hb["exit"]) == (3, "FAILED:synth", 3)
+    assert hb["last_cmd"] is None and not (Path(spec["root"]) / "log" / "synth.log").exists()
+
+    spec = render_spec(tmp_path / "group", stages=("power",), tasks=("k_small", "k_big"))
+    spec["stages"][0]["tasks"][0]["needs"] = {"disk_gb": 1e9}
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:0f1s", 8)
+    assert hb["tasks"]["k_small"]["phase"] == "skipped" and hb["tasks"]["k_big"]["phase"] == "done"
+    assert hb["counts"] == {"done": 1, "failed": 0, "skipped": 1, "running": 0, "queued": 0}
+    assert (Path(spec["queue_dir"]) / "power" / "pending" / "k_small").exists()
+
+
+def test_budget_kill_ends_the_stage(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",), budgets={"synth": {"hours": 0.0003, "kill": True}})
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"], hb["exit"], hb["over_budget"]) == (9, "OVER_BUDGET:synth", 9, "synth")
+    assert hb["stages"]["synth"]["status"] == "over_budget" and hb["stages"]["synth"]["exit"] != 0
+    assert hb["killed_by"] is None and hb["pgids"] == []
+    assert not (Path(spec["root"]) / "reports" / "3").exists()
+
+
+def test_per_task_budget_kills_that_task_only(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=2,
+                       env={"DEMO_SLEEP": "4"}, budgets={"power": {"hours": 0.0003, "per": "task"}})
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:1f0s", 8)
+    small, big = hb["tasks"]["k_small"], hb["tasks"]["k_big"]
+    assert small["phase"] == "failed" and small["over_budget"] is True and small["exit"] != 0
+    assert big["phase"] == "done" and "over_budget" not in big  # its own 2 h budget holds
+    assert "over_budget" not in hb and hb["killed_by"] is None
+    assert sorted(os.listdir(Path(spec["queue_dir"]) / "power" / "done")) == ["k_big", "k_small"]
+
+
+def test_checkpoint_resumes_the_first_stage_only(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth", "pnr"), start_at={"stage": "synth", "checkpoint": "elaborate"})
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"], hb["exit"]) == (0, "done", 0)
+    root = Path(spec["root"])
+    assert [n for n in range(6) if (root / "reports" / str(n) / "qor.rpt").exists()] == [2, 3, 4, 5]
+    synth, pnr = (root / "log" / "synth.log").read_text(), (root / "log" / "pnr.log").read_text()
+    assert "FIRST_STAGE=elaborate" in synth.splitlines()[0] and "step 0 setup" not in synth
+    assert "FIRST_STAGE" not in pnr and "step 4 cts" in pnr
+    assert hb["stages"]["synth"]["status"] == hb["stages"]["pnr"]["status"] == "done"
+
+
+@pytest.mark.xfail(strict=True, reason="driver defect: a shard that starts after a claim re-creates pending/<id>, "
+                   "because the O_EXCL creation checks done/ but not claimed/; the task runs twice")
+def test_two_shards_claim_from_one_queue(tmp_path: Path) -> None:
+    a = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=1, env={"DEMO_SLEEP": "3"})
+    b = dict(a, run_id=RUN_ID + "_b", state_file=str(Path(a["state_file"]).with_name(RUN_ID + "_b.json")))
+    pa = start(a)
+    wait_for(a, lambda h: h["tasks"].get("k_small", {}).get("phase") == "running")
+    pb = start(b)
+    (rc_a, ha), (rc_b, hb) = finish(pa, a), finish(pb, b)
+    assert (rc_a, ha["phase"], rc_b, hb["phase"]) == (0, "done", 0, "done")
+    q = Path(a["queue_dir"]) / "power"
+    assert sorted(os.listdir(q / "done")) == ["k_big", "k_small"] and os.listdir(q / "claimed") == []
+    assert (set(ha["tasks"]), set(hb["tasks"])) == ({"k_small"}, {"k_big"})
+
+
+def test_sighup_kills_the_group_and_reports(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small",), env={"DEMO_SLEEP": "20"})
+    proc = start(spec)
+    hb = wait_for(spec, lambda h: h["tasks"].get("k_small", {}).get("phase") == "running")
+    pgid = hb["tasks"]["k_small"]["pgid"]
+    proc.send_signal(signal.SIGHUP)
+    rc, hb = finish(proc, spec, timeout=15)
+    assert (rc, hb["phase"], hb["killed_by"], hb["exit"]) == (10, "KILLED:SIGHUP", "SIGHUP", 10)
+    assert hb["pgids"] == []
+    for _ in range(100):
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("process group %d still alive" % pgid)
+    assert os.listdir(Path(spec["queue_dir"]) / "power" / "claimed") == ["k_small." + RUN_ID]
