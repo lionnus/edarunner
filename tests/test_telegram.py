@@ -53,9 +53,16 @@ class FakeActions:
 class FakeLedger:
     def __init__(self) -> None:
         self.events: list[dict] = []
+        self.kv: dict = {}
 
     def add_event(self, **kw) -> None:
         self.events.append(kw)
+
+    def get_kv(self, key, default=None):
+        return self.kv.get(key, default)
+
+    def set_kv(self, key, value) -> None:
+        self.kv[key] = json.loads(json.dumps(value))
 
 
 COMMANDS = {
@@ -190,7 +197,7 @@ def test_custom_dry_run_skip_detach_timeout(bot):
     bot.handle_update(msg("/skip"))
     assert last_reply(bot) == pre("already demo")
     bot.handle_update(msg("/bg"))
-    assert "started demo (pid " in last_reply(bot)
+    assert "started demo (pid " in last_reply(bot) and (Path(bot.project.data) / "telegram-bg.log").exists()
     bot.handle_update(msg("/slow"))
     assert "timed out after 1 s" in last_reply(bot)
 
@@ -288,12 +295,11 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     sent = bot.api.of("sendMessage")
     assert len(sent) == 1 and sent[0]["disable_notification"] is True
     assert bot.api.of("pinChatMessage")[0]["message_id"] == 1
-    state = json.loads((tmp_path / "data" / "board" / "telegram.json").read_text())
-    assert state["board"] == 1
+    assert bot.ledger.kv["telegram"]["board"] == 1 and not (tmp_path / "data").exists()
     bot.board("board v2")
     assert len(bot.api.of("sendMessage")) == 1
     assert bot.api.of("editMessageText")[-1] == {"chat_id": CHAT, "message_id": 1, "text": pre("board v2"), "parse_mode": "HTML", "reply_markup": None}
-    # A new bot on the same state file edits the same message.
+    # A new bot on the same ledger edits the same message.
     again = TelegramBot(bot.site, bot.project, bot.ledger, bot.actions, str(bot.tg.token_file))
     again.api = FakeApi()
     again.board("board v3")

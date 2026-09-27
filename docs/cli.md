@@ -198,7 +198,7 @@ edr run HANDLE --collect NAME [--dry-run]
 ```
 
 More work on the tree of an existing run: one stage, on the same tree,
-as a new run in a batch `run_<date>` with the label `<label>.<stage>`.
+as a new run in the batch of that run with the label `<label>.<stage>`.
 `--tasks` names the tasks of a task group, `--parallel` its width, `--on`
 the host (default: the tree's host). `--from` fills `{checkpoint}` in
 the stage's `resume` command, and is refused when the stage has none.

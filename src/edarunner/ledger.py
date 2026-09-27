@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task T
   source_file TEXT, extracted_at INTEGER, PRIMARY KEY(run_id, stage, step, task, name));
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, ts INTEGER, actor TEXT, run_id TEXT, kind TEXT, text TEXT);
+CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
 """
 
 _PK = {
@@ -142,6 +143,16 @@ class Ledger:
         )
         self.db.commit()
         return int(cur.lastrowid)
+
+    def set_kv(self, key: str, value: Any) -> None:
+        """Store `value` as JSON under `key`; a key already present is replaced."""
+        self.db.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?, ?)", (key, json.dumps(value)))
+        self.db.commit()
+
+    def get_kv(self, key: str, default: Any = None) -> Any:
+        """The value stored under `key`, or `default`."""
+        row = self.db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        return default if row is None else json.loads(row["value"])
 
     def mark_batch_retired(self, batch: str) -> None:
         """Set `retired` on a batch; the row is created when it is missing."""

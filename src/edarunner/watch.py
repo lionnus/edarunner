@@ -2,8 +2,8 @@
 
 The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a file or a tree. Its memory between cycles
-is two small JSON files under data/board/: progress.json (what each run
-looked like last time) and notified.json (states, alerts, grace clocks).
+is two rows of the ledger's kv table: progress (what each run looked
+like last time) and notified (states, alerts, grace clocks).
 """
 
 from __future__ import annotations
@@ -288,7 +288,8 @@ def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, prog
     spec_path = project.state / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
     stage = next((s for s in spec.get("stages") or [] if s.get("name") == hb.get("stage")), None)
-    if rec.get("resumed") or not stage or not stage.get("resume"):
+    driver = spec.get("driver")
+    if rec.get("resumed") or not stage or not stage.get("resume") or not driver:
         return
     host = str(run["host"])
     alive = [g for g in hb.get("pgids") or [] if int(g) > 1 and ssh.run(host, f"kill -0 -- -{int(g)}")[0] == 0]
@@ -302,7 +303,7 @@ def _resume(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, prog
     checkpoint = hb.get("step_name") if hb.get("step") else None
     spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint}
     config.save_json(spec_path, spec)
-    driver, logf = project.state / "bin" / str(run["batch"]) / "edr_driver.py", spec_path.with_name(f"{run_id}.driver.log")
+    logf = spec_path.with_name(f"{run_id}.driver.log")
     try:
         pid = launch.start_driver(ssh, host, driver, spec_path, logf, project.site.env)
     except (HostError, OSError) as e:
@@ -351,8 +352,7 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
           dry_run: bool = False) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing."""
     now = time.time() if now is None else now
-    bdir = project.data / "board"
-    progress, notes = config.load_json(bdir / "progress.json"), config.load_json(bdir / "notified.json")
+    progress, notes = ledger.get_kv("progress", {}), ledger.get_kv("notified", {})
     heartbeats = read_heartbeats(project)
     if not dry_run:
         ingest(ledger, heartbeats)
@@ -379,8 +379,8 @@ def cycle(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier],
         return states
     _launch_queued(project, ssh, ledger)
     _boards(project, ssh, ledger, notifiers, now)
-    config.save_json(bdir / "progress.json", progress)
-    config.save_json(bdir / "notified.json", notes)
+    ledger.set_kv("progress", progress)
+    ledger.set_kv("notified", notes)
     n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1
     config.save_json(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states

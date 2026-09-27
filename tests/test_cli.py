@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -23,8 +24,8 @@ DATE = "20260926_1200"
 
 @pytest.fixture
 def demo(tmp_path: Path, monkeypatch) -> Path:
-    """The demo copied to tmp_path, its scratch and HOME under tmp_path, cwd in the copy."""
-    root = tmp_path / "demo"
+    """The demo copied under tmp_path/edr (the safety marker), its scratch and HOME under tmp_path, cwd in the copy."""
+    root = tmp_path / "edr" / "demo"
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     (tmp_path / "scratch").mkdir()
     site = root / "site.toml"
@@ -49,7 +50,7 @@ def dead_pid() -> int:
 
 def bdir(root: Path, batch: str = "demo") -> Path:
     """The batch directory of the state: <HOME>/.edr/<project>/<batch>."""
-    return root.parent / ".edr" / "demo" / batch
+    return Path.home() / ".edr" / "demo" / batch
 
 
 def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batch: str = "demo",
@@ -141,7 +142,8 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     q = seed(demo, "q", None, tree=False, state="queued")
     code, out, _ = edr(capsys, "status")
     assert code == 0 and "b_nodw" in out and "done" in out and out.startswith("#")
-    last = json.loads((demo / "data" / "board" / "last_board.json").read_text())
+    with Ledger(demo / "data" / "edr.db") as led:
+        last = led.get_kv("last_board")
     assert last == [r["run_id"] for r in board.order([{"run_id": a, "phase": "done"}, {"run_id": b, "phase": "stage:synth", "label": "b_nodw"}, {"run_id": q, "state": "queued", "label": "q"}])]
     code, out, _ = edr(capsys, "status", "#1")
     assert code == 0 and out.startswith(last[0])
@@ -307,7 +309,9 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
         assert {e["actor"] for e in led.events()} == {"telegram"} and len(led.events()) == 3
     text = acts.status_text()
     assert "b_nodw" in text and all(len(ln) <= 48 for ln in text.splitlines())
-    assert "#1" in acts.status_text(narrow=False) and (demo / "data" / "board" / "last_board.json").exists()
+    assert "#1" in acts.status_text(narrow=False) and not (demo / "data" / "board").exists()
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert len(led.get_kv("last_board")) == 2
     assert acts.events_text(2).count("\n") == 1
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[0].split() == ["metric", "a", "b_nodw"] and cmp[1].split() == ["area.cell", "1031.5", "999.0"]
@@ -395,10 +399,10 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
         assert [e["kind"] for e in led.events()] == ["export"]
 
 
-def test_hosts_and_lic_probe_local(demo: Path, capsys) -> None:
+def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     assert code == 0 and out.splitlines()[0].split() == ["host", "cores", "ram_gb", "free_gb", "mount", "tools", "runs"]
-    assert out.splitlines()[1].split()[0] == "local" and str(demo.parent / "scratch") in out
+    assert out.splitlines()[1].split()[0] == "local" and str(tmp_path / "scratch") in out
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
     code, out, _ = edr(capsys, "lic")
@@ -421,12 +425,12 @@ def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
     assert code == 1 and "no resume" in err  # export has no resume command
     code, out, _ = edr(capsys, "--json", "run", "a@demo", "--stage", "pnr", "--on", "local", "--from", "cts", "--dry-run")
     data = json.loads(out)["data"]
-    assert code == 0 and data["batch"].startswith("run_") and data["host"] == "local"
-    assert data["run_id"] == f"{data['batch'][4:]}_a.pnr_demo_gabc1234"
+    assert code == 0 and data["batch"] == "demo" and data["host"] == "local"
+    assert re.fullmatch(r"\d{8}_\d{4}_a\.pnr_demo_gabc1234", data["run_id"])
     spec = data["spec"]
     assert spec["start_at"] == {"stage": "pnr", "checkpoint": "cts"} and [s["name"] for s in spec["stages"]] == ["pnr"]
     assert spec["root"] == spec["stages"][0]["cwd"] and f"pnr {data['run_id']} demo" in spec["stages"][0]["cmd"]
-    assert data["run_id"] != a and not bdir(demo, data["batch"]).exists()
+    assert data["run_id"] != a and not (bdir(demo) / f"{data['run_id']}.spec.json").exists()
     code, _, err = edr(capsys, "run", "a@demo", "--stage", "export", "--on", "mars", "--dry-run")
     assert code == 1
     code, out, _ = edr(capsys, "run", "a@demo", "--collect", "netlist")
@@ -545,6 +549,33 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     code, out, err = edr(capsys, "retire", "--batch", "demo", "--why", "t", "--uncollected")
     assert code == 0, err
     assert not Path(row["root"]).exists()
+
+
+def test_retire_batch_removes_the_staged_tree_no_other_batch_uses(demo: Path, capsys) -> None:
+    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
+    repo = demo / "repo"
+    src = json.loads(edr(capsys, "--json", "stage", "HEAD")[1])["data"]["src"]
+    wt = demo / "wt" / src
+    seed(demo, "a", "done", src=src)
+    seed(demo, "b", "done", src=src, batch="other")
+    assert edr(capsys, "retire", "--batch", "other", "--uncollected", "--why", "x")[0] == 0
+    assert (wt / ".git").is_file()  # demo still has the source
+    code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x", "--dry-run")
+    assert code == 0 and f"git worktree remove --force {wt} (dry)" in out and (wt / ".git").is_file()
+    code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
+    assert code == 0 and not wt.exists() and repo.is_dir()
+    listed = subprocess.run(["git", "-C", str(repo), "worktree", "list"], capture_output=True, text=True, check=True).stdout
+    assert str(wt) not in listed
+    with open(repo / "flow" / "flow.sh", "a") as f:
+        f.write("# dirty\n")
+    dirty = json.loads(edr(capsys, "--json", "stage", "--dirty", str(repo))[1])["data"]["src"]
+    snap = demo / "wt" / dirty
+    assert "-dirty-" in dirty and snap.is_dir() and not (snap / ".git").exists()
+    seed(demo, "c", "done", src=dirty, batch="snap")
+    code, out, _ = edr(capsys, "retire", "--batch", "snap", "--uncollected", "--why", "y")
+    assert code == 0 and f"rm -rf {snap}" in out and not snap.exists() and (repo / "flow").is_dir()
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert [e["text"] for e in led.events() if e["run_id"] == ""] == [f"x: worktree {wt}", f"y: worktree {snap}"]
 
 
 def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -> None:
