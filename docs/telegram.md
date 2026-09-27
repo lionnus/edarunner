@@ -3,8 +3,7 @@
 The bot is a thread of `edr watch`. It sends alerts with two buttons,
 keeps one pinned board message, and answers commands from one chat. It
 uses long polling over outbound HTTPS, so it needs no open port and no
-webhook. The code is `src/edarunner/notify/telegram.py`, standard library
-only.
+webhook. `docs/configuration.md` lists the keys of `[telegram]`.
 
 ## Set up the bot
 
@@ -25,6 +24,7 @@ only.
    [telegram]
    token_file = "~/.config/edarunner/telegram.token"
    chat_id = 0
+   user_id = 0
    ```
 
 4. Open the new bot on the phone and send `/start`. Start `edr watch`.
@@ -37,6 +37,12 @@ only.
 
 5. Put that number in `chat_id` and restart `edr watch`. The bot now
    publishes its command menu with `setMyCommands` and answers.
+
+`user_id` is optional. When it is set, the bot obeys the messages and
+the button presses of that one user and ignores every other member of
+the chat. When it is unset, the chat is the only gate, so the chat must
+be a private one; `edr watch` logs a warning to say so. Your user id is
+the `from.id` of a message; a bot such as @userinfobot shows it.
 
 ## Alerts
 
@@ -73,7 +79,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/board` | pin a new board message |
 | `/keep <handle> [hours]` | add hours to the running stage or task, default 12 |
 | `/ack <handle>` | cancel a pending kill |
-| `/stop <handle> [why]` | stop after the running task; never a kill |
+| `/stop <handle> [why]` | `edr stop --after-task`; never a kill |
 | `/compare <handle>...` | metrics side by side |
 | `/metric <name> [--design H]` | one metric for every run of a design |
 | `/help` | the list above plus the custom commands |
@@ -131,8 +137,9 @@ of the exact values you expect.
 
 - The token is the one secret. Keep it in a file with mode 600; the bot
   refuses any other mode.
-- The bot obeys one `chat_id`. Every other chat gets no answer, and the
-  first message from it makes one ledger event `rejected`.
+- The bot obeys one `chat_id`, and one `user_id` when it is set. Every
+  other chat or user gets no answer, and the first message from it makes
+  one ledger event `rejected`.
 - The command set, the argument shapes and the working directory come
   from `site.toml` on the head node. The phone chooses among those
   entries and fills the gated slots.
