@@ -129,7 +129,7 @@ def bot(tmp_path, monkeypatch) -> TelegramBot:
 
 
 def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
-    return {"update_id": 1, "message": {"chat": {"id": chat}, "from": {"id": user}, "text": text}}
+    return {"update_id": 1, "message": {"message_id": 100, "chat": {"id": chat}, "from": {"id": user}, "text": text}}
 
 
 def last_reply(bot: TelegramBot) -> str:
@@ -643,3 +643,28 @@ def test_the_reply_keyboard_sends_plain_words(bot):
     bot.handle_update(msg("/keyboard"))
     assert last_reply(bot) == "keyboard on" and "keyboard" in bot.api.of("sendMessage")[-1]["reply_markup"]
     assert [e["text"] for e in bot.ledger.events][:2] == ["/start", "/status"]
+
+
+def reactions(bot) -> list[str]:
+    return [p["reaction"][0]["emoji"] for p in bot.api.of("setMessageReaction")]
+
+
+def test_a_command_message_gets_a_reaction(bot, monkeypatch):
+    bot.handle_update(msg("/status"))
+    assert reactions(bot) == ["👍"] and bot.api.of("setMessageReaction")[0]["message_id"] == 100
+    bot.handle_update(msg("/hosts"))
+    bot.handle_update(msg("/echo backend"))
+    assert reactions(bot)[1:] == ["👀", "👍", "👀", "👍"]
+    bot.api.calls.clear()
+    bot.handle_update(msg("/echo nope"))
+    bot.handle_update(msg("/keep 'a;rm'"))
+    assert reactions(bot) == ["👀", "👎", "👎"]
+
+    def no_reactions(method, params, files=None):
+        if method == "setMessageReaction":
+            raise tgapi.ApiError("setMessageReaction: Bad Request: REACTION_INVALID")
+        return {"message_id": 1}
+
+    monkeypatch.setattr(bot.api, "call", no_reactions)
+    bot.handle_update(msg("/status"))
+    assert bot.actions.calls[-1][0] == "status_text"

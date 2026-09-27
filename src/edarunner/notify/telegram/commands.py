@@ -37,15 +37,16 @@ class Builtin:
     kind: str = "text"  # "html" as it is, "pre" in a <pre> block, "text" escaped
     self_logged: bool = False  # the action writes its own ledger event
     on_run: bool = False  # the first argument is a handle; a reply to an alert fills it
+    slow: bool = False  # it can take more than a second, so its message gets a reaction first
 
 
 BUILTINS = {b.name: b for b in (
     Builtin("status", "[handle]", "the board, or one run", "Look", "html", on_run=True),
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
-    Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html"),
+    Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html", slow=True),
     Builtin("lic", "", "licence seats, used of total", "Look", "html"),
     Builtin("pin", "", "pin a new board message", "Look"),
-    Builtin("log", "<handle> [n]", "the last n log lines as a file, default 200", "Files", on_run=True),
+    Builtin("log", "<handle> [n]", "the last n log lines as a file, default 200", "Files", on_run=True, slow=True),
     Builtin("board", "", "compare.html and status.html as files", "Files"),
     Builtin("csv", "<design>", "the metrics of one design as a CSV file", "Files"),
     Builtin("keep", "<handle> [hours]", "add hours, default 12", "Act on a run", self_logged=True, on_run=True),
@@ -113,6 +114,10 @@ class Commands:
         out = [{"command": b.name, "description": (f"{b.help}: /{b.name} {b.args}" if b.args else b.help)[:256]}
                for b in BUILTINS.values()]
         return out + [{"command": n, "description": (c.help or n)[:256]} for n, c in self.tg.commands.items()]
+
+    def slow(self, name: str) -> bool:
+        """True for a command that can take more than a second: a custom one, or a slow built-in."""
+        return name in self.tg.commands or (name in BUILTINS and BUILTINS[name].slow)
 
     def run(self, name: str, args: list[str], text: str, run: str | None = None) -> Reply:
         """Answer one command; an unknown name gets the help. Every command lands in the ledger.
