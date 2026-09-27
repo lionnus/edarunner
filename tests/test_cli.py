@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from edarunner import board, cli, config, launch
+from edarunner import db as db_mod
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.db import Database
@@ -136,6 +137,15 @@ def test_check_reports_problems(demo: Path, capsys) -> None:
     jobs.write_text(jobs.read_text().replace('host = "mars"', 'host = "local"'))
     code, out, _ = edr(capsys, "check")
     assert code == 1 and "demo/a: unknown placeholder {nope}" in out
+
+
+def test_check_warns_about_a_database_on_nfs(demo: Path, capsys, monkeypatch) -> None:
+    code, out, _ = edr(capsys, "check")
+    assert "warning" not in out
+    monkeypatch.setattr(db_mod, "fs_magic", lambda path: 0x6969)
+    code, out, _ = edr(capsys, "--json", "check")
+    data = json.loads(out)["data"]
+    assert data["warnings"] == [f"{demo / 'data' / 'edr.db'} is on a network filesystem (nfs); journal_mode DELETE, not WAL"]
 
 
 # status, events, handles

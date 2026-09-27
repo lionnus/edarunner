@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The database uses the DELETE journal with `synchronous=FULL` when
+  `data/` is on NFS, SMB, 9p or FUSE, and WAL elsewhere. WAL does not
+  work on a network filesystem. `edr check` prints a warning line with
+  the path and the mode, and `Database.journal_mode` holds the mode.
 - The database table `kv` is now `store`, and `Database.get_kv` and
   `set_kv` are `get_store` and `set_store`. An existing `data/edr.db`
   migrates on the first open.

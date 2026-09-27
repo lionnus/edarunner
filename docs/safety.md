@@ -71,6 +71,17 @@ is empty, and the worktree is the same byte for byte.
 
 Do the dry run first. Read every target path. Then run the command.
 
+## The database
+
+SQLite documents that WAL does not work on a network filesystem: every
+process must share one memory index, and two hosts do not. A project
+directory under a home on NFS puts `data/edr.db` there. The database reads
+the statfs type of its directory at open and uses the DELETE journal with
+`synchronous=FULL` on NFS, SMB, 9p and FUSE, and WAL elsewhere. `edr check`
+warns when the database sits on such a filesystem. A local `data/` is still
+the better place, since the watcher and each `edr` call take a file lock
+there that NFS gives only through its lock daemon.
+
 ## Limits
 
 `docs/running.md` says what the driver does at each `needs`, `budget`
