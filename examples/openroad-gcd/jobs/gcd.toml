@@ -1,0 +1,8 @@
+batch = "gcd"
+source = "HEAD"
+
+[[job]]
+label = "gcd"
+config = "nangate45"
+host = "local"
+stages = ["synth", "floorplan", "place"]

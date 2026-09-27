@@ -19,7 +19,8 @@ jobs:
       # The demo flow computes its fake area with bc.
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq bc rsync
       - run: uv sync --extra dev
-      - run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
+      - name: pytest
+        run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
       - run: uv run coverage-badge -o coverage.svg
       - uses: actions/upload-artifact@v4
         if: matrix.python == '3.11'
@@ -33,58 +34,70 @@ jobs:
     container: python:3.6
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update -qq && apt-get install -y -qq tmux rsync bc
+      # The image is Debian buster, whose mirrors moved to the archive. The demo flow needs bc.
+      - run: |
+          sed -i 's|deb.debian.org|archive.debian.org|; s|security.debian.org|archive.debian.org|; /buster-updates/d' /etc/apt/sources.list
+          apt-get -o Acquire::Check-Valid-Until=false update -qq && apt-get install -y -qq bc
       # tests/helpers_driver.py starts the driver with /usr/bin/python3; the image keeps 3.6 in /usr/local/bin.
       - run: ln -sf /usr/local/bin/python3 /usr/bin/python3 && /usr/bin/python3 --version
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv run --no-project --with pytest pytest tests/test_driver.py -q
+      - name: pytest
+        run: uv run --no-project --with pytest pytest tests/test_driver.py -q
 
   openroad:
-    # The GCD design of ORFS on nangate45 through synth, floorplan and place. CTS in this
-    # image crashes on a CPU without AVX-512, and a runner may lack it.
+    # The GCD design of ORFS on nangate45 through synth, floorplan and place, under edr.
+    # The flow stops after placement: CTS in this image needs AVX-512, and a runner may lack it.
     runs-on: ubuntu-latest
     container: openroad/orfs:26Q3-657-gb74a7293e
     steps:
       - uses: actions/checkout@v4
-      # Probe: which tools the image has, where ORFS writes, and which keys the metrics carry.
-      - run: |
-          mkdir -p openroad
-          for t in rsync git make python3 curl; do command -v $t || echo "no $t"; done > openroad/tools.txt
-          python3 --version >> openroad/tools.txt
-          nproc >> openroad/tools.txt
-          grep -c avx512f /proc/cpuinfo >> openroad/tools.txt || true
-          echo "HOME=$HOME USER=$(id -un) PWD=$PWD" >> openroad/tools.txt
+      # The image has git, make and python 3.10, but no rsync. The controller needs 3.11.
+      - run: apt-get update -qq && apt-get install -y -qq rsync
+      - run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: uv venv -q --python 3.11 .venv && uv pip install -q --python .venv/bin/python -e .
+      # Probe: where ORFS writes, and which keys the metrics carry.
+      - name: probe
+        continue-on-error: true
+        run: |
+          set -x
+          mkdir -p _status/openroad
           . /OpenROAD-flow-scripts/env.sh
           cd "$FLOW_HOME"
           for s in synth floorplan place; do
             t0=$SECONDS
-            make DESIGN_CONFIG=./designs/nangate45/gcd/config.mk WORK_HOME=$GITHUB_WORKSPACE/work $s > $GITHUB_WORKSPACE/openroad/$s.log 2>&1
-            echo "$s $((SECONDS - t0)) s" | tee -a $GITHUB_WORKSPACE/openroad/time.txt
+            make DESIGN_CONFIG=./designs/nangate45/gcd/config.mk WORK_HOME=$GITHUB_WORKSPACE/probe $s > $GITHUB_WORKSPACE/_status/openroad/probe_$s.log 2>&1 || { tail -40 $GITHUB_WORKSPACE/_status/openroad/probe_$s.log; exit 1; }
+            echo "$s $((SECONDS - t0)) s" >> $GITHUB_WORKSPACE/_status/openroad/probe_time.txt
           done
-          cd $GITHUB_WORKSPACE/work
-          find . -type f | sort > ../openroad/find.txt
-          python3 - > ../openroad/keys.txt <<'EOF'
+          cd $GITHUB_WORKSPACE/probe
+          find . -type f | sort > ../_status/openroad/probe_find.txt
+          python3 - > ../_status/openroad/probe_keys.txt <<'EOF'
           import glob, json
           for f in sorted(glob.glob("logs/**/*.json", recursive=True)):
               for k, v in json.load(open(f)).items():
                   print(f, k, v)
           EOF
-          cp reports/nangate45/gcd/base/synth_stat.txt ../openroad/
+          cp reports/nangate45/gcd/base/synth_stat.txt ../_status/openroad/probe_synth_stat.txt
+      - name: run
+        run: |
+          mkdir -p _status/openroad
+          EDR=$PWD/.venv/bin/edr bash examples/openroad-gcd/run.sh 2>&1 | tee _status/openroad/run.log
+          cp examples/openroad-gcd/data/exports/*/metrics.csv _status/openroad/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: openroad
-          path: openroad
+          path: _status
 
   status:
-    # Writes the outcome of every job into the orphan branch ci-status; see docs/ci.md.
+    # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/ci.md.
     needs: [tests, driver, openroad]
     if: always()
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -93,20 +106,33 @@ jobs:
           path: _status
           merge-multiple: true
       - env:
-          NEEDS: ${{ toJSON(needs) }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p _status
           python3 - <<'EOF'
-          import datetime, json, os
-          jobs = {k: v["result"] for k, v in json.loads(os.environ["NEEDS"]).items()}
+          import datetime, json, os, re, subprocess
+          api = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/actions"
           run = os.environ["GITHUB_RUN_ID"]
-          url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run}"
+          def curl(url, *args):
+              return subprocess.run(["curl", "-sSfL", "-H", "Authorization: Bearer " + os.environ["GITHUB_TOKEN"],
+                                     "-H", "Accept: application/vnd.github+json", *args, url],
+                                    check=True, capture_output=True).stdout
+          jobs = [j for j in json.loads(curl(f"{api}/runs/{run}/jobs?per_page=100"))["jobs"] if j["name"] != "status"]
+          os.makedirs("_status/logs", exist_ok=True)
+          for j in jobs:
+              try:
+                  curl(f"{api}/jobs/{j['id']}/logs", "-o", "_status/logs/" + re.sub(r"[^\w.-]+", "_", j["name"]) + ".txt")
+              except subprocess.CalledProcessError as e:
+                  j["log_error"] = e.stderr.decode()
           status = {"sha": os.environ["GITHUB_SHA"], "ref": os.environ["GITHUB_REF_NAME"], "run_id": int(run),
-                    "run_url": url, "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-                    "jobs": jobs, "conclusion": "success" if set(jobs.values()) == {"success"} else "failure"}
+                    "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run}",
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                    "jobs": {j["name"]: {"conclusion": j["conclusion"], "started_at": j["started_at"], "completed_at": j["completed_at"],
+                                         "steps": {s["name"]: s["conclusion"] for s in j["steps"]},
+                                         **({"log_error": j["log_error"]} if "log_error" in j else {})} for j in jobs},
+                    "conclusion": "success" if all(j["conclusion"] == "success" for j in jobs) else "failure"}
           json.dump(status, open("_status/status.json", "w"), indent=1)
+          print(json.dumps(status, indent=1))
           EOF
-          cat _status/status.json
       - run: |
           git config user.name ci
           git config user.email ci@users.noreply.github.com
