@@ -112,7 +112,7 @@ def test_probe_local(ssh: Ssh, tmp_path: Path) -> None:
     finally:
         tool.kill(), driver.kill(), tool.wait(), driver.wait()
     assert p.host == "local"
-    assert 0 < p.free_cores <= os.cpu_count() == p.cores and p.load >= 0
+    assert 0 <= p.free_cores <= os.cpu_count() == p.cores and p.load >= 0
     assert 0 < p.free_ram_gb <= p.total_ram_gb
     assert p.mount == str(tmp_path) and 0 < p.free_gb <= p.total_gb
     assert p.our_tool_procs >= 1 and p.our_runs >= 1
@@ -153,6 +153,12 @@ def test_probe_parses_canned_output_without_gpus(ssh: Ssh, monkeypatch) -> None:
     calls = fake_run(monkeypatch, {"nproc": (0, "\n".join([*CANNED, ""]), "")})
     ssh.probe("h")
     assert "command -v nvidia-smi" in calls[0][1] and "utilization.gpu" in calls[0][1]
+
+
+def test_probe_clamps_free_cores_at_zero(ssh: Ssh, monkeypatch) -> None:
+    fake_run(monkeypatch, {"nproc": (0, "\n".join([CANNED[0], CANNED[1], "12.5", *CANNED[3:], ""]), "")})
+    p = ssh.probe("h")
+    assert (p.free_cores, p.cores, p.load) == (0.0, 8, 12.5)
 
 
 def test_probe_failure_raises(ssh: Ssh, monkeypatch) -> None:

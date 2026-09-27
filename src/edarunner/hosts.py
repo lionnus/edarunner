@@ -175,7 +175,8 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
     runs = sum(1 for ln in sections[3] if ln.split(None, 1)[0] == me)
     return HostProbe(
         host=host,
-        free_cores=round(int(ncpu) - float(load), 1),
+        # A load above the core count leaves no core free, not a negative count.
+        free_cores=max(0.0, round(int(ncpu) - float(load), 1)),
         free_ram_gb=round(int(mem_kb) / 2**20, 1),
         mount=mount,
         free_gb=round(free_kb / 2**20, 1),
