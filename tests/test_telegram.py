@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import re
+import time
 import tomllib
 import urllib.error
 from pathlib import Path
@@ -334,7 +335,7 @@ def test_alert_send_edits_a_repeat(bot):
     sent = bot.api.of("sendMessage")[-1]
     assert mid == "1" and sent["disable_notification"] is False
     assert sent["text"] == "🔴 <b>demo: hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
-    assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo"]
+    assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo", "stop:a@demo"]
     assert bot.send("hung", "run1", "no progress for 3 h") == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
     assert bot.send("hung", "run2", "x") == "2"
@@ -597,3 +598,30 @@ def test_send_document_posts_a_multipart_body(monkeypatch):
     assert req.full_url.endswith("/sendDocument") and req.headers["Content-type"].startswith("multipart/form-data")
     assert b'name="message_thread_id"\r\n\r\n17\r\n' in req.data
     assert b'filename="a@demo.log"\r\nContent-Type: application/octet-stream\r\n\r\nx\n\r\n' in req.data
+
+
+def press(data: str, text: str, edited: float) -> dict:
+    """A press on alert 5 with `text`, last edited at `edited`."""
+    u = callback(data)
+    u["callback_query"]["message"].update(text=text, edit_date=int(edited))
+    return u
+
+
+def test_the_stop_button_asks_and_acts_on_the_second_tap(bot):
+    now = time.time()
+    bot.handle_update(press("stop:a@demo", "hung a@demo", now - 3600))
+    edit = bot.api.of("editMessageText")[-1]
+    assert edit["text"] == "hung a@demo\nStop a@demo?" and bot.actions.calls == []
+    assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == ["stopyes:a@demo", "stopno:a@demo"]
+    assert edit["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]
+    bot.handle_update(press("stopno:a@demo", "hung a@demo\nStop a@demo?", now))
+    edit = bot.api.of("editMessageText")[-1]
+    assert edit["text"] == "hung a@demo" and bot.actions.calls == []
+    assert edit["reply_markup"]["inline_keyboard"][0][2]["callback_data"] == "stop:a@demo"
+    bot.handle_update(press("stopyes:a@demo", "hung a@demo\nStop a@demo?", now - 601))
+    assert bot.api.of("answerCallbackQuery")[-1]["text"] == "the question expired; press stop again"
+    assert bot.api.of("editMessageText")[-1]["text"] == "hung a@demo" and bot.actions.calls == []
+    bot.handle_update(press("stopyes:a@demo", "hung a@demo\nStop a@demo?", now - 5))
+    assert bot.actions.calls == [("stop_after_task", ("a@demo", "telegram", "stopped from a telegram button"), {})]
+    edit = bot.api.of("editMessageText")[-1]
+    assert edit["text"] == "hung a@demo\nstop_after_task ok" and len(edit["reply_markup"]["inline_keyboard"][0]) == 3

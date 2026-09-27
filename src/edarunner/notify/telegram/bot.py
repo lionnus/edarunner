@@ -17,7 +17,8 @@ from edarunner.model import Project, Site
 from edarunner.notify import Button, Notifier
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import ApiError, BotApi
-from edarunner.notify.telegram.commands import HANDLE, Commands, Reply
+from edarunner.notify.telegram.buttons import Buttons, markup
+from edarunner.notify.telegram.commands import Commands, Reply
 
 if TYPE_CHECKING:
     from edarunner.cli import Actions
@@ -40,6 +41,7 @@ class TelegramBot(Notifier):
         self.actions = actions
         self.api = BotApi(Path(token_file).read_text().strip())
         self.commands = Commands(actions, ledger, self.tg, lambda: self.project, self.repin)
+        self.buttons = Buttons(actions, self.commands.event)
         self.chat_id = int(self.tg.chat_id)
         self.user_id = self.tg.user_id or None
         self.topic = self.tg.topic_id
@@ -64,10 +66,9 @@ class TelegramBot(Notifier):
              cmd: str | None = None) -> str | None:
         """Send one alert; a repeat with the same kind and run id edits it in place."""
         # A press reaches the watcher that polls, which acts on its own project only.
-        markup = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]} if (
-            buttons and self.project.telegram_poll) else None
+        keys = markup(buttons) if buttons and self.project.telegram_poll else None
         try:
-            mid = self._upsert(f"alert:{kind}:{run_id}", fmt.alert(self.project.project, text, cmd), markup)
+            mid = self._upsert(f"alert:{kind}:{run_id}", fmt.alert(self.project.project, text, cmd), keys)
         except ApiError as e:
             log.warning("telegram: %s", e)
             return None
@@ -197,7 +198,7 @@ class TelegramBot(Notifier):
         if not self._in_topic(thread):
             return
         if q:
-            self._callback(q)
+            self._press(q)
         elif msg and msg.get("text", "").startswith("/"):
             parts = msg["text"].split()
             name, run = parts[0][1:].split("@")[0], self._replied_run(msg)
@@ -230,23 +231,11 @@ class TelegramBot(Notifier):
         full = fmt.head(self.project.project, r.title) + "\n" + body
         self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full), thread_id=thread)
 
-    def _callback(self, q: dict) -> None:
-        """Act on a button press, answer it, and append the result to the message."""
-        verb, _, handle = q.get("data", "").partition(":")
-        try:
-            if verb == "keep12" and HANDLE.match(handle):
-                note = self.actions.keep(handle, 12, "telegram") or f"kept {handle} for 12 h"
-            elif verb == "ack" and HANDLE.match(handle):
-                note = self.actions.ack(handle, "telegram") or f"acked {handle}"
-            else:
-                note = "unknown button"
-        except Exception as e:
-            note = f"error: {e}"
-        if note == "unknown button" or note.startswith("error:"):
-            self.commands.event("refused", f"button {q.get('data')}: {note}")
-        self._call(self.api.answer_callback, q["id"], str(note))
+    def _press(self, q: dict) -> None:
+        """Answer a button press and rewrite its alert."""
+        p = self.buttons.press(q)
+        self._call(self.api.answer_callback, q["id"], p.answer)
         m = q.get("message")
         if m:
-            # Plain text plus the old entities keeps the bold title; the note goes after the last entity.
-            self._call(self.api.edit_message, self.chat_id, m["message_id"], m.get("text", "") + "\n" + str(note),
-                       m.get("reply_markup"), m.get("entities") or [])
+            # Plain text plus the old entities keeps the bold title; a note goes after the last entity.
+            self._call(self.api.edit_message, self.chat_id, m["message_id"], p.text, p.markup, m.get("entities") or [])

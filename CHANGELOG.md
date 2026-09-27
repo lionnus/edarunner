@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- An alert has a third button, `stop`, which stops the run after its
+  task. It asks `Stop <handle>?` first and acts only on `Yes, stop`
+  within 10 minutes.
 - The bot sends files: `/log <handle> [n]` the log tail of a run,
   `/board` the two HTML boards, and `/csv <design>` the metrics, each
   up to 20 MB. `/pin` now pins a new board message, which `/board` did
