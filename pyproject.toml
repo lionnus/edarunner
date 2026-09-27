@@ -24,7 +24,8 @@ dependencies = []
 
 [project.optional-dependencies]
 plots = ["matplotlib>=3.7"]
-dev = ["pytest>=8"]
+# coverage-badge imports pkg_resources, which setuptools 81 removed.
+dev = ["pytest>=8", "pytest-cov>=5", "coverage-badge>=1.1", "setuptools<81"]
 
 [project.scripts]
 edr = "edarunner.cli:main"

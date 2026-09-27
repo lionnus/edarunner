@@ -16,21 +16,107 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      # The demo flow computes its fake area with bc.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq bc rsync
       - run: uv sync --extra dev
-      - run: uv run pytest -q
+      - name: pytest
+        run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
+      - run: uv run coverage-badge -o coverage.svg
+      - uses: actions/upload-artifact@v4
+        if: matrix.python == '3.11'
+        with:
+          name: coverage-badge
+          path: coverage.svg
 
   driver:
     # The driver runs on the compute hosts with their own python3; 3.6 is the floor.
+    # A container job has no init, so a killed task would stay a zombie in its process group.
     runs-on: ubuntu-latest
-    container: python:3.6
+    container:
+      image: python:3.6
+      options: --init
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update -qq && apt-get install -y -qq tmux rsync bc
       # tests/helpers_driver.py starts the driver with /usr/bin/python3; the image keeps 3.6 in /usr/local/bin.
       - run: ln -sf /usr/local/bin/python3 /usr/bin/python3 && /usr/bin/python3 --version
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv run --no-project --with pytest pytest tests/test_driver.py -q
+      - name: pytest
+        run: uv run --no-project --with pytest pytest tests/test_driver.py -q
+
+  openroad:
+    # The GCD design of ORFS on nangate45 through synth, floorplan and place, under edr.
+    # The flow stops after placement: CTS in this image needs AVX-512, and a runner may lack it.
+    runs-on: ubuntu-latest
+    container: openroad/orfs:26Q3-657-gb74a7293e
+    steps:
+      - uses: actions/checkout@v4
+      # The image has git, make and python 3.10, but no rsync. The controller needs 3.11.
+      - run: apt-get update -qq && apt-get install -y -qq rsync
+      - run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: uv venv -q --python 3.11 .venv && uv pip install -q --python .venv/bin/python -e .
+      # The default step shell of a container job is sh; bash makes a failure pass through tee.
+      - name: run
+        shell: bash
+        run: |
+          mkdir -p _status/openroad
+          EDR=$PWD/.venv/bin/edr bash examples/openroad-gcd/run.sh 2>&1 | tee _status/openroad/run.log
+          cp examples/openroad-gcd/data/exports/*/metrics.csv _status/openroad/
+          find examples/openroad-gcd/data/results -type f | sort > _status/openroad/files.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openroad
+          path: _status
+
+  status:
+    # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/ci.md.
+    needs: [tests, driver, openroad]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: _status
+          merge-multiple: true
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'EOF'
+          import datetime, json, os, re, subprocess
+          api = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/actions"
+          run = os.environ["GITHUB_RUN_ID"]
+          def curl(url, *args):
+              return subprocess.run(["curl", "-sSfL", "-H", "Authorization: Bearer " + os.environ["GITHUB_TOKEN"],
+                                     "-H", "Accept: application/vnd.github+json", *args, url],
+                                    check=True, capture_output=True).stdout
+          jobs = [j for j in json.loads(curl(f"{api}/runs/{run}/jobs?per_page=100"))["jobs"] if j["name"] != "status"]
+          os.makedirs("_status/logs", exist_ok=True)
+          for j in jobs:
+              try:
+                  curl(f"{api}/jobs/{j['id']}/logs", "-o", "_status/logs/" + re.sub(r"[^\w.-]+", "_", j["name"]) + ".txt")
+              except subprocess.CalledProcessError as e:
+                  j["log_error"] = e.stderr.decode()
+          status = {"sha": os.environ["GITHUB_SHA"], "ref": os.environ["GITHUB_REF_NAME"], "run_id": int(run),
+                    "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run}",
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                    "jobs": {j["name"]: {"conclusion": j["conclusion"], "started_at": j["started_at"], "completed_at": j["completed_at"],
+                                         "steps": {s["name"]: s["conclusion"] for s in j["steps"]},
+                                         **({"log_error": j["log_error"]} if "log_error" in j else {})} for j in jobs},
+                    "conclusion": "success" if all(j["conclusion"] == "success" for j in jobs) else "failure"}
+          json.dump(status, open("_status/status.json", "w"), indent=1)
+          print(json.dumps(status, indent=1))
+          EOF
+      - run: |
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git checkout -q --orphan ci-status
+          git rm -rfq --cached .
+          cd _status
+          git --git-dir=../.git add -A .
+          git --git-dir=../.git commit -qm "status of $GITHUB_SHA"
+          git --git-dir=../.git push -qf origin ci-status

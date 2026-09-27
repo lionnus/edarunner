@@ -1,0 +1,95 @@
+# The GCD design of OpenROAD-flow-scripts on nangate45: three stages, one `make`
+# target each, on the head node. `bash run.sh` runs it end to end. It needs the ORFS
+# tools; ORFS names the checkout, default /OpenROAD-flow-scripts as in the
+# openroad/orfs image.
+schema = 1
+project = "gcd"
+site = "site.toml"
+state = "~/.edr/{project}"
+data = "data"
+run_prefix = "{user}/edr/{project}"
+
+[source]
+repo = "repo"
+worktrees = "wt"
+ref = "HEAD"
+run_id = "{date}_{label}_{build_tag}_g{src}"
+
+[sync]
+exclude = [".git"]
+
+[safety]
+marker = "/edr/"
+min_depth = 3
+
+[limits]
+stagger_s = 0
+stale_s = 120
+dead_s = 600
+hung_s = 900
+grace_s = 10
+host_free_min_gb = 1
+streak = 2
+heartbeat_s = 5
+gate_max_s = 30
+
+[placement]
+max_per_host = 1
+min_free_cores = 1
+min_free_ram_gb = 1
+
+# WORK_HOME sends logs/, reports/, results/ and objects/ into the run tree.
+[stages.synth]
+cmd = ". ${ORFS:-/OpenROAD-flow-scripts}/env.sh && make -C $FLOW_HOME DESIGN_CONFIG={root}/config.mk WORK_HOME={root} {overrides} synth"
+needs = { cores = 1, disk_gb = 0.5 }
+budget = { hours = 0.5 }
+collect = ["reports/", "logs/"]
+
+[stages.floorplan]
+after = "synth"
+cmd = ". ${ORFS:-/OpenROAD-flow-scripts}/env.sh && make -C $FLOW_HOME DESIGN_CONFIG={root}/config.mk WORK_HOME={root} {overrides} floorplan"
+needs = { cores = 1, disk_gb = 0.5 }
+budget = { hours = 0.5 }
+collect = ["reports/", "logs/"]
+
+[stages.place]
+after = "floorplan"
+cmd = ". ${ORFS:-/OpenROAD-flow-scripts}/env.sh && make -C $FLOW_HOME DESIGN_CONFIG={root}/config.mk WORK_HOME={root} {overrides} place"
+needs = { cores = 1, disk_gb = 0.5 }
+budget = { hours = 0.5 }
+collect = ["reports/", "logs/"]
+
+[metrics.area_synth_um2]
+stage = "synth"
+file = "reports/nangate45/gcd/base/synth_stat.txt"
+regex = 'Chip area for (?:top )?module \S+:\s+([0-9.]+)'
+unit = "um2"
+canonical = "area.cell"
+
+[metrics.area_floorplan_um2]
+stage = "floorplan"
+file = "logs/nangate45/gcd/base/2_1_floorplan.json"
+json = "floorplan__design__instance__area"
+unit = "um2"
+canonical = "area.cell"
+
+[metrics.wns_floorplan_ns]
+stage = "floorplan"
+file = "logs/nangate45/gcd/base/2_1_floorplan.json"
+json = "floorplan__timing__setup__ws"
+unit = "ns"
+canonical = "timing.wns"
+
+[metrics.area_place_um2]
+stage = "place"
+file = "logs/nangate45/gcd/base/3_5_place_dp.json"
+json = "detailedplace__design__instance__area"
+unit = "um2"
+canonical = "area.cell"
+
+[metrics.wns_place_ns]
+stage = "place"
+file = "logs/nangate45/gcd/base/3_5_place_dp.json"
+json = "detailedplace__timing__setup__ws"
+unit = "ns"
+canonical = "timing.wns"
