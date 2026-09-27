@@ -79,9 +79,21 @@ jobs:
       - run: uv sync
       - run: uv run tools/gen_docs.py --check
 
+  condor:
+    # The local demo through the condor backend, on a one-machine HTCondor pool in a container.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv venv -q .venv && uv pip install -q --python .venv/bin/python -e .
+      - run: RUNTIME=docker IMAGE=htcondor/mini:latest WORK=$RUNNER_TEMP/harness/work EDR=$PWD/.venv/bin/edr bash tools/harness/condor.sh
+
   status:
     # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/dev/testing.md.
-    needs: [tests, driver, openroad, docs]
+    needs: [tests, driver, openroad, docs, condor]
     if: always()
     # One run at a time writes the branch; two pushes at once made one fail.
     concurrency:

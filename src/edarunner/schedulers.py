@@ -138,6 +138,47 @@ class _Scheduler:
         return None
 
 
+class CondorBackend(_Scheduler):
+    """HTCondor: the submit file next to the spec, the handle `condor:<cluster>.<proc>`."""
+
+    name = "condor"
+    STATES = {"1": Live.PENDING, "2": Live.RUNNING, "3": Live.GONE, "4": Live.GONE, "5": Live.HELD,
+              "6": Live.RUNNING, "7": Live.SUSPENDED}
+
+    def submit(self, req: Request) -> Handle:
+        sub = req.spec.with_name(f"{req.run_id}.sub")
+        sub.write_text(condor_submit(req))
+        out = self._ok(["condor_submit", "-terse", str(sub)])
+        ident = out.split()[0] if out.split() else ""
+        if not re.fullmatch(r"\d+\.\d+", ident):
+            raise HostError(f"condor_submit: no job id in {out.strip()!r}")
+        return Handle(self.name, ident)
+
+    def alive(self, handles: Iterable[Handle]) -> dict[Handle, tuple[Live, str]]:
+        handles = list(handles)
+        rc, out, err = self.run(["condor_q", *(h.id for h in handles), "-af", "ClusterId", "ProcId", "JobStatus",
+                                 "HoldReason"])
+        if rc != 0:
+            return {h: (Live.UNKNOWN, f"condor_q: rc {rc}: {err.strip()}") for h in handles}
+        found = {}
+        for line in out.splitlines():
+            parts = line.split(None, 3)
+            if len(parts) >= 3:
+                reason = parts[3] if len(parts) > 3 and parts[2] == "5" else ""
+                found[f"{parts[0]}.{parts[1]}"] = (self.STATES.get(parts[2], Live.UNKNOWN), reason)
+        return {h: found.get(h.id, (Live.GONE, f"job {h.id} left the queue")) for h in handles}
+
+    def stop(self, handle: Handle, hard: bool, pgids: Sequence[int] = ()) -> None:
+        """`condor_rm`: the starter sends SIGTERM, and SIGKILL after the job's kill timeout."""
+        self._ok(["condor_rm", handle.id])
+
+    def licence(self, name: str) -> bool | None:
+        rc, out, err = self.run(["condor_config_val", "-negotiator", f"{name.upper()}_LIMIT"])
+        if rc == 0 and out.strip():
+            return True
+        return False if "not defined" in (out + err).lower() else None
+
+
 class LsfBackend(_Scheduler):
     """LSF: `bsub` with the argv of `lsf_argv`, the handle `lsf:<jobid>`."""
 
@@ -166,4 +207,4 @@ class LsfBackend(_Scheduler):
         self._ok(["bkill", *(["-s", "KILL"] if hard else []), handle.id])
 
 
-BY_NAME: dict[str, type[_Scheduler]] = {b.name: b for b in (LsfBackend,)}
+BY_NAME: dict[str, type[_Scheduler]] = {b.name: b for b in (CondorBackend, LsfBackend)}
