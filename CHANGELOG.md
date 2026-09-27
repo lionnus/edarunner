@@ -4,18 +4,47 @@
 
 The first release.
 
-- `edr`, the controller, with the seventeen verbs of `docs/design.md`
-  section 10, among them `import` for a tree that edr did not make.
-  `import --results DIR` links collected files of a run whose tree is gone
-  and extracts its metrics, so `metrics` and `export` cover legacy results.
+- `edr`, the controller, with seventeen verbs; `docs/cli.md` lists them.
 - `edr_driver.py`, the one-file driver for Python 3.6 or newer: stages,
   task groups with a shared queue, licence gates, budgets, retries, the
   heartbeat, and the stop and keep files.
-- `edr watch`: the classifier of section 7, collection, metric extraction,
-  one resume of a dead run, the boards, and the Telegram bot.
+- `edr watch`: the classifier, collection, metric extraction, one resume
+  of a dead run, the boards, and the Telegram bot.
 - The SQLite ledger, `edr export` with a manifest, and
-  `examples/local-demo`.
+  `examples/local-demo` and `examples/openroad-gcd`.
 - A project `[env]` table rendered per run, and the `{tree_id}`
-  placeholder that a chain of reuse keeps. Both came out of the first run
-  on real hosts: a flow needs the venv of its tree on `PATH`, and a reused
-  tree keeps its own run directory.
+  placeholder that a chain of reuse keeps.
+- `edr import --results DIR` links the collected files of a run whose
+  tree is gone and extracts its metrics; `--host` and `--root` are
+  optional then, and `import` takes `--why`.
+- `edr` works from any directory below `edr.toml`.
+- A read verb (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
+  never creates `data/edr.db`.
+- `edr check` names every tool the head node lacks, and probes each host
+  once for every batch.
+- Config values are checked against their type at load; the error names
+  the key path.
+- Stages run in file order; the `after` key is gone, and a job's `stages`
+  picks a subset.
+- `netlist_stage` is an optional job field with no default.
+- `edr launch` exits 0 when a run started or was queued, 2 when every job
+  was already launched, 1 otherwise.
+- `edr stop` marks a queued run `stopped`, refuses a run with no driver
+  pid, waits at most 60 s, and exits 3 with `still alive; use --now`.
+- `edr retire` refuses a live run with no heartbeat yet, a root a live
+  run uses, and a root shared with an uncollected run.
+- The safety guard refuses `/`, the home directory, a one-component path,
+  a path without the marker, and a path shallower than `min_depth`.
+- `edr export` skips `log/` and `*.log` unless `--with-logs`; `runs.csv`
+  and the manifest carry `build_tag` and `src`.
+- `metrics --design` and `export --design` match the source tag exactly.
+- Metrics come only from stages and tasks that ended `done`.
+- The board never downloads: `compare.html` uses
+  `data/board/plotly.min.js` when present, else the CDN URL, and its
+  tables work without Plotly. `edr watch --serve` is gone; serve
+  `data/board` with `python -m http.server`.
+- `edr watch --once` exits 1 when the cycle failed.
+- `[telegram] user_id` limits the bot to one user of the chat.
+- Remote commands run through `sh -c`, so a csh login shell works.
+- A compute host needs a POSIX `sh`, `ssh`, `rsync`, procps-ng and its
+  own `python3` 3.6 or newer; nothing is installed there.
