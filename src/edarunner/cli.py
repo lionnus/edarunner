@@ -59,7 +59,7 @@ def _since(text: str) -> int:
 
 
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "compare", "check", "notify"})
+_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "compare", "runtime", "check", "notify"})
 
 
 class Ctx:
@@ -568,6 +568,22 @@ def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     picked, rows = analysis.area_delta(c.db, runs, a.depth, a.instance, a.stage, a.step)
     c.emit(analysis.area_view(picked, rows, a.depth), {"runs": picked, "depth": a.depth, "rows": rows})
     return Exit.DONE if rows else Exit.NOTHING
+
+
+def cmd_runtime(c: Ctx, a: argparse.Namespace) -> int:
+    """Stage, step and task times of one run, or a table of runs."""
+    if a.batch:
+        runs = c.db.runs(batch=a.batch)
+    elif a.handles:
+        runs = [c.resolve(h) for h in a.handles]
+    else:
+        raise Refuse("runtime needs a handle or --batch")
+    rts = [analysis.runtime(c.project, c.db, r) for r in runs]
+    if len(rts) == 1 and not a.batch:
+        c.emit(analysis.runtime_view(rts[0]), rts[0])
+    else:
+        c.emit(analysis.runtime_batch_view(c.project, rts), rts)
+    return Exit.DONE if any(rt["stages"] or rt["steps"] for rt in rts) else Exit.NOTHING
 
 
 def cmd_init(c: Ctx, a: argparse.Namespace) -> int:
@@ -1194,6 +1210,20 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--instance", metavar="PATH", help="only this instance and the instances below it")
     s.add_argument("--stage", metavar="S", help="this stage only; with --area, compare at this stage")
     s.add_argument("--step", type=int, metavar="N", help="this step only; with --area, compare at this step number")
+    s = command("runtime", "stage, step and task times", """
+        With one handle, the times of one run: a row per stage attempt from
+        the stage_runs table, a row per step under it, and one row per task
+        group with the task count, the summed task time and the longest task.
+        A step starts when the driver first sees its number, or at the time
+        the stage's step_log finds in a collected file; it ends when the next
+        step starts or the stage ends. The source column names the table or
+        the file and line of each time. The total sums the stage attempts.
+
+        With several handles or --batch, one row per run: the wall time of
+        each stage, attempts summed, and the total.
+        """, exits={Exit.NOTHING: "no stage or step time"})
+    s.add_argument("handles", nargs="*", metavar="HANDLE", help=HANDLE)
+    s.add_argument("--batch", metavar="B", help="every run of the batch")
     command("init", "write edr.toml and the watch unit here", """
         Writes edr.toml and edr-watch.service into the current directory. --site
         is the directory or the file of the site file; init does not write that

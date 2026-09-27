@@ -140,7 +140,7 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
     now = int(time.time())
     base = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
     rows: list[dict] = []
-    owned = _owned_steps(project)
+    owned = owned_steps(project)
     for metric in project.metrics.values():
         if metric.expr:
             continue
@@ -176,8 +176,8 @@ def _extract_one(
     try:
         if task is not None:
             values.update({f"task.{k}": v for k, v in task.fields.items()})
-            values["task_dir"] = task_dir or _render(stage.task_dir if stage else "", values)
-        pattern = _render(metric.file, values)
+            values["task_dir"] = task_dir or fill(stage.task_dir if stage else "", values)
+        pattern = fill(metric.file, values)
     except KeyError as e:
         text = f"{metric.file}: no value for placeholder {e}"
         return [_row(run_id, stage_name, None, task_id, metric, None, text, now)]
@@ -228,10 +228,10 @@ def _expressions(project: Project, rows: list[dict], run_id: str, now: int) -> l
 
 def step_totals(project: Project) -> dict[str, int]:
     """The step count of the flow at the end of each stage that has `steps`."""
-    return {k: r.stop for k, r in _owned_steps(project).items()}
+    return {k: r.stop for k, r in owned_steps(project).items()}
 
 
-def _owned_steps(project: Project) -> dict[str, range]:
+def owned_steps(project: Project) -> dict[str, range]:
     """The step numbers each stage owns, in stage order.
 
     A `steps` list is indexed by the step number and continues the previous stage's
@@ -265,7 +265,7 @@ def _files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | No
     return sorted(found)
 
 
-def _render(text: str, values: dict[str, object]) -> str:
+def fill(text: str, values: dict[str, object]) -> str:
     return _PLACEHOLDER.sub(lambda m: str(values[m.group(1)]), text)
 
 

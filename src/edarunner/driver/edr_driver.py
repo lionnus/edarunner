@@ -105,7 +105,7 @@ class Driver(object):
             "label": spec.get("label"), "config": spec.get("config"),
             "host": spec.get("host"), "root": self.root, "driver_pid": os.getpid(),
             "pgids": [], "phase": "setup", "stage": None, "step": None, "step_name": None,
-            "tasks": {}, "stages": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0},
+            "tasks": {}, "stages": {}, "step_times": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0},
             "started": now, "updated": now, "elapsed_s": 0, "disk_free_gb": None,
             "tree_gb": None, "exit": None, "killed_by": None, "last_cmd": None,
             "last_log": None, "log": None}
@@ -374,6 +374,8 @@ class Driver(object):
             return
         step, steps = int(m.group(0)), st.get("steps") or []
         with self.lock:
+            # The first time the driver sees a step is the time that step started, to within POLL_S.
+            self.hb["step_times"].setdefault(st["name"], {}).setdefault(str(step), int(time.time()))
             self.hb["step"] = step
             self.hb["step_name"] = steps[min(step, len(steps) - 1)] if steps else None
 

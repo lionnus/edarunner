@@ -126,6 +126,8 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
             db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
                                      "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
                                      "exit": s.get("exit"), "log": s.get("log")})
+        if hb.get("step_times"):
+            db.set_step_times(hb["run_id"], hb["step_times"])
         for tid, t in (hb.get("tasks") or {}).items():
             db.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
                                      **{k: t.get(k) for k in _TASK_KEYS}})

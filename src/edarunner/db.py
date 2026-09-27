@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task T
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, ts INTEGER, actor TEXT, run_id TEXT, kind TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS step_runs(run_id TEXT, stage TEXT, step INTEGER, started INTEGER, PRIMARY KEY(run_id, stage, step));
 CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT, instance TEXT, depth INTEGER, area REAL,
   local_area REAL, cells INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
@@ -157,6 +158,13 @@ class Database:
               i["cells"]) for i in r.get("instances") or []])
         self.conn.commit()
         return cur.rowcount == 1
+
+    def set_step_times(self, run_id: str, times: dict[str, dict[str, int]]) -> None:
+        """Write the start time of each step, {stage: {step: unix time}}; a resumed step replaces its time."""
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO step_runs(run_id, stage, step, started) VALUES(?, ?, ?, ?)",
+            [(run_id, stage, int(step), int(ts)) for stage, steps in times.items() for step, ts in steps.items()])
+        self.conn.commit()
 
     def add_artifact(self, row: Row) -> None:
         """Insert a collected file, or update its size and time."""

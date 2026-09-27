@@ -397,6 +397,14 @@ def _stage(name: str, raw: object, file: Path) -> Stage:
             raw[key] = _build(cls, raw[key], file, f"{at}.{key}")
     if "needs" in raw:
         raw["needs"] = _needs(raw["needs"], file, f"{at}.needs")
+    if "step_log" in raw:
+        log = _table(raw["step_log"], {"file", "regex"}, file, f"{at}.step_log")
+        if not (log.get("file") and log.get("regex")):
+            raise ConfigError(f"{file}: {at}.step_log needs file and regex")
+        try:
+            re.compile(str(log["regex"]))
+        except re.error as e:
+            raise ConfigError(f"{file}: {at}.step_log.regex: {e}") from None
     return _build(Stage, raw, file, at, name=name)
 
 

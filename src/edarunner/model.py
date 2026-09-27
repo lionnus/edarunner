@@ -194,6 +194,9 @@ class Stage:
     prepare: str = doc("a command once before a group starts", "")
     task_dir: str = doc("the directory of a task, relative to the tree; required in a group", "")
     after_each: str = doc("a command after each task, with `{task_dir}`", "")
+    step_log: dict[str, str] = doc("`{ file, regex }`: step start times the flow writes into a collected file; "
+                                   "group 1 of the regex is a unix time, and group 2, when present, the step number",
+                                   factory=dict)
 
     @property
     def is_group(self) -> bool:

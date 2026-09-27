@@ -6,6 +6,7 @@ keeps the source of its number: a file under data/results, or the table it came 
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from rich.console import Group, RenderableType
@@ -13,6 +14,7 @@ from rich.text import Text
 
 from . import board
 from .db import Database
+from .metrics import fill, owned_steps
 from .model import Project
 
 Row = dict[str, Any]
@@ -178,3 +180,116 @@ def over_steps_view(rows: list[Row]) -> RenderableType:
             line += [None if v is None or prev is None else _fmt(v - prev), r["source_file"].get(keys[0])]
             prev = v if v is not None else prev
     return board.table(head, body, styles={"source": "dim"}, right=("step", *keys, "Δ"))
+
+
+# runtime
+
+def dur(seconds: float | None) -> str | None:
+    """A duration as 45s, 12m or 7h32m."""
+    if seconds is None:
+        return None
+    s = int(seconds)
+    return f"{s}s" if s < 60 else f"{s // 60}m" if s < 3600 else f"{s // 3600}h{s % 3600 // 60:02d}m"
+
+
+def _log_steps(project: Project, run: Row, stage: str, first: int) -> list[Row]:
+    """Step starts from the stage's step_log in the collected files; the source is file:line."""
+    spec = project.stages[stage].step_log
+    values = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
+    try:
+        rel = fill(spec["file"], values)
+    except KeyError:
+        return []
+    path = project.data / "results" / str(run["run_id"]) / rel
+    if not path.is_file():
+        return []
+    rx, out, n = re.compile(spec["regex"]), [], first
+    for i, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+        m = rx.search(line)
+        if not m:
+            continue
+        step = int(m.group(2)) if rx.groups >= 2 and m.group(2) is not None else n
+        n = step + 1
+        out.append({"stage": stage, "step": step, "started": int(float(m.group(1))), "source": f"{rel}:{i}"})
+    # The next line of the log ends a step, even one of a later stage of the same log.
+    for s, nxt in zip(out, out[1:]):
+        s["end"] = nxt["started"]
+    return out
+
+
+def runtime(project: Project, db: Database, run: Row) -> Row:
+    """Stage, step and task times of one run, from stage_runs, step_runs and the step_log files."""
+    run_id = run["run_id"]
+    rows = [dict(r) for r in db.conn.execute(
+        "SELECT * FROM stage_runs WHERE run_id=? ORDER BY started, stage, task, attempt", (run_id,))]
+    order = {n: i for i, n in enumerate(project.stages)}
+    stages = sorted((r for r in rows if not r["task"]), key=lambda r: (order.get(r["stage"], len(order)), r["attempt"]))
+    for r in stages:
+        r["wall_s"] = r["ended"] - r["started"] if r.get("ended") and r.get("started") else None
+        r["source"] = "stage_runs"
+    ended = {s["stage"]: s["ended"] for s in stages if s.get("ended")}
+    owned = owned_steps(project)
+    steps = [{**dict(r), "source": "step_runs"} for r in db.conn.execute(
+        "SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))]
+    have = {s["stage"] for s in steps}
+    for name, st in project.stages.items():
+        if st.step_log and name not in have:
+            own = owned.get(name)
+            logged = {s["step"]: s for s in _log_steps(project, run, name, own.start if own else 0)}
+            steps += [s for k, s in sorted(logged.items()) if own is None or k in own]
+    steps.sort(key=lambda s: (order.get(s["stage"], len(order)), s["step"]))
+    for s, nxt in zip(steps, [*steps[1:], None]):
+        end = nxt["started"] if nxt and nxt["stage"] == s["stage"] else ended.get(s["stage"]) or s.pop("end", None)
+        s.pop("end", None)
+        s["name"] = step_name(project, s["stage"], s["step"])
+        s["wall_s"] = end - s["started"] if end and end >= s["started"] else None
+    tasks: dict[str, Row] = {}
+    for r in rows:
+        if r["task"] and r.get("started") and r.get("ended"):
+            t = tasks.setdefault(r["stage"], {"stage": r["stage"], "tasks": 0, "wall_s": 0, "longest": None,
+                                             "longest_s": 0, "source": "stage_runs"})
+            w = r["ended"] - r["started"]
+            t["tasks"] += 1
+            t["wall_s"] += w
+            if w > t["longest_s"]:
+                t["longest"], t["longest_s"] = r["task"], w
+    total = sum(s["wall_s"] or 0 for s in stages) if stages else (
+        sum(s["wall_s"] or 0 for s in steps) if steps else None)
+    return {"run_id": run_id, "label": run.get("label"), "src": run.get("src"), "host": run.get("host"),
+            "stages": stages, "steps": steps, "tasks": list(tasks.values()), "total_s": total}
+
+
+def runtime_view(rt: Row) -> RenderableType:
+    """One run: a row per stage attempt, its steps under it, its tasks summed, and the total."""
+    body = []
+    steps = rt["steps"]
+    names = [s["stage"] for s in rt["stages"]] + [s["stage"] for s in steps if s["stage"] not in
+                                                   {x["stage"] for x in rt["stages"]}]
+    for name in dict.fromkeys(names):
+        for s in (x for x in rt["stages"] if x["stage"] == name):
+            body.append([name, None, f"attempt {s['attempt']}, {s.get('status') or '-'}", board._ts(s.get("started")),
+                         dur(s["wall_s"]), s["source"]])
+        for s in (x for x in steps if x["stage"] == name):
+            body.append([name, s["step"], s["name"], board._ts(s["started"]), dur(s["wall_s"]), s["source"]])
+        for t in (x for x in rt["tasks"] if x["stage"] == name):
+            body.append([name, None, f"{t['tasks']} tasks, longest {t['longest']} {dur(t['longest_s'])}", None,
+                         dur(t["wall_s"]), t["source"]])
+    if not body:
+        return "no stage or step times"
+    body.append(["total", None, None, None, dur(rt["total_s"]), None])
+    return Group(Text(f"{rt['label']}  {rt['run_id']}", style="bold"),
+                 board.table(["stage", "step", "what", "started", "wall", "source"], body,
+                             styles={"started": "dim", "source": "dim"}, right=("step", "wall")))
+
+
+def runtime_batch_view(project: Project, rts: list[Row]) -> RenderableType:
+    """One row per run: the wall time of each stage, attempts summed, and the total."""
+    names = [n for n in project.stages if any(s["stage"] == n for rt in rts for s in rt["stages"] or rt["steps"])]
+    body = []
+    for rt in rts:
+        per = {n: sum(s["wall_s"] or 0 for s in (rt["stages"] or rt["steps"]) if s["stage"] == n) or None for n in names}
+        body.append([rt["label"], rt.get("src"), rt.get("host"), *[dur(per[n]) for n in names], dur(rt["total_s"])])
+    if not body:
+        return "no runs"
+    return board.table(["label", "design", "host", *names, "total"], body, styles={"label": "bold", "design": "dim"},
+                       right=(*names, "total"))

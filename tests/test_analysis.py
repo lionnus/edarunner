@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import config, metrics
+from edarunner import board, config, metrics
 from edarunner.db import Database
 from test_cli import demo, edr, seed  # noqa: F401  (the fixture and the helpers of test_cli)
 
@@ -165,3 +165,63 @@ def test_metrics_over_the_steps_of_one_run(demo: Path, capsys) -> None:
     assert lines[4] == ["pnr", "4", "cts", "0.05", "0.15", "reports/4/qor.rpt"]
     assert edr(capsys, "metrics", "--over", "steps", "--design", "abc1234")[0] == 1
     assert edr(capsys, "metrics")[0] == 1
+
+
+def test_runtime_of_one_run_and_of_a_batch(demo: Path, capsys) -> None:
+    a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
+    t0 = 1_790_000_000
+    with Database(demo / "data" / "edr.db") as db:
+        for run, k in ((a, 1), (b, 2)):
+            db.upsert_stage_run({"run_id": run, "stage": "synth", "status": "done", "started": t0, "ended": t0 + 600 * k})
+            db.upsert_stage_run({"run_id": run, "stage": "power", "status": "done", "started": t0 + 600 * k,
+                                 "ended": t0 + 900 * k})
+            db.upsert_stage_run({"run_id": run, "stage": "power", "task": "k1", "status": "done",
+                                 "started": t0 + 600 * k, "ended": t0 + 700 * k})
+        db.set_step_times(a, {"synth": {"1": t0 + 60, "0": t0, "2": t0 + 180}})
+    # pnr writes its steps into its log; group 1 is the time, the count starts at the stage's first step, 4.
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text().replace('[stages.pnr]\n', '[stages.pnr]\nstep_log = { file = "log/pnr.log", '
+                                             "regex = 'START (\\d+)' }\n"))
+    log = demo / "data" / "results" / a / "log"
+    log.mkdir(parents=True)
+    (log / "pnr.log").write_text(f"x\nSTART {t0 + 1000}\ny\nSTART {t0 + 1300}\nSTART {t0 + 1500}\n")
+    code, out, _ = edr(capsys, "runtime", a)
+    lines = [ln.split() for ln in out.splitlines()]
+
+    def at(s: int) -> list[str]:
+        return board._ts(t0 + s).split()
+
+    assert code == 0 and ["synth", "-", "attempt", "1,", "done", *at(0), "10m", "stage_runs"] in lines
+    assert ["synth", "0", "setup", *at(0), "1m", "step_runs"] in lines
+    assert ["synth", "2", "elaborate", *at(180), "7m", "step_runs"] in lines  # ends with the stage
+    assert ["pnr", "4", "cts", *at(1000), "5m", "log/pnr.log:2"] in lines
+    assert ["pnr", "5", "route", *at(1300), "3m", "log/pnr.log:4"] in lines  # the next line ends it
+    assert ["power", "-", "1", "tasks,", "longest", "k1", "1m", "-", "1m", "stage_runs"] in lines
+    assert lines[-1] == ["total", "-", "-", "-", "15m", "-"]
+    code, out, _ = edr(capsys, "--json", "runtime", "--batch", "demo")
+    data = json.loads(out)["data"]
+    assert code == 0 and [d["total_s"] for d in data] == [900, 1800]
+    code, out, _ = edr(capsys, "runtime", a, b)
+    assert [ln.split()[-3:] for ln in out.splitlines()[2:]] == [["10m", "5m", "15m"], ["20m", "10m", "30m"]]
+    assert edr(capsys, "runtime")[0] == 1
+
+
+def test_ingest_keeps_the_step_times_and_a_resume_replaces_one(tmp_path: Path) -> None:
+    from edarunner import watch
+
+    hb = {"run_id": "20260926_1200_a_demo_gabc1234", "phase": "stage:synth", "stage": "synth",
+          "step_times": {"synth": {"0": 100, "1": 160}}}
+    with Database(tmp_path / "edr.db") as db:
+        watch.ingest(db, [("demo", hb)])
+        watch.ingest(db, [("demo", {**hb, "step_times": {"synth": {"1": 400, "2": 500}}})])
+        rows = [tuple(r) for r in db.conn.execute("SELECT stage, step, started FROM step_runs ORDER BY step")]
+    assert rows == [("synth", 0, 100), ("synth", 1, 400), ("synth", 2, 500)]
+
+
+def test_step_log_needs_file_and_a_regex_that_compiles(demo: Path) -> None:
+    toml = demo / "edr.toml"
+    text = toml.read_text()
+    for bad, msg in (('{ file = "log/pnr.log" }', "needs file and regex"), ("""{ file = "x", regex = '(' }""", "regex")):
+        toml.write_text(text.replace("[stages.pnr]\n", f"[stages.pnr]\nstep_log = {bad}\n"))
+        with pytest.raises(config.ConfigError, match=msg):
+            config.load_project(demo)
