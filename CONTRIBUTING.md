@@ -16,9 +16,9 @@ For a question, write to Lionnus Kesting, lkesting@iis.ee.ethz.ch.
 Open an issue before a large change, so we can agree on the approach. A
 small fix can go straight to a pull request.
 
-`docs/architecture.md` names the modules and the rules every change keeps.
-A change that moves a responsibility updates that page in the same commit.
-A change in behaviour updates the page under `docs/` that describes it.
+`docs/dev/architecture.md` names the modules, and `docs/dev/conventions.md`
+the rules every change keeps and how a change is documented. A change in
+behaviour updates the page under `docs/` that describes it.
 
 ## Set up a development environment
 
@@ -46,43 +46,9 @@ CI measures the coverage and fails under 88 %:
 `EDR_DRIVER_PYTHON`, else `python3.6` on `PATH`, else `/usr/bin/python3`,
 and skips without a 3.6. CI runs the driver tests in a `python:3.6`
 container. CI also runs the OpenROAD example `examples/openroad-gcd` in a
-container. `docs/ci.md` describes each job.
+container. `docs/dev/testing.md` describes each job.
 
 A change to a module comes with a test in `tests/test_<module>.py`.
-
-## Code rules
-
-- The controller uses the standard library and `rich` only. A new
-  dependency needs a reason that the standard library cannot meet.
-- The driver `src/edarunner/driver/edr_driver.py` runs on the hosts with
-  their own `python3`. It stays on the Python 3.6 subset, uses the
-  standard library only, and never imports the package.
-- No site string goes into the repository: no host name, licence server,
-  user name, chat id, token or unpublished design name. Fixtures use
-  `local`, `hostA`, `user`, `demo` and `k_small`, and fake numbers.
-- A test writes under `tmp_path` only and uses the host `local` only. It
-  starts a driver only through `tests/helpers_driver.py`.
-- Every `rm -rf` and every `rsync --delete` calls `assert_safe_target`
-  first.
-- A dry run writes nothing.
-  `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` checks this.
-- Every function has type hints. Every public function has a one-line
-  docstring.
-- Write minimal comments. A comment gives a reason that the code cannot
-  show. It never tells what the code was before.
-
-Write documentation, comments and commit messages in plain technical
-English: short sentences, active voice, one instruction per sentence.
-
-## The reference pages are generated
-
-`docs/reference/` comes from the code. A command, a flag and its exit codes
-come from the argparse definitions in `cli.py`; a config key from its
-`doc` field in `model.py`; a placeholder from `PLACEHOLDERS` in
-`config.py`; a run state from `STATES` in `watch.py`; a bot command from
-the command table in `notify/`. Document a new one where you define it,
-then run `uv run tools/gen_docs.py` before the commit. CI refuses a
-stale page.
 
 ## Commit messages
 
