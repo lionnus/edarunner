@@ -686,15 +686,17 @@ def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[st
     """
     others = [r for r in c.ledger.runs() if r["run_id"] not in retiring and r.get("root") == root
               and (r.get("host") or "") == host and r.get("state") != "retired"]
-    if not others:
-        return
     live = [r["run_id"] for r in others if board.is_live(c.heartbeat(r) or r)]
-    if prune and not live:
+    if live:
+        raise Refuse(f"{row['run_id']}: root {root} is in use by a live run ({', '.join(live[:3])}); "
+                     "stop it first")
+    if prune:
         return
-    what = "a live run" if live else "another run"
-    names = ", ".join((live or [r["run_id"] for r in others])[:3])
-    raise Refuse(f"{row['run_id']}: root {root} is shared with {what} ({names}); "
-                 "retire them together with --batch, or stop the live run first")
+    results = c.project.data / "results"
+    uncollected = [r["run_id"] for r in others if not (results / r["run_id"] / "log").is_dir()]
+    if uncollected:
+        raise Refuse(f"{row['run_id']}: root {root} is shared with a run whose results are not collected "
+                     f"({', '.join(uncollected[:3])}); run edr watch --once, or retire them together with --batch")
 
 
 def _retire_targets(c: Ctx, row: Row, hb: dict, root: str, a: argparse.Namespace) -> list[str]:
