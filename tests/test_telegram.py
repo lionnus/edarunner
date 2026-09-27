@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import tomllib
 import urllib.error
 from pathlib import Path
@@ -18,6 +19,7 @@ from edarunner.notify.telegram import TelegramBot, pre
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 CHAT = 42
+USER = 12345
 
 
 class FakeApi:
@@ -63,16 +65,18 @@ COMMANDS = {
     "bg": BotCommand("bg", "bg", ["sleep", "0"], detach=True, reply="started {project}"),
     "ask": BotCommand("ask", "ask", ["echo", "{question}"], args={"question": "^[\\w ?]{1,40}$"}),
     "slow": BotCommand("slow", "slow", ["sleep", "5"], timeout_s=1),
+    "same": BotCommand("same", "same", ["echo", "ran {dir}"], args={"dir": "^\\w+$"},
+                       skip_if=["test", "{dir}", "=", "{project}"], skip_reply="skipped {dir}"),
 }
 
 
-def make_site(tmp_path: Path, chat_id: int = CHAT, mode: int = 0o600) -> Site:
+def make_site(tmp_path: Path, chat_id: int = CHAT, mode: int = 0o600, user_id: int | None = None) -> Site:
     token = tmp_path / "telegram.token"
     token.write_text("123:ABC\n")
     token.chmod(mode)
     return Site(path=DEMO / "site.toml", scratch=["/tmp/edr-demo"], env={}, ssh_options=[], ssh_timeout_s=20,
                 tool_procs="^(sleep)$", hosts={"local": Host("local", 4, 8)},
-                telegram=Telegram(token_file=token, chat_id=chat_id, commands=dict(COMMANDS)))
+                telegram=Telegram(token_file=token, chat_id=chat_id, commands=dict(COMMANDS), user_id=user_id))
 
 
 def make_project(tmp_path: Path) -> SimpleNamespace:
@@ -90,8 +94,8 @@ def bot(tmp_path, monkeypatch) -> TelegramBot:
     return bots[0]
 
 
-def msg(text: str, chat: int = CHAT) -> dict:
-    return {"update_id": 1, "message": {"chat": {"id": chat}, "text": text}}
+def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
+    return {"update_id": 1, "message": {"chat": {"id": chat}, "from": {"id": user}, "text": text}}
 
 
 def last_reply(bot: TelegramBot) -> str:
@@ -160,6 +164,26 @@ def test_custom_last_argument_takes_the_rest(bot):
     assert last_reply(bot) == pre("usage: /ask <question>")
 
 
+def test_custom_without_args_refuses_extra_words(bot):
+    bot.handle_update(msg("/skip extra"))
+    assert last_reply(bot).startswith("<pre>usage: /skip")
+    assert bot.ledger.events == []
+
+
+def test_custom_skip_if_renders_placeholders(bot):
+    bot.handle_update(msg("/same demo"))
+    assert last_reply(bot) == pre("skipped demo")
+    bot.handle_update(msg("/same other"))
+    assert last_reply(bot) == pre("ran other")
+
+
+def test_keep_refuses_a_unicode_digit(bot):
+    bot.handle_update(msg("/keep x \u00b2"))
+    assert bot.actions.calls == []
+    assert last_reply(bot).startswith("<pre>error")
+    assert [e["kind"] for e in bot.ledger.events] == ["refused"]
+
+
 def test_custom_dry_run_skip_detach_timeout(bot):
     bot.handle_update(msg("/dry x"))
     assert "would run in" in last_reply(bot) and "rm -rf x" in last_reply(bot)
@@ -188,10 +212,10 @@ def test_chat_id_zero_prints_the_chat_id(tmp_path, monkeypatch, capsys):
     assert b.api.calls == []
 
 
-def callback(data: str, chat: int = CHAT) -> dict:
+def callback(data: str, chat: int = CHAT, user: int = USER) -> dict:
     markup = {"inline_keyboard": [[{"text": "ack", "callback_data": "ack:a@demo"}]]}
-    # A press in a group comes from a user id; the chat that holds the button is checked.
-    return {"update_id": 2, "callback_query": {"id": "cb1", "from": {"id": 12345}, "data": data,
+    # A press in a group comes from a user id; without user_id only the chat that holds the button is checked.
+    return {"update_id": 2, "callback_query": {"id": "cb1", "from": {"id": user}, "data": data,
                                                "message": {"message_id": 5, "chat": {"id": chat}, "text": "hung a@demo",
                                                            "reply_markup": markup}}}
 
@@ -212,6 +236,39 @@ def test_callback_buttons(bot):
     assert len(bot.actions.calls) == 2
     bot.handle_update(callback("ack:a@demo", chat=7))
     assert len(bot.actions.calls) == 2
+
+
+def test_press_by_another_user_needs_no_user_id(bot, caplog):
+    bot._stop.set()  # the poll thread ends at once
+    with caplog.at_level(logging.WARNING):
+        bot.start()
+    bot.stop()
+    assert "chat 42 is the only gate" in caplog.text
+    bot.handle_update(callback("ack:a@demo", user=999))
+    assert ("ack", ("a@demo", "telegram"), {}) in bot.actions.calls
+    bot.handle_update(msg("/status", user=999))
+    assert last_reply(bot) == pre("status_text ok")
+
+
+def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
+    site = make_site(tmp_path, user_id=777)
+    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
+    monkeypatch.setattr(b, "api", FakeApi())
+    b._stop.set()
+    with caplog.at_level(logging.WARNING):
+        b.start()
+    b.stop()
+    assert "only gate" not in caplog.text
+    b.handle_update(msg("/status", user=USER))
+    b.handle_update(callback("ack:a@demo", user=USER))
+    b.handle_update(msg("/stop a@demo", user=USER))
+    assert b.api.of("sendMessage") == [] and b.api.of("answerCallbackQuery") == [] and b.actions.calls == []
+    assert [e["kind"] for e in b.ledger.events] == ["rejected"] and "user 12345 in chat 42" in b.ledger.events[0]["text"]
+    b.handle_update(msg("/status", user=777))
+    b.handle_update(callback("ack:a@demo", user=777))
+    assert [c[0] for c in b.actions.calls] == ["status_text", "ack"]
+    b.handle_update(msg("/status", chat=7, user=777))
+    assert len(b.actions.calls) == 2
 
 
 def test_alert_send_edits_a_repeat(bot):
@@ -272,6 +329,29 @@ def test_api_obeys_429_retry_after(tmp_path, monkeypatch):
     answers.append(urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b'{"description":"Bad Request: chat not found"}')))
     with pytest.raises(tgmod.ApiError, match="chat not found"):
         b.api("sendMessage", {"chat_id": CHAT})
+
+
+def test_api_retries_idempotent_methods_only(tmp_path, monkeypatch):
+    site = make_site(tmp_path)
+    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
+    slept: list[int] = []
+    monkeypatch.setattr(tgmod.time, "sleep", slept.append)
+    tries: list[str] = []
+
+    def fake_urlopen(req, timeout):
+        tries.append(req.full_url.rsplit("/", 1)[1])
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(tgmod, "urlopen", fake_urlopen)
+    with pytest.raises(tgmod.ApiError, match="sendMessage: timed out"):
+        b.api("sendMessage", {"chat_id": CHAT, "text": "x"})
+    assert tries == ["sendMessage"] and slept == []
+    for method in ("getUpdates", "editMessageText", "answerCallbackQuery"):
+        tries.clear()
+        with pytest.raises(tgmod.ApiError, match=method):
+            b.api(method, {"chat_id": CHAT})
+        assert tries == [method] * 3
+    assert slept == [5, 10, 15] * 3
 
 
 def test_builtin_commands_land_in_events(bot):

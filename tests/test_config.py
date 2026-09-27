@@ -78,11 +78,44 @@ def test_render_and_placeholders():
         ('licence = "demo"', 'licence = "fc"', "unknown licence 'fc'"),
         ("licence = { demo = 1 }", "licence = { questa = 1 }", "unknown licence 'questa'"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
+        ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
+        ("host_free_min_gb = 1", 'host_free_min_gb = "1"', "limits.host_free_min_gb must be float, not str"),
+        ("stagger_s = 0", "stagger_s = 0\nkill_hung = 1", "limits.kill_hung must be bool, not int"),
+        ('marker = "/edr/"', "marker = 1", "safety.marker must be str, not int"),
+        ('steps = ["setup", "analyze", "elaborate", "synth"]', 'steps = "setup"', "stages.synth.steps must be list, not str"),
+        ('prune = { netlist = ["out"] }', 'prune = ["out"]', "stages.export.prune must be dict, not list"),
+        ('licence = "demo"', "licence = 1", "stages.synth.needs.licence must be str or dict, not int"),
+        ("budget = { hours = 1 }", "budget = { hours = true }", "budget.hours must be float, not bool"),
     ],
 )
 def test_refused(tmp_path, old, new, msg):
     with pytest.raises(ConfigError, match=msg):
         config.load_project(demo_copy(tmp_path, old, new))
+
+
+def test_int_fits_a_float_field(tmp_path):
+    p = config.load_project(demo_copy(tmp_path, "disk_gb = 1 }", "disk_gb = 2 }"))
+    assert p.stages["synth"].budget.disk_gb == 2 and p.tasks["k_big"].budget.hours == 2
+
+
+def test_site_types_and_user_id(tmp_path):
+    root = demo_copy(tmp_path)
+    site = root / "site.toml"
+    text = site.read_text()
+    site.write_text(text.replace("cores = 4", 'cores = "4"'))
+    with pytest.raises(ConfigError, match="hosts.local.cores must be int, not str"):
+        config.load_project(root)
+    site.write_text(text + "\n[telegram]\nchat_id = 42\n")
+    assert config.load_project(root).site.telegram.user_id is None
+    site.write_text(text + "\n[telegram]\nchat_id = 42\nuser_id = 7\n")
+    tg = config.load_project(root).site.telegram
+    assert (tg.chat_id, tg.user_id) == (42, 7)
+    site.write_text(text + "\n[telegram]\nchat_id = 42\nuser_id = \"7\"\n")
+    with pytest.raises(ConfigError, match="telegram.user_id must be int, not str"):
+        config.load_project(root)
+    site.write_text(text + "\n[telegram]\nchat_id = \"42\"\n")
+    with pytest.raises(ConfigError, match="telegram.chat_id must be int, not str"):
+        config.load_project(root)
 
 
 def test_duplicate_label(tmp_path):
