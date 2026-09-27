@@ -118,23 +118,31 @@ def events(rows: Iterable[Row], names: dict[str, str]) -> str:
     return fit("\n".join(lines)) or "<i>no events</i>"
 
 
+def resources(probe: Row) -> list[tuple[str, str]]:
+    """The resources of one host probe as (name, `used/total`), in the order of the /hosts line."""
+    cores = probe["cores"]
+    out = [("cores", f"{max(0, min(cores, round(probe['load'])))}/{cores}"),
+           ("ram", f"{probe['total_ram_gb'] - probe['free_ram_gb']:.0f}/{probe['total_ram_gb']:.0f} GB"),
+           ("scratch", f"{probe['total_gb'] - probe['free_gb']:.0f}/{probe['total_gb']:.0f} GB")]
+    if probe["gpus"]:
+        out.append(("gpu", f"{probe['gpus'] - probe['gpus_idle']}/{probe['gpus']}"))
+    return out
+
+
 def hosts(rows: Iterable[Row]) -> str:
-    """`host · used/total cores · free/total GB free · gpu idle/total` per host."""
+    """`host · cores used/total · ram used/total GB · scratch used/total GB · gpu used/total` per host."""
     lines = []
     for r in rows:
         if "error" in r:
             lines.append(f"<b>{esc(r['host'])}</b> · <i>no answer</i>")
             continue
-        used = max(0, min(r["cores"], round(r["load"])))
-        gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
-        lines.append(f"<b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
-                     f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB free · gpu {gpu}")
+        lines.append(f"<b>{esc(r['host'])}</b> · " + " · ".join(f"{name} {value}" for name, value in resources(r)))
     return fit("\n".join(lines)) or "<i>no hosts</i>"
 
 
 def licences(rows: Iterable[Row]) -> str:
-    """`licence · free/pool seats free` per licence; a failed probe shows its note."""
-    lines = [f"<b>{esc(r['licence'])}</b> · " + (f"{r['free']}/{r['pool']} seats free" if "free" in r
+    """`licence · used/pool seats used` per licence; a failed probe shows its note."""
+    lines = [f"<b>{esc(r['licence'])}</b> · " + (f"{r['used']}/{r['pool']} seats used" if "used" in r
                                                   else f"<i>{esc(r['note'])}</i>") for r in rows]
     return fit("\n".join(lines)) or "<i>no licences</i>"
 

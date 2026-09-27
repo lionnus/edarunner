@@ -44,10 +44,12 @@ def test_events_newest_first_with_handles():
 def test_hosts_and_licences():
     probe = {"host": "hostA", "cores": 32, "load": 20.6, "free_ram_gb": 283.0, "total_ram_gb": 376.0,
              "free_gb": 1343.0, "total_gb": 1538.0, "gpus": 1, "gpus_idle": 1}
-    assert fmt.hosts([probe, {"host": "hostB", "error": "timeout"}]).splitlines() == [
-        "<b>hostA</b> · 21/32 cores · 1343/1538 GB free · gpu 1/1", "<b>hostB</b> · <i>no answer</i>"]
-    assert fmt.licences([{"licence": "demo", "free": 3, "pool": 8}, {"licence": "x", "note": "unknown: <none>"}]) == (
-        "<b>demo</b> · 3/8 seats free\n<b>x</b> · <i>unknown: &lt;none&gt;</i>")
+    no_gpu = {**probe, "host": "hostC", "gpus": 0, "gpus_idle": 0}
+    assert fmt.hosts([probe, no_gpu, {"host": "hostB", "error": "timeout"}]).splitlines() == [
+        "<b>hostA</b> · cores 21/32 · ram 93/376 GB · scratch 195/1538 GB · gpu 0/1",
+        "<b>hostC</b> · cores 21/32 · ram 93/376 GB · scratch 195/1538 GB", "<b>hostB</b> · <i>no answer</i>"]
+    assert fmt.licences([{"licence": "demo", "used": 5, "pool": 8}, {"licence": "x", "note": "unknown: <none>"}]) == (
+        "<b>demo</b> · 5/8 seats used\n<b>x</b> · <i>unknown: &lt;none&gt;</i>")
 
 
 def test_run_detail_strips_colour_codes_from_the_log_line():

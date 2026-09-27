@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `/hosts` shows every resource as used of total, in one order:
+  `cores 21/32 · ram 93/376 GB · scratch 195/1538 GB · gpu 0/1`. `/lic`
+  shows the seats used of the pool.
+
 ## 0.1.1 (2026-09-27)
 
 - Every Telegram reply fits 40 columns and names the project in its first

@@ -38,8 +38,8 @@ class Builtin:
 BUILTINS = {b.name: b for b in (
     Builtin("status", "[handle]", "the board, or one run", "Look", "html"),
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
-    Builtin("hosts", "", "used cores, free scratch, idle GPUs", "Look", "html"),
-    Builtin("lic", "", "free licence seats", "Look", "html"),
+    Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html"),
+    Builtin("lic", "", "licence seats, used of total", "Look", "html"),
     Builtin("board", "", "pin a new board message", "Look"),
     Builtin("keep", "<handle> [hours]", "add hours, default 12", "Act on a run", self_logged=True),
     Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True),
