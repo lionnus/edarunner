@@ -12,3 +12,5 @@ coverage.xml
 coverage.svg
 gmon.out
 site/
+tools/harness/work/
+tools/harness/*.sif
