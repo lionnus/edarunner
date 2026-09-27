@@ -385,3 +385,14 @@ def test_run_forever_reloads_the_project_each_cycle(env: Env, monkeypatch) -> No
         watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier])
     assert calls == ["load", "cycle", "load", "load", "cycle"]
     assert env.notifier.project is env.project
+
+
+def test_run_forever_once_returns_1_when_the_cycle_failed(env: Env, monkeypatch) -> None:
+    def boom(*a, **k):
+        raise KeyError("runs: unknown columns")
+
+    monkeypatch.setattr(config, "load_project", lambda root: env.project)
+    monkeypatch.setattr(watch, "cycle", lambda *a, **k: None)
+    assert watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier], once=True) == 0
+    monkeypatch.setattr(watch, "cycle", boom)
+    assert watch.run_forever(env.project, env.ssh, env.ledger, [env.notifier], once=True) == 1

@@ -725,8 +725,7 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
         return watch.check(project, notifiers)
     if a.serve:
         _serve(project.data / "board", a.serve)
-    watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
-    return 0
+    return watch.run_forever(project, c.ssh, c.ledger, notifiers, once=a.once)
 
 
 def _notifiers(c: Ctx) -> list:
