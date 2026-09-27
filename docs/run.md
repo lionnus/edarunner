@@ -300,6 +300,45 @@ whose tree is gone. The directory holds the collected files in the run
 layout, the same paths `collect` names. An imported run carries the
 import time as `started` and `ended`.
 
+## Track a run started elsewhere
+
+`edr track` runs one command under the driver in the foreground, on the
+machine where you call it, and records it as a run of the project. Use
+it when a job script, a Makefile or a lab scheduler starts the work, and
+you want the board, the alerts, the metrics and `export` for it.
+
+```sh
+edr track --label base --stage pnr --collect -- make pnr CONFIG=base
+```
+
+The run gets one stage with the name `--stage`. When `edr.toml` has a
+stage with that name, the run takes its `steps`, `progress`, `budget`,
+`retry` and `needs.tools`, so the step names, the budget and the tool
+gate work. The command replaces the stage's `cmd` as given, with no
+placeholder. A name that `edr.toml` does not know gives a bare stage.
+
+The tree is `--root`, the current directory by default. The driver
+writes `log/<stage>.log` there. The run id follows `source.run_id`,
+with the label as config, `track` as the build tag, and `--src` as the
+source tag. `--src` defaults to the tag of the tree, and a tree outside
+git needs it. The batch is `--batch`, `track` by default.
+
+`edr track` then replaces itself with the driver. The pid stays the
+same, so a signal to the job reaches the driver, and the job ends with
+the exit code of the phase in the table above: 0 for `done`, 5 for a
+failed command. A job script can test the code as it would test the
+command.
+
+With `--collect`, the watcher copies the collect paths of the stage and
+extracts the metrics when the run ends, as for a launched run. The head
+node reads the tree at the same path, so the tree must be on a
+filesystem that the head node mounts. Without `--collect`, the watcher
+records the run and collects nothing. `--dry-run` prints the spec and
+runs nothing.
+
+The watcher checks that the driver lives over ssh to the host of the
+run. A host that ssh cannot reach keeps the run `stale`, never `dead`.
+
 ## Retire, prune and archive
 
 `edr retire <handle> --why <text>` removes the run tree on the host with

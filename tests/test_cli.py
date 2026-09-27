@@ -7,7 +7,9 @@ import getpass
 import json
 import os
 import re
+import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -15,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import board, cli, config, launch
+from edarunner import board, cli, config, launch, watch
 from edarunner import db as db_mod
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
@@ -845,3 +847,56 @@ def test_status_digest_prints_the_digest_as_text(demo: Path, capsys) -> None:
     assert code == 0 and out.startswith("Ended since ") and "⚪ a@demo done" in out and "<" not in out
     code, out, _ = edr(capsys, "--json", "status", "--digest")
     assert code == 0 and "<code>a@demo</code>" in json.loads(out)["data"]["digest"]
+
+
+# track
+
+FLOW = ["bash", "flow/flow.sh", "synth", "x", "demo", "LAST_STAGE=synth"]
+
+
+def track(*argv: str) -> subprocess.CompletedProcess:
+    """edr track in its own process, so its exec replaces that process and not the test."""
+    return subprocess.run([sys.executable, "-m", "edarunner.cli", "track", *argv], capture_output=True, text=True,
+                          timeout=120)
+
+
+def test_track_dry_run_prints_the_spec_and_writes_nothing(demo: Path, capsys) -> None:
+    code, out, _ = edr(capsys, "track", "--label", "t", "--stage", "synth", "--src", "abc1234", "--dry-run", "--", *FLOW)
+    spec = json.loads(out[out.index("{"):])
+    (st,) = spec["stages"]
+    assert code == 0 and st["cmd"] == shlex.join(FLOW) and "resume" not in st and st["steps"][0] == "setup"
+    assert spec["batch"] == "track" and spec["host"] is None and spec["root"] == str(demo) and spec["collect"] is False
+    assert spec["run_id"].endswith("_t_track_gabc1234") and spec["start_at"] == {"stage": "synth", "checkpoint": None}
+    assert not (Path.home() / ".edr").exists() and not (demo / "data" / "edr.db").exists()
+    code, _, err = edr(capsys, "track", "--label", "t", "--stage", "power", "--src", "a", "--dry-run", "--", "true")
+    assert code == 1 and "task group" in err
+    code, _, err = edr(capsys, "track", "--label", "t", "--stage", "synth", "--dry-run", "--", "true")
+    assert code == 1 and "not a git tree; pass --src" in err
+
+
+def test_track_execs_the_driver_and_the_watcher_collects(demo: Path) -> None:
+    p = track("--label", "t", "--stage", "synth", "--src", "abc1234", "--collect", "--", *FLOW)
+    assert p.returncode == 0, p.stderr
+    project = config.load_project(demo)
+    with Database(project.data / "edr.db") as db:
+        (row,) = db.runs(batch="track")
+        hb = json.loads((project.state_dir / "track" / f"{row['run_id']}.json").read_text())
+        host = socket.gethostname()
+        assert (hb["phase"], hb["host"], hb["stage"]) == ("done", host, "synth")
+        assert row["handle"] == f"track:{host}:{hb['driver_pid']}" and row["root"] == str(demo)
+        watch.cycle(project, Ssh(project.site), db, [])
+        assert db.run(row["run_id"])["state"] == "done"
+        assert (project.data / "results" / row["run_id"] / "reports" / "3" / "area.rpt").is_file()
+        assert {m["name"] for m in db.metrics(run_ids=[row["run_id"]])} >= {"area_cell_um2"}
+
+
+def test_track_passes_the_driver_exit_code_and_collects_only_on_request(demo: Path) -> None:
+    p = track("--label", "f", "--stage", "check", "--src", "abc1234", "--", "sh", "-c", "echo no; exit 3")
+    assert p.returncode == 5, p.stderr
+    project = config.load_project(demo)
+    with Database(project.data / "edr.db") as db:
+        (row,) = db.runs(batch="track")
+        hb = json.loads((project.state_dir / "track" / f"{row['run_id']}.json").read_text())
+        assert hb["phase"] == "FAILED:check" and (demo / "log" / "check.log").read_text().endswith("no\n")
+        watch.cycle(project, Ssh(project.site), db, [])
+        assert db.run(row["run_id"])["state"] == "failed" and not (project.data / "results" / row["run_id"]).exists()

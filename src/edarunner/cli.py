@@ -18,10 +18,11 @@ import os
 import posixpath
 import shlex
 import shutil
+import socket
 import sys
 import textwrap
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from enum import IntEnum
 from pathlib import Path
 from string import Template
@@ -37,7 +38,7 @@ from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
 from .db import Database, network_fs
-from .model import Batch, Job, Project
+from .model import Batch, Job, Project, Stage
 from .notify import make_notifiers
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
@@ -107,6 +108,7 @@ class Ctx:
         """Close the database when a command opened it."""
         if self._db is not None:
             self._db.close()
+            self._db = None
 
     def emit(self, out: str | RenderableType, data: Any = None) -> None:
         """Print `out`; keep `data` (default: the text) for --json."""
@@ -711,6 +713,58 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.DONE
 
 
+def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
+    """Record a command as a run of the project, then replace this process with the driver of that run."""
+    argv = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
+    if not argv:
+        raise Refuse("track needs a command after --")
+    project = c.project
+    stage = project.stages.get(a.stage) or Stage(name=a.stage)
+    if stage.is_group:
+        raise Refuse(f"stage {a.stage} is a task group; track runs one command")
+    root = Path(a.root or os.getcwd()).resolve()
+    if not root.is_dir():
+        raise Refuse(f"'{root}' is not a directory")
+    try:
+        src = a.src or runid.src_tag(root)
+    except runid.GitError:
+        raise Refuse(f"{root} is not a git tree; pass --src") from None
+    date, host = time.strftime(launch.DATE_FMT), socket.gethostname()
+    job = Job(label=a.label, config=a.label)
+    batch = Batch(batch=a.batch, source=src, jobs=[job], path=project.root / "jobs" / f"{a.batch}.toml")
+    v = config.placeholders(project, date=date, batch=a.batch, label=a.label, config=a.label, build_tag="track",
+                            src=src, overrides={})
+    run_id = config.render(project.source.run_id, v)
+    assert_run_id(run_id)
+    v.update(run_id=run_id, tree_id=run_id, host=None, mount="", root=str(root))
+    # The command runs as given; only the stage's steps, progress, budget, retry and tools come from edr.toml.
+    spec = launch._spec(project, batch, job, [], [], v, stages=[replace(stage, cmd="", resume="")])
+    spec["stages"][0]["cmd"] = shlex.join(argv)
+    spec["collect"] = a.collect
+    plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, src=src)
+    spec_path = project.state_dir / a.batch / f"{run_id}.spec.json"
+    if spec_path.exists():
+        raise Refuse(f"already tracked: {spec_path} exists")
+    driver = sync.publish_driver(project.state_dir, launch.DRIVER_SRC, a.dry_run)
+    launch.write_spec(project.state_dir, a.batch, plan_, driver, a.dry_run)
+    if a.dry_run:
+        c.emit(json.dumps(spec, indent=1), spec)
+        return Exit.DONE
+    now = int(time.time())
+    c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": src, "run_date": date})
+    c.db.upsert_run({"run_id": run_id, "batch": a.batch, "label": a.label, "config": a.label, "build_tag": "track",
+                     "src": src, "dirty": int("-dirty" in src), "host": host, "root": str(root), "created": now,
+                     "phase": "setup", "state": "running", "started": now, "tree_id": run_id,
+                     "handle": str(Handle("track", f"{host}:{os.getpid()}", host))})
+    c.db.add_event("user", run_id, "track", shlex.join(argv))
+    print(f"{run_id}: {a.stage} on {host} {root}", file=sys.stderr)
+    c.close()
+    sys.stdout.flush()
+    # The driver keeps this pid, so a signal to the job reaches it and its exit code is the job's.
+    os.execv(sys.executable, [sys.executable, str(driver), str(spec_path)])
+    return Exit.REFUSED  # not reached
+
+
 def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
     """Write the keep file of a run."""
     row = c.resolve(a.handle)
@@ -1202,6 +1256,33 @@ def _parser() -> argparse.ArgumentParser:
         each.add_argument("--on", metavar="HOST", help="the host; default auto")
         each.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
         each.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
+    s = command("track", "run a command under the driver here, as a run of the project", """
+        Runs one command in the foreground under the driver, on this machine, and
+        records it as a run in the batch --batch (default track). A lab with its
+        own scheduler writes edr track into its job script; the board, the alerts,
+        the metrics and export then see the run.
+
+        The run is one stage named --stage. A stage of edr.toml with that name
+        gives its steps, progress, budget, retry and tools, so the gate and the
+        budget work; the command replaces its cmd. The tree is --root, default
+        the current directory, and the driver writes log/<stage>.log there. The
+        run id follows source.run_id with the label as config, track as the
+        build tag, and --src (default the source tag of the tree) as src.
+
+        edr track then replaces itself with the driver: the pid, the signals
+        and the exit code are the driver's. With --collect, the watcher copies
+        the stage's collect paths from the tree, which the head node must read
+        at the same path, and extracts the metrics when the run ends. Without
+        it, the watcher collects nothing. --dry-run prints the spec and runs
+        nothing.
+        """, write=True, exits={Exit.DONE: "the command ended done; once the driver runs, the code is its phase code"})
+    s.add_argument("--label", required=True, metavar="L", help="the label of the run")
+    s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
+    s.add_argument("--batch", default="track", metavar="B", help="the batch; default track")
+    s.add_argument("--src", metavar="TAG", help="the source tag; default the tag of the tree")
+    s.add_argument("--root", metavar="DIR", help="the run tree; default the current directory")
+    s.add_argument("--collect", action="store_true", help="the watcher collects the stage and extracts its metrics")
+    s.add_argument("cmd", nargs=argparse.REMAINDER, help="the command, after --")
     s = command("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
         Writes the keep file of a live run. --hours (default 12 when --ack is
         absent) adds hours to the budget of the running stage or task; --ack

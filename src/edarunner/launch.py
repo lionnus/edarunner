@@ -157,7 +157,9 @@ def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
 
 
 def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: list[Task],
-          v: dict[str, object]) -> dict[str, Any]:
+          v: dict[str, object], stages: list[Stage] | None = None) -> dict[str, Any]:
+    """The run spec; `stages` replaces the stages that `names` picks from the project."""
+    stages = stages or [project.stages[n] for n in names]
     state_dir = project.state_dir / batch.batch
     run_id = str(v["run_id"])
     return {
@@ -166,8 +168,8 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
         "shell": "/bin/bash", "env": _env(project, v),
         "limits": {k: getattr(project.limits, k) for k in _SPEC_LIMITS},
-        "start_at": {"stage": names[0], "checkpoint": None},
-        "stages": [_stage_spec(project, project.stages[n], tasks, v) for n in names],
+        "start_at": {"stage": stages[0].name, "checkpoint": None},
+        "stages": [_stage_spec(project, s, tasks, v) for s in stages],
     }
 
 

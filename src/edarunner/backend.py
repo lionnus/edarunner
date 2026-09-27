@@ -47,7 +47,9 @@ class Request:
 
 @dataclass(frozen=True)
 class Handle:
-    """A started driver as its backend names it; `id` is `<host>:<pid>` for `ssh` and `local`."""
+    """A started driver as its backend names it; `id` is `<host>:<pid>` for `ssh`, `local` and `track`.
+
+    `track` names a driver that `edr track` runs in the foreground, outside every backend."""
 
     backend: str
     id: str
@@ -60,7 +62,7 @@ class Handle:
     def parse(cls, text: str) -> Handle:
         """The handle that `str(handle)` wrote into `runs.handle`."""
         backend, _, ident = text.partition(":")
-        host = ident.rpartition(":")[0] if backend in BACKENDS else ""
+        host = ident.rpartition(":")[0] if backend in (*BACKENDS, "track") else ""
         return cls(backend, ident, host or None)
 
     @property
@@ -188,7 +190,8 @@ class SshBackend:
         return out
 
     def file_host(self, run: dict[str, Any]) -> str:
-        return str(run.get("host") or "")
+        """The run's host; `local` for a run of `edr track`, whose tree the head node reads in place."""
+        return "local" if str(run.get("handle") or "").startswith("track:") else str(run.get("host") or "")
 
 
 class LocalBackend(SshBackend):

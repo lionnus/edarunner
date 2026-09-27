@@ -73,6 +73,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
 | `stages` | the stages in run order |
+| `collect` | `false` for a run of `edr track` without `--collect`: the watcher collects nothing; the driver does not read it |
 
 A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
 `steps`, `progress`, `budget`, `retry` and `tools`. A task group holds

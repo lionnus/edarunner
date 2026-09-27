@@ -300,6 +300,8 @@ def _parameters(project: Project, run: Row) -> dict[str, Any]:
 
 def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> None:
     spec = collect.load_spec(project, run)
+    if spec.get("collect") is False:  # edr track without --collect
+        return
     only = collect.spec_stages(spec)
     finished, running = collect.stage_state(project, hb, only)
     tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items() if e.get("phase") in ("done", "failed")}

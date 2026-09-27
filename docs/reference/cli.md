@@ -317,6 +317,46 @@ stage from the tree into data/results/<run id>/.
 | 1 | the plan has a problem, or --from names a stage without resume |
 | 3 | with --collect, a copy failed |
 
+## track
+
+```
+edr track [--dry-run] --label L --stage S [--batch B] [--src TAG] [--root DIR] [--collect] ...
+```
+
+Runs one command in the foreground under the driver, on this machine, and
+records it as a run in the batch --batch (default track). A lab with its
+own scheduler writes edr track into its job script; the board, the alerts,
+the metrics and export then see the run.
+
+The run is one stage named --stage. A stage of edr.toml with that name
+gives its steps, progress, budget, retry and tools, so the gate and the
+budget work; the command replaces its cmd. The tree is --root, default
+the current directory, and the driver writes log/<stage>.log there. The
+run id follows source.run_id with the label as config, track as the
+build tag, and --src (default the source tag of the tree) as src.
+
+edr track then replaces itself with the driver: the pid, the signals
+and the exit code are the driver's. With --collect, the watcher copies
+the stage's collect paths from the tree, which the head node must read
+at the same path, and extracts the metrics when the run ends. Without
+it, the watcher collects nothing. --dry-run prints the spec and runs
+nothing.
+
+| Flag | Meaning |
+|---|---|
+| `cmd` | the command, after -- |
+| `--dry-run` | print what would happen and write nothing |
+| `--label L` | the label of the run, required |
+| `--stage S` | the stage name; a stage of edr.toml lends its settings, required |
+| `--batch B` | the batch; default track |
+| `--src TAG` | the source tag; default the tag of the tree |
+| `--root DIR` | the run tree; default the current directory |
+| `--collect` | the watcher collects the stage and extracts its metrics |
+
+| Exit | Meaning |
+|---|---|
+| 0 | the command ended done; once the driver runs, the code is its phase code |
+
 ## keep
 
 ```
