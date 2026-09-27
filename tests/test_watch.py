@@ -248,6 +248,19 @@ def test_collect_extract_and_params_once(env: Env, monkeypatch) -> None:
     assert calls == [run_id] and len(env.ledger.metrics(run_ids=[run_id])) == 8
 
 
+def test_a_failed_stage_yields_no_metrics(env: Env) -> None:
+    hb = env.heartbeat("b_nodw", phase="FAILED:pnr", exit=5, stage="pnr", step=4, step_name="cts",
+                       stages={"synth": {"status": "done", "exit": 0}, "pnr": {"status": "failed", "exit": 5}})
+    root = Path(hb["root"])
+    for n in range(6):  # a copied tree carries the pnr reports of another run
+        (root / "reports" / str(n)).mkdir(parents=True)
+        (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
+    env.cycle()
+    assert (env.project.data / "results" / hb["run_id"] / "reports" / "5" / "area.rpt").is_file()
+    rows = env.ledger.metrics(run_ids=[hb["run_id"]])
+    assert [(r["stage"], r["step"]) for r in rows] == [("synth", 0), ("synth", 1), ("synth", 2), ("synth", 3)]
+
+
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     hb = env.heartbeat("c", age=200, step=2, step_name="elaborate")
     spec_path = env.project.state / "demo" / f"{hb['run_id']}.spec.json"
