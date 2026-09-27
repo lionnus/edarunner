@@ -235,8 +235,6 @@ def test_checkpoint_resumes_the_first_stage_only(tmp_path: Path) -> None:
     assert hb["stages"]["synth"]["status"] == hb["stages"]["pnr"]["status"] == "done"
 
 
-@pytest.mark.xfail(strict=True, reason="driver defect: a shard that starts after a claim re-creates pending/<id>, "
-                   "because the O_EXCL creation checks done/ but not claimed/; the task runs twice")
 def test_two_shards_claim_from_one_queue(tmp_path: Path) -> None:
     a = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=1, env={"DEMO_SLEEP": "3"})
     b = dict(a, run_id=RUN_ID + "_b", state_file=str(Path(a["state_file"]).with_name(RUN_ID + "_b.json")))
