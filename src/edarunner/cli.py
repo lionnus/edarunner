@@ -656,6 +656,9 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         pid = hb.get("driver_pid")
         if root and board.is_live(hb) and pid and c.ssh.pid_alive(str(host), int(pid)):
             raise Refuse(f"{run_id}: driver {pid} is alive on {host}; stop it first")
+        # A driver writes its first heartbeat within seconds; none after dead_s means it never came up.
+        if root and not hb and board.is_live(row) and time.time() - (row.get("started") or 0) < project.limits.dead_s:
+            raise Refuse(f"{run_id}: no heartbeat yet; wait for the driver, then stop it first")
         if root:
             _refuse_shared_root(c, row, str(host), str(root), retiring, bool(a.prune))
         checked.append((row, hb, host, root, targets))
