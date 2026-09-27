@@ -1018,3 +1018,12 @@ def test_track_passes_the_driver_exit_code_and_collects_only_on_request(demo: Pa
         assert hb["phase"] == "FAILED:check" and (demo / "log" / "check.log").read_text().endswith("no\n")
         watch.cycle(project, Ssh(project.site), db, [])
         assert db.run(row["run_id"])["state"] == "failed" and not (project.data / "results" / row["run_id"]).exists()
+
+
+def test_help_names_the_json_form_and_says_retire_keeps_the_logs(capsys) -> None:
+    for name in ("status", "plan", "launch", "retire"):
+        assert cli.main([name, "--help"]) == 0
+        assert f"the same as edr --json {name}" in capsys.readouterr().out
+    cli.main(["retire", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "copied log/ and the collect paths of every finished stage to data/results/<run id>/" in out

@@ -1624,6 +1624,12 @@ def _parser() -> argparse.ArgumentParser:
         retires every run of the batch and marks it RETIRED, so the watcher
         skips it. A live run gets the phase ABANDONED:<why>.
 
+        The logs and results survive a retire. The watcher has already copied
+        log/ and the collect paths of every finished stage to
+        data/results/<run id>/ on the head node, and retire refuses a tree
+        without that copy unless --uncollected. edr watch --once makes the copy
+        now.
+
         --collect NAME,... first copies the named collect_on_request lists of
         every run into data/results/<run id>/, and removes nothing when one copy
         failed.
