@@ -79,8 +79,8 @@ ones on top. The state has a colour on a terminal and none in a pipe.
 ```
 
 `edr status --narrow` fits the board in 48 columns for an ssh app on a
-phone. The Telegram bot keeps the same narrow board pinned in the chat
-and rewrites it every watcher cycle.
+phone. The Telegram bot pins a 40-column board, one line per run, in
+the chat and rewrites it every watcher cycle.
 
 `edr hosts` shows each machine: cores used of total, RAM and scratch free
 of total, GPUs idle of total with their memory free of total, tool

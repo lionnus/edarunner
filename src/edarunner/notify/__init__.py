@@ -31,8 +31,9 @@ class Notifier:
     def stop(self) -> None:
         """Stop that thread."""
 
-    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None) -> str | None:
-        """Send one alert of `kind` for `run_id`; return its message id."""
+    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
+             cmd: str | None = None) -> str | None:
+        """Send one alert of `kind` for `run_id`: a title line, the reason, and the command to run next; return its message id."""
         return None
 
     def edit(self, msg_id: str, text: str) -> None:
