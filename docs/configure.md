@@ -1,16 +1,77 @@
-# Declaring a flow
+# Configure a project
 
-Two flows have run through `edr` on real hosts. They differ in shape, and
-the two configs below show both patterns. The names and paths are
-examples; the site names live in the private site file.
+After this page your own flow is a project. It has an `edr.toml` with
+stages and metrics, a site file with your hosts, and a batch that `edr
+check` accepts.
+
+![The files of a project: what you write, what edr writes, and what lives outside](diagrams/project-files.svg)
+
+## 1. Create the project
+
+```sh
+mkdir myflow && cd myflow
+edr init --site ~/.config/edarunner
+```
+
+`edr init` writes `edr.toml`, a template with one stage and one metric,
+and `edr-watch.service`, the systemd unit for the watcher. `--site` names
+the directory or the file of the private site file; `edr init` does not
+write that file. The template then points at
+`~/.config/edarunner/site.toml`.
+
+Put `data/` in the project's `.gitignore`. In git: `edr.toml`,
+`tasks.toml`, `jobs/`, `hooks/` and `edr-watch.service`. Not in git: the
+database, the results and the boards under `data/`, the state directory,
+the worktrees, the run trees on the hosts, `site.toml` and the Telegram
+token.
+
+## 2. Write the site file
+
+The site file holds the hosts, the tools and the bot. It stays outside
+the project and outside git, because it names your machines.
+
+```toml
+schema = 1
+scratch = ["/scratch"]
+
+[hosts.hostA]
+cores = 64
+ram_gb = 256
+
+[hosts.hostB]
+cores = 128
+ram_gb = 512
+```
+
+Add `[tools.<name>]` when not every host has a tool, or when a stage has
+to wait for seats, and `[telegram]` when you want alerts on your phone.
+`examples/site/` shows both with placeholder names. The core knows no
+licence manager; a site hook such as `examples/site/hooks/flexlm_free.sh`
+turns the output of a licence tool into the `free total` line a probe
+prints. [reference/configuration.md](reference/configuration.md) lists
+every key.
+
+## 3. Declare the flow
+
+Edit `edr.toml`: the repository under `[source]`, one `[stages.<name>]`
+per command of the flow, and the `[metrics.<name>]` you want in the
+database. Stages run in file order.
 
 ![How a flow plugs in: the core, the project file and the private site file](diagrams/site-layer.svg)
 
-## One tool session, many steps inside
+Cut a stage where the tool session ends, or where you want a budget, a
+retry rule or a stop of your own. Everything inside a stage is a step,
+which `edr` tracks through `progress`, extracts metrics from per step,
+and resumes through `{checkpoint}`. A stage with `foreach = "tasks"`
+fans out into tasks that run in parallel on the host and share one queue
+across runs. The two configs below show the two shapes a flow takes. The
+names and paths are examples.
+
+### One tool session, many steps inside
 
 A commercial place-and-route flow runs its stages inside one tool
 session. A new session per stage would cost a licence checkout and a
-library reload, so the stages stay inside one command and `edr` tracks
+library reload. So the stages stay inside one command, and `edr` tracks
 them as steps through the numbered report directories.
 
 ```toml
@@ -69,20 +130,20 @@ canonical = "energy"
 
 The stages run in file order, `pnr` then `power`. A job that lists
 `stages = ["power"]` with `reuse` runs the kernels on an existing
-netlist; `netlist_stage` in the job names the step directory that holds
+netlist. `netlist_stage` in the job names the step directory that holds
 it, and `{netlist_stage}` has no value without it.
 
-The first run taught three lessons:
+Three details matter in this shape:
 
 - `{tree_id}` names the tree the flow writes in. A run that reuses a tree
-  (to run more kernels on an existing netlist) has its own `{run_id}`, but
-  the flow's run directory must keep the tree's id.
+  has its own `{run_id}`, but the flow's run directory must keep the
+  tree's id.
 - The flow needs its own `PATH`. The project `[env]` table carries it, and
   `$PATH` expands on the host.
-- A whole-window power row may carry no duration. The energy then comes
-  from the window that the phase file records, through an `expr` metric.
+- A number the flow does not print comes from an `expr` metric over the
+  numbers it does print, such as the energy from a power and a window.
 
-## One command per step
+### One command per step
 
 An open flow with a script per step and a checkpoint between steps maps
 one stage to one step. Here the flow runs inside a tool container, and
@@ -136,11 +197,42 @@ of OpenROAD-flow-scripts on nangate45, three stages `synth`, `floorplan` and
 `place`, one `make` target each. The area comes from `synth_stat.txt`, the
 area and the slack of each later stage from the METRICS2.1 JSON of ORFS.
 
-## Which shape to choose
+## 4. Write a batch
 
-Cut a stage where the tool session ends, or where you want a budget, a
-retry rule or a stop of your own. Everything inside a stage is a step,
-which `edr` tracks through `progress`, extracts metrics from per step, and
-resumes through `{checkpoint}`. A stage with `foreach = "tasks"` fans out
-into tasks that run in parallel on the host and share one queue across
-shards. `docs/reference/configuration.md` has every key.
+```toml
+# jobs/sweep1.toml
+batch = "sweep1"
+source = "3f9a2c1"
+
+[[job]]
+label = "base"
+config = "base"
+
+[[job]]
+label = "base_dw0"
+config = "base"
+overrides = { DW = 0 }
+```
+
+`source` is the tag that `edr checkout` printed; [run.md](run.md) shows
+the checkout. A job is one run: a label, a configuration name the flow
+understands, optional overrides that become `KEY=VALUE` tokens in the
+command, and optional `stages` and `tasks` lists. The run id is
+`<date>_<label>_<build_tag>_g<src>`.
+
+## 5. Check
+
+```sh
+edr check
+```
+
+`check` loads every file, imports the hooks, and probes every host over
+ssh for its cores, load, RAM and scratch. It names every tool the head
+node lacks, and plans every batch under `jobs/`. It prints one `problem:`
+line per fault and exits 1, or `ok: 2 hosts, 3 stages, 5 metrics, 1
+batches` and exits 0.
+
+## Next
+
+[run.md](run.md) checks out the source, launches the batch and runs the
+watcher behind it.

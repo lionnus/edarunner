@@ -17,12 +17,11 @@ edarunner runs, tracks and analyzes an EDA flow on shared ssh hosts.
 - Track: one SQLite database holds every run with its source hashes, host,
   events, metrics and artifacts. The board and a Telegram bot show it.
 - Analyze: it gives the metrics of one design, compares runs, and exports
-  a snapshot that a paper reads.
+  a snapshot that a report, a notebook or a dashboard reads.
 
 A project is a few TOML files: `edr.toml`, `tasks.toml`,
 `jobs/<batch>.toml` and a private `site.toml`. The core knows no EDA tool.
-Markdown contracts, `AGENTS.md` and the per-directory `CLAUDE.md` of the
-paper layout, let an agent set up a project and operate it.
+`AGENTS.md` lets an agent set up a project and operate it.
 
 ## Install
 
@@ -85,8 +84,10 @@ stale seat lease.
 
 ## Documents
 
-- `docs/README.md` is the index of the documentation; the same pages are published at <https://lionnus.github.io/edarunner/>.
-- `AGENTS.md` tells an agent how to operate the farm through `edr`.
+`docs/README.md` is the index: one path for a user, from the install to
+the results, and one for a contributor. The same pages are published at
+<https://lionnus.github.io/edarunner/>. `AGENTS.md` tells an agent how to
+operate the farm through `edr`.
 
 ## Contributing
 

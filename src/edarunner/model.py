@@ -175,7 +175,7 @@ class Stage:
     A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
     `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
     tasks of a run go through a queue in the state directory, so a second run with the same queue
-    takes tasks from the same pool; `docs/running.md` explains the queue and shards.
+    takes tasks from the same pool; `docs/run.md` explains the queue and shards.
     """
 
     name: str
@@ -274,7 +274,7 @@ class Sync:
 
 @dataclass
 class Safety:
-    """The guard on every delete target; `docs/safety.md` explains it."""
+    """The guard on every delete target; `docs/guarantees.md` explains it."""
 
     marker: str = doc("a substring every delete target must hold", "/edr/")
     min_depth: int = doc("the smallest path depth of a delete target", 4)
@@ -282,8 +282,8 @@ class Safety:
 
 @dataclass
 class Limits:
-    """The clocks and floors of the driver and the watcher; `docs/running.md` and `docs/watcher.md`
-    say what each one does."""
+    """The clocks and floors of the driver and the watcher; `docs/run.md` says what each
+    one does."""
 
     stagger_s: int = doc("pause between two launches of one batch", 120)
     stale_s: int = doc("heartbeat age that marks a run `stale`", 600)
@@ -351,7 +351,7 @@ class Job:
     A job with `reuse` runs on the host and the tree of the reused run, and takes its build tag and
     `{tree_id}`; a glob in `label` is an error. With `restore`, the job takes the source tag, the
     build tag and `{tree_id}` of the reused run but is placed like a new job, so it runs after the
-    tree was retired; `docs/running.md` shows the rerun. A task group in a job without `tasks` is a
+    tree was retired; `docs/run.md` shows the rerun. A task group in a job without `tasks` is a
     plan problem.
     """
 

@@ -1283,7 +1283,7 @@ def _parser() -> argparse.ArgumentParser:
         bot as a thread when the site file configures it. --once runs one cycle.
         --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
         reads and classifies every run, prints the states and writes nothing.
-        docs/watcher.md explains the cycle.
+        docs/run.md explains the cycle.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
                                               "with --check, watch.json is older than three cycles"})
     s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")
