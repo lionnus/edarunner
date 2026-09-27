@@ -29,7 +29,7 @@ def project(tmp_path):
     root = tmp_path / "edr" / "demo"
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     edr = root / "edr.toml"
-    text = edr.read_text().replace('nested = []', 'nested = ["nonfree"]')
+    text = edr.read_text().replace('nested = []', 'nested = ["sub"]')
     text = text.replace('state = "~/.edr/{project}"', f'state = "{tmp_path}/state"')
     edr.write_text(text)
     repo = root / "repo"
@@ -39,11 +39,11 @@ def project(tmp_path):
     commit_all(repo, "flow")
     (repo / "README").write_text("demo\n")
     commit_all(repo, "readme")
-    nested = repo / "nonfree"
+    nested = repo / "sub"
     nested.mkdir()
     git("init", "-q", "-b", "main", cwd=nested)
     (nested / "secret.txt").write_text("42\n")
-    commit_all(nested, "nonfree")
+    commit_all(nested, "sub")
     return config.load_project(root)
 
 
@@ -54,15 +54,15 @@ def listing(root: Path) -> list[tuple[str, int, int]]:
 def test_stage_head_twice_is_idempotent(project):
     repo = project.source.repo
     head = git("rev-parse", "--short", "HEAD", cwd=repo)
-    nested_head = git("rev-parse", "--short", "HEAD", cwd=repo / "nonfree")
+    nested_head = git("rev-parse", "--short", "HEAD", cwd=repo / "sub")
     a = checkout.checkout(project, "HEAD")
     assert a == checkout.checkout(project, "HEAD")
     assert a.path == project.source.worktrees / head and a.src == head and not a.dirty
     assert git("rev-parse", "HEAD", cwd=a.path) == git("rev-parse", "HEAD", cwd=repo)
     assert (a.path / "flow" / "flow.sh").exists() and (a.path / "README").exists()
-    assert a.nested == {"nonfree": nested_head}
-    assert (a.path / "nonfree" / "secret.txt").read_text() == "42\n"
-    assert git("rev-parse", "--short", "HEAD", cwd=a.path / "nonfree") == nested_head
+    assert a.nested == {"sub": nested_head}
+    assert (a.path / "sub" / "secret.txt").read_text() == "42\n"
+    assert git("rev-parse", "--short", "HEAD", cwd=a.path / "sub") == nested_head
     assert runid.src_tag(a.path) == head
     assert checkout.find(project, head) == a.path and checkout.find(project, "HEAD") == a.path
     assert checkout.checkout(project, dirty_dir=repo) == a  # a clean tree pins its commit
@@ -84,11 +84,11 @@ def test_dirty_snapshot_tag_is_stable(project):
     assert a.path == project.source.worktrees / a.src
     assert (a.path / "README").read_text() == "changed\n"
     assert (a.path / "notes.txt").exists() and not (a.path / ".git").exists()
-    assert (a.path / "nonfree" / "secret.txt").exists() and not (a.path / "nonfree" / ".git").exists()
+    assert (a.path / "sub" / "secret.txt").exists() and not (a.path / "sub" / ".git").exists()
     assert "+changed" in (a.path / "source.diff").read_text()
     meta = json.loads((a.path / "source.json").read_text())
     assert meta["src"] == a.src and meta["base"] == head and meta["nested"] == a.nested and meta["dirty"]
-    assert a.nested == {"nonfree": git("rev-parse", "--short", "HEAD", cwd=repo / "nonfree")}
+    assert a.nested == {"sub": git("rev-parse", "--short", "HEAD", cwd=repo / "sub")}
     assert runid.src_tag(a.path) == a.src
     assert checkout.find(project, a.src) == a.path
     (repo / "README").write_text("changed again\n")
@@ -107,7 +107,7 @@ def test_dry_run_writes_nothing(project, tmp_path, capsys):
     old = checkout.checkout(project, "HEAD~1", dry_run=True)
     dirty = checkout.checkout(project, dirty_dir=repo, dry_run=True)
     assert listing(tmp_path) == before
-    assert not old.path.exists() and old.nested == {"nonfree": a.nested["nonfree"]}
+    assert not old.path.exists() and old.nested == {"sub": a.nested["sub"]}
     assert "-dirty-" in dirty.src and not dirty.path.exists() and dirty.dirty
     out = capsys.readouterr().out
     assert "worktree add" in out and "git clone" in out and "rsync -a" in out
