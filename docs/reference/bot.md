@@ -53,8 +53,6 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/start` | this list and the reply keyboard |
 | `/keyboard [off]` | show or remove the reply keyboard |
 
-Old names that still answer: `/lic` for `/tools`.
-
 ## Alert buttons
 
 | Button | callback_data |

@@ -61,7 +61,9 @@ def _since(text: str) -> int:
 
 
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "lic", "metrics", "compare", "runtime", "check", "notify"})
+# The old command names that 0.4.0 removed, with the command that replaces each.
+REMOVED = {"lic": "tools", "stage": "checkout", "run": "continue"}
+_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "metrics", "compare", "runtime", "check", "notify"})
 
 
 class Ctx:
@@ -550,12 +552,6 @@ def _metrics_csv(rows: list[Row]) -> str:
     return out.getvalue()
 
 
-def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
-    """`edr tools` under its old name; gone in the next release."""
-    print("edr: lic is deprecated; use edr tools", file=sys.stderr)
-    return cmd_tools(c, a)
-
-
 def _area_table(rows: list[Row]) -> Table | str:
     body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m["instance"], m["depth"], m["area"],
              m.get("local_area"), m.get("cells")] for m in rows]
@@ -735,9 +731,7 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
-    """Check out a ref as a worktree, or copy a dirty tree as a snapshot; `stage` is the old name."""
-    if a.command == "stage":
-        print("edr: stage is deprecated; use edr checkout", file=sys.stderr)
+    """Check out a ref as a worktree, or copy a dirty tree as a snapshot."""
     res = checkout.checkout(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
     c.emit(Text.assemble((res.src, "bold"), " ", (str(res.path), "dim"), (" (dirty)" if res.dirty else "", "yellow")),
            {"src": res.src, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
@@ -772,9 +766,7 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
-    """Run one stage on the tree of an existing run, or fetch a collect_on_request list; `run` is the old name."""
-    if a.command == "run":
-        print("edr: run is deprecated; use edr continue", file=sys.stderr)
+    """Run one stage on the tree of an existing run, or fetch a collect_on_request list."""
     row = c.resolve(a.handle)
     project, run_id = c.project, row["run_id"]
     if a.collect:
@@ -1354,11 +1346,7 @@ def _parser() -> argparse.ArgumentParser:
         directory as {root}. hosts lists the hosts that have the tool, with
         their versions. A tool without a probe shows - for the seats. --json
         gives tool, free, total, hosts (host to version) and note.
-
-        edr lic prints the same and a deprecation line on stderr; it goes in
-        the next release.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
-    sub.add_parser("lic").set_defaults(fn=cmd_lic)  # no help: the old name stays out of the listing
     s = command("metrics", "the metrics of one design or one run", """
         Every metric of one design: label, design, stage, step, task, name,
         value and unit. --design is the source tag exactly as edr checkout printed
@@ -1456,12 +1444,8 @@ def _parser() -> argparse.ArgumentParser:
         the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
         under --dirty is checked out as a worktree.
         """, write=True)
-    old = sub.add_parser("stage")  # the old name; no help keeps it out of the listing; gone in the next release
-    old.set_defaults(fn=cmd_checkout)
-    old.add_argument("--dry-run", action="store_true")
-    for each in (s, old):
-        each.add_argument("ref", nargs="?", help="default: source.ref")
-        each.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
+    s.add_argument("ref", nargs="?", help="default: source.ref")
+    s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
     command("plan", "render the run specs of a batch; writes no spec", """
         Renders every job of the batch into a run spec and prints
         <run id>: <host or queued> <root> per job, with problem: lines under a
@@ -1500,17 +1484,13 @@ def _parser() -> argparse.ArgumentParser:
         stage from the tree into data/results/<run id>/.
         """, write=True, exits={Exit.REFUSED: "the plan has a problem, or --from names a stage without resume",
                                 Exit.HOSTS: "with --collect, a copy failed"})
-    old = sub.add_parser("run")  # the old name; no help keeps it out of the listing; gone in the next release
-    old.set_defaults(fn=cmd_continue)
-    old.add_argument("--dry-run", action="store_true")
-    for each in (s, old):
-        each.add_argument("handle", help=HANDLE)
-        each.add_argument("--stage", metavar="S", help="the stage to run on the tree")
-        each.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
-        each.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
-        each.add_argument("--on", metavar="HOST", help="the host; default auto")
-        each.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
-        each.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
+    s.add_argument("handle", help=HANDLE)
+    s.add_argument("--stage", metavar="S", help="the stage to run on the tree")
+    s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
+    s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
+    s.add_argument("--on", metavar="HOST", help="the host; default auto")
+    s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
+    s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
     s = command("track", "run a command under the driver here, as a run of the project", """
         Runs one command in the foreground under the driver, on this machine, and
         records it as a run in the batch --batch (default track). A lab with its
@@ -1649,6 +1629,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return its exit code."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+    name = next((x for x in (sys.argv[1:] if argv is None else argv) if not x.startswith("-")), None)
+    if name in REMOVED:
+        print(f"edr: {name} was removed in 0.4.0; use edr {REMOVED[name]}", file=sys.stderr)
+        return Exit.REFUSED
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:

@@ -158,7 +158,6 @@ def test_make_notifiers_needs_a_private_token(tmp_path):
     ("/events", ("events_text", (8,), {})),
     ("/hosts", ("hosts_text", (), {})),
     ("/tools", ("tools_text", (), {})),
-    ("/lic", ("tools_text", (), {})),
     ("/keep a@demo 6", ("keep", ("a@demo", 6, "telegram"), {})),
     ("/keep a@demo", ("keep", ("a@demo", 12, "telegram"), {})),
     ("/ack #3", ("ack", ("#3", "telegram"), {})),
@@ -174,6 +173,11 @@ def test_builtin_dispatch(bot, text, call):
     out = call[0] + " ok"
     assert last_reply(bot) == (pre(out) if call[0] in ("compare_text", "metric_text") else out)
 
+
+
+def test_a_removed_command_names_its_replacement(bot):
+    bot.handle_update(msg("/lic"))
+    assert bot.actions.calls == [] and last_reply(bot) == "/lic was removed; use /tools"
 
 def test_bad_handle_is_an_answer(bot):
     bot.handle_update(msg("/keep 'a;rm' 3"))

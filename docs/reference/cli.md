@@ -29,7 +29,7 @@ event, not even an empty database.
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read command (brief, check, compare, events, hosts, lic, metrics, notify, runtime, status, tools) never creates
+A read command (brief, check, compare, events, hosts, metrics, notify, runtime, status, tools) never creates
 data/edr.db. Without the file it reads an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
@@ -198,9 +198,6 @@ probe reports; the probe runs on the head node with the project
 directory as {root}. hosts lists the hosts that have the tool, with
 their versions. A tool without a probe shows - for the seats. --json
 gives tool, free, total, hosts (host to version) and note.
-
-edr lic prints the same and a deprecation line on stderr; it goes in
-the next release.
 
 
 | Exit | Meaning |

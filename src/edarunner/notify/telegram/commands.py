@@ -24,7 +24,8 @@ DESIGN = re.compile(r"^[\w.-]{1,64}$")
 LOG_LINES = 200
 # The words of the reply keyboard, in rows; a tap sends the word, which runs the command of that name.
 KEYBOARD = (("Status", "Hosts"), ("Events", "Tools", "Digest"))
-ALIASES = {"lic": "tools"}  # old names, gone in the next release
+# The old command names that 0.4.0 removed, with the command that replaces each.
+REMOVED = {"lic": "tools"}
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,8 @@ class Commands:
         `run` is the run of the alert the message replies to: it fills the handle of a built-in
         and the run placeholders of a custom command.
         """
-        name = ALIASES.get(name, name)
+        if name in REMOVED and name not in self.tg.commands:
+            return Reply(name, f"/{name} was removed; use /{REMOVED[name]}", ok=False)
         if name not in self.tg.commands and name not in BUILTINS:
             name = "help"
         try:

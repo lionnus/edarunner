@@ -215,8 +215,6 @@ def bot_page() -> str:
         groups.setdefault(b.group, []).append(b)
     for group, cmds in groups.items():
         out += [f"### {group}\n\n", table(["Command", "Effect"], [[code(f"/{b.name} {b.args}".rstrip()), b.help] for b in cmds]), "\n"]
-    out += ["Old names that still answer: " + ", ".join(f"{code('/' + old)} for {code('/' + new)}" for old, new in tgc.ALIASES.items())
-            + ".\n\n"]
     out += ["## Alert buttons\n\n", table(["Button", "callback_data"], [[label, code(data)] for label, data in alert_buttons("<handle>")]),
             "\n## Custom commands\n\n", doc(model.BotCommand) + "\n\n", fields_table(model.BotCommand)]
     return "".join(out).rstrip() + "\n"

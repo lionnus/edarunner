@@ -575,8 +575,6 @@ def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None
     code, out, _ = edr(capsys, "tools")
     assert code == 0 and out.splitlines()[0].split() == ["tool", "free", "total", "hosts", "note"]
     assert out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"]
-    code, out, err = edr(capsys, "lic")
-    assert code == 0 and out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"] and "deprecated" in err
     code, out, _ = edr(capsys, "--json", "tools")
     assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 8, "total": 10, "hosts": {"local": "1.0"}}]
     site = demo / "site.toml"
@@ -852,17 +850,10 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     assert not Path(row["root"]).exists()
 
 
-def test_stage_is_the_old_name_of_checkout(demo: Path, capsys) -> None:
-    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
-    code, out, err = edr(capsys, "--json", "stage", "HEAD", "--dry-run")
-    assert code == 0 and json.loads(out)["data"]["src"] and "deprecated" in err and not (demo / "wt").exists()
-
-
-def test_run_is_the_old_name_of_continue(demo: Path, capsys) -> None:
-    seed(demo, "a", "done")
-    code, out, err = edr(capsys, "--json", "run", "a@demo", "--stage", "pnr", "--on", "local", "--dry-run")
-    assert code == 0 and json.loads(out)["data"]["batch"] == "demo"
-    assert "edr: run is deprecated; use edr continue" in err
+@pytest.mark.parametrize("old,new", [("lic", "tools"), ("stage", "checkout"), ("run", "continue")])
+def test_a_removed_command_names_its_replacement(demo: Path, capsys, old: str, new: str) -> None:
+    code, out, err = edr(capsys, "--json", old, "x")
+    assert code == 1 and out == "" and err == f"edr: {old} was removed in 0.4.0; use edr {new}\n"
 
 
 def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Path, capsys) -> None:
