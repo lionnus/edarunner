@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class MailNotifier(Notifier):
-    """One SMTP server and its recipients; no buttons, no edits, no board."""
+    """One SMTP server and its recipients; buttons as command lines, no edits, the board on request only."""
 
     def __init__(self, project: Any, cfg: Mail) -> None:
         self.project = project
