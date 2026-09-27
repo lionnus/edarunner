@@ -29,7 +29,7 @@ PLOTLY_FILE = "plotly.min.js"
 PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED")
 # Sort rank on a board; the live rows go before the finished ones.
-_RANK = {"dead": 0, "failed": 0, "hung": 1, "incomplete": 1, "looping": 2, "over_budget": 3,
+RANK = {"dead": 0, "failed": 0, "hung": 1, "incomplete": 1, "looping": 2, "over_budget": 3,
          "host_full": 4, "killed": 4, "superseded": 5, "stopped": 5, "stale": 6, "running": 8, "done": 9}
 _SHORT = {"running": "RUN", "dead": "DEAD", "hung": "HUNG", "looping": "LOOP", "over_budget": "OVER",
           "host_full": "FULL", "superseded": "SUPER", "incomplete": "INC", "failed": "FAIL", "stopped": "STOP",
@@ -38,10 +38,6 @@ STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "
          "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
          "imported": "dim", "abandoned": "dim", "resumed": "cyan"}
-# One mark per state for a bot message.
-MARK = {"running": "🟢", "queued": "🔵", "resumed": "🔵", "stale": "🟡", "host_full": "🟡", "superseded": "🟡",
-        "dead": "🔴", "hung": "🔴", "looping": "🔴", "over_budget": "🔴", "orphan": "🔴", "failed": "🔴", "killed": "🔴",
-        "incomplete": "🟠", "done": "⚪", "retired": "⚫", "stopped": "⚫", "imported": "⚫", "abandoned": "⚫"}
 # No markup: a task in a metric key looks like a tag, `power_w[k_small]`.
 _OPTS = {"markup": False, "highlight": False, "emoji": False}
 
@@ -91,7 +87,7 @@ def state_of(row: Row) -> str:
 
 def order(rows: list[Row]) -> list[Row]:
     """Board order: live before finished, dead first, then by label. `#n` counts this order."""
-    return sorted(rows, key=lambda r: (not is_live(r), _RANK.get(state_of(r), 7), _s(r.get("label")), _s(r.get("run_id"))))
+    return sorted(rows, key=lambda r: (not is_live(r), RANK.get(state_of(r), 7), _s(r.get("label")), _s(r.get("run_id"))))
 
 
 def cost(row: Row, now: float | None = None) -> float:
@@ -163,7 +159,7 @@ def narrow(rows: list[Row], width: int = 48, now: float | None = None) -> str:
     live = [r for r in ordered if is_live(r)]
     counts = Counter(state_of(r) for r in ordered)
     head = time.strftime("%d.%m %H:%M", time.localtime(now)) + " " + " ".join(
-        f"{_SHORT.get(k, k)}:{v}" for k, v in sorted(counts.items(), key=lambda kv: _RANK.get(kv[0], 7)))
+        f"{_SHORT.get(k, k)}:{v}" for k, v in sorted(counts.items(), key=lambda kv: RANK.get(kv[0], 7)))
     lines = [head[:width], "-" * width]
     for n, r in enumerate(live, 1):
         st = state_of(r)
@@ -184,34 +180,6 @@ def narrow_text(rows: list[Row], width: int = 48, now: float | None = None) -> T
         if state:
             text.stylize(STYLE[state], m.start(1), m.end(1))
     return text
-
-
-def phone(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None, most: int = 30) -> str:
-    """Telegram HTML: `mark handle state · age` per run in board order, then the counts in italics.
-
-    A live run shows its stage and step; `totals` gives the step count of a stage.
-    """
-    now = now or time.time()
-    ordered = order(rows)
-    lines = []
-    for r in ordered[:most]:
-        st, parts = state_of(r), []
-        if st != "running":
-            parts.append(st)
-        if is_live(r) and r.get("stage"):
-            step = "" if r.get("step") is None else f" {r['step']}" + (
-                f"/{totals[r['stage']]}" if (totals or {}).get(r["stage"]) else "")
-            parts.append(f"{r['stage']}{step}")
-        parts.append(hm(_age_s(r, now)))
-        lines.append(f"{MARK.get(st, '⚪')} <code>{_h(handle(r))}</code> {_h(' · '.join(parts))}")
-    if len(ordered) > most:
-        lines.append(f"<i>… and {len(ordered) - most} more</i>")
-    if ordered and not any(is_live(r) for r in ordered):
-        lines.append("<i>nothing live</i>")
-    counts = Counter(state_of(r) for r in ordered)
-    lines.append("<i>" + (" · ".join(f"{v} {_h(k)}" for k, v in sorted(counts.items(), key=lambda kv: _RANK.get(kv[0], 7)))
-                          or "no runs") + "</i>")
-    return "\n".join(lines)
 
 
 def handle(row: Row) -> str:

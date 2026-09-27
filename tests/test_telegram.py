@@ -16,20 +16,26 @@ import pytest
 from edarunner import board
 from edarunner.model import BotCommand, Host, Site, Telegram
 from edarunner.notify import alert_buttons, make_notifiers
-from edarunner.notify import telegram as tgmod
-from edarunner.notify.telegram import LIMIT, TelegramBot, fit, pre
+from edarunner.notify.telegram import TelegramBot
+from edarunner.notify.telegram import api as tgapi
+from edarunner.notify.telegram import format as fmt
+from edarunner.notify.telegram.api import BotApi
+from edarunner.notify.telegram.format import LIMIT, fit, pre
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 CHAT = 42
 USER = 12345
 
 
-class FakeApi:
+class FakeApi(BotApi):
+    """Records every call; a send returns the next message id."""
+
     def __init__(self) -> None:
+        super().__init__("123:ABC")
         self.calls: list[tuple[str, dict]] = []
         self.n = 0
 
-    def __call__(self, method: str, params: dict, files=None) -> dict:
+    def call(self, method: str, params: dict, files=None) -> dict:
         self.calls.append((method, params))
         if method == "sendMessage":
             self.n += 1
@@ -89,9 +95,10 @@ def make_site(tmp_path: Path, chat_id: int = CHAT, mode: int = 0o600, user_id: i
 
 
 def make_project(tmp_path: Path) -> SimpleNamespace:
-    # A Project needs every stage; the bot reads three fields of it.
+    # A Project needs every stage; the bot reads a few fields of it.
     edr = tomllib.loads((DEMO / "edr.toml").read_text())
-    return SimpleNamespace(project=edr["project"], root=DEMO, data=tmp_path / "data", telegram_poll=True)
+    return SimpleNamespace(project=edr["project"], root=DEMO, data=tmp_path / "data", telegram_poll=True,
+                           site=SimpleNamespace(path=DEMO / "site.toml"))
 
 
 @pytest.fixture
@@ -340,11 +347,10 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     assert bot.api.of("pinChatMessage")[-1]["message_id"] == 2
 
 
-def test_api_obeys_429_retry_after(tmp_path, monkeypatch):
-    site = make_site(tmp_path)
-    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
+def test_api_obeys_429_retry_after(monkeypatch):
+    b = BotApi("123:ABC")
     slept: list[int] = []
-    monkeypatch.setattr(tgmod.time, "sleep", slept.append)
+    monkeypatch.setattr(tgapi.time, "sleep", slept.append)
     answers = [
         urllib.error.HTTPError("u", 429, "Too Many Requests", {}, io.BytesIO(b'{"ok":false,"parameters":{"retry_after":3}}')),
         io.BytesIO(b'{"ok":true,"result":{"message_id":9}}'),
@@ -357,35 +363,34 @@ def test_api_obeys_429_retry_after(tmp_path, monkeypatch):
             raise a
         return a
 
-    monkeypatch.setattr(tgmod, "urlopen", fake_urlopen)
-    assert b.api("sendMessage", {"chat_id": CHAT, "text": "x"}) == {"message_id": 9}
+    monkeypatch.setattr(tgapi, "urlopen", fake_urlopen)
+    assert b.call("sendMessage", {"chat_id": CHAT, "text": "x"}) == {"message_id": 9}
     assert slept == [3]
     answers.append(urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b'{"description":"Bad Request: message is not modified"}')))
-    assert b.api("editMessageText", {"chat_id": CHAT}) == {}
+    assert b.call("editMessageText", {"chat_id": CHAT}) == {}
     answers.append(urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b'{"description":"Bad Request: chat not found"}')))
-    with pytest.raises(tgmod.ApiError, match="chat not found"):
-        b.api("sendMessage", {"chat_id": CHAT})
+    with pytest.raises(tgapi.ApiError, match="chat not found"):
+        b.call("sendMessage", {"chat_id": CHAT})
 
 
-def test_api_retries_idempotent_methods_only(tmp_path, monkeypatch):
-    site = make_site(tmp_path)
-    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
+def test_api_retries_idempotent_methods_only(monkeypatch):
+    b = BotApi("123:ABC")
     slept: list[int] = []
-    monkeypatch.setattr(tgmod.time, "sleep", slept.append)
+    monkeypatch.setattr(tgapi.time, "sleep", slept.append)
     tries: list[str] = []
 
     def fake_urlopen(req, timeout):
         tries.append(req.full_url.rsplit("/", 1)[1])
         raise TimeoutError("timed out")
 
-    monkeypatch.setattr(tgmod, "urlopen", fake_urlopen)
-    with pytest.raises(tgmod.ApiError, match="sendMessage: timed out"):
-        b.api("sendMessage", {"chat_id": CHAT, "text": "x"})
+    monkeypatch.setattr(tgapi, "urlopen", fake_urlopen)
+    with pytest.raises(tgapi.ApiError, match="sendMessage: timed out"):
+        b.call("sendMessage", {"chat_id": CHAT, "text": "x"})
     assert tries == ["sendMessage"] and slept == []
     for method in ("getUpdates", "editMessageText", "answerCallbackQuery"):
         tries.clear()
-        with pytest.raises(tgmod.ApiError, match=method):
-            b.api(method, {"chat_id": CHAT})
+        with pytest.raises(tgapi.ApiError, match=method):
+            b.call(method, {"chat_id": CHAT})
         assert tries == [method] * 3
     assert slept == [5, 10, 15] * 3
 
@@ -407,16 +412,15 @@ def test_poll_survives_a_bad_response(bot, monkeypatch):
         bot._stop.set()
         return []
 
-    monkeypatch.setattr(bot, "api", api)
-    monkeypatch.setattr(tgmod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(bot.api, "call", api)
+    monkeypatch.setattr(tgapi.time, "sleep", lambda s: None)
     bot._poll()
     assert calls == ["getUpdates", "getUpdates"]
 
 
-def test_api_turns_a_bad_body_into_apierror(tmp_path, monkeypatch):
-    site = make_site(tmp_path)
-    b = TelegramBot(site, make_project(tmp_path), FakeLedger(), FakeActions(), str(site.telegram.token_file))
-    monkeypatch.setattr(tgmod.time, "sleep", lambda s: None)
+def test_api_turns_a_bad_body_into_apierror(monkeypatch):
+    b = BotApi("123:ABC")
+    monkeypatch.setattr(tgapi.time, "sleep", lambda s: None)
     html = b"<html>502 Bad Gateway</html>"
     answers = [urllib.error.HTTPError("u", 502, "Bad Gateway", {}, io.BytesIO(html))] + [io.BytesIO(html) for _ in range(3)]
 
@@ -426,11 +430,11 @@ def test_api_turns_a_bad_body_into_apierror(tmp_path, monkeypatch):
             raise a
         return a
 
-    monkeypatch.setattr(tgmod, "urlopen", fake_urlopen)
-    with pytest.raises(tgmod.ApiError, match="502"):
-        b.api("getUpdates", {"offset": None})
-    with pytest.raises(tgmod.ApiError, match="Expecting value"):
-        b.api("getUpdates", {"offset": None})
+    monkeypatch.setattr(tgapi, "urlopen", fake_urlopen)
+    with pytest.raises(tgapi.ApiError, match="502"):
+        b.call("getUpdates", {"offset": None})
+    with pytest.raises(tgapi.ApiError, match="Expecting value"):
+        b.call("getUpdates", {"offset": None})
     assert answers == []
 
 
@@ -446,9 +450,9 @@ def test_pre_escapes_and_cuts():
 
 
 def test_every_run_state_has_a_mark():
-    states = set(board.STYLE) | set(board._RANK) | {"queued", "orphan", "retired", "imported"}
+    states = set(board.STYLE) | set(board.RANK) | {"queued", "orphan", "retired", "imported"}
     states |= {t.lower() for t in board.TERMINAL}
-    assert states <= set(board.MARK) and len(set(board.MARK.values())) == 7
+    assert states <= set(fmt.MARK) and len(set(fmt.MARK.values())) == 7
 
 
 def test_a_long_reply_is_cut_at_a_line(bot):
