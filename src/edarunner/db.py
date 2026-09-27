@@ -21,8 +21,11 @@ CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task T
   source_file TEXT, extracted_at INTEGER, PRIMARY KEY(run_id, stage, step, task, name));
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, ts INTEGER, actor TEXT, run_id TEXT, kind TEXT, text TEXT);
-CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
 """
+
+# A table of an older schema, with its current name.
+_RENAMED = {"kv": "store"}
 
 _PK = {
     "batches": ("batch",),
@@ -67,8 +70,20 @@ class Database:
         self.conn.close()
 
     def init_schema(self) -> None:
-        """Create every table that does not exist yet."""
-        self.conn.executescript(DDL)
+        """Rename every table of an older schema and create every table that does not exist yet, in one transaction."""
+        self.conn.commit()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            tables = {r["name"] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for old, new in _RENAMED.items():
+                if old in tables and new not in tables:
+                    self.conn.execute(f"ALTER TABLE {old} RENAME TO {new}")
+            for stmt in DDL.split(";"):
+                if stmt.strip():
+                    self.conn.execute(stmt)
+        except BaseException:
+            self.conn.rollback()
+            raise
         # A database made before a column existed gets it here; SQLite adds a NULL column in place.
         if "tree_id" not in self._table_columns("runs"):
             self.conn.execute("ALTER TABLE runs ADD COLUMN tree_id TEXT")
@@ -144,14 +159,14 @@ class Database:
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def set_kv(self, key: str, value: Any) -> None:
+    def set_store(self, key: str, value: Any) -> None:
         """Store `value` as JSON under `key`; a key already present is replaced."""
-        self.conn.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?, ?)", (key, json.dumps(value)))
+        self.conn.execute("INSERT OR REPLACE INTO store(key, value) VALUES(?, ?)", (key, json.dumps(value)))
         self.conn.commit()
 
-    def get_kv(self, key: str, default: Any = None) -> Any:
+    def get_store(self, key: str, default: Any = None) -> Any:
         """The value stored under `key`, or `default`."""
-        row = self.conn.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        row = self.conn.execute("SELECT value FROM store WHERE key=?", (key,)).fetchone()
         return default if row is None else json.loads(row["value"])
 
     def mark_batch_retired(self, batch: str) -> None:

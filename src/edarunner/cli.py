@@ -158,7 +158,7 @@ class Ctx:
     def resolve(self, handle: str) -> Row:
         """The database row of label@batch, a run id prefix, or #n from the last board."""
         try:
-            run_id = self.db.resolve(handle, self.db.get_kv("last_board"))
+            run_id = self.db.resolve(handle, self.db.get_store("last_board"))
         except KeyError as e:
             raise Refuse(str(e.args[0])) from None
         row = self.db.run(run_id)
@@ -173,7 +173,7 @@ class Ctx:
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""
         if rows:
-            self.db.set_kv("last_board", [r["run_id"] for r in board.order(rows)])
+            self.db.set_store("last_board", [r["run_id"] for r in board.order(rows)])
 
 
 # --- texts shared by the commands and the bot

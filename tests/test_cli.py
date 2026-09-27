@@ -148,7 +148,7 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "status")
     assert code == 0 and "b_nodw" in out and "done" in out and out.startswith("#")
     with Database(demo / "data" / "edr.db") as db:
-        last = db.get_kv("last_board")
+        last = db.get_store("last_board")
     assert last == [r["run_id"] for r in board.order([{"run_id": a, "phase": "done"}, {"run_id": b, "phase": "stage:synth", "label": "b_nodw"}, {"run_id": q, "state": "queued", "label": "q"}])]
     code, out, _ = edr(capsys, "status", "#1")
     assert code == 0 and out.startswith(last[0])
@@ -315,7 +315,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4, 0m", "⚪ <code>a@demo</code> done, 0m",
                                                "<i>1 running, 1 done</i>"]
     with Database(demo / "data" / "edr.db") as db:
-        assert len(db.get_kv("last_board")) == 2
+        assert len(db.get_store("last_board")) == 2
     one = acts.status_text("b_nodw@demo").splitlines()
     assert one == ["🟢 <code>b_nodw@demo</code> running", "stage synth, step 2 elaborate", "on local, 0m",
                    "<pre>step 2 elaborate</pre>"]

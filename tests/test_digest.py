@@ -14,9 +14,9 @@ from test_watch import NOW, Env, env, rid  # noqa: F401  (the fixture of test_wa
 def fill(e: Env) -> None:
     """Five runs, one of them before the last digest, a keep file with ack, and four host probes."""
     db = e.db
-    db.set_kv("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
+    db.set_store("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
     alert = {"state": "hung", "msgs": {"hung": {"text": "no progress", "ids": ["1"]}}}
-    db.set_kv("notified", {rid("h"): alert, rid("k"): alert, rid("c"): {"state": "running"}})
+    db.set_store("notified", {rid("h"): alert, rid("k"): alert, rid("c"): {"state": "running"}})
     rows = [("a", "done", None, NOW - 600), ("f", "FAILED:3", None, NOW - 2 * 86400),
             ("c", "stage:synth", "running", NOW - 60), ("h", "stage:pnr", "hung", NOW - 60),
             ("k", "stage:pnr", "hung", NOW - 60), ("q", None, "queued", None)]
@@ -73,7 +73,7 @@ def test_the_digest_is_due_once_a_day_from_its_hour(env: Env) -> None:
     assert d.due(NOW) and not d.due(NOW - 60)
     d.mark_sent(NOW)
     assert not d.due(NOW + 60) and d.due(NOW + 86400)
-    assert env.db.get_kv("digest")["ts"] == NOW
+    assert env.db.get_store("digest")["ts"] == NOW
 
 
 def test_the_cycle_sends_the_digest_once(env: Env) -> None:

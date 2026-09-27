@@ -15,7 +15,7 @@ frozen snapshot of one design from it for a paper.
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
-| `kv` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and the `telegram` message ids |
+| `store` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and the `telegram` message ids |
 
 `data/results/<run_id>/` holds the collected files in the layout of the
 run tree, so a metric's `source_file` is a path under it.

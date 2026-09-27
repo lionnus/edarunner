@@ -34,7 +34,7 @@ service up.
    `limits.digest_at`.
 9. Write `<state>/watch.json` with the time, the cycle count and the pid.
 
-Its memory between cycles is three rows of the database's `kv` table:
+Its memory between cycles is three rows of the database's `store` table:
 `progress`, what each run looked like last time, `notified`, the
 states, the alerts sent and the grace clocks, and `digest`, the day and
 the time of the last digest.
@@ -75,7 +75,7 @@ Every cycle writes `data/board/`:
 | `compare.html` | the runs with their params as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
 
 The row order of the last text board is the `last_board` row of the
-database's `kv` table, so `#n` resolves.
+database's `store` table, so `#n` resolves.
 
 `compare.html` is one self-contained page over the database's runs, params
 and metrics. Its tables work as they are. The plots (a metric over the

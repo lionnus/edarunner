@@ -2,7 +2,7 @@
 
 The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a file or a tree. Its memory between cycles
-is two rows of the database's kv table: progress (what each run looked
+is two rows of the database's store table: progress (what each run looked
 like last time) and notified (states, alerts, grace clocks).
 """
 
@@ -401,7 +401,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
           dry_run: bool = False) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing."""
     now = time.time() if now is None else now
-    progress, notes = db.get_kv("progress", {}), db.get_kv("notified", {})
+    progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
     heartbeats = read_heartbeats(project)
     if not dry_run:
         ingest(db, heartbeats)
@@ -434,8 +434,8 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         for n in notifiers:
             n.post("digest", text)
         digest.mark_sent(now)
-    db.set_kv("progress", progress)
-    db.set_kv("notified", notes)
+    db.set_store("progress", progress)
+    db.set_store("notified", notes)
     n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1
     config.save_json(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states

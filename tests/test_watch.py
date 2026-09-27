@@ -162,7 +162,7 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert env.notifier.texts[rid("d")][1].startswith("edr run d@demo --stage ")
     bdir = env.project.data / "board"
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
-    assert set(env.db.get_kv("progress")) == set(states) and rid("d") in env.db.get_kv("notified")
+    assert set(env.db.get_store("progress")) == set(states) and rid("d") in env.db.get_store("notified")
     assert len(json.loads((bdir / "board.json").read_text())["runs"]) == 9
     assert f'<script src="{board.PLOTLY_URL}">' in (bdir / "compare.html").read_text()
     assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 1

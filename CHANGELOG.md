@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The database table `kv` is now `store`, and `Database.get_kv` and
+  `set_kv` are `get_store` and `set_store`. An existing `data/edr.db`
+  migrates on the first open.
+
 ## 0.2.0 (2026-09-27)
 
 - The SQLite ledger is now the run database: `ledger.py` is `db.py`,
