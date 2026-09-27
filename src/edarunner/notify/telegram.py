@@ -153,7 +153,9 @@ class TelegramBot(Notifier):
     def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
              cmd: str | None = None) -> str | None:
         """Send one alert; a repeat with the same kind and run id edits it in place."""
-        markup = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]} if buttons else None
+        # A press reaches the watcher that polls, which acts on its own project only.
+        markup = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]} if (
+            buttons and self.project.telegram_poll) else None
         try:
             return str(self._upsert(f"alert:{kind}:{run_id}", self.alert(text, cmd), markup))
         except ApiError as e:
@@ -244,7 +246,7 @@ class TelegramBot(Notifier):
                 self._rejected.add(who)
                 self._event("rejected", f"chat {who} ignored")
                 if self.chat_id == 0:
-                    print(f"telegram: the first message came from chat {who}; set chat_id = {who} in site.toml", file=sys.stderr)
+                    print(f"telegram: the first message came from chat {who}; set chat_id = {who} in [telegram]", file=sys.stderr)
             return
         if self.user_id and actor != self.user_id:
             if actor not in self._rejected:

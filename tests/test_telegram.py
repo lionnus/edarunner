@@ -278,8 +278,8 @@ def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
     b.start()
     b.stop()
     assert b._thread is None and b.api.of("setMyCommands") == []
-    b.send("dead", "a@demo", "no heartbeat")
-    assert len(b.api.of("sendMessage")) == 1
+    b.send("dead", "a@demo", "no heartbeat", alert_buttons("a@demo"))
+    assert len(b.api.of("sendMessage")) == 1 and b.api.of("sendMessage")[0]["reply_markup"] is None
 
 
 def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):

@@ -32,7 +32,7 @@ webhook. `docs/configuration.md` lists the keys of `[telegram]`.
    the first message it receives to stderr:
 
    ```
-   telegram: the first message came from chat 987654321; set chat_id = 987654321 in site.toml
+   telegram: the first message came from chat 987654321; set chat_id = 987654321 in [telegram]
    ```
 
 5. Put that number in `chat_id` and restart `edr watch`. The bot now
@@ -169,15 +169,42 @@ or the bot replies `refused: <name> must match <regex>`, records the
 refusal in the ledger, and runs nothing. Write the regex as an allowlist
 of the exact values you expect.
 
-## Several projects
+## One chat, or one per project
+
+The default is one bot in one chat for every project of a site. The bold
+first line of every message names the project, so the messages of two
+projects stay apart.
 
 Telegram lets one consumer poll a bot token. Two watchers on one token
-fight over the updates and each sees half of them. Either give every
-project its own bot (a `token_file` per site file, or one site file per
-project), or set `telegram_poll = false` in `edr.toml` of every project
-but one. A project without the poll still sends its alerts and its
-board to the chat; the commands and the buttons reach the one watcher
-that polls, and act on its project.
+fight over the updates and each sees half of them. So with one bot, set
+`telegram_poll = false` in `edr.toml` of every project but one. A
+project without the poll sends its alerts and its board to the chat, but
+its alerts carry no buttons. The commands reach the one watcher that
+polls, and act on its project only.
+
+A chat per project, such as one Telegram group per project, needs a bot
+per project, because each watcher must poll its own token. To set it
+up:
+
+1. Make one more bot with @BotFather, as in "Set up the bot". Write its
+   token to its own file, mode 600, for example
+   `~/.config/edarunner/myflow.token`.
+2. Make a group, add the bot, and send `/start` in the group.
+3. Add a `[telegram]` table to `edr.toml` of that project:
+
+   ```toml
+   [telegram]
+   token_file = "~/.config/edarunner/myflow.token"
+   chat_id = 0
+   ```
+
+4. Restart the watcher of that project. It prints the chat id of the
+   group to stderr. A group id is negative. Put it in `chat_id` and
+   restart the watcher again.
+
+The table in `edr.toml` replaces `token_file`, `chat_id` and `user_id`
+of the site for this project only; the custom commands stay in
+`site.toml`. Keep `telegram_poll = true` in a project with its own bot.
 
 ## Security
 
