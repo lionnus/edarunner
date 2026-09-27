@@ -127,6 +127,11 @@ The source of this flow keeps its PDK in a directory that git ignores, so
 `edr stage --dirty <tree>` snapshots the working tree instead of adding a
 worktree. The run id then carries `-dirty-<hash of the diff>`.
 
+`examples/openroad-gcd/` runs this shape on an open flow in CI: the GCD design
+of OpenROAD-flow-scripts on nangate45, three stages `synth`, `floorplan` and
+`place`, one `make` target each. The area comes from `synth_stat.txt`, the
+area and the slack of each later stage from the METRICS2.1 JSON of ORFS.
+
 ## Which shape to choose
 
 Cut a stage where the tool session ends, or where you want a budget, a

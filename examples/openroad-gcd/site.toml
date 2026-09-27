@@ -1,0 +1,10 @@
+# Site file of the GCD example: the head node alone.
+schema = 1
+scratch = ["/tmp"]
+env = {}
+ssh = { options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"], timeout_s = 20 }
+tool_procs = "^(openroad|yosys)$"
+
+[hosts.local]
+cores = 2
+ram_gb = 7
