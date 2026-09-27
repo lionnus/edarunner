@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from edarunner import config, launch, sync
-from edarunner.guards import Refuse
+from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.ledger import Ledger
 
@@ -261,8 +261,14 @@ def test_launch_refuses_a_dirty_source(env) -> None:
         launch.launch(project, batch, ssh, ledger, dry_run=True)
 
 
+def test_guard_refuses_a_root_a_top_level_directory_and_home() -> None:
+    for bad in ("/", "/x", "/edr", "/edr/", os.path.expanduser("~"), "/a/edr/../.."):
+        with pytest.raises(Refuse, match="root"):
+            assert_safe_target(bad, "/edr/", 1)
+    assert assert_safe_target("/edr/x", "/edr/", 1) == Path("/edr/x")
+
+
 def test_guard_normalizes_dotdot(tmp_path: Path) -> None:
-    from edarunner.guards import assert_safe_target
     for bad in ("/a/edr/b/c/../../../..", f"{tmp_path}/edr/../../{tmp_path.name}", "/scratch2/u/edr/x/../../../.."):
         with pytest.raises(Refuse):
             assert_safe_target(bad, "/edr/", 4)
