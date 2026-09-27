@@ -1,8 +1,9 @@
 # The local demo
 
-This project runs on the head node alone, with a fake flow. Every `edr`
-command works here without an EDA tool, a licence or a second host. The
-tests build on it, and it is the shortest way to see the tool at work.
+This project runs a scripted stand-in for an EDA flow on the head node.
+It needs no EDA tool, no licence and no second host. The unit tests,
+`tests/test_e2e_local.py` and the condor and slurm CI jobs run it. For a first
+run with real tools, take `examples/openroad-gcd` instead.
 
 ## What the flow fakes
 
