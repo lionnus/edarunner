@@ -40,7 +40,7 @@ RETRIES = {"getUpdates", "editMessageText", "answerCallbackQuery"}
 BUILTINS = {
     "status": "the narrow board",
     "events": "the last events: /events [n]",
-    "hosts": "free cores, RAM and scratch per host",
+    "hosts": "cores, RAM, scratch and GPUs per host, used or free of total",
     "lic": "free licence seats",
     "board": "pin a new board message",
     "keep": "add hours to a run: /keep <handle> [hours]",

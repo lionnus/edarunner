@@ -194,15 +194,26 @@ def _probe_rows(c: Ctx) -> list[Row]:
 
 
 def _hosts_table(rows: list[Row], narrow: bool) -> Table:
-    head = ["host", "cores", "ram_gb", "free_gb"] + ([] if narrow else ["mount", "tools", "runs"])
+    """One row per host: used or free of total, a bar for the cores and the scratch, GPUs when the host has any."""
+    head = ["host", "cores", "ram GB", "scratch GB", "gpu"] if narrow else [
+        "host", "cores", "", "load", "ram GB", "mount", "scratch GB", "", "gpu", "gpu GB", "tools", "runs"]
     body = []
     for r in rows:
         if "error" in r:
-            body.append([r["host"], Text("error: " + r["error"], style="red")])
+            body.append([r["host"], Text("error: " + r["error"], style="red", justify="left")])
             continue
-        body.append([r["host"], r["free_cores"], r["free_ram_gb"], r["free_gb"]] + ([] if narrow else [
-            r["mount"], f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]]))
-    return board.table(head, body, styles={"host": "bold", "mount": "dim"}, right=("cores", "ram_gb", "free_gb", "tools", "runs"))
+        cores, used = r["cores"], max(0, min(r["cores"], round(r["load"])))
+        ram, disk = f"{r['free_ram_gb']:g}/{r['total_ram_gb']:g}", f"{r['free_gb']:g}/{r['total_gb']:g}"
+        gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
+        if narrow:
+            body.append([r["host"], f"{used}/{cores}", ram, disk, gpu])
+            continue
+        body.append([r["host"], f"{used}/{cores}", board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
+                     board.bar(r["total_gb"] - r["free_gb"], r["total_gb"]), gpu,
+                     f"{r['gpu_used_gb']:g}/{r['gpu_total_gb']:g}" if r["gpus"] else "-",
+                     f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]])
+    return board.table(head, body, styles={"host": "bold", "mount": "dim"},
+                       right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
 
 
 def _lic_rows(c: Ctx) -> list[Row]:
@@ -307,7 +318,7 @@ class Actions:
         return board.plain(_events_table(self.c, self.c.ledger.events(n=n)))
 
     def hosts_text(self) -> str:
-        return board.plain(_hosts_table(_probe_rows(self.c), narrow=True))
+        return board.plain(_hosts_table(_probe_rows(self.c), narrow=True), width=48)
 
     def lic_text(self) -> str:
         return board.plain(_lic_table(_lic_rows(self.c)))
@@ -402,6 +413,9 @@ def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
     """Probe every site host."""
     rows = _probe_rows(c)
+    if a.narrow:
+        # A long cell, such as an error, folds inside its column instead of widening the table.
+        c.console.width = 48
     c.emit(_hosts_table(rows, a.narrow), rows)
     return 3 if any("error" in r for r in rows) else 0
 

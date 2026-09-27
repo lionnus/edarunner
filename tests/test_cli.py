@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from edarunner import board, cli, config, launch
-from edarunner.hosts import Ssh
+from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.ledger import Ledger
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -405,8 +405,9 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
 
 def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
-    assert code == 0 and out.splitlines()[0].split() == ["host", "cores", "ram_gb", "free_gb", "mount", "tools", "runs"]
-    assert out.splitlines()[2].split()[0] == "local" and str(tmp_path / "scratch") in out
+    head, row = out.splitlines()[0], out.splitlines()[2]
+    assert code == 0 and head.split() == ["host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
+    assert row.split()[0] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
     code, out, _ = edr(capsys, "lic")
@@ -419,6 +420,43 @@ def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
 
 
 # run (reuse), watch, bad input
+
+
+def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
+    site = demo / "site.toml"
+    site.write_text(site.read_text() + "\n[hosts.hostA]\ncores = 64\nram_gb = 256\n\n[hosts.hostB]\ncores = 32\nram_gb = 128\n")
+    probes = {
+        "local": HostProbe("local", 7.8, 35.0, "/tmp/x", 15.5, 3, 0, 0, cores=8, load=0.2, total_ram_gb=62.3, total_gb=15.6),
+        "hostA": HostProbe("hostA", 12.5, 120.0, "/scratch", 800.0, 4, 2, 3, cores=64, load=51.5, total_ram_gb=256.0,
+                           total_gb=2000.0, gpus=4, gpus_idle=1, gpu_used_gb=30.0, gpu_total_gb=320.0),
+    }
+
+    def probe(self, host):
+        if host in probes:
+            return probes[host]
+        raise HostError(f"{host}: rc 255: timeout")
+
+    monkeypatch.setattr(Ssh, "probe", probe)
+    code, out, _ = edr(capsys, "hosts")
+    lines = out.splitlines()
+    assert code == 3 and len(lines) == 5 and "\x1b" not in out
+    a = next(ln for ln in lines if ln.startswith("hostA"))
+    assert a.split() == ["hostA", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "120/256", "/scratch", "800/2000",
+                         "\u2588" * 5 + "\u2591" * 3, "1/4", "30/320", "4/2", "3"]
+    local = next(ln for ln in lines if ln.startswith("local"))
+    assert local.split() == ["local", "0/8", "\u2591" * 8, "0.2", "35/62.3", "/tmp/x", "15.5/15.6", "\u2591" * 8, "-", "-", "3/0", "0"]
+    assert next(ln for ln in lines if ln.startswith("hostB")).split()[1:] == ["error:", "hostB:", "rc", "255:", "timeout"]
+    code, out, _ = edr(capsys, "hosts", "--narrow")
+    lines = out.splitlines()
+    assert code == 3 and all(len(ln) <= 48 for ln in lines)
+    assert lines[0].split() == ["host", "cores", "ram", "GB", "scratch", "GB", "gpu"]
+    assert next(ln for ln in lines if ln.startswith("hostA")).split() == ["hostA", "52/64", "120/256", "800/2000", "1/4"]
+    code, out, _ = edr(capsys, "--json", "hosts")
+    data = {r["host"]: r for r in json.loads(out)["data"]}
+    assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    text = acts.hosts_text()
+    assert "\x1b" not in text and text.splitlines()[0].split()[0] == "host" and all(len(ln) <= 48 for ln in text.splitlines())
 
 
 def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:

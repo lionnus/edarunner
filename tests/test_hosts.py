@@ -109,10 +109,11 @@ def test_probe_local(ssh: Ssh, tmp_path: Path) -> None:
     finally:
         tool.kill(), driver.kill(), tool.wait(), driver.wait()
     assert p.host == "local"
-    assert 0 < p.free_cores <= os.cpu_count()
-    assert p.free_ram_gb > 0
-    assert p.mount == str(tmp_path) and p.free_gb > 0
+    assert 0 < p.free_cores <= os.cpu_count() == p.cores and p.load >= 0
+    assert 0 < p.free_ram_gb <= p.total_ram_gb
+    assert p.mount == str(tmp_path) and 0 < p.free_gb <= p.total_gb
     assert p.our_tool_procs >= 1 and p.our_runs >= 1
+    assert p.gpus >= p.gpus_idle >= 0 and p.gpu_total_gb >= p.gpu_used_gb >= 0
 
 
 def test_probe_picks_largest_writable_scratch(ssh: Ssh, tmp_path: Path) -> None:
@@ -124,15 +125,31 @@ def test_probe_picks_largest_writable_scratch(ssh: Ssh, tmp_path: Path) -> None:
     assert ssh.probe("local").mount == str(tmp_path)
 
 
-def test_probe_parses_canned_output(ssh: Ssh, monkeypatch) -> None:
-    out = "\n".join([
-        "me", "8", "2.5", "38750732", "@@",
-        "/scratch 104857600", "/scratch2 209715200", "@@",
-        "me sleep", "other sleep", "me bash", "me sleep", "@@",
-        "me python3 /x/edr_driver.py a.json", "other python3 /y/edr_driver.py b.json", "",
-    ])
+CANNED = [
+    "me", "8", "2.5", "65536000", "38750732", "@@",
+    "/scratch 209715200 104857600", "/scratch2 1048576000 209715200", "@@",
+    "me sleep", "other sleep", "me bash", "me sleep", "@@",
+    "me python3 /x/edr_driver.py a.json", "other python3 /y/edr_driver.py b.json", "@@",
+]
+
+
+def test_probe_parses_canned_output_with_gpus(ssh: Ssh, monkeypatch) -> None:
+    # One idle GPU, one busy by memory, one busy by utilisation, and a line nvidia-smi could not fill.
+    out = "\n".join([*CANNED, "512, 81920, 0", "40960, 81920, 2", "1024, 81920, 87", "[N/A], 81920, 0", ""])
     fake_run(monkeypatch, {"nproc": (0, out, "")})
-    assert ssh.probe("h") == HostProbe("h", 5.5, 37.0, "/scratch2", 200.0, 2, 1, 1)
+    assert ssh.probe("h") == HostProbe("h", 5.5, 37.0, "/scratch2", 200.0, 2, 1, 1, cores=8, load=2.5,
+                                       total_ram_gb=62.5, total_gb=1000.0, gpus=3, gpus_idle=1,
+                                       gpu_used_gb=41.5, gpu_total_gb=240.0)
+
+
+def test_probe_parses_canned_output_without_gpus(ssh: Ssh, monkeypatch) -> None:
+    fake_run(monkeypatch, {"nproc": (0, "\n".join([*CANNED, ""]), "")})
+    p = ssh.probe("h")
+    assert (p.gpus, p.gpus_idle, p.gpu_used_gb, p.gpu_total_gb) == (0, 0, 0.0, 0.0)
+    assert (p.free_cores, p.cores, p.free_gb, p.total_gb) == (5.5, 8, 200.0, 1000.0)
+    calls = fake_run(monkeypatch, {"nproc": (0, "\n".join([*CANNED, ""]), "")})
+    ssh.probe("h")
+    assert "command -v nvidia-smi" in calls[0][1] and "utilization.gpu" in calls[0][1]
 
 
 def test_probe_failure_raises(ssh: Ssh, monkeypatch) -> None:

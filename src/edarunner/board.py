@@ -64,6 +64,13 @@ def state_text(state: Any) -> Text:
     return Text(_s(state) or "-", style=STYLE.get(_s(state), ""))
 
 
+def bar(used: float, total: float, width: int = 8) -> Text:
+    """A used-of-total bar: green below 70 %, yellow below 90 %, red above."""
+    frac = min(1.0, max(0.0, used / total)) if total else 0.0
+    n = round(frac * width)
+    return Text("\u2588" * n + "\u2591" * (width - n), style="green" if frac < 0.7 else "yellow" if frac < 0.9 else "red")
+
+
 # row helpers
 
 def is_live(row: Row) -> bool:

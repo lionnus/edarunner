@@ -37,6 +37,14 @@ class HostProbe:
     our_tool_procs: int = 0
     other_tool_procs: int = 0
     our_runs: int = 0
+    cores: int = 0
+    load: float = 0.0
+    total_ram_gb: float = 0.0
+    total_gb: float = 0.0
+    gpus: int = 0
+    gpus_idle: int = 0
+    gpu_used_gb: float = 0.0
+    gpu_total_gb: float = 0.0
 
 
 # Placement
@@ -101,13 +109,26 @@ def _text(data: bytes | str | None) -> str:
 def _probe_cmd(dirs: list[str]) -> str:
     quoted = " ".join(shlex.quote(d) for d in dirs)
     return (
-        "id -un; nproc; cut -d' ' -f1 /proc/loadavg; awk '/^MemAvailable:/{print $2}' /proc/meminfo; "
+        "id -un; nproc; cut -d' ' -f1 /proc/loadavg; "
+        "awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print t; print a}' /proc/meminfo; "
         f"echo {_SEP}; for d in {quoted}; do "
-        '[ -w "$d" ] && df -Pk "$d" | awk -v d="$d" \'NR==2{print d, $4}\'; done; '
+        '[ -w "$d" ] && df -Pk "$d" | awk -v d="$d" \'NR==2{print d, $2, $4}\'; done; '
         f"echo {_SEP}; ps -eo user:32=,comm=; "
         # The bracket keeps this shell and the grep out of the count.
-        f"echo {_SEP}; ps -eww -o user:32=,args= | grep '[e]dr_driver.py'; true"
+        f"echo {_SEP}; ps -eww -o user:32=,args= | grep '[e]dr_driver.py'; "
+        f"echo {_SEP}; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi "
+        "--query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null; true"
     )
+
+
+def _gpus(lines: list[str]) -> list[tuple[int, int, int]]:
+    """(used MiB, total MiB, utilisation %) per well-formed nvidia-smi line."""
+    out = []
+    for ln in lines:
+        parts = [p.strip() for p in ln.split(",")]
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            out.append((int(parts[0]), int(parts[1]), int(parts[2])))
+    return out
 
 
 def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
@@ -117,11 +138,12 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
             sections.append([])
         elif line.strip():
             sections[-1].append(line)
-    if len(sections) != 4 or len(sections[0]) != 4:
+    if len(sections) != 5 or len(sections[0]) != 5:
         raise HostError(f"{host}: unreadable probe output: {out[:200]!r}")
-    me, ncpu, load, mem_kb = (s.strip() for s in sections[0])
-    scratch = [(int(kb), d) for d, kb in (ln.rsplit(None, 1) for ln in sections[1])]
-    free_kb, mount = max(scratch) if scratch else (0, "")
+    me, ncpu, load, ram_kb, mem_kb = (s.strip() for s in sections[0])
+    scratch = [(int(free), int(total), d) for d, total, free in (ln.rsplit(None, 2) for ln in sections[1])]
+    free_kb, total_kb, mount = max(scratch) if scratch else (0, 0, "")
+    gpus = _gpus(sections[4])
     rx = re.compile(tool_procs) if tool_procs else None
     ours = others = 0
     for line in sections[2]:
@@ -141,6 +163,14 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
         our_tool_procs=ours,
         other_tool_procs=others,
         our_runs=runs,
+        cores=int(ncpu),
+        load=float(load),
+        total_ram_gb=round(int(ram_kb) / 2**20, 1),
+        total_gb=round(total_kb / 2**20, 1),
+        gpus=len(gpus),
+        gpus_idle=sum(1 for used, total, util in gpus if util < 5 and used < 0.05 * total),
+        gpu_used_gb=round(sum(g[0] for g in gpus) / 1024, 1),
+        gpu_total_gb=round(sum(g[1] for g in gpus) / 1024, 1),
     )
 
 
@@ -188,7 +218,7 @@ class Ssh:
         return list(h.scratch) if h and h.scratch else list(self.site.scratch)
 
     def probe(self, host: str) -> HostProbe:
-        """Free cores, RAM, the largest writable scratch and the tool processes of `host`."""
+        """Cores, RAM, the largest writable scratch, the GPUs and the tool processes of `host`, free and total."""
         out = self._run_ok(host, _probe_cmd(self.scratch_dirs(host)))
         return _parse_probe(host, out, self.site.tool_procs)
 
