@@ -340,7 +340,7 @@ def test_a_button_press_records_one_event(demo: Path, tmp_path: Path) -> None:
     ctx = cli.Ctx(argparse.Namespace(json=False, dry_run=False))
     ctx.project.site.telegram = Telegram(token_file=token, chat_id=42)
     bot = TelegramBot(ctx.project.site, ctx.project, ctx.ledger, cli.Actions(ctx), str(token))
-    bot.api = lambda method, params, files=None: {}
+    bot.api.call = lambda method, params, files=None: {}
     press = {"id": "q", "from": {"id": 7}, "data": "ack:b_nodw@demo",
              "message": {"message_id": 1, "chat": {"id": 42}, "text": "dead b_nodw@demo"}}
     bot.handle_update({"update_id": 1, "callback_query": press})

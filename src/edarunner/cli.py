@@ -17,14 +17,11 @@ import json
 import logging
 import os
 import posixpath
-import re
 import shlex
 import shutil
 import sys
-import textwrap
 import time
 from dataclasses import asdict
-from html import escape as esc
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -40,6 +37,7 @@ from .hosts import HostError, HostProbe, Ssh
 from .ledger import Ledger
 from .model import Batch, Job, Project
 from .notify import make_notifiers
+from .notify.telegram import format as tgfmt
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 Row = dict[str, Any]
@@ -318,55 +316,23 @@ class Actions:
         if handle is None:
             rows = self.c.rows()
             self.c.save_board(rows)
-            return board.phone(rows, totals=metrics.step_totals(self.c.project))
+            return tgfmt.board(rows, totals=metrics.step_totals(self.c.project))
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.ledger.run(row["run_id"]) or row
-        hb = self.c.heartbeat(row)
-        state = board.state_of(row)
-        step = " ".join(str(v) for v in (hb.get("step") or row.get("step"), hb.get("step_name")) if v not in (None, ""))
-        age = board.hm(None if row.get("updated") is None else time.time() - row["updated"])
-        log_line = next((ln for ln in reversed(str(hb.get("last_log") or "").splitlines()) if ln.strip()), "-")
-        log_line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", log_line)
-        cmd = board.triage_cmd(row, state, hb)
-        lines = [f"{board.MARK.get(state, '⚪')} <code>{esc(board.handle(row))}</code> {esc(state)}",
-                 esc(f"stage {row.get('stage') or '-'}, step {step or '-'}"), esc(f"on {row.get('host') or '-'}, {age}")]
-        lines += [f"<code>{esc(cmd)}</code>"] if cmd else []
-        return "\n".join(lines + [f"<pre>{esc(log_line[-300:])}</pre>"])
+        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time())
 
     def events_text(self, n: int) -> str:
-        """Newest first: `HH:MM kind handle`, the reason indented under it in italics, run ids replaced by handles."""
-        names = {r["run_id"]: board.handle(r) for r in self.c.ledger.runs()}
-        lines = []
-        for e in reversed(self.c.ledger.events(n=n)):
-            text = str(e["text"] or "")
-            for run_id, h in names.items():
-                text = text.replace(run_id, h)
-            who = names.get(e["run_id"])
-            lines.append(f"{time.strftime('%H:%M', time.localtime(e['ts']))} <b>{esc(e['kind'])}</b>"
-                         + (f" <code>{esc(who)}</code>" if who else ""))
-            if text and text != e["kind"]:
-                lines.append(f"    <i>{esc(textwrap.shorten(text, 200, placeholder=' …'))}</i>")
-        return "\n".join(lines) or "<i>no events</i>"
+        """The last `n` events, newest first."""
+        return tgfmt.events(self.c.ledger.events(n=n), {r["run_id"]: board.handle(r) for r in self.c.ledger.runs()})
 
     def hosts_text(self) -> str:
-        """`host · used/total cores · free/total GB free · gpu idle/total` per host."""
-        lines = []
-        for r in _probe_rows(self.c):
-            if "error" in r:
-                lines.append(f"<b>{esc(r['host'])}</b> · <i>no answer</i>")
-                continue
-            used = max(0, min(r["cores"], round(r["load"])))
-            gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
-            lines.append(f"<b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
-                         f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB free · gpu {gpu}")
-        return "\n".join(lines) or "<i>no hosts</i>"
+        """One line per host."""
+        return tgfmt.hosts(_probe_rows(self.c))
 
     def lic_text(self) -> str:
-        """`licence · free/pool seats free` per licence; a failed probe shows its note."""
-        lines = [f"<b>{esc(r['licence'])}</b> · " + (f"{r['free']}/{r['pool']} seats free" if "free" in r
-                                                      else f"<i>{esc(r['note'])}</i>") for r in _lic_rows(self.c)]
-        return "\n".join(lines) or "<i>no licences</i>"
+        """One line per licence."""
+        return tgfmt.licences(_lic_rows(self.c))
 
     def compare_text(self, handles: list[str]) -> str:
         """One block per metric: its name, then one `label value` line per run."""

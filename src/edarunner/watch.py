@@ -21,6 +21,7 @@ from .hosts import HostError, Ssh
 from .ledger import Ledger
 from .model import Project, Task
 from .notify import Notifier, alert_buttons
+from .notify.telegram import format as tgfmt
 
 log = logging.getLogger(__name__)
 Row = dict[str, Any]
@@ -344,7 +345,7 @@ def _boards(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Notifier
     params = [dict(r) for r in ledger.db.execute("SELECT run_id, key, value, source FROM params")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
     config.save_text(bdir / "compare.html", board.compare_html(rows, params, ledger.metrics(), plotly))
-    text = board.phone(rows, now=now, totals=metrics.step_totals(project))
+    text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)
 
