@@ -6,7 +6,7 @@
 |---|---|
 | `tests` | `pytest` with coverage on Python 3.11 and 3.12. The run fails under 88 % (measured: 93 %). The 3.11 run uploads `coverage.svg`. |
 | `driver` | `tests/test_driver.py` in a `python:3.6` container, the floor of the compute hosts. |
-| `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. |
+| `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. About 2 min, 1 min of it the image pull. |
 | `status` | after every other job, also after a failure: writes the outcome into the branch `ci-status`. |
 
 ## The ci-status branch
@@ -16,9 +16,10 @@ The branch has one commit and holds these files.
 
 | File | Holds |
 |---|---|
-| `status.json` | the commit, the run id and url, the timestamp, the result of every job, and the conclusion |
+| `status.json` | the commit, the run id and url, the timestamp, the result and the steps of every job, and the conclusion |
 | `coverage.svg` | the badge of the `tests` job |
-| `openroad/` | the log and the metrics of the OpenROAD run |
+| `openroad/` | `run.log`, `metrics.csv` and `files.txt` of the OpenROAD run |
+| `logs/` | the log of every job, from the Actions API |
 
 Read a result without the Actions UI:
 
