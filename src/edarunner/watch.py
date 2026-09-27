@@ -21,7 +21,7 @@ from . import board, collect, config, launch, metrics
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .ledger import Ledger
-from .model import Project
+from .model import Project, Task
 from .notify import Notifier, alert_buttons
 
 log = logging.getLogger(__name__)
@@ -257,7 +257,9 @@ def _params(project: Project, run: Row) -> dict[str, Any]:
 
 
 def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, progress: dict) -> None:
-    finished, running = collect.stage_state(project, hb)
+    spec = collect.load_spec(project, run)
+    only = collect.spec_stages(spec)
+    finished, running = collect.stage_state(project, hb, only)
     tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items() if e.get("phase") in ("done", "failed")}
     key = [finished, sorted(tasks), hb.get("step") if running else None, board.is_live(hb)]
     rec = progress.setdefault(run["run_id"], {})
@@ -269,8 +271,21 @@ def _collect(project: Project, ssh: Ssh, ledger: Ledger, run: Row, hb: dict, pro
         ledger.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
     if not res.copied:
         return
-    done = {t: config.resolve_task(project, t) for t, p in tasks.items() if p == "done"}
-    rows = metrics.extract(project, run, project.data / "results", done)
+    task_dirs = collect.spec_task_dirs(spec, str(run.get("root") or hb.get("root") or ""))
+    done: dict[str, Task] = {}
+    for t, p in tasks.items():
+        if p != "done":
+            continue
+        try:
+            done[t] = config.resolve_task(project, t)
+        except config.ConfigError as e:
+            # The spec names the task's directory even when the task table no longer has it.
+            if t in task_dirs:
+                done[t] = Task(id=t, fields={"id": t})
+            else:
+                ledger.add_event("watch", run["run_id"], "extract", f"unknown task {t}: {e}")
+    rows = metrics.extract(project, run, project.data / "results", done,
+                           stages=set(only) if only else None, task_dirs=task_dirs)
     n = sum(ledger.add_metric(r) for r in rows if r["value"] is not None)
     if not rec.get("params"):
         ledger.set_params(run["run_id"], _params(project, run), "spec")
@@ -389,7 +404,15 @@ def run_forever(project: Project, ssh: Ssh, ledger: Ledger, notifiers: list[Noti
         while True:
             t0 = time.time()
             try:
+                # A watcher runs for weeks; the config it read at start must not rule every cycle.
+                project = config.load_project(project.root)
+                ssh = Ssh(project.site)
+                for n in notifiers:
+                    if hasattr(n, "project"):
+                        n.project = project
                 cycle(project, ssh, ledger, notifiers)
+            except config.ConfigError as e:  # a config edit mid-way: skip this cycle, keep the service
+                log.error("config not loadable, cycle skipped: %s", e)
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
             if once:

@@ -77,8 +77,14 @@ def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
     raise ValueError(f"metric {metric.name} has no parser")
 
 
-def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Task]) -> list[dict]:
-    """Extract every metric of `run` from its collected files under `results_dir`."""
+def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Task],
+            stages: set[str] | None = None, task_dirs: dict[str, str] | None = None) -> list[dict]:
+    """Extract every metric of `run` from its collected files under `results_dir`.
+
+    `stages` limits the work to the stages the run's spec lists, and `task_dirs`
+    (task id -> directory relative to the root) comes from that spec.
+    """
+    task_dirs = task_dirs or {}
     run_dir = Path(results_dir) / run["run_id"]
     now = int(time.time())
     base = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
@@ -88,11 +94,13 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
         if metric.expr:
             continue
         for stage_name in metric.stage:
+            if stages is not None and stage_name not in stages:
+                continue
             stage = project.stages.get(stage_name)
             group = stage is not None and stage.is_group
             for task in list(tasks.values()) if group else [None]:
                 rows += _extract_one(project, metric, stage_name, stage, task, base, run_dir, now,
-                                     owned.get(stage_name, range(0)))
+                                     owned.get(stage_name, range(0)), task_dirs.get(task.id) if task else None)
     rows += _expressions(project, rows, run["run_id"], now)
     return rows
 
@@ -107,6 +115,7 @@ def _extract_one(
     run_dir: Path,
     now: int,
     owned: range = range(0),
+    task_dir: str | None = None,
 ) -> list[dict]:
     run_id = str(base["run_id"])
     task_id = task.id if task else ""
@@ -116,7 +125,7 @@ def _extract_one(
     try:
         if task is not None:
             values.update({f"task.{k}": v for k, v in task.fields.items()})
-            values["task_dir"] = _render(stage.task_dir if stage else "", values)
+            values["task_dir"] = task_dir or _render(stage.task_dir if stage else "", values)
         pattern = _render(metric.file, values)
     except KeyError as e:
         text = f"{metric.file}: no value for placeholder {e}"
