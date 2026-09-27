@@ -336,6 +336,30 @@ def test_reuse_renders_tree_id_of_the_old_run(env) -> None:
     assert b.values["tree_id"] == b.values["run_id"]
 
 
+def test_restore_launches_a_fresh_tree_from_the_archive(env, tmp_path: Path) -> None:
+    project, batch, ssh, ledger = env
+    project.data = tmp_path / "data"
+    old = "20260101_0000_a_demo_gOLD"
+    ledger.upsert_run({"run_id": old, "batch": "old", "label": "a", "src": "OLD", "build_tag": "demo", "state": "retired"})
+    archive = project.data / "results" / old / "out" / "11"
+    archive.mkdir(parents=True)
+    (archive / "netlist.v").write_text("module top; endmodule\n")
+    synth_only(batch)
+    batch.jobs[0].reuse = {"run_id": old, "restore": "netlist"}
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == [] and p.reuse == old and p.restore == "netlist" and p.src == "OLD"
+    assert p.host == "local" and p.root and p.values["tree_id"] == old and p.build_tag == "demo"
+    (dry,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path), dry_run=True)
+    assert dry["problems"] == [] and not Path(p.root).exists()
+    (row,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path / "again"))
+    root = Path(row["root"])
+    assert row["started"] and (root / "out" / "11" / "netlist.v").is_file() and (root / "flow" / "flow.sh").is_file()
+    wait_hb(tmp_path / "state" / "demo" / f"{row['run_id']}.json", lambda h: h["phase"] == "done")
+    batch.jobs[0].label, batch.jobs[0].reuse = "a_bad", {"run_id": old, "restore": "nope"}
+    (bad,) = launch.launch(project, batch, ssh, ledger, src_dir=src_tree(tmp_path / "bad"))
+    assert bad["problems"] == ["sync failed"] and not bad["started"]
+
+
 def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
     class FakeSsh:
         def run(self, host, cmd, timeout_s=None):
