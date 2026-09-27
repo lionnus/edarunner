@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import config, runid, checkout
+from edarunner import checkout, config, runid
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]

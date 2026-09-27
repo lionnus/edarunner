@@ -12,8 +12,8 @@ import pytest
 from edarunner import board, collect, config, launch, watch
 from edarunner.backend import Live
 from edarunner.config import load_project
-from edarunner.hosts import HostProbe, Ssh
 from edarunner.db import Database
+from edarunner.hosts import HostProbe, Ssh
 from edarunner.notify import Notifier
 from helpers_backend import FakeBackend
 

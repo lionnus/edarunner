@@ -14,9 +14,9 @@ from pathlib import Path
 
 from . import board
 from .config import ConfigError, load_json, placeholders, render, resolve_task
+from .db import Database
 from .guards import Refuse, assert_run_id
 from .hosts import Ssh
-from .db import Database
 from .model import Project, Stage
 
 _TASK_END = ("done", "failed")

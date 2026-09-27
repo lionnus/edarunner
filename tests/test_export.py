@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from edarunner import config, export
-from edarunner.guards import Refuse
 from edarunner.db import Database
+from edarunner.guards import Refuse
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 

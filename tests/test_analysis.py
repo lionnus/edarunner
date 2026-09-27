@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
+from test_cli import demo, edr, seed  # noqa: F401  (the fixture and the helpers of test_cli)
 
 from edarunner import analysis, board, config, metrics
 from edarunner.db import Database
-from test_cli import demo, edr, seed  # noqa: F401  (the fixture and the helpers of test_cli)
 
 SYNOPSYS = """\
 Report : area

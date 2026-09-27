@@ -35,9 +35,9 @@ from rich.text import Text
 from . import __version__, analysis, board, brief, checkout, collect, config, export, launch, metrics, runid, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
+from .db import Database, network_fs
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
-from .db import Database, network_fs
 from .model import SCHEDULERS, Batch, Job, Project, Stage
 from .notify import make_notifiers
 from .notify.digest import Digest

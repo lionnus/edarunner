@@ -6,9 +6,10 @@ import json
 import shutil
 from pathlib import Path
 
-from edarunner import cli, launch, checkout
-from edarunner.hosts import HostProbe, Ssh
 from test_cli import demo, edr  # noqa: F401 - the fixture and the runner of test_cli
+
+from edarunner import checkout, cli, launch
+from edarunner.hosts import HostProbe, Ssh
 
 
 def test_main_reports_an_unhandled_exception(capsys, caplog, monkeypatch) -> None:

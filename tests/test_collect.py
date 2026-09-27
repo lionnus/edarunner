@@ -12,8 +12,8 @@ import pytest
 
 from edarunner import collect
 from edarunner.config import load_project
-from edarunner.hosts import Ssh
 from edarunner.db import Database
+from edarunner.hosts import Ssh
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 RUN_ID = "20260926_1200_a_demo_gabc1234"

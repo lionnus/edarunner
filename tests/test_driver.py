@@ -9,8 +9,8 @@ import signal
 import socket
 import subprocess
 import threading
-import types
 import time
+import types
 from pathlib import Path
 
 import pytest

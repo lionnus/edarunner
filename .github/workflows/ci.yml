@@ -21,6 +21,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --extra dev
+      - run: uv run ruff check src tests tools
       - name: pytest
         run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
       - run: uv run coverage-badge -o coverage.svg

@@ -15,8 +15,8 @@ from typing import Any
 from . import __version__, board, checkout, collect, config, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
-from .guards import Refuse, assert_safe_target
 from .db import Database, NotFound
+from .guards import Refuse, assert_safe_target
 from .model import SCHEDULERS, Batch, Budget, Job, Project, Stage, Task
 
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"

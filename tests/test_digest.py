@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import time
 
+from test_watch import NOW, Env, env, rid  # noqa: F401  (the fixture of test_watch)
+
 from edarunner import watch
 from edarunner.notify.digest import Digest
 from edarunner.notify.telegram import format as fmt
-from test_watch import NOW, Env, env, rid  # noqa: F401  (the fixture of test_watch)
 
 
 def fill(e: Env) -> None:

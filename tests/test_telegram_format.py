@@ -2,8 +2,9 @@
 
 import time
 
-from edarunner.notify.telegram import format as fmt
 from test_board import NOW, RUN, _row, _rows
+
+from edarunner.notify.telegram import format as fmt
 
 
 def test_board_is_one_line_per_run_then_the_counts():

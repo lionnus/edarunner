@@ -18,9 +18,9 @@ from typing import Any
 
 from . import analysis, board, collect, config, launch, metrics
 from .backend import Backend, Live, make_backend, run_handle
+from .db import Database
 from .guards import Refuse
 from .hosts import HostError, Ssh
-from .db import Database
 from .model import SCHEDULERS, Project, Task
 from .notify import Notifier, alert_buttons
 from .notify.digest import Digest

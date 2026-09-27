@@ -33,8 +33,31 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    BACKENDS, SCHEDULERS, Batch, BotCommand, Budget, Host, Job, Limits, Mail, Marks, Metric, Needs, Ntfy, Placement,
-    Project, Retry, Safety, Scheduler, Site, Source, Stage, Sync, Task, Telegram, Tool,
+    BACKENDS,
+    SCHEDULERS,
+    Batch,
+    BotCommand,
+    Budget,
+    Host,
+    Job,
+    Limits,
+    Mail,
+    Marks,
+    Metric,
+    Needs,
+    Ntfy,
+    Placement,
+    Project,
+    Retry,
+    Safety,
+    Scheduler,
+    Site,
+    Source,
+    Stage,
+    Sync,
+    Task,
+    Telegram,
+    Tool,
 )
 
 T = TypeVar("T")

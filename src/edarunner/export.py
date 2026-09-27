@@ -14,8 +14,8 @@ from typing import Any
 
 from . import __version__, collect
 from .board import is_live
-from .guards import Refuse
 from .db import Database
+from .guards import Refuse
 from .model import Project
 
 Row = dict[str, Any]

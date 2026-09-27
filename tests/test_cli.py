@@ -19,9 +19,9 @@ import pytest
 
 from edarunner import board, cli, config, launch, watch
 from edarunner import db as db_mod
+from edarunner.db import Database
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
-from edarunner.db import Database
 from edarunner.model import Telegram
 from edarunner.notify import Notifier
 from edarunner.notify.telegram import TelegramBot

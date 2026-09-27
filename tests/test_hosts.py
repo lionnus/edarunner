@@ -14,9 +14,7 @@ import pytest
 
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh, missing_tools, place, tool_versions
-from edarunner.model import (
-    Host, Job, Limits, Needs, Placement, Project, Safety, Site, Source, Stage, Sync, Tool,
-)
+from edarunner.model import Host, Job, Limits, Needs, Placement, Project, Safety, Site, Source, Stage, Sync, Tool
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 

@@ -12,8 +12,6 @@ from . import config
 from .config import ConfigError, load_hook
 from .model import Metric, Project, Stage, Task
 
-
-
 TOP = "<top>"
 _NUM = re.compile(r"-?\d+(\.\d*)?([eE][-+]?\d+)?$")
 

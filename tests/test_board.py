@@ -9,8 +9,8 @@ import time
 import pytest
 
 from edarunner import board
-from edarunner.hosts import HostProbe
 from edarunner.db import Database
+from edarunner.hosts import HostProbe
 from edarunner.model import Marks
 
 NOW = 1_800_000_000

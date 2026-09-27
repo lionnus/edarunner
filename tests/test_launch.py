@@ -18,9 +18,9 @@ import edarunner
 from edarunner import config, launch, sync
 from edarunner.backend import Handle, Request, SshBackend
 from edarunner.config import ConfigError
+from edarunner.db import Database
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
-from edarunner.db import Database
 from edarunner.model import Needs
 from helpers_driver import wait_for
 
