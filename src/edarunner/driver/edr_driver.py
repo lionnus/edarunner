@@ -461,8 +461,11 @@ class Driver(object):
             os.makedirs(os.path.join(q, d), exist_ok=True)
         tasks = st.get("tasks") or []
         by_id = dict((t["id"], t) for t in tasks)
+        # A shard that joins later must not re-create a task another shard holds:
+        # a claim is claimed/<id>.<run id>, so the prefix names it.
+        claimed = set(n.split(".", 1)[0] for n in os.listdir(os.path.join(q, "claimed")))
         for t in tasks:
-            if os.path.exists(os.path.join(q, "done", t["id"])):
+            if os.path.exists(os.path.join(q, "done", t["id"])) or t["id"] in claimed:
                 continue
             try:
                 os.close(os.open(os.path.join(q, "pending", t["id"]), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
