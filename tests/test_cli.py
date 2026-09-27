@@ -227,6 +227,23 @@ def test_stop_after_task_now_and_finished(demo: Path, capsys) -> None:
     assert len(texts) == 2 and texts[0] == "after-task: later" and texts[1].startswith("gone [driver")
 
 
+def test_launch_exit_codes(demo: Path, capsys, monkeypatch) -> None:
+    def row(started=False, queued=False, *problems):
+        return {"run_id": "r", "label": "l", "host": "local", "root": "", "started": started, "queued": queued,
+                "problems": list(problems), "pid": None}
+    old, sync_failed = row(False, False, "already launched: x exists"), row(False, False, "sync failed")
+    monkeypatch.setattr(cli.Ctx, "batch", lambda self, name: name)
+    cases = [([row(True), old], 0), ([row(False, True), old], 0), ([row(True), sync_failed], 0),
+             ([old, old], 2), ([], 2), ([sync_failed, old], 1), ([sync_failed], 1)]
+    for rows, code in cases:
+        monkeypatch.setattr(launch, "launch", lambda *a, **k: rows)
+        assert edr(capsys, "launch", "demo")[0] == code, rows
+    monkeypatch.setattr(launch, "launch", lambda *a, **k: [row(), row()])
+    assert edr(capsys, "launch", "demo", "--dry-run")[0] == 0
+    monkeypatch.setattr(launch, "launch", lambda *a, **k: [row(), old])
+    assert edr(capsys, "launch", "demo", "--dry-run")[0] == 2
+
+
 def test_stop_waits_60_s_then_says_now(demo: Path, capsys, monkeypatch) -> None:
     b = seed(demo, "b_nodw", "stage:synth", pid=os.getpid())
     cmds: list[str] = []

@@ -500,11 +500,12 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.ledger, dry_run=a.dry_run, only=only,
                          allow_dirty=a.allow_dirty)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
-    c.emit(f"{started} started, {queued} queued, {sum(bool(r['problems']) for r in rows)} with problems"
-           + (" (dry)" if a.dry_run else ""), rows)
-    if any(r["problems"] for r in rows):
-        return 1
-    return 0 if started or queued or a.dry_run else 2
+    problems = [r["problems"] for r in rows if r["problems"]]
+    c.emit(f"{started} started, {queued} queued, {len(problems)} with problems" + (" (dry)" if a.dry_run else ""), rows)
+    if started or queued or (a.dry_run and not problems):
+        return 0
+    # A second launch of the same batch names every old job "already launched"; that is nothing to do.
+    return 2 if all(any(p.startswith("already launched") for p in ps) for ps in problems) else 1
 
 
 def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
