@@ -376,14 +376,20 @@ def submit(backend: Backend, db: Database, project: Project, run_id: str, host: 
     return handle
 
 
-def _src_dir(project: Project, src: str, src_dir: Path | None) -> Path:
+def _src_dir(project: Project, src: str, src_dir: Path | None, dry_run: bool = False) -> Path:
     if src_dir is not None:
         return Path(src_dir)
     try:
         from . import checkout
     except ImportError:
         raise Refuse("no src_dir given and checkout is missing") from None
-    return Path(checkout.find(project, src))
+    try:
+        return Path(checkout.find(project, src))
+    except checkout.CheckoutError:
+        # A dry run checked nothing out; the tree would be at the path of the checkout.
+        if dry_run and checkout.SRC_RE.match(src):
+            return project.source.worktrees / src
+        raise
 
 
 def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run: bool = False,
@@ -417,7 +423,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         if started and stagger > 0:
             time.sleep(stagger)
         if not p.reuse or p.restore:
-            ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.src, src_dir), p.root, project.sync.exclude,
+            ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.src, src_dir, dry_run), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
             if ok and p.restore:
                 res = collect.restore_on_request(project, ssh, db, db.run(p.reuse) or {}, p.restore,

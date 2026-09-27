@@ -254,7 +254,7 @@ def test_launch_exit_codes(demo: Path, capsys, monkeypatch) -> None:
         return {"run_id": "r", "label": "l", "host": "local", "root": "", "started": started, "queued": queued,
                 "problems": list(problems), "pid": None}
     old, sync_failed = row(False, False, "already launched: x exists"), row(False, False, "sync failed")
-    monkeypatch.setattr(cli.Ctx, "batch", lambda self, name: name)
+    monkeypatch.setattr(cli.Ctx, "batch", lambda self, name, dry_run=False: name)
     cases = [([row(True), old], 0), ([row(False, True), old], 0), ([row(True), sync_failed], 0),
              ([old, old], 2), ([], 2), ([sync_failed, old], 1), ([sync_failed], 1)]
     for rows, code in cases:

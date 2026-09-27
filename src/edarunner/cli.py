@@ -130,9 +130,15 @@ class Ctx:
             raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name
 
-    def batch(self, name: str | None) -> Batch:
-        """Load a batch with its source resolved."""
-        return self.resolve_source(config.load_batch(self.project, self.batch_name(name)))
+    def batch(self, name: str | None, dry_run: bool = False) -> Batch:
+        """Load a batch, check its source out when it is missing, and resolve the source to its tag."""
+        b = config.load_batch(self.project, self.batch_name(name))
+        got = checkout.ensure(self.project, b.source, dry_run)
+        if got:
+            print(f"checkout {got.src} {got.path}" + (" (dry)" if dry_run else ""))
+            if not checkout.SRC_RE.match(b.source):
+                b.source = got.src
+        return self.resolve_source(b)
 
     def resolve_source(self, b: Batch) -> Batch:
         """A ref as source becomes the src tag of its checked-out tree; CheckoutError when it is not checked out."""
@@ -692,7 +698,7 @@ def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     """Render every job of a batch; writes nothing."""
-    plans = launch.plan(c.project, c.batch(a.batch), c.ssh, c.db, backend=c.backend)
+    plans = launch.plan(c.project, c.batch(a.batch, a.dry_run), c.ssh, c.db, backend=c.backend)
     lines = [Text.assemble((p.run_id, "bold"), ": ",
                            (p.host or ("queued" if p.queued else c.project.site.scheduler.backend), "cyan" if p.queued else ""), " ", (str(p.root), "dim"),
                            *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
@@ -705,7 +711,7 @@ def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     """Start one driver per job of a batch."""
     only = a.only.split(",") if a.only else None
-    rows = launch.launch(c.project, c.batch(a.batch), c.ssh, c.db, dry_run=a.dry_run, only=only,
+    rows = launch.launch(c.project, c.batch(a.batch, a.dry_run), c.ssh, c.db, dry_run=a.dry_run, only=only,
                          allow_dirty=a.allow_dirty, backend=c.backend)
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
@@ -1357,16 +1363,24 @@ def _parser() -> argparse.ArgumentParser:
     for each in (s, old):
         each.add_argument("ref", nargs="?", help="default: source.ref")
         each.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
-    command("plan", "render the run specs of a batch; writes nothing", """
+    command("plan", "render the run specs of a batch; writes no spec", """
         Renders every job of the batch into a run spec and prints
         <run id>: <host or queued> <root> per job, with problem: lines under a
-        job that cannot run. Writes nothing, with or without --dry-run. With
-        --json, data[].spec is the full spec of each job.
+        job that cannot run. With --json, data[].spec is the full spec of each
+        job.
+
+        If the batch's source is a clean ref that has not been checked out
+        yet, plan checks it out first, the same way edr checkout does, and
+        prints a checkout <src> <path> line. With --dry-run it prints that line
+        and the git commands but checks nothing out. Apart from that checkout,
+        plan writes nothing. A dirty source that has not been checked out is
+        refused; add it with edr checkout --dirty DIR.
         """, write=True, exits={Exit.REFUSED: "a job has a problem"}).add_argument(
         "batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s = command("launch", "start one driver per job of a batch", """
-        Pins the date of the batch, publishes the driver into the state
-        directory, syncs the checked-out tree to each host, writes one spec per run
+        Checks out a missing clean source the way plan does, then pins the date
+        of the batch, publishes the driver into the state directory, syncs the
+        checked-out tree to each host, writes one spec per run
         and starts one driver per run, stagger_s apart. Prints
         <n> started, <n> queued, <n> with problems. A job that no host fits is
         queued; the watcher starts it when a host frees up. A job whose spec

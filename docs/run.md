@@ -18,10 +18,16 @@ of this tree, so a later commit never changes a running flow. A tree
 with uncommitted changes goes in with `edr checkout --dirty <dir>`; its tag
 is `<hash>-dirty-<8 hex>`, and `launch` needs `--allow-dirty` for it.
 
+If the batch's source has not been checked out yet, `plan` and `launch`
+check it out for you and print a `checkout <src> <path>` line. With
+`--dry-run`, they print the git commands instead of running them. This
+only works for a clean ref. A dirty snapshot has to be added with
+`edr checkout --dirty <dir>` before you plan or launch it.
+
 ## Plan and launch
 
 ```sh
-edr plan sweep1               # run id, host and root per job; writes nothing
+edr plan sweep1               # run id, host and root per job; writes no spec
 edr launch sweep1 --dry-run   # every path and command, nothing written
 edr launch sweep1
 ```
