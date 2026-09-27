@@ -21,13 +21,13 @@ hold for every file:
 
 ## edr.toml
 
-`edr.toml`: the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
+`edr.toml` holds the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
 `source.worktrees` render at load time with `{project}`, `{project_root}`, `{user}` and
 `{site_dir}`. Every other string keeps its placeholders until `plan`.
 
 | Key | Meaning | Default |
 |---|---|---|
-| `project` | the project name; `{project}` | required |
+| `project` | the project name, also available as `{project}` | required |
 | `site` | the path of `site.toml` | required |
 | `state_dir` | the state directory, on a filesystem every host mounts | `"~/.edr/{project}"` |
 | `data` | the head-node data directory: `edr.db`, `results/`, `board/` | `"data"` |
@@ -97,7 +97,7 @@ problem.
 
 | Key | Meaning | Default |
 |---|---|---|
-| `max_per_host` | our runs per host | `2` |
+| `max_per_host` | the most runs of this project on one host | `2` |
 | `min_free_cores` | free cores a host needs to take a run | `16` |
 | `min_free_ram_gb` | free RAM a host needs, in GB | `60` |
 | `avoid` | hosts `auto` never picks | `[]` |
@@ -203,7 +203,7 @@ parse gives a row with an empty value and the error in `source_file`, never a cr
 | `json` | a dotted path into a JSON file; a number indexes a list | one of the five |
 | `python` | a hook that gets the file path and returns a number | one of the five |
 | `area_hier` | the deepest instance depth to keep from a hierarchical area report, of Synopsys `report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is the top area, and each instance down to this depth becomes a row of the `area` table | one of the five |
-| `unit` | unit text | `""` |
+| `unit` | the unit, as text | `""` |
 | `canonical` | the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: `design__instance__area`, `design__instance__count`, `design__instance__utilization`, `timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; empty when the schema has no name | `""` |
 
 ## site.toml
@@ -276,7 +276,7 @@ declares is an error where it appears. The core knows no licence manager;
 |---|---|---|
 | `seats` | the seat total, for `edr tools` | unset |
 | `probe` | an argv list that prints the free seats; it runs on the host with the run placeholders filled | `[]` |
-| `licence` | the licence or concurrency limit that counts the tool in the scheduler; a job asks it for the most seats one of its stages needs, for its whole run | none; the scheduler does not count the tool |
+| `licence` | the licence or concurrency limit that counts the tool in the scheduler; a job asks it for the most seats one of its stages needs, for its whole run | unset; the scheduler does not count the tool |
 
 ### [telegram]
 
@@ -286,8 +286,8 @@ The bot, the one chat it answers, and the custom commands; `docs/telegram.md` ex
 |---|---|---|
 | `chat_id` | the one chat the bot answers; a group id is negative | required |
 | `token_file` | the bot token, mode 600 | `"~/.config/edarunner/telegram.token"` |
-| `user_id` | the one user whose messages and buttons the bot obeys | none; the chat is the only gate |
-| `topic_id` | the forum topic of every message; a command from another topic is ignored | none; the main thread |
+| `user_id` | the one user whose messages and buttons the bot obeys | unset; the chat is the only gate |
+| `topic_id` | the forum topic of every message; a command from another topic is ignored | unset; the main thread |
 
 ### [telegram.commands.<name>]
 
@@ -334,14 +334,14 @@ budget = { hours = 8 }
 
 | Key | Meaning | Default |
 |---|---|---|
-| `tasks.<id>.<key>` | any key; `{task.<key>}` in the stage strings | none |
+| `tasks.<id>.<key>` | any key; `{task.<key>}` in the stage strings | unset |
 | `tasks.<id>.needs` | `{ cores, disk_gb, tools, ram_gb }`; replaces the stage's | unset |
 | `tasks.<id>.budget` | `{ hours, disk_gb, kill, per }`; replaces the stage's | unset |
 | `pattern.resolver` | a hook `id -> table` for ids the file does not list | `""` |
 
 ## jobs/<batch>.toml
 
-`jobs/<batch>.toml`: the jobs of one batch on one source. A tag is a short hash, or
+`jobs/<batch>.toml` holds the jobs of one batch on one source. A tag is a short hash, or
 `<hash>-dirty-<8 hex>` for a snapshot of a tree with uncommitted changes. The date is pinned once
 per batch in `<state_dir>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
 ids. A batch name is used once; a second launch of the same batch finds its specs and does

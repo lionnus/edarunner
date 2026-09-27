@@ -54,12 +54,12 @@ class Tool:
                            "filled", factory=list)
     licence: str = doc("the licence or concurrency limit that counts the tool in the scheduler; a job asks it for "
                        "the most seats one of its stages needs, for its whole run", "",
-                       shown="none; the scheduler does not count the tool")
+                       shown="unset; the scheduler does not count the tool")
 
 
 @dataclass
 class BotCommand:
-    """One custom command of the bot: `[telegram.commands.<name>]` in `site.toml`.
+    """Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
 
     Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
     `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. A command sent as a reply to an alert
@@ -94,9 +94,9 @@ class Telegram:
     token_file: Path = doc("the bot token, mode 600", Path("~/.config/edarunner/telegram.token"))
     commands: dict[str, BotCommand] = field(default_factory=dict)
     user_id: int | None = doc("the one user whose messages and buttons the bot obeys", None,
-                              shown="none; the chat is the only gate")
+                              shown="unset; the chat is the only gate")
     topic_id: int | None = doc("the forum topic of every message; a command from another topic is ignored", None,
-                               shown="none; the main thread")
+                               shown="unset; the main thread")
 
 
 @dataclass
@@ -288,7 +288,7 @@ class Metric:
                          "`report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is "
                          "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
                          shown="one of the five")
-    unit: str = doc("unit text", "")
+    unit: str = doc("the unit, as text", "")
     canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
                          "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
                          "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "
@@ -311,7 +311,7 @@ class Task:
     """
 
     id: str
-    fields: dict[str, str] = doc("any key; `{task.<key>}` in the stage strings", key="tasks.<id>.<key>", shown="none")
+    fields: dict[str, str] = doc("any key; `{task.<key>}` in the stage strings", key="tasks.<id>.<key>", shown="unset")
     needs: Needs | None = doc("`{ cores, disk_gb, tools, ram_gb }`; replaces the stage's", None, key="tasks.<id>.needs")
     budget: Budget | None = doc("`{ hours, disk_gb, kill, per }`; replaces the stage's", None, key="tasks.<id>.budget")
 
@@ -375,7 +375,7 @@ class Placement:
     the job is queued. When no host of the site has a tool the job needs, `plan` reports it as a
     problem."""
 
-    max_per_host: int = doc("our runs per host", 2)
+    max_per_host: int = doc("the most runs of this project on one host", 2)
     min_free_cores: int = doc("free cores a host needs to take a run", 16)
     min_free_ram_gb: int = doc("free RAM a host needs, in GB", 60)
     avoid: list[str] = doc("hosts `auto` never picks", factory=list)
@@ -384,12 +384,12 @@ class Placement:
 
 @dataclass
 class Project:
-    """`edr.toml`: the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
+    """`edr.toml` holds the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
     `source.worktrees` render at load time with `{project}`, `{project_root}`, `{user}` and
     `{site_dir}`. Every other string keeps its placeholders until `plan`."""
 
     root: Path  # the project directory
-    project: str = doc("the project name; `{project}`")
+    project: str = doc("the project name, also available as `{project}`")
     site: Site = doc("the path of `site.toml`")
     source: Source = field()
     sync: Sync = field(default_factory=Sync)
@@ -443,7 +443,7 @@ class Job:
 
 @dataclass
 class Batch:
-    """`jobs/<batch>.toml`: the jobs of one batch on one source. A tag is a short hash, or
+    """`jobs/<batch>.toml` holds the jobs of one batch on one source. A tag is a short hash, or
     `<hash>-dirty-<8 hex>` for a snapshot of a tree with uncommitted changes. The date is pinned once
     per batch in `<state_dir>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
     ids. A batch name is used once; a second launch of the same batch finds its specs and does

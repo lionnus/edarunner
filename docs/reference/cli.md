@@ -11,7 +11,7 @@ Run flows on hosts, keep a run database, watch, export.
 | Flag | Meaning |
 |---|---|
 | `--json` | print the result as JSON |
-| `--version` | show program's version number and exit |
+| `--version` | print the version and exit |
 
 edr finds edr.toml in the current directory or a parent, so it works from
 anywhere below the project. Without one it refuses.
@@ -29,8 +29,9 @@ event, not even an empty database.
 --why &lt;text&gt; is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read command (brief, check, compare, events, hosts, metrics, notify, runtime, status, tools) never creates
-data/edr.db. Without the file it reads an empty database in memory.
+These commands never create data/edr.db: brief, check, compare, events,
+hosts, metrics, notify, plan, runtime, status, tools. Without the file they
+read an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
 queued, yellow when stale, red when dead, hung, over budget, an orphan or
@@ -42,8 +43,10 @@ run with that label in that batch. A run id prefix is the one run whose
 id starts with it; an ambiguous prefix is refused. The form #n is row n
 of the last board that edr status printed.
 
---batch on status, plan, launch and retire defaults to EDR_BATCH, then
-to the newest batch directory in the state.
+plan and launch take the batch as an argument, which defaults to
+EDR_BATCH and then to the newest batch directory in the state. status
+--batch defaults to EDR_BATCH and then to every batch. retire needs a
+handle or --batch.
 
 ## Exit codes
 
@@ -154,12 +157,12 @@ the run, the metrics, and the log tail from the heartbeat.
 edr events [--since T] [--run HANDLE] [-n N]
 ```
 
-The last N events in time order: time, actor (user, watch or telegram),
+The last N events, oldest first: time, actor (user, watch or telegram),
 run, kind and text.
 
 | Flag | Meaning |
 |---|---|
-| `--since T` | 30m, 2h, 1d or seconds |
+| `--since T` | only events newer than this: 30m, 2h, 1d or seconds |
 | `--run HANDLE` | the events of one run |
 | `-n N` | the last N events; default 50 |
 
@@ -179,8 +182,8 @@ one-minute load average; RAM free of total; the largest writable scratch
 of the host's list, and its space free of total, with a bar of the used
 part; GPUs idle of total, where idle means under 5 % utilisation and
 under 5 % memory in use; GPU memory free of total, summed over the GPUs;
-processes that match tool_procs, ours and others; and our driver
-processes.
+processes that match tool_procs, split into yours and other users';
+and your edr drivers.
 
 A mark tells how full a resource is. It is 🟢 below the first threshold
 of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
@@ -192,7 +195,8 @@ answer shows ⚫ and its error in the row. The rows go by the worst mark,
 ⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by host name within one mark.
 
 The GPU columns come from nvidia-smi; a host without it shows -. A bar is
-green below 70 % used, yellow below 90 %, red above. --json gives the
+green below 70 % used, yellow below 90 % and red above; unlike the
+marks, the bar colour does not follow [marks]. --json gives the
 numbers: cores, load, free_cores, free_ram_gb, total_ram_gb, mount,
 free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
 our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
@@ -208,7 +212,7 @@ use (the load, capped at the cores), RAM, scratch and busy GPUs over
 |---|---|
 | `--history` | no probe: the samples the watcher kept, one line per host over --since |
 | `--since T` | with --history: 30m, 2h, 1d or seconds; default 1d |
-| `--narrow` | ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number |
+| `--narrow` | only the mark (column ok), host, cores, RAM, scratch and GPUs, in 48 columns, with no space between a mark and its number |
 
 | Exit | Meaning |
 |---|---|
@@ -238,9 +242,9 @@ edr metrics [--design SRC] [--run HANDLE] [--metric NAME] [--over {steps}] [--st
 ```
 
 Every metric of one design: label, design, stage, step, task, name,
-value and unit. --design is the source tag exactly as edr checkout printed
-it, -dirty-... included. It has no default, because one table holds one
-design. --run takes one run instead. --csv writes the columns of
+value and unit. --design or --run is required. --design is the source
+tag exactly as edr checkout printed it, -dirty-... included; --run takes
+one run instead. --csv writes the columns of
 metrics.csv (docs/results.md) to stdout.
 
 --run with --over steps prints the metrics along the steps of that run:
@@ -403,7 +407,7 @@ under --dirty is checked out as a worktree.
 
 | Flag | Meaning |
 |---|---|
-| `[ref]` | default: source.ref |
+| `[ref]` | the git ref to check out; default source.ref |
 | `--dry-run` | print what would happen and write nothing |
 | `--dirty DIR` | snapshot this working tree instead of a ref |
 
@@ -517,6 +521,10 @@ at the same path, and extracts the metrics when the run ends. Without
 it, the watcher collects nothing. --dry-run prints the spec and runs
 nothing.
 
+Once the driver runs, the exit code is the driver's, as the table
+below lists; 2 and 3 then carry the driver's meaning, not the one of
+the global table. docs/run.md lists the phases.
+
 | Flag | Meaning |
 |---|---|
 | `cmd` | the command, after -- |
@@ -530,7 +538,14 @@ nothing.
 
 | Exit | Meaning |
 |---|---|
-| 0 | the command ended done; once the driver runs, the code is its phase code |
+| 0 | the command ended done |
+| 2 | FAILED:setup, the stage is not in the spec; or FAILED:&lt;stage&gt;, a checkpoint on a stage without resume |
+| 3 | FAILED:&lt;stage&gt;, too little disk for the stage |
+| 4 | FAILED:&lt;stage&gt;, the tool gate timed out |
+| 5 | FAILED:&lt;stage&gt;, the command failed |
+| 8 | INCOMPLETE, a task failed or was skipped |
+| 9 | OVER_BUDGET:&lt;stage&gt;, a budget passed |
+| 10 | STOPPED or KILLED:&lt;signal&gt; |
 
 ## keep
 
@@ -546,8 +561,8 @@ cancels a pending kill or stop of the watcher.
 |---|---|
 | `handle` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
-| `--hours N` | default 12 |
-| `--ack` | cancel the pending kill of the run |
+| `--hours N` | hours to add to the budget of the running stage or task; default 12 without --ack |
+| `--ack` | cancel the watcher's pending kill or stop |
 
 | Exit | Meaning |
 |---|---|
@@ -556,11 +571,12 @@ cancels a pending kill or stop of the watcher.
 ## import
 
 ```
-edr import [--dry-run] --run-id RUN_ID --label LABEL --config CONFIG --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
+edr import [--dry-run] --run-id RUN_ID --label LABEL [--config CONFIG] --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
 ```
 
-Records a run the package did not make. With --host and --root, the tree
-on that host, so reuse and edr continue can use it. With --results DIR,
+Records a run that edr did not start, such as one you ran by hand. With
+--host and --root, it records the tree on that host, so reuse and edr
+continue can build on it. With --results DIR,
 a directory of collected files of a run whose tree is gone: it is linked
 as data/results/&lt;run id&gt; and the project's metrics are extracted from
 it; --tasks names the tasks whose files it holds. The run id must start
@@ -571,7 +587,7 @@ with YYYYMMDD_HHMM_.
 | `--dry-run` | print what would happen and write nothing |
 | `--run-id RUN_ID` | the run id; it must start with YYYYMMDD_HHMM_, required |
 | `--label LABEL` | the label of the run, required |
-| `--config CONFIG` | the configuration name of the run, required |
+| `--config CONFIG` | the configuration name of the run; default empty |
 | `--src SRC` | the source tag of the tree, required |
 | `--host HOST` | the host of the tree |
 | `--root PATH` | the tree on the host |
@@ -682,10 +698,10 @@ edr notify [--dry-run] [--board] [--digest] [--silent] [text]
 ```
 
 Sends one message through every notifier that the site configures. The
-first line names the project and the word note, as in every message of
-the bot; TEXT follows as plain text. --board sends the board of edr
-status and --digest the daily digest instead, so a cron line can mail
-either. docs/telegram.md shows a Claude Code hook that calls it.
+message starts with a header line with the project name, like every
+message of the bot, and TEXT follows as plain text. --board sends the
+board of edr status and --digest the daily digest instead, so a cron
+line can mail either.
 
 | Flag | Meaning |
 |---|---|

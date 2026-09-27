@@ -70,7 +70,7 @@ STATES = {
                        "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, unless the run has a keep file", alert=True),
-    "orphan": State("a process of ours that matches `tool_procs`, outside every live run tree",
+    "orphan": State("a process of the current user that matches `tool_procs`, outside every live run tree",
                     "`SIGTERM`, only with `kill_orphan`", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),

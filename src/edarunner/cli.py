@@ -1,4 +1,4 @@
-"""The `edr` command line: eighteen commands.
+"""The `edr` command line.
 
 Every command wires the modules; nothing here knows a file format. Exit
 codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
@@ -63,7 +63,7 @@ def _since(text: str) -> int:
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 # The old command names that 0.4.0 removed, with the command that replaces each.
 REMOVED = {"lic": "tools", "stage": "checkout", "run": "continue"}
-_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "metrics", "compare", "runtime", "check", "notify"})
+_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "metrics", "compare", "runtime", "check", "notify", "plan"})
 
 
 class Ctx:
@@ -1183,7 +1183,7 @@ EXIT = {Exit.DONE: "done",
         Exit.NOTHING: "nothing to do",
         Exit.HOSTS: "a host did not answer, or a host command failed",
         Exit.INTERRUPTED: "interrupted"}
-EXITS: dict[str, dict[Exit, str]] = {}  # command -> the codes it refines; `_parser` fills it
+EXITS: dict[str, dict[Exit | int, str]] = {}  # command -> the codes it refines; `_parser` fills it
 HANDLE = "label@batch, a run id prefix, or #n from the last board"
 
 
@@ -1197,6 +1197,13 @@ class _Parser(argparse.ArgumentParser):
 
 def _d(text: str) -> str:
     return textwrap.dedent(text).strip()
+
+
+def _read_commands() -> str:
+    """The epilog paragraph on the commands that never create the database, wrapped like the rest."""
+    names = ", ".join(sorted(_READ_COMMANDS))
+    return textwrap.fill(f"These commands never create data/edr.db: {names}. Without the file they read an empty "
+                         "database in memory.", 84, initial_indent=" " * 8, subsequent_indent=" " * 8).lstrip()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1218,8 +1225,7 @@ def _parser() -> argparse.ArgumentParser:
         --why <text> is required on stop and retire, and optional on import. The
         text lands in the events table with the actor.
 
-        A read command ({", ".join(sorted(_READ_COMMANDS))}) never creates
-        data/edr.db. Without the file it reads an empty database in memory.
+        {_read_commands()}
 
         A table on a terminal has colour: a run is green while it runs, cyan when
         queued, yellow when stale, red when dead, hung, over budget, an orphan or
@@ -1231,16 +1237,18 @@ def _parser() -> argparse.ArgumentParser:
         id starts with it; an ambiguous prefix is refused. The form #n is row n
         of the last board that edr status printed.
 
-        --batch on status, plan, launch and retire defaults to EDR_BATCH, then
-        to the newest batch directory in the state.
+        plan and launch take the batch as an argument, which defaults to
+        EDR_BATCH and then to the newest batch directory in the state. status
+        --batch defaults to EDR_BATCH and then to every batch. retire needs a
+        handle or --batch.
         """))
     p.add_argument("--json", action="store_true", help="print the result as JSON")
-    p.add_argument("--version", action="version", version=f"edr {__version__}")
+    p.add_argument("--version", action="version", version=f"edr {__version__}", help="print the version and exit")
     p.set_defaults(dry_run=False)
     sub = p.add_subparsers(dest="command", metavar="command", required=True)
 
     def command(name: str, help_: str, description: str = "", write: bool = False, why: bool = False,
-             exits: dict[Exit, str] | None = None) -> argparse.ArgumentParser:
+             exits: dict[Exit | int, str] | None = None) -> argparse.ArgumentParser:
         EXITS[name] = exits or {}
         codes = {Exit.DONE: EXIT[Exit.DONE], Exit.REFUSED: EXIT[Exit.REFUSED], **EXITS[name]}
         s = sub.add_parser(name, help=help_, description=_d(description) or help_,
@@ -1297,10 +1305,10 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
     s.add_argument("--digest", action="store_true", help="the daily digest that the watcher sends, as plain text")
     s = command("events", "the last events", """
-        The last N events in time order: time, actor (user, watch or telegram),
+        The last N events, oldest first: time, actor (user, watch or telegram),
         run, kind and text.
         """, exits={Exit.NOTHING: "no event"})
-    s.add_argument("--since", metavar="T", help="30m, 2h, 1d or seconds")
+    s.add_argument("--since", metavar="T", help="only events newer than this: 30m, 2h, 1d or seconds")
     s.add_argument("--run", metavar="HANDLE", help="the events of one run")
     s.add_argument("-n", type=int, default=50, help="the last N events; default 50")
     s = command("hosts", "probe every host", """
@@ -1310,8 +1318,8 @@ def _parser() -> argparse.ArgumentParser:
         of the host's list, and its space free of total, with a bar of the used
         part; GPUs idle of total, where idle means under 5 % utilisation and
         under 5 % memory in use; GPU memory free of total, summed over the GPUs;
-        processes that match tool_procs, ours and others; and our driver
-        processes.
+        processes that match tool_procs, split into yours and other users';
+        and your edr drivers.
 
         A mark tells how full a resource is. It is 🟢 below the first threshold
         of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
@@ -1323,7 +1331,8 @@ def _parser() -> argparse.ArgumentParser:
         ⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by host name within one mark.
 
         The GPU columns come from nvidia-smi; a host without it shows -. A bar is
-        green below 70 % used, yellow below 90 %, red above. --json gives the
+        green below 70 % used, yellow below 90 % and red above; unlike the
+        marks, the bar colour does not follow [marks]. --json gives the
         numbers: cores, load, free_cores, free_ram_gb, total_ram_gb, mount,
         free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
         our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
@@ -1339,7 +1348,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="no probe: the samples the watcher kept, one line per host over --since")
     s.add_argument("--since", default="1d", metavar="T", help="with --history: 30m, 2h, 1d or seconds; default 1d")
     s.add_argument("--narrow", action="store_true",
-                   help="ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number")
+                   help="only the mark (column ok), host, cores, RAM, scratch and GPUs, in 48 columns, "
+                        "with no space between a mark and its number")
     command("tools", "every site tool: free seats and hosts", """
         One row per tool of the site file. free and total are the seats the
         probe reports; the probe runs on the head node with the project
@@ -1349,9 +1359,9 @@ def _parser() -> argparse.ArgumentParser:
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
     s = command("metrics", "the metrics of one design or one run", """
         Every metric of one design: label, design, stage, step, task, name,
-        value and unit. --design is the source tag exactly as edr checkout printed
-        it, -dirty-... included. It has no default, because one table holds one
-        design. --run takes one run instead. --csv writes the columns of
+        value and unit. --design or --run is required. --design is the source
+        tag exactly as edr checkout printed it, -dirty-... included; --run takes
+        one run instead. --csv writes the columns of
         metrics.csv (docs/results.md) to stdout.
 
         --run with --over steps prints the metrics along the steps of that run:
@@ -1444,7 +1454,7 @@ def _parser() -> argparse.ArgumentParser:
         the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
         under --dirty is checked out as a worktree.
         """, write=True)
-    s.add_argument("ref", nargs="?", help="default: source.ref")
+    s.add_argument("ref", nargs="?", help="the git ref to check out; default source.ref")
     s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
     command("plan", "render the run specs of a batch; writes no spec", """
         Renders every job of the batch into a run spec and prints
@@ -1510,7 +1520,15 @@ def _parser() -> argparse.ArgumentParser:
         at the same path, and extracts the metrics when the run ends. Without
         it, the watcher collects nothing. --dry-run prints the spec and runs
         nothing.
-        """, write=True, exits={Exit.DONE: "the command ended done; once the driver runs, the code is its phase code"})
+
+        Once the driver runs, the exit code is the driver's, as the table
+        below lists; 2 and 3 then carry the driver's meaning, not the one of
+        the global table. docs/run.md lists the phases.
+        """, write=True, exits={Exit.DONE: "the command ended done", 2: "FAILED:setup, the stage is not in the spec; "
+                                "or FAILED:<stage>, a checkpoint on a stage without resume",
+                                3: "FAILED:<stage>, too little disk for the stage", 4: "FAILED:<stage>, the tool gate timed out",
+                                5: "FAILED:<stage>, the command failed", 8: "INCOMPLETE, a task failed or was skipped",
+                                9: "OVER_BUDGET:<stage>, a budget passed", 10: "STOPPED or KILLED:<signal>"})
     s.add_argument("--label", required=True, metavar="L", help="the label of the run")
     s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
     s.add_argument("--batch", default="track", metavar="B", help="the batch; default track")
@@ -1524,11 +1542,13 @@ def _parser() -> argparse.ArgumentParser:
         cancels a pending kill or stop of the watcher.
         """, write=True, exits={Exit.NOTHING: "the run has ended"})
     s.add_argument("handle", help=HANDLE)
-    s.add_argument("--hours", type=int, metavar="N", help="default 12")
-    s.add_argument("--ack", action="store_true", help="cancel the pending kill of the run")
+    s.add_argument("--hours", type=int, metavar="N",
+                   help="hours to add to the budget of the running stage or task; default 12 without --ack")
+    s.add_argument("--ack", action="store_true", help="cancel the watcher's pending kill or stop")
     s = command("import", "record a run tree that edr did not make, or its collected results", """
-        Records a run the package did not make. With --host and --root, the tree
-        on that host, so reuse and edr continue can use it. With --results DIR,
+        Records a run that edr did not start, such as one you ran by hand. With
+        --host and --root, it records the tree on that host, so reuse and edr
+        continue can build on it. With --results DIR,
         a directory of collected files of a run whose tree is gone: it is linked
         as data/results/<run id> and the project's metrics are extracted from
         it; --tasks names the tasks whose files it holds. The run id must start
@@ -1536,7 +1556,7 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True)
     s.add_argument("--run-id", required=True, dest="run_id", help="the run id; it must start with YYYYMMDD_HHMM_")
     s.add_argument("--label", required=True, help="the label of the run")
-    s.add_argument("--config", required=True, help="the configuration name of the run")
+    s.add_argument("--config", default="", help="the configuration name of the run; default empty")
     s.add_argument("--src", required=True, metavar="SRC", help="the source tag of the tree")
     s.add_argument("--host", help="the host of the tree")
     s.add_argument("--root", metavar="PATH", help="the tree on the host")
@@ -1603,10 +1623,10 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
     s = command("notify", "send one message, the board or the digest through every notifier", """
         Sends one message through every notifier that the site configures. The
-        first line names the project and the word note, as in every message of
-        the bot; TEXT follows as plain text. --board sends the board of edr
-        status and --digest the daily digest instead, so a cron line can mail
-        either. docs/telegram.md shows a Claude Code hook that calls it.
+        message starts with a header line with the project name, like every
+        message of the bot, and TEXT follows as plain text. --board sends the
+        board of edr status and --digest the daily digest instead, so a cron
+        line can mail either.
         """, write=True, exits={Exit.REFUSED: "no notifier is configured, a send failed, or not exactly one "
                                               "of TEXT, --board and --digest"})
     s.add_argument("text", nargs="?", help="the message, as plain text")

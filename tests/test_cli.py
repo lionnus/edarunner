@@ -757,6 +757,10 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
                "--host", "local", "--root", str(root))[0] == 1
     assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--src", "a",
                "--host", "local", "--root", str(root / "missing"))[0] == 1
+    other = root.with_name("20260904_0412_noconf_x_gabc1234")
+    other.mkdir()
+    assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--src", "a", "--host", "local",
+               "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
 
 
 def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys) -> None:

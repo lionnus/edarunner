@@ -56,7 +56,7 @@ BUILTINS = {b.name: b for b in (
     Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True, on_run=True),
     Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
     Builtin("compare", "<handle>...", "metrics side by side", "Compare", "pre"),
-    Builtin("metric", "<name> [--design H]", "one metric per run", "Compare", "pre"),
+    Builtin("metric", "<name> [--design SRC]", "one metric per run", "Compare", "pre"),
     Builtin("help", "", "this list", "Help", "html"),
     Builtin("start", "", "this list and the reply keyboard", "Help", "html"),
     Builtin("keyboard", "[off]", "show or remove the reply keyboard", "Help"),
@@ -232,7 +232,7 @@ class Commands:
     def cmd_metric(self, args: list[str]) -> str:
         """One metric for every run, or for the runs of one design."""
         if not args:
-            return "usage: /metric <name> [--design H]"
+            return "usage: /metric <name> [--design SRC]"
         design = args[args.index("--design") + 1] if "--design" in args[:-1] else None
         return self.actions.metric_text(args[0], design)
 

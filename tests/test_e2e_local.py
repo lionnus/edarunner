@@ -58,7 +58,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert edr(capsys, "plan", "demo", "--dry-run")[0] == 0 and not state.exists()
     code, out, _ = edr(capsys, "plan", "demo")
     assert code == 0 and f"_a_demo_g{src}: local " in out and f"_b_nodw_demo_DW0_g{src}: local " in out
-    assert not state.exists()
+    assert not state.exists() and not (demo / "data" / "edr.db").exists()
 
     code, out, _ = edr(capsys, "launch", "demo")
     assert code == 0 and "2 started" in out

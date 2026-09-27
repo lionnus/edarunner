@@ -80,7 +80,7 @@ def _worktree(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
     repo, wts = project.source.repo, project.source.worktrees
     if runid.git("remote", cwd=repo):
         if dry_run:
-            print(f"dry-run: git -C {repo} fetch")
+            print(f"dry: git -C {repo} fetch")
         else:
             runid.git("fetch", "-q", cwd=repo)
     src = _short(repo, ref)
@@ -88,7 +88,7 @@ def _worktree(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
     if (path / ".git").exists():
         pass
     elif dry_run:
-        print(f"dry-run: git -C {repo} worktree add --detach {path} {src}")
+        print(f"dry: git -C {repo} worktree add --detach {path} {src}")
     else:
         wts.mkdir(parents=True, exist_ok=True)
         # A registered worktree whose directory is gone blocks `add`.
@@ -106,7 +106,7 @@ def _nested(src: Path, dst: Path, dry_run: bool) -> str:
         return runid.git("rev-parse", "--short", "HEAD", cwd=dst)
     head = runid.git("rev-parse", "--short", "HEAD", cwd=src)
     if dry_run:
-        print(f"dry-run: git clone {src} {dst} && git -C {dst} checkout --detach {head}")
+        print(f"dry: git clone {src} {dst} && git -C {dst} checkout --detach {head}")
         return head
     runid.git("clone", "-q", str(src), str(dst))
     runid.git("checkout", "-q", "--detach", head, cwd=dst)
@@ -134,7 +134,7 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     excludes = [a for e in [".git", *project.sync.exclude] for a in ("--exclude", e)]
     cmd = ["rsync", "-a", *excludes, f"{tree}/", f"{path}/"]
     if dry_run:
-        print(f"dry-run: {' '.join(cmd)}")
+        print(f"dry: {' '.join(cmd)}")
         return CheckoutResult(path, src, nested, True)
     path.parent.mkdir(parents=True, exist_ok=True)
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")

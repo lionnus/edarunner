@@ -43,7 +43,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | Command | Effect |
 |---|---|
 | `/compare <handle>...` | metrics side by side |
-| `/metric <name> [--design H]` | one metric per run |
+| `/metric <name> [--design SRC]` | one metric per run |
 
 ### Help
 
@@ -63,7 +63,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 
 ## Custom commands
 
-One custom command of the bot: `[telegram.commands.<name>]` in `site.toml`.
+Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
 
 Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
 `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. A command sent as a reply to an alert
