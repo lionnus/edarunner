@@ -277,8 +277,8 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
     pid = launch.start_driver(ssh, "hostA", tmp_path / "d.py", tmp_path / "s.json", tmp_path / "l.log",
                               {"PATH": "/usr/sepp/bin:$PATH"})
     assert pid == 4242
-    assert ssh.cmd.index("py=$(command -v python3)") < ssh.cmd.index("export PATH=")
-    assert 'nohup "$py"' in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
+    assert ssh.cmd.startswith("py=$(command -v python3); setsid nohup \"$py\" ")
+    assert "export" not in ssh.cmd and "/usr/sepp" not in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
 
 
 def test_project_env_is_rendered_over_the_site_env(env) -> None:
