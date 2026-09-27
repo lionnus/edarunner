@@ -63,7 +63,9 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert code == 0 and "2 started" in out
     date = (state / "demo" / "RUN_DATE").read_text().strip()
     ids = {"a": f"{date}_a_demo_g{src}", "b_nodw": f"{date}_b_nodw_demo_DW0_g{src}"}
-    assert (state / "bin" / "demo" / "edr_driver.py").is_file() and (state / "demo" / f"{ids['a']}.spec.json").is_file()
+    (driver,) = (state / "bin").iterdir()
+    spec = json.loads((state / "demo" / f"{ids['a']}.spec.json").read_text())
+    assert driver.name.startswith("edr_driver-") and spec["driver"] == str(driver)
     assert edr(capsys, "launch", "demo")[0] == 2  # already launched
     code, out, _ = edr(capsys, "keep", "a@demo", "--hours", "1", "--ack")
     assert code == 0 and json.loads((state / "demo" / f"{ids['a']}.keep.json").read_text()) == {"hours": 1, "ack": True}
@@ -108,6 +110,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert re.fullmatch(rf"\d{{8}}_\d{{4}}_a\.export_demo_g{src}", new["run_id"]) and new["run_id"] != ids["a"]
     rows = wait_terminal(capsys, 3)
     assert {r["run_id"]: (r["label"], r["phase"]) for r in rows}[new["run_id"]] == ("a.export", "done")
+    assert [p for p in (state / "bin").iterdir()] == [driver]  # one copy per driver version
     assert (roots["a"] / "out" / "11" / "netlist.v").is_file() and (results / new["run_id"] / "log" / "export.log").is_file()
 
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--why", "test", "--dry-run")

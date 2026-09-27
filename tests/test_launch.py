@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import shutil
@@ -189,8 +190,8 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     run_id = row["run_id"]
     state = tmp_path / "state" / "demo"
     assert (state / "RUN_DATE").read_text().strip() == run_id[:13]
-    assert (tmp_path / "state" / "bin" / "demo" / "edr_driver.py").exists()
     spec = json.loads((state / f"{run_id}.spec.json").read_text())
+    assert Path(spec["driver"]).parent == tmp_path / "state" / "bin" and Path(spec["driver"]).is_file()
     assert [s["name"] for s in spec["stages"]] == ["synth"]
     assert (Path(row["root"]) / "flow" / "flow.sh").exists()
     assert ledger.run(run_id)["state"] == "running" and ledger.batches()[0]["batch"] == "demo"
@@ -315,12 +316,18 @@ def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
     assert (target / ".git" / "HEAD").exists()  # an excluded path survives the delete
 
 
-def test_publish_driver_copies_by_rename(tmp_path: Path) -> None:
-    dest = sync.publish_driver(tmp_path, "b1", launch.DRIVER_SRC)
-    assert dest == tmp_path / "bin" / "b1" / "edr_driver.py" and dest.read_bytes() == launch.DRIVER_SRC.read_bytes()
-    assert sorted(p.name for p in dest.parent.iterdir()) == ["edr_driver.py"]
-    assert sync.publish_driver(tmp_path, "b2", launch.DRIVER_SRC, dry_run=True) == tmp_path / "bin" / "b2" / "edr_driver.py"
-    assert not (tmp_path / "bin" / "b2").exists()
+def test_publish_driver_one_copy_per_version(tmp_path: Path) -> None:
+    dest = sync.publish_driver(tmp_path, launch.DRIVER_SRC)
+    digest = hashlib.sha256(launch.DRIVER_SRC.read_bytes()).hexdigest()[:8]
+    assert dest == tmp_path / "bin" / f"edr_driver-{digest}.py" and dest.read_bytes() == launch.DRIVER_SRC.read_bytes()
+    assert [p.name for p in dest.parent.iterdir()] == [dest.name] and dest.stat().st_mode & 0o111
+    ino = dest.stat().st_ino
+    assert sync.publish_driver(tmp_path, launch.DRIVER_SRC) == dest and dest.stat().st_ino == ino  # reused as is
+    v2 = tmp_path / "v2.py"
+    v2.write_text("print(2)\n")
+    dry = sync.publish_driver(tmp_path, v2, dry_run=True)
+    assert dry.parent == dest.parent and dry != dest and [p.name for p in dest.parent.iterdir()] == [dest.name]
+    assert sync.publish_driver(tmp_path, v2) == dry and dry.read_text() == "print(2)\n" and dest.stat().st_ino == ino
 
 
 def test_reuse_renders_tree_id_of_the_old_run(env) -> None:

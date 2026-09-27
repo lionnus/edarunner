@@ -548,8 +548,8 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         if not p.spec["stages"][0].get("resume"):
             raise Refuse(f"stage {a.stage} has no resume command; --from needs one")
         p.spec["start_at"]["checkpoint"] = a.from_
-    driver = sync.publish_driver(state, batch.batch, launch.DRIVER_SRC, a.dry_run)
-    spec_path = launch.write_spec(state, batch.batch, p, a.dry_run)
+    driver = sync.publish_driver(state, launch.DRIVER_SRC, a.dry_run)
+    spec_path = launch.write_spec(state, batch.batch, p, driver, a.dry_run)
     c.emit(f"{p.run_id}: {a.stage} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
            {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
     if a.dry_run:

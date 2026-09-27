@@ -265,6 +265,7 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     hb = env.heartbeat("c", age=200, step=2, step_name="elaborate")
     spec_path = env.project.state / "demo" / f"{hb['run_id']}.spec.json"
     spec_path.write_text(json.dumps({"run_id": hb["run_id"], "start_at": {"stage": "synth", "checkpoint": None},
+                                     "driver": "/x/bin/edr_driver-0badc0de.py",
                                      "stages": [{"name": "synth", "cmd": "x", "resume": "x FIRST_STAGE={checkpoint}"}]}))
     starts: list[tuple] = []
     monkeypatch.setattr(launch, "start_driver", lambda ssh, host, driver, spec, log, env_: starts.append((host, driver, spec)) or 777)
@@ -274,7 +275,7 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     env.ssh.alive[4300] = False
     assert env.cycle()[hb["run_id"]] == "dead"
     assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate"}
-    assert starts == [("local", env.project.state / "bin" / "demo" / "edr_driver.py", spec_path)]
+    assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
     rows = [tuple(r) for r in env.ledger.db.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
     assert rows == [("synth", 1, "running"), ("synth", 2, "resumed")]
     assert env.events().count((hb["run_id"], "resume")) == 2
