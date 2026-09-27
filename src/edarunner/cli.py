@@ -1,6 +1,6 @@
-"""The `edr` command: eighteen verbs.
+"""The `edr` command line: eighteen commands.
 
-Every verb wires the modules; nothing here knows a file format. Exit
+Every command wires the modules; nothing here knows a file format. Exit
 codes: 0 done, 1 refused or bad input, 2 nothing to do, 3 some hosts
 failed. `--json` prints {"code", "data", "output"} with the captured text.
 """
@@ -58,8 +58,8 @@ def _since(text: str) -> int:
     return int(time.time() - secs)
 
 
-# These verbs never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_VERBS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check", "notify"})
+# These commands never create data/edr.db; `notify` reads the bot's message ids only.
+_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check", "notify"})
 
 
 class Ctx:
@@ -85,8 +85,8 @@ class Ctx:
     def db(self) -> Database:
         if self._db is None:
             path = self.project.data / "edr.db"
-            # A read verb or a dry run creates nothing, not even an empty database.
-            memory = not path.exists() and (self.a.dry_run or self.a.verb in _READ_VERBS)
+            # A read command or a dry run creates nothing, not even an empty database.
+            memory = not path.exists() and (self.a.dry_run or self.a.command in _READ_COMMANDS)
             self._db = Database(":memory:") if memory else Database(path)
         return self._db
 
@@ -99,7 +99,7 @@ class Ctx:
         return board.console()
 
     def close(self) -> None:
-        """Close the database when a verb opened it."""
+        """Close the database when a command opened it."""
         if self._db is not None:
             self._db.close()
 
@@ -136,7 +136,7 @@ class Ctx:
     def refresh(self, batch: str | None = None) -> None:
         """Ingest the heartbeat files of the shown batches, so the board follows the driver, not the last watcher cycle.
 
-        This is the watcher's own first step and idempotent, so a read verb may run it.
+        This is the watcher's own first step and idempotent, so a read command may run it.
         """
         heartbeats = watch.read_heartbeats(self.project, {batch} if batch else None)
         if heartbeats:
@@ -176,7 +176,7 @@ class Ctx:
             self.db.set_kv("last_board", [r["run_id"] for r in board.order(rows)])
 
 
-# --- texts shared by the verbs and the bot
+# --- texts shared by the commands and the bot
 
 def _events_table(c: Ctx, events: list[Row]) -> Table | str:
     names = {r["run_id"]: f"{r['label']}@{r['batch']}" for r in c.db.runs()}
@@ -319,7 +319,7 @@ def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> 
 
 
 class Actions:
-    """The verbs the Telegram bot may call; each one is a CLI verb without the printing.
+    """The commands the Telegram bot may call; each one is a CLI command without the printing.
 
     The status, events, hosts and tools texts are Telegram HTML; the compare and metric texts are 40 plain columns.
     """
@@ -417,7 +417,7 @@ class Actions:
         return board.cols(["label", "design", "step", "value"], body) if body else "no metrics"
 
 
-# --- verbs
+# --- commands
 
 def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
     """The board, one run with its stages, metrics and log tail, or the daily digest."""
@@ -959,7 +959,7 @@ def _notifiers(c: Ctx) -> list:
 # --- parser and main
 
 class Exit(IntEnum):
-    """The exit codes of every verb. `EXIT` gives the meaning of each; `EXITS` the refinements per verb."""
+    """The exit codes of every command. `EXIT` gives the meaning of each; `EXITS` the refinements per command."""
 
     DONE = 0
     REFUSED = 1
@@ -973,7 +973,7 @@ EXIT = {Exit.DONE: "done",
         Exit.NOTHING: "nothing to do",
         Exit.HOSTS: "a host did not answer, or a host command failed",
         Exit.INTERRUPTED: "interrupted"}
-EXITS: dict[str, dict[Exit, str]] = {}  # verb -> the codes it refines; `_parser` fills it
+EXITS: dict[str, dict[Exit, str]] = {}  # command -> the codes it refines; `_parser` fills it
 HANDLE = "label@batch, a run id prefix, or #n from the last board"
 
 
@@ -995,12 +995,12 @@ def _parser() -> argparse.ArgumentParser:
         edr finds edr.toml in the current directory or a parent, so it works from
         anywhere below the project. Without one it refuses.
 
-        --json on any verb prints one object instead of the text:
+        --json on any command prints one object instead of the text:
         {{"code": 0, "data": {{}}, "output": "the text a person would see"}}.
-        code is the exit code, data the verb's result as structured data, and
+        code is the exit code, data the command's result as structured data, and
         output the text.
 
-        --dry-run exists on every verb that writes. A dry run prints every path
+        --dry-run exists on every command that writes. A dry run prints every path
         and every command with the mark (dry) or the prefix dry: and writes
         nothing: no date pin, no spec, no file on a host, no database row, no
         event, not even an empty database.
@@ -1008,7 +1008,7 @@ def _parser() -> argparse.ArgumentParser:
         --why <text> is required on stop and retire, and optional on import. The
         text lands in the events table with the actor.
 
-        A read verb ({", ".join(sorted(_READ_VERBS))}) never creates
+        A read command ({", ".join(sorted(_READ_COMMANDS))}) never creates
         data/edr.db. Without the file it reads an empty database in memory.
 
         A table on a terminal has colour: a run is green while it runs, cyan when
@@ -1027,9 +1027,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     p.add_argument("--version", action="version", version=f"edr {__version__}")
     p.set_defaults(dry_run=False)
-    sub = p.add_subparsers(dest="verb", metavar="verb", required=True)
+    sub = p.add_subparsers(dest="command", metavar="command", required=True)
 
-    def verb(name: str, help_: str, description: str = "", write: bool = False, why: bool = False,
+    def command(name: str, help_: str, description: str = "", write: bool = False, why: bool = False,
              exits: dict[Exit, str] | None = None) -> argparse.ArgumentParser:
         EXITS[name] = exits or {}
         codes = {Exit.DONE: EXIT[Exit.DONE], Exit.REFUSED: EXIT[Exit.REFUSED], **EXITS[name]}
@@ -1043,7 +1043,7 @@ def _parser() -> argparse.ArgumentParser:
             s.add_argument("--why", required=True, help="the reason; it goes into the events table")
         return s
 
-    s = verb("status", "the board, or one run", """
+    s = command("status", "the board, or one run", """
         Without a handle, the board: one line per run of every batch that is not
         retired, live runs first and dead ones on top. The columns are the row
         number, label, host, state, phase, stage/step, heartbeat age, failed and
@@ -1062,14 +1062,14 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
     s.add_argument("--digest", action="store_true", help="the daily digest that the watcher sends, as plain text")
-    s = verb("events", "the last events", """
+    s = command("events", "the last events", """
         The last N events in time order: time, actor (user, watch or telegram),
         run, kind and text.
         """, exits={Exit.NOTHING: "no event"})
     s.add_argument("--since", metavar="T", help="30m, 2h, 1d or seconds")
     s.add_argument("--run", metavar="HANDLE", help="the events of one run")
     s.add_argument("-n", type=int, default=50, help="the last N events; default 50")
-    s = verb("hosts", "probe every host", """
+    s = command("hosts", "probe every host", """
         Probes every host of the site file and prints one row per host: the
         worst mark of the host; the name; cores in use of total, with a bar; the
         one-minute load average; RAM free of total; the largest writable scratch
@@ -1097,7 +1097,7 @@ def _parser() -> argparse.ArgumentParser:
         """, exits={Exit.HOSTS: "a host did not answer"})
     s.add_argument("--narrow", action="store_true",
                    help="ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number")
-    verb("tools", "every site tool: free seats and hosts", """
+    command("tools", "every site tool: free seats and hosts", """
         One row per tool of the site file. free and total are the seats the
         probe reports; the probe runs on the head node with the project
         directory as {root}. hosts lists the hosts that have the tool, with
@@ -1108,7 +1108,7 @@ def _parser() -> argparse.ArgumentParser:
         the next release.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
     sub.add_parser("lic").set_defaults(fn=cmd_lic)  # no help: the old name stays out of the listing
-    s = verb("metrics", "the metrics of one design", """
+    s = command("metrics", "the metrics of one design", """
         Every metric of one design: label, design, stage, step, task, name,
         value and unit. --design is the source tag exactly as edr stage printed
         it, -dirty-... included. It has no default, because one table holds one
@@ -1119,18 +1119,18 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--stage", metavar="S", help="the metrics of one stage")
     s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
-    verb("init", "write edr.toml and the watch unit here", """
+    command("init", "write edr.toml and the watch unit here", """
         Writes edr.toml and edr-watch.service into the current directory. --site
         is the directory or the file of the site file; init does not write that
         file. Refuses when edr.toml exists.
         """, write=True).add_argument("--site", required=True, metavar="DIR", help="the site directory, or a site.toml path")
-    verb("check", "load everything, probe the hosts, check the hooks", """
+    command("check", "load everything, probe the hosts, check the hooks", """
         Loads the project, the site and every batch under jobs/, imports every
         hook, checks the driver file, probes every host once, names every tool
         the head node lacks, and plans every batch with those probes. Prints one
         problem: line per fault, or an ok: line with the counts.
         """, exits={Exit.REFUSED: "a problem was found"})
-    s = verb("stage", "stage a ref as a worktree, or a dirty tree as a snapshot", """
+    s = command("stage", "stage a ref as a worktree, or a dirty tree as a snapshot", """
         Fetches, then adds a detached worktree of ref (default source.ref) at
         <worktrees>/<short hash>, and clones each source.nested repository into
         it at the HEAD the repository copy has. Prints <src> <path>.
@@ -1141,14 +1141,14 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True)
     s.add_argument("ref", nargs="?", help="default: source.ref")
     s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
-    verb("plan", "render the run specs of a batch; writes nothing", """
+    command("plan", "render the run specs of a batch; writes nothing", """
         Renders every job of the batch into a run spec and prints
         <run id>: <host or queued> <root> per job, with problem: lines under a
         job that cannot run. Writes nothing, with or without --dry-run. With
         --json, data[].spec is the full spec of each job.
         """, write=True, exits={Exit.REFUSED: "a job has a problem"}).add_argument(
         "batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
-    s = verb("launch", "start one driver per job of a batch", """
+    s = command("launch", "start one driver per job of a batch", """
         Pins the date of the batch, publishes the driver into the state
         directory, syncs the staged tree to each host, writes one spec per run
         and starts one driver per run, stagger_s apart. Prints
@@ -1160,7 +1160,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s.add_argument("--only", metavar="L", help="labels, comma separated")
     s.add_argument("--allow-dirty", action="store_true", help="launch a dirty snapshot source")
-    s = verb("run", "more work on the tree of an existing run", """
+    s = command("run", "more work on the tree of an existing run", """
         More work on the tree of an existing run: one stage, on the same tree,
         as a new run in the batch of that run with the label <label>.<stage>.
         --tasks names the tasks of a task group, --parallel its width, --on the
@@ -1178,7 +1178,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--on", metavar="HOST", help="the host; default auto")
     s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
     s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
-    s = verb("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
+    s = command("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
         Writes the keep file of a live run. --hours (default 12 when --ack is
         absent) adds hours to the budget of the running stage or task; --ack
         cancels a pending kill or stop of the watcher.
@@ -1186,7 +1186,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handle", help=HANDLE)
     s.add_argument("--hours", type=int, metavar="N", help="default 12")
     s.add_argument("--ack", action="store_true", help="cancel the pending kill of the run")
-    s = verb("import", "record a run tree that edr did not make, or its collected results", """
+    s = command("import", "record a run tree that edr did not make, or its collected results", """
         Records a run the package did not make. With --host and --root, the tree
         on that host, so reuse and edr run can continue it. With --results DIR,
         a directory of collected files of a run whose tree is gone: it is linked
@@ -1206,7 +1206,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--phase", default="done", help="the terminal phase; default done")
     s.add_argument("--build-tag", dest="build_tag", metavar="TAG", help="the build tag of the run")
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
-    s = verb("export", "a frozen snapshot of one design", """
+    s = command("export", "a frozen snapshot of one design", """
         Writes a snapshot of one design to DIR: manifest.json, runs.csv,
         metrics.csv and the collected files of the newest run per label.
         --design matches the source tag exactly. log/ and *.log stay out unless
@@ -1217,7 +1217,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--out", required=True, metavar="DIR", help="the directory to write; it must be absent or empty")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")
     s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
-    s = verb("stop", "stop one run", """
+    s = command("stop", "stop one run", """
         Stops one run through the pids the driver recorded, never through a
         session name or a process pattern. Without a flag: SIGTERM to the driver
         and every process group of the run, then a wait of up to 60 s.
@@ -1232,7 +1232,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handle", help=HANDLE)
     s.add_argument("--after-task", action="store_true", help="write the stop file; the running task ends first")
     s.add_argument("--now", action="store_true", help="SIGKILL after 30 s")
-    s = verb("retire", "remove the run tree, or its prune targets", """
+    s = command("retire", "remove the run tree, or its prune targets", """
         Removes the run tree on the host, or with --prune T the paths that
         prune.T names in the stages, after the guard on every target. --batch
         retires every run of the batch and marks it RETIRED, so the watcher
@@ -1253,7 +1253,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
-    s = verb("notify", "send one message through every notifier", """
+    s = command("notify", "send one message through every notifier", """
         Sends one message through every notifier that the site configures. The
         first line names the project and the word note, as in every message of
         the bot; TEXT follows as plain text. docs/telegram.md shows a Claude Code
@@ -1261,7 +1261,7 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True, exits={Exit.REFUSED: "no notifier is configured, or a send failed"})
     s.add_argument("text", help="the message, as plain text")
     s.add_argument("--silent", action="store_true", help="send without a sound on the phone")
-    s = verb("watch", "the watcher", """
+    s = command("watch", "the watcher", """
         The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
         bot as a thread when the site file configures it. --once runs one cycle.
         --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
@@ -1275,7 +1275,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run one verb and return its exit code."""
+    """Run one command and return its exit code."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
     try:
         a = _parser().parse_args(argv)

@@ -1,4 +1,4 @@
-"""cli.py: main, Ctx and check on a copy of examples/local-demo; the verbs are in test_cli.py."""
+"""cli.py: main, Ctx and check on a copy of examples/local-demo; the commands are in test_cli.py."""
 
 from __future__ import annotations
 

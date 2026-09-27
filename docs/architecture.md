@@ -43,10 +43,10 @@ commands, the report files and the numbers in them.
 | `notify/telegram/custom.py` | the custom argv commands of `[telegram.commands.*]` |
 | `notify/telegram/buttons.py` | the inline buttons of an alert, the action of a press, the confirmation of a stop |
 | `notify/telegram/bot.py` | `TelegramBot`: the poll thread, the router, the allowlist, the alerts and the pinned board |
-| `cli.py` | the verbs, the exit codes, `--json`, the project lookup |
+| `cli.py` | the commands, the exit codes, `--json`, the project lookup |
 | `tools/gen_docs.py` | the pages under `docs/reference/`, from the parser, the model, `STATES`, the marks and the bot table |
 
-A channel never imports `cli` or `watch`; it gets its verbs through the
+A channel never imports `cli` or `watch`; it gets its commands through the
 `Actions` object the CLI hands in.
 
 ## Data flow
@@ -71,7 +71,7 @@ A channel never imports `cli` or `watch`; it gets its verbs through the
 6. `export.export` selects the newest run per label of one source tag
    from the database and copies its results with a manifest.
 
-The read verbs (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
+The read commands (`status`, `events`, `hosts`, `lic`, `metrics`, `check`)
 ingest the heartbeats too, so the board follows the driver and not the
 last watcher cycle; that step is idempotent.
 
@@ -95,7 +95,7 @@ changes the driver and the tests in the same commit.
 - A dry run writes nothing: no date pin, no spec, no file on a host, no
   database row, no event, not even the database file. `tests/test_e2e_local.py::
   test_dry_run_flow_writes_nothing` proves it for the whole flow.
-- A read verb creates nothing.
+- A read command creates nothing.
 - The watcher never deletes. A budget stops or kills; it never removes
   a file.
 - A stop signals the pids the driver recorded, never a session name or
@@ -112,6 +112,6 @@ changes the driver and the tests in the same commit.
   `hostA`, `user`, `demo` and `k_small`.
 - Tests write under `tmp_path`, use the host `local` only, and start a
   driver only through `tests/helpers_driver.py`.
-- A verb, flag, config key, state or bot command is documented where it
+- A command, flag, config key, state or bot command is documented where it
   is defined. `uv run tools/gen_docs.py` regenerates `docs/reference/`,
   and CI refuses a stale page.

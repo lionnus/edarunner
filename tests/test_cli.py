@@ -1,4 +1,4 @@
-"""cli.py: every verb on a copy of examples/local-demo in tmp_path, host local, no driver started."""
+"""cli.py: every command on a copy of examples/local-demo in tmp_path, host local, no driver started."""
 
 from __future__ import annotations
 

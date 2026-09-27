@@ -3,7 +3,7 @@
 # The edr command
 
 ```
-edr [--json] [--version] verb ...
+edr [--json] [--version] command ...
 ```
 
 Run flows on hosts, keep a run database, watch, export.
@@ -16,12 +16,12 @@ Run flows on hosts, keep a run database, watch, export.
 edr finds edr.toml in the current directory or a parent, so it works from
 anywhere below the project. Without one it refuses.
 
---json on any verb prints one object instead of the text:
+--json on any command prints one object instead of the text:
 {"code": 0, "data": {}, "output": "the text a person would see"}.
-code is the exit code, data the verb's result as structured data, and
+code is the exit code, data the command's result as structured data, and
 output the text.
 
---dry-run exists on every verb that writes. A dry run prints every path
+--dry-run exists on every command that writes. A dry run prints every path
 and every command with the mark (dry) or the prefix dry: and writes
 nothing: no date pin, no spec, no file on a host, no database row, no
 event, not even an empty database.
@@ -29,7 +29,7 @@ event, not even an empty database.
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read verb (check, events, hosts, lic, metrics, notify, status, tools) never creates
+A read command (check, events, hosts, lic, metrics, notify, status, tools) never creates
 data/edr.db. Without the file it reads an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
@@ -55,7 +55,7 @@ to the newest batch directory in the state.
 | 3 | a host did not answer, or a host command failed |
 | 130 | interrupted |
 
-A verb below says where it refines a code.
+A command below says where it refines a code.
 
 ## status
 

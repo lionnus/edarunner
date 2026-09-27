@@ -2,7 +2,7 @@
 
 The watcher calls `make_notifiers` once and then `send`, `edit` and `board`
 on every channel. The channels never import `cli` or `watch` at run time;
-they get their verbs through the `cli.Actions` object the CLI hands in.
+they get their commands through the `cli.Actions` object the CLI hands in.
 """
 
 from __future__ import annotations

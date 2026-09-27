@@ -101,7 +101,7 @@ def keyboard_word(text: str) -> str | None:
 
 
 class Commands:
-    """The built-in and custom commands of one bot, on the verbs of `Actions`."""
+    """The built-in and custom commands of one bot, on the commands of `Actions`."""
 
     def __init__(self, actions: Actions, db: Any, tg: Telegram, project: Callable[[], Project],
                  repin: Callable[[], None]) -> None:

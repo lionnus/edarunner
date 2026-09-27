@@ -424,4 +424,4 @@ token has one poller.
 - It never answers a chat outside the allowlist.
 - It writes only `data/board/` itself; `/keep`, `/ack` and `/stop` write
   the keep file and the stop file under `state/<batch>/` through the same
-  verbs as the CLI.
+  commands as the CLI.

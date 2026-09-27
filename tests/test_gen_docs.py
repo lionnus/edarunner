@@ -1,4 +1,4 @@
-"""tools/gen_docs.py: every page is written, and every verb, config table and state appears."""
+"""tools/gen_docs.py: every page is written, and every command, config table and state appears."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ def test_pages_cover_every_verb_table_and_state(tmp_path: Path) -> None:
     gen.write(tmp_path)
     pages = {p.name: p.read_text() for p in tmp_path.glob("*.md")}
     assert set(pages) == set(gen.pages()) and all(pages.values())
-    for verb in gen.verbs():
-        assert f"\n## {verb}\n" in pages["cli.md"]
+    for command in gen.commands():
+        assert f"\n## {command}\n" in pages["cli.md"]
     for heading, _, _ in gen.CONFIG:
         assert f"\n{heading}\n" in pages["configuration.md"]
     for state in watch.STATES:

@@ -20,8 +20,8 @@ frozen snapshot of one design from it for a paper.
 `data/results/<run_id>/` holds the collected files in the layout of the
 run tree, so a metric's `source_file` is a path under it.
 
-Read the tables with `sqlite3 data/edr.db` when a verb does not answer
-the question. Only the head node opens the file; a read verb without a
+Read the tables with `sqlite3 data/edr.db` when a command does not answer
+the question. Only the head node opens the file; a read command without a
 the file reads an empty database in memory and creates nothing.
 
 ## edr metrics

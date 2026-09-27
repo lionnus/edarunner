@@ -39,7 +39,7 @@
 
 <rect class="box" x="40" y="192" width="264" height="52" rx="7"/>
 <text class="t" x="54" y="214">Controller, runs and exits</text>
-<text class="m" x="54" y="232">edr &lt;verb&gt;</text>
+<text class="m" x="54" y="232">edr &lt;command&gt;</text>
 
 <rect class="box" x="40" y="256" width="264" height="52" rx="7"/>
 <text class="t" x="54" y="278">Run database</text>

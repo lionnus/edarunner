@@ -76,7 +76,7 @@ English: short sentences, active voice, one instruction per sentence.
 
 ## The reference pages are generated
 
-`docs/reference/` comes from the code. A verb, a flag and its exit codes
+`docs/reference/` comes from the code. A command, a flag and its exit codes
 come from the argparse definitions in `cli.py`; a config key from its
 `doc` field in `model.py`; a placeholder from `PLACEHOLDERS` in
 `config.py`; a run state from `STATES` in `watch.py`; a bot command from

@@ -7,7 +7,7 @@ as well for a person in a hurry.
 ## Only through edr
 
 Operate the farm through `edr` and nothing else. Do not call `ssh`,
-`rsync`, `rm`, `kill`, `tmux` or the driver yourself. Every `edr` verb
+`rsync`, `rm`, `kill`, `tmux` or the driver yourself. Every `edr` command
 runs the guards, writes an event with the actor and the reason, and has a
 dry twin. A hand command has none of that.
 
@@ -24,7 +24,7 @@ bad, 2 means there was nothing to do, and 3 means some hosts failed. On
 `launch`, 2 means every job was already launched; on `stop`, 3 means the
 driver is still alive and `--now` is the next step. Act on `data`, and
 quote `output` when you report. `docs/reference/cli.md` lists every
-verb.
+command.
 
 ## Start with triage
 
@@ -59,7 +59,7 @@ last phase after the driver dies.
 Run the dry twin before every write: `--dry-run` on `stage`, `plan`,
 `launch`, `run`, `keep`, `export`, `stop` and `retire`. Read every path in
 the output. A launch shows the run id, the host and the root of every job,
-and a retire shows every `rm -rf` target. Then run the verb without the
+and a retire shows every `rm -rf` target. Then run the command without the
 flag.
 
 Confirm within one minute that the run made progress: `edr status
@@ -68,7 +68,7 @@ Confirm within one minute that the run made progress: `edr status
 ## Say why
 
 `stop` and `retire` refuse to run without `--why`. Write the state and the
-evidence, not the verb:
+evidence, not the command:
 
 ```sh
 edr stop a@demo --after-task --why "hung: no progress since 14:02, log stops at step 9"

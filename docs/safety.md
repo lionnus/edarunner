@@ -50,13 +50,13 @@ uncollected run. `docs/running.md` lists them with the way out. The
 staged tree that `retire --batch` removes passes `assert_safe_target`
 too, and `source.repo` is never a target.
 
-A guard raises `Refuse`. The verb prints `edr: <reason>` to stderr, exits
+A guard raises `Refuse`. The command prints `edr: <reason>` to stderr, exits
 1, and runs nothing after the refusal. The events table gets no row,
 because nothing happened.
 
 ## Dry runs
 
-Every verb that writes takes `--dry-run`; `docs/reference/cli.md` marks
+Every command that writes takes `--dry-run`; `docs/reference/cli.md` marks
 them. A dry run prints every path and every command with the mark `(dry)` or
 the prefix `dry:`, and writes nothing:
 
@@ -69,7 +69,7 @@ the prefix `dry:`, and writes nothing:
 flow dry, then checks that the state directory does not exist, the scratch
 is empty, and the worktree is the same byte for byte.
 
-Run the dry twin first. Read every target path. Then run the verb.
+Run the dry twin first. Read every target path. Then run the command.
 
 ## Limits
 
