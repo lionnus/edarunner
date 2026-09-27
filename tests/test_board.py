@@ -119,11 +119,20 @@ def test_run_detail():
     metrics = [{"stage": "synth", "step": 3, "task": "", "name": "area_cell_um2", "canonical": "design__instance__area",
                 "value": 1031.5, "unit": "um2"}]
     text = board.plain(board.run_detail(row, stages, metrics, "line one\nline two\n", now=NOW))
-    assert text.startswith(RUN["run1"] + "\nrunning  stage:synth  synth/3  exit -")
-    assert "cost 2.0 core-h" in text and "counts done 1 failed 0" in text
+    assert text.startswith(RUN["run1"] + "\nrunning  stage:synth  synth/3\n")
+    assert "cost 2.0 core-h" in text and "tasks done 1 failed 0" in text and "command exit" in text
     assert "k_bad" in text and "boom: kernel bad failed" in text
     assert "design__instance__area" in text and "1031.5" in text
     assert text.endswith("log tail\nline one\nline two")
+
+
+def test_run_detail_labels_the_driver_exit_and_shows_task_counts_only_for_a_task_group():
+    row = _row("done", "a", "FAILED:synth", exit=5)
+    stages = [{"stage": "synth", "task": "", "attempt": 1, "status": "failed", "exit": 2, "started": NOW - 600,
+               "ended": NOW - 60, "signature": None}]
+    text = board.plain(board.run_detail(row, stages, [], "", now=NOW))
+    assert text.splitlines()[1].endswith("driver exit 5 (FAILED:synth)")
+    assert "tasks " not in text and "command exit" in text and " 9m " in text
 
 
 def test_status_html():

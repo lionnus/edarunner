@@ -219,6 +219,34 @@ host expands the last `$PATH` to its own path. A project value without
 such a reference, such as `LM_LICENSE_FILE = "2020@lic"`, replaces the
 site's value.
 
+### The environment of a stage command
+
+The driver runs each stage command as `/bin/bash -c "<cmd>"`: a
+non-login shell with no terminal. Standard input is `/dev/null`, and the
+output goes to the stage log. Bash reads neither `~/.bash_profile` nor
+`~/.bashrc` for it, so a `PATH`, a module or an alias that your login
+sets up is not there.
+
+The command inherits the environment of the driver. On a site host that
+is what ssh gives a command without a terminal, and it has no `TERM`
+variable. On the host `local` it is the environment of the `edr` process
+that started the driver, so a flow can work under `local` from your
+terminal and still fail on a site host. On top of it come the site
+`[env]`, then the project `[env]` as the section above describes, then
+`EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID`. Nothing else is added.
+
+A tool that calls `tput`, or a script that runs `clear`, fails without
+`TERM`. Set it in the project `[env]`:
+
+```toml
+[env]
+TERM = "xterm"
+```
+
+`edr plan --show-spec` prints the environment and the commands of each
+run as the driver will get them, and runs nothing. `edr launch --dry-run
+--show-spec` does the same for a launch.
+
 ### Source and runtime on the host
 
 #### What the host gets

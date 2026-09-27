@@ -457,7 +457,7 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         row = c.db.run(row["run_id"]) or row
         hb, run_id = c.heartbeat(row), row["run_id"]
         stages = [dict(r) for r in c.db.conn.execute(
-            "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
+            "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage != 'setup', stage, task, attempt", (run_id,))]
         mets = c.db.metrics(run_ids=[run_id])
         samples = c.db.run_samples(run_id)
         c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples),
@@ -753,6 +753,8 @@ def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
     c.emit(Text("\n").join(lines),
            [{"run_id": p.run_id, "label": p.label, "host": p.host, "root": p.root, "queued": p.queued,
              "problems": p.problems, "spec": p.spec} for p in plans])
+    if a.show_spec:
+        print("\n\n".join(launch.spec_text(c.project, p.spec) for p in plans if p.spec))
     return Exit.REFUSED if any(p.problems for p in plans) else Exit.DONE
 
 
@@ -761,6 +763,8 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     only = a.only.split(",") if a.only else None
     rows = launch.launch(c.project, c.batch(a.batch, a.dry_run), c.ssh, c.db, dry_run=a.dry_run, only=only,
                          allow_dirty=a.allow_dirty, backend=c.backend)
+    if a.show_spec:
+        print("\n\n".join(launch.spec_text(c.project, r["spec"]) for r in rows if r["spec"]))
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
     c.emit(Text.assemble((f"{started} started", "green" if started else ""), ", ", (f"{queued} queued", "cyan" if queued else ""),
@@ -1213,7 +1217,8 @@ def _parser() -> argparse.ArgumentParser:
         edr finds edr.toml in the current directory or a parent, so it works from
         anywhere below the project. Without one it refuses.
 
-        --json on any command prints one object instead of the text:
+        --json, before the command as in edr --json status or after it, prints
+        one object instead of the text:
         {{"code": 0, "data": {{}}, "output": "the text a person would see"}}.
         code is the exit code, data the command's result as structured data, and
         output the text.
@@ -1259,6 +1264,7 @@ def _parser() -> argparse.ArgumentParser:
             s.add_argument("--dry-run", action="store_true", help="print what would happen and write nothing")
         if why:
             s.add_argument("--why", required=True, help="the reason; it goes into the events table")
+        s.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=f"the same as edr --json {name}")
         return s
 
     s = command("brief", "what a session reads first: the project, its flow, site and state", """
@@ -1283,7 +1289,6 @@ def _parser() -> argparse.ArgumentParser:
         session with the briefing; docs/run.md shows the hook.
         """)
     s.add_argument("--run", metavar="HANDLE", help="the story of one run: " + HANDLE)
-    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="the same as edr --json brief")
     s = command("status", "the board, or one run", """
         Without a handle, the board: one line per run of every batch that is not
         retired, live runs first and dead ones on top. The columns are the row
@@ -1293,9 +1298,13 @@ def _parser() -> argparse.ArgumentParser:
         verdict (hung, host_full, ...). A finished run shows its phase class:
         done, incomplete, failed, over_budget, stopped or killed.
 
-        With a handle, one run: identity, state, counts, disk, every stage and
-        task row, the CPU, RSS, tree size and free disk the driver sampled over
-        the run, the metrics, and the log tail from the heartbeat.
+        With a handle, one run: identity, state, disk, every stage and task
+        row, the CPU, RSS, tree size and free disk the driver sampled over the
+        run, the metrics, and the log tail from the heartbeat. A finished run
+        shows driver exit <n> (<phase>): the code of the driver, whose phase
+        names the stage that failed. The command exit column of the stage table
+        is the code of the stage command itself. The tasks line with the done
+        and failed counts appears only for a run with a task group.
         """, exits={Exit.HOSTS: "with --live, a host did not answer"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH, else every batch")
@@ -1464,7 +1473,7 @@ def _parser() -> argparse.ArgumentParser:
     for each in (s, old):
         each.add_argument("ref", nargs="?", help="default: source.ref")
         each.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
-    command("plan", "render the run specs of a batch; writes no spec", """
+    s = command("plan", "render the run specs of a batch; writes no spec", """
         Renders every job of the batch into a run spec and prints
         <run id>: <host or queued> <root> per job, with problem: lines under a
         job that cannot run. With --json, data[].spec is the full spec of each
@@ -1476,14 +1485,20 @@ def _parser() -> argparse.ArgumentParser:
         and the git commands but checks nothing out. Apart from that checkout,
         plan writes nothing. A dirty source that has not been checked out is
         refused; add it with edr checkout --dirty DIR.
-        """, write=True, exits={Exit.REFUSED: "a job has a problem"}).add_argument(
-        "batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
+
+        --show-spec also prints the rendered spec of each run: the environment
+        its commands get, the command of each stage and task, and the collect
+        paths.
+        """, write=True, exits={Exit.REFUSED: "a job has a problem"})
+    s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
+    s.add_argument("--show-spec", action="store_true", help="print the env, commands and collect paths of each run")
     s = command("launch", "start one driver per job of a batch", """
         Checks out a missing clean source the way plan does, then pins the date
         of the batch, publishes the driver into the state directory, syncs the
         checked-out tree to each host, writes one spec per run
-        and starts one driver per run, stagger_s apart. Prints
-        <n> started, <n> queued, <n> with problems. A job that no host fits is
+        and starts one driver per run, stagger_s apart, with a waiting line
+        before each wait. Prints <n> started, <n> queued, <n> with problems.
+        --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
         queued; the watcher starts it when a host frees up. A job whose spec
         exists is already launched; a batch name is used once.
         """, write=True, exits={Exit.DONE: "a run started or was queued", Exit.REFUSED: "a job has a problem",
@@ -1491,6 +1506,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s.add_argument("--only", metavar="L", help="labels, comma separated")
     s.add_argument("--allow-dirty", action="store_true", help="launch a dirty snapshot source")
+    s.add_argument("--show-spec", action="store_true", help="print the env, commands and collect paths of each run")
     s = command("continue", "more work on the tree of an existing run", """
         More work on the tree of an existing run: one stage, on the same tree,
         as a new run in the batch of that run with the label <label>.<stage>.
@@ -1607,6 +1623,12 @@ def _parser() -> argparse.ArgumentParser:
         prune.T names in the stages, after the guard on every target. --batch
         retires every run of the batch and marks it RETIRED, so the watcher
         skips it. A live run gets the phase ABANDONED:<why>.
+
+        The logs and results survive a retire. The watcher has already copied
+        log/ and the collect paths of every finished stage to
+        data/results/<run id>/ on the head node, and retire refuses a tree
+        without that copy unless --uncollected. edr watch --once makes the copy
+        now.
 
         --collect NAME,... first copies the named collect_on_request lists of
         every run into data/results/<run id>/, and removes nothing when one copy

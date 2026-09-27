@@ -137,7 +137,8 @@ def _fmt(v: float | None) -> str | None:
 
 def side_by_side(project: Project | None, runs: list[Row], rows: list[Row]) -> list[Row]:
     """One row per stage, step, task and metric, with the value of each run and the delta of each to the first."""
-    order = {n: i for i, n in enumerate(project.stages)} if project else {}
+    # The driver records `[runtime] setup` as the stage `setup`, before every stage of the flow.
+    order = {"setup": -1, **{n: i for i, n in enumerate(project.stages)}} if project else {}
     ids = [r["run_id"] for r in runs]
     out: dict[tuple, Row] = {}
     for m in rows:
@@ -246,7 +247,8 @@ def runtime(project: Project, db: Database, run: Row) -> Row:
     run_id = run["run_id"]
     rows = [dict(r) for r in db.conn.execute(
         "SELECT * FROM stage_runs WHERE run_id=? ORDER BY started, stage, task, attempt", (run_id,))]
-    order = {n: i for i, n in enumerate(project.stages)}
+    # The driver records `[runtime] setup` as the stage `setup`, before every stage of the flow.
+    order = {"setup": -1, **{n: i for i, n in enumerate(project.stages)}}
     stages = sorted((r for r in rows if not r["task"]), key=lambda r: (order.get(r["stage"], len(order)), r["attempt"]))
     for r in stages:
         r["wall_s"] = r["ended"] - r["started"] if r.get("ended") and r.get("started") else None

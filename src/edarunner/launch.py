@@ -198,6 +198,23 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
     return spec
 
 
+def spec_text(project: Project, spec: dict[str, Any]) -> str:
+    """The rendered spec of one run for `--show-spec`: the env, the command of each stage and task, the collect paths."""
+    out = [f"{spec['run_id']}:", "  env:", *(f"    {k}={v}" for k, v in spec["env"].items())]
+    if rt := spec.get("runtime"):
+        out.append(f"  runtime setup in {spec['root']}: {rt['setup']}")
+    for st in spec["stages"]:
+        tasks = st.get("tasks")
+        kind = f", a task group, {st['parallel']} at a time" if tasks is not None else ""
+        out.append(f"  stage {st['name']}{kind}, in {st['cwd']}:")
+        out += [f"    {k}: {st[k]}" for k in ("cmd", "resume", "progress", "prepare", "after_each") if st.get(k)]
+        out += [f"    task {t['id']} in {t['dir']}: {t['cmd']}" for t in tasks or []]
+        stage = project.stages.get(st["name"])
+        if stage and stage.collect:
+            out.append(f"    collect: {', '.join(stage.collect)}")
+    return "\n".join(out)
+
+
 # --- plan
 
 def _reuse_row(db: Database, reuse: dict[str, object], need_tree: bool = True) -> dict[str, Any]:
@@ -423,7 +440,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
     started = 0
     for p in plans:
         row = {"run_id": p.run_id, "label": p.label, "host": p.host, "root": p.root, "queued": p.queued,
-               "problems": p.problems, "started": False, "pid": None}
+               "problems": p.problems, "started": False, "pid": None, "spec": p.spec}
         out.append(row)
         spec_path = state / batch.batch / f"{p.run_id}.spec.json"
         if p.spec and not p.problems and spec_path.exists():
@@ -434,6 +451,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
             print(f"{p.run_id}: " + ("queued" if p.queued else "; ".join(p.problems)))
             continue
         if started and stagger > 0:
+            print(f"waiting {stagger} s (stagger) before {p.label}")
             time.sleep(stagger)
         if not p.reuse or p.restore:
             ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.src, src_dir, dry_run), p.root, project.sync.exclude,
