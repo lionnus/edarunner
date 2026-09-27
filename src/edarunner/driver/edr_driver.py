@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one run from a spec: python3 edr_driver.py <spec.json>.
+"""Drive one run from its spec: python3 edr_driver.py <spec.json>.
 
 Python 3.6, standard library only, no import of the package.
 """
@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import traceback
+from typing import Optional  # noqa: F401  (the type comments use it)
 
 POLL_S = 5
 TICK_S = 0.5
@@ -29,6 +30,15 @@ def identity(spec, env):
     """The host the driver runs on, when the spec names none, and the job id of a scheduler."""
     sched = env.get("EDR_SCHED_ID") or env.get("SLURM_JOB_ID") or env.get("LSB_JOBID")
     return {"host": spec.get("host") or socket.gethostname(), "sched_id": sched or None}
+
+
+def group_alive(pgid):
+    # type: (int) -> bool
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def usage(pgids):
@@ -67,7 +77,7 @@ def usage(pgids):
 
 
 def log_size(path):
-    # type: (str) -> int
+    # type: (str) -> Optional[int]
     """The size of a log in bytes, or None when it does not exist."""
     try:
         return os.path.getsize(path) if path else None
@@ -84,7 +94,7 @@ class Killed(Exception):
 
 
 def free_gb(path):
-    # type: (str) -> float
+    # type: (str) -> Optional[float]
     try:
         return round(shutil.disk_usage(path).free / GB, 3)
     except OSError:
@@ -92,7 +102,7 @@ def free_gb(path):
 
 
 def du_gb(path):
-    # type: (str) -> float
+    # type: (str) -> Optional[float]
     try:
         out = subprocess.run(["du", "-sk", path], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, universal_newlines=True, timeout=600).stdout
@@ -171,7 +181,7 @@ class Driver(object):
         self.shell = spec.get("shell") or "/bin/bash"
         self.limits = spec.get("limits") or {}
         self.env = dict(os.environ)
-        # A value such as "/usr/sepp/bin:$PATH" names the host's own variables, so it
+        # A value such as "/opt/eda/bin:$PATH" names the host's own variables, so it
         # expands here, on the host, against the environment the driver started with.
         for k, v in (spec.get("env") or {}).items():
             self.env[k] = string.Template(str(v)).safe_substitute(self.env)
@@ -182,6 +192,7 @@ class Driver(object):
         self.keep_file = os.path.join(spec_dir, self.run_id + ".keep.json")
         self.lock = threading.RLock()
         self.procs = {}  # pgid -> Popen
+        self.signalled = {}  # pgid -> Popen of every group kill_all reached; its shell may exit first
         self.killed = None
         self.stop_mode = None
         self.over_budget = None
@@ -313,6 +324,8 @@ class Driver(object):
         self.kill_all(signum)
 
     def kill_all(self, sig):
+        with self.lock:
+            self.signalled.update(self.procs)
         for pgid in list(self.procs):
             self.killpg(pgid, sig)
 
@@ -324,7 +337,7 @@ class Driver(object):
             pass
 
     def read_stop(self):
-        # type: () -> str
+        # type: () -> Optional[str]
         try:
             with open(self.stop_file) as f:
                 return f.read().strip() or "now"
@@ -402,19 +415,24 @@ class Driver(object):
             return None, ""
 
     def reap(self, timeout):
+        """Wait up to `timeout` for every recorded process group to end, then SIGKILL the groups.
+
+        The test is the group, not the direct child: a tool that ignores SIGTERM outlives its shell."""
         end = time.time() + timeout
-        for pgid, p in list(self.procs.items()):
-            try:
-                p.wait(max(0.1, end - time.time()))
-            except subprocess.TimeoutExpired:
-                self.killpg(pgid, signal.SIGKILL)
-                p.wait()
+        with self.lock:
+            procs = list({**self.signalled, **self.procs}.items())
+        for pgid, p in procs:
+            while time.time() < end and (p.poll() is None or group_alive(pgid)):
+                time.sleep(TICK_S)
+        for pgid, p in procs:
+            self.killpg(pgid, signal.SIGKILL)
+            p.wait()
             self.forget(p)
 
     # limits
 
     def free_seats(self, tool):
-        # type: (dict) -> int
+        # type: (dict) -> Optional[int]
         """The first number the probe of a tool prints, or None when the probe fails."""
         rc, out = self.sh(tool["probe"], self.root)
         try:
@@ -435,7 +453,7 @@ class Driver(object):
                 if n.rsplit(".", 1)[0] != key and now - float(c.get("ts") or 0) < lease_s]
 
     def take(self, tools, key, budget):
-        # type: (list, str, dict) -> str
+        # type: (list, str, dict) -> Optional[str]
         """Lease the seats of every tool under `key`; return why the caller waits, or None.
 
         One file per seat, <key>.<n>, made by a rename. After the rename the driver counts again and
@@ -517,7 +535,7 @@ class Driver(object):
         return full
 
     def budget_over(self, budget, started):
-        # type: (dict, int) -> str
+        # type: (dict, int) -> Optional[str]
         hours = budget.get("hours")
         if hours is not None and time.time() - started > (float(hours) + self.keep_extra(started)) * 3600:
             return "hours"
@@ -757,11 +775,13 @@ class Driver(object):
         start_at = self.spec.get("start_at") or {}
         start = start_at.get("stage") or (names[0] if names else None)
         if start not in names:
+            sys.stderr.write("start stage %s not in %s\n" % (start, names))
             raise Fail(2, "FAILED:setup")
         todo = self.stages[names.index(start):]
         need = float((todo[0].get("needs") or {}).get("disk_gb") or 0)
         free = free_gb(self.root)
         if free is not None and free < need:
+            sys.stderr.write("%.1f GB free, %s needs %.1f\n" % (free, todo[0]["name"], need))
             raise Fail(3, "FAILED:" + todo[0]["name"])
         self.setup_runtime()
         for i, st in enumerate(todo):

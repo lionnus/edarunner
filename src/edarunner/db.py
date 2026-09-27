@@ -78,6 +78,13 @@ def _text(value: Any) -> Any:
     return json.dumps(value) if isinstance(value, (dict, list)) else value
 
 
+class NotFound(KeyError):
+    """A handle or a reuse that names no run. Its text is the message, without the quotes of a KeyError."""
+
+    def __str__(self) -> str:
+        return str(self.args[0])
+
+
 class Database:
     """One SQLite database, head node only. Use as a context manager.
 
@@ -271,6 +278,19 @@ class Database:
 
     # queries
 
+    def stage_runs(self, run_id: str) -> list[Row]:
+        """The stage and task rows of one run, oldest first; a stage row has task ''."""
+        return self._rows("SELECT * FROM stage_runs WHERE run_id=? ORDER BY started, stage, task, attempt", (run_id,))
+
+    def step_runs(self, run_id: str) -> list[Row]:
+        """The step start times of one run, by stage and step."""
+        return self._rows("SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))
+
+    def parameters(self, run_id: str | None = None) -> list[Row]:
+        """The parameter rows of one run, or of every run."""
+        where, args = (" WHERE run_id=?", (run_id,)) if run_id else ("", ())
+        return self._rows("SELECT run_id, key, value, source FROM parameters" + where, args)
+
     def _rows(self, sql: str, args: tuple | list = ()) -> list[Row]:
         return [dict(r) for r in self.conn.execute(sql, args)]
 
@@ -299,21 +319,21 @@ class Database:
         if handle.startswith("#"):
             n = int(handle[1:]) if handle[1:].isdigit() else 0
             if not last_board or not 1 <= n <= len(last_board):
-                raise KeyError(f"{handle}: the last board has {len(last_board or [])} rows")
+                raise NotFound(f"{handle}: the last board has {len(last_board or [])} rows")
             return last_board[n - 1]
         if "@" in handle:
             label, batch = handle.split("@", 1)
             rows = self._rows("SELECT run_id FROM runs WHERE label=? AND batch=? ORDER BY run_id DESC", (label, batch))
             if not rows:
-                raise KeyError(f"{handle}: no run has label '{label}' in batch '{batch}'")
+                raise NotFound(f"{handle}: no run has label '{label}' in batch '{batch}'")
             return rows[0]["run_id"]
         ids = [r["run_id"] for r in self._rows("SELECT run_id FROM runs WHERE substr(run_id, 1, ?)=?", (len(handle), handle))]
         if handle in ids:
             return handle
         if not ids:
-            raise KeyError(f"{handle}: no run id starts with it")
+            raise NotFound(f"{handle}: no run id starts with it")
         if len(ids) > 1:
-            raise KeyError(f"{handle}: ambiguous, matches {', '.join(sorted(ids))}")
+            raise NotFound(f"{handle}: ambiguous, matches {', '.join(sorted(ids))}")
         return ids[0]
 
     def events(self, since_s: int | None = None, run_id: str | None = None, n: int = 50) -> list[Row]:

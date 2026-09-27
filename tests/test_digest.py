@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import time
 
+from helpers_watch import NOW, Env, rid
+
 from edarunner import watch
+from edarunner.notify import untag
 from edarunner.notify.digest import Digest
-from edarunner.notify.telegram import format as fmt
-from test_watch import NOW, Env, env, rid  # noqa: F401  (the fixture of test_watch)
 
 
 def fill(e: Env) -> None:
@@ -62,7 +63,7 @@ def test_digest_text_on_a_fixed_database(env: Env) -> None:
 
 def test_an_empty_digest_says_none(env: Env) -> None:
     text = Digest(env.project, env.db).text(NOW)
-    assert text.count("<i>none</i>") == 5 and fmt.plain(text).startswith("Ended since ")
+    assert text.count("<i>none</i>") == 5 and untag(text).startswith("Ended since ")
 
 
 def test_the_digest_is_due_once_a_day_from_its_hour(env: Env) -> None:

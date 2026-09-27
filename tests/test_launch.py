@@ -9,7 +9,6 @@ import os
 import shutil
 import signal
 import subprocess
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,12 +17,13 @@ import pytest
 import edarunner
 from edarunner import config, launch, sync
 from edarunner.backend import Handle, Request, SshBackend
+from edarunner.config import ConfigError
+from edarunner.db import Database
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
-from edarunner.db import Database
 from edarunner.model import Needs, Runtime
+from helpers_driver import DEMO, wait_for
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
 SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "vars", "host", "root", "state_file",
              "queue_dir", "shell", "env", "limits", "start_at", "stages"}
@@ -70,19 +70,6 @@ def src_tree(tmp_path: Path) -> Path:
     src = tmp_path / "src"
     shutil.copytree(DEMO / "flow", src / "flow")
     return src
-
-
-def wait_hb(path: Path, pred, timeout: float = 60) -> dict:
-    end = time.time() + timeout
-    while time.time() < end:
-        try:
-            hb = json.loads(path.read_text())
-            if pred(hb):
-                return hb
-        except (OSError, ValueError):
-            pass
-        time.sleep(0.2)
-    raise AssertionError(f"heartbeat never matched: {path}")
 
 
 # plan
@@ -211,6 +198,9 @@ def test_a_job_without_config(env, tmp_path: Path) -> None:
     hook.write_text("def build_tag(config, overrides):\n    return repr(config)\n")
     project.source.build_tag = f"python:{hook}:build_tag"
     assert launch.build_tag(project, job) == "''"
+    hook.write_text("def build_tag(config, overrides, worktree):\n    return len(None)\n")
+    with pytest.raises(ConfigError, match="object of type 'NoneType' has no len"):
+        launch.build_tag(project, job)  # the hook's own fault, not a second call with two arguments
     assert launch.render_run_id("{build_tag}_{label}-{config}", {"build_tag": "", "label": "a", "config": ""}) == "a"
 
 
@@ -224,6 +214,9 @@ def test_plan_reuses_a_database_run(env) -> None:
     assert a.problems == [] and a.reuse == f"{DATE}_a_demo_gOLD" and a.src == "OLD"
     assert a.root == "/x/edr/old" and a.run_id == f"{DATE}_a_demo_gOLD"
     assert a.spec["start_at"]["stage"] == "pnr" and a.spec["stages"][0]["cwd"] == "/x/edr/old"
+    batch.jobs[0].reuse = {"label": "nope", "latest": True}
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
+    assert a.problems == ["reuse label=nope latest=True: no run with a host and a root in the database"]
 
 
 # launch and stop
@@ -246,7 +239,7 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     assert (Path(row["root"]) / "flow" / "flow.sh").exists()
     assert db.run(run_id)["state"] == "running" and db.batches()[0]["batch"] == "demo"
     assert [e["kind"] for e in db.events(run_id=run_id)] == ["launch"]
-    hb = wait_hb(state / f"{run_id}.json", lambda h: h["phase"] == "done")
+    hb = wait_for({"state_file": str(state / f"{run_id}.json")}, lambda h: h["phase"] == "done", timeout=60)
     assert hb["exit"] == 0 and (Path(row["root"]) / "reports" / "3" / "qor.rpt").exists()
     assert list((tmp_path / "state" / "leases" / "demo").iterdir()) == []
     again = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "again"))
@@ -265,7 +258,7 @@ def test_launch_runs_the_setup_and_the_stage_with_the_run_identity(env, tmp_path
     assert spec["runtime"] == {"setup": f"echo {run_id} $EDR_SRC > setup.out", "when_changed": ["uv.lock"]}
     assert {k: spec["env"][k] for k in ("EDR_SRC", "EDR_RUN_ID", "EDR_TREE_ID")} == \
         {"EDR_SRC": "HEAD", "EDR_RUN_ID": run_id, "EDR_TREE_ID": run_id}
-    hb = wait_hb(tmp_path / "state" / "demo" / f"{run_id}.json", lambda h: h["phase"] == "done")
+    hb = wait_for({"state_file": str(tmp_path / "state" / "demo" / f"{run_id}.json")}, lambda h: h["phase"] == "done", timeout=60)
     assert hb["exit"] == 0
     assert (root / "setup.out").read_text() == f"{run_id} HEAD\n" and (root / "log" / "setup.log").is_file()
     assert (root / "stage.out").read_text() == f"HEAD {run_id} {run_id}\n"
@@ -276,12 +269,12 @@ def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
     synth_only(batch)
     (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path))
     hb_path = tmp_path / "state" / "demo" / f"{row['run_id']}.json"
-    hb = wait_hb(hb_path, lambda h: h["phase"] == "stage:synth")
+    hb = wait_for({"state_file": str(hb_path)}, lambda h: h["phase"] == "stage:synth", timeout=60)
     run_row = db.run(row["run_id"])
     assert launch.stop(ssh, db, run_row, hb, now=True, grace_s=15, why="test", state=project.state_dir)
-    hb = wait_hb(hb_path, lambda h: h["exit"] is not None, timeout=20)
+    hb = wait_for({"state_file": str(hb_path)}, lambda h: h["exit"] is not None, timeout=20)
     assert hb["phase"] in ("KILLED:SIGTERM", "STOPPED") and hb["exit"] == 10 and hb["pgids"] == []
-    assert not ssh.pid_alive("local", hb["driver_pid"])
+    assert not ssh.pids_alive("local", [hb["driver_pid"]])
     assert [e["kind"] for e in db.events(run_id=row["run_id"])] == ["launch", "stop"]
     assert launch.stop(ssh, db, run_row, hb, after_task=True, why="later", state=project.state_dir)
     assert (hb_path.with_name(f"{row['run_id']}.stop")).read_text().strip() == "after-task"
@@ -469,7 +462,7 @@ def test_restore_launches_a_fresh_tree_from_the_archive(env, tmp_path: Path) -> 
     (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "again"))
     root = Path(row["root"])
     assert row["started"] and (root / "out" / "11" / "netlist.v").is_file() and (root / "flow" / "flow.sh").is_file()
-    wait_hb(tmp_path / "state" / "demo" / f"{row['run_id']}.json", lambda h: h["phase"] == "done")
+    wait_for({"state_file": str(tmp_path / "state" / "demo" / f"{row['run_id']}.json")}, lambda h: h["phase"] == "done", timeout=60)
     batch.jobs[0].label, batch.jobs[0].reuse = "a_bad", {"run_id": old, "restore": "nope"}
     (bad,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "bad"))
     assert bad["problems"] == ["sync failed"] and not bad["started"]
@@ -481,10 +474,10 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
             self.cmd = cmd
             return 0, "4242\n", ""
     ssh = FakeSsh()
-    req = Request("r", tmp_path / "s.json", tmp_path / "d.py", tmp_path / "l.log", "hostA", {"PATH": "/usr/sepp/bin:$PATH"})
+    req = Request("r", tmp_path / "s.json", tmp_path / "d.py", tmp_path / "l.log", "hostA", {"PATH": "/opt/eda/bin:$PATH"})
     assert SshBackend(ssh).submit(req) == Handle("ssh", "hostA:4242", "hostA")
     assert ssh.cmd.startswith("py=$(command -v python3); setsid nohup \"$py\" ")
-    assert "export" not in ssh.cmd and "/usr/sepp" not in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
+    assert "export" not in ssh.cmd and "/opt/eda" not in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
 
 
 def test_project_env_is_rendered_over_the_site_env(env) -> None:
@@ -528,4 +521,4 @@ def test_tree_id_survives_a_chain_of_reuse(env) -> None:
     batch.jobs[0].stages = ["pnr"]
     a = next(p for p in launch.plan(project, batch, ssh, db, date=DATE) if p.label == "a")
     assert a.reuse == "20260102_0000_a_demo_gOLD" and a.values["tree_id"] == "20260101_0000_a_demo_gOLD"
-    assert launch._run_row(a, batch)["tree_id"] == "20260101_0000_a_demo_gOLD"
+    assert launch.run_row(a, batch)["tree_id"] == "20260101_0000_a_demo_gOLD"

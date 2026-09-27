@@ -4,9 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -16,7 +20,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --extra dev
+      # One entry installs the mlflow extra, so the MLflow export runs in CI.
+      - run: uv sync --extra dev ${{ matrix.python == '3.12' && '--extra mlflow' || '' }}
+      - run: uv run ruff check src tests tools
       - name: pytest
         run: uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
       - run: uv run coverage-badge -o coverage.svg
@@ -30,13 +36,14 @@ jobs:
     # The driver runs on the compute hosts with their own python3; 3.6 is the floor.
     # A container job has no init, so a killed task would stay a zombie in its process group.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: python:3.6
       options: --init
+    env:
+      EDR_DRIVER_PYTHON: /usr/local/bin/python3.6
     steps:
       - uses: actions/checkout@v4
-      # tests/helpers_driver.py starts the driver with /usr/bin/python3; the image keeps 3.6 in /usr/local/bin.
-      - run: ln -sf /usr/local/bin/python3 /usr/bin/python3 && /usr/bin/python3 --version
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
@@ -47,6 +54,7 @@ jobs:
     # The GCD design of ORFS on nangate45 through synth, floorplan and place, under edr.
     # The flow stops after placement: CTS in this image needs AVX-512, and a runner may lack it.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container: openroad/orfs:26Q3-657-gb74a7293e
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +79,7 @@ jobs:
   docs:
     # docs/reference/ is generated from the code; a page that is not current fails here.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -105,8 +114,9 @@ jobs:
 
   status:
     # Writes the outcome and the log of every job into the orphan branch ci-status; see docs/dev/testing.md.
+    # Only a push writes the branch: a pull request would put its own results over those of the branch.
     needs: [tests, driver, openroad, docs, condor, slurm]
-    if: always()
+    if: always() && github.event_name == 'push'
     # One run at a time writes the branch; two pushes at once made one fail.
     concurrency:
       group: ci-status
@@ -158,4 +168,5 @@ jobs:
           cd _status
           git --git-dir=../.git add -A .
           git --git-dir=../.git commit -qm "status of $GITHUB_SHA"
-          for i in 1 2 3; do git --git-dir=../.git push -qf origin ci-status && break; sleep $((i * 5)); done
+          for i in 1 2 3; do git --git-dir=../.git push -qf origin ci-status && exit 0; sleep $((i * 5)); done
+          exit 1

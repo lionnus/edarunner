@@ -163,9 +163,9 @@ class SshBackend:
             raise HostError(f"{req.run_id}: the ssh backend needs a host")
         if host == "local":
             return Handle(self.name, f"local:{_start_local(req)}", "local")
-        # The interpreter is the host's own python3 from the login PATH: a tool PATH once put a
-        # Python 3.4 first, and the driver died at its first subprocess.run. The site env reaches
-        # the driver's children through the spec, so nothing is exported here.
+        # The interpreter is the host's own python3 from the login PATH, because a tool PATH can put
+        # an old Python first. The site env reaches the driver's children through the spec, so
+        # nothing is exported here.
         cmd = (f"py=$(command -v python3); setsid nohup \"$py\" {shlex.quote(str(req.driver))} "
                f"{shlex.quote(str(req.spec))} > {shlex.quote(str(req.log))} 2>&1 < /dev/null & echo $!")
         rc, out, err = self.ssh.run(host, cmd)

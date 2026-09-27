@@ -8,9 +8,10 @@ import subprocess
 import time
 from pathlib import Path
 
+from helpers_cli import edr
+
 from edarunner import board, cli, config
 from edarunner.db import Database
-from test_cli import demo, edr  # noqa: F401  (the fixture and the runner of test_cli)
 
 
 def setup_repo(root: Path) -> None:
@@ -63,7 +64,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert "  stage synth, in " in out and "    cmd: bash " in out
     code, out, _ = edr(capsys, "plan", "demo", "--json")
     assert code == 0 and len(json.loads(out)["data"]) == 2
-    assert not state.exists()
+    assert not state.exists() and not (demo / "data" / "edr.db").exists()
 
     code, out, _ = edr(capsys, "launch", "demo")
     assert code == 0 and "2 started" in out

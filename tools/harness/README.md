@@ -1,7 +1,8 @@
 # Scheduler harness
 
-Two scripts start a scheduler in containers and run the local demo
-through it with `edr`. CI runs both; the `condor` and `slurm` jobs of
+`condor.sh` and `slurm.sh` each start a scheduler in containers and run
+the local demo through it with `edr`; `demo.sh` holds the part they
+share. CI runs both; the `condor` and `slurm` jobs of
 `.github/workflows/ci.yml` call them.
 
 | Script | Scheduler | Runtime |

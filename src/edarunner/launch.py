@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import os
 import re
 import string
@@ -11,11 +12,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, board, collect, config, hosts, sync
+from . import __version__, board, checkout, collect, config, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
+from .db import Database, NotFound
 from .guards import Refuse, assert_safe_target
-from .db import Database
 from .model import SCHEDULERS, Batch, Budget, Job, Project, Stage, Task
 
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
@@ -26,6 +27,8 @@ _SPEC_LIMITS = ("host_free_min_gb", "streak", "heartbeat_s", "gate_max_s", "leas
 
 @dataclass
 class RunPlan:
+    """One job rendered into a run: its id, host, root and spec, and the problems that stop it."""
+
     run_id: str
     label: str
     host: str | None
@@ -70,11 +73,13 @@ def build_tag(project: Project, job: Job, src: str = "") -> str:
         if src:
             candidate = project.source.worktrees / src
             worktree = str(candidate) if candidate.is_dir() else None
+        args = (job.config, job.overrides, worktree)
         try:
-            try:
-                return str(fn(job.config, job.overrides, worktree))
-            except TypeError:
-                return str(fn(job.config, job.overrides))
+            inspect.signature(fn).bind(*args)
+        except TypeError:
+            args = args[:2]  # a hook of the form (config, overrides)
+        try:
+            return str(fn(*args))
         except Exception as e:  # a hook fault is a plan problem, never a traceback
             raise ConfigError(f"build_tag hook {name}: {e}") from e
     return "_".join([job.config] * bool(job.config) + [f"{k}{v}" for k, v in job.overrides.items()])
@@ -224,7 +229,8 @@ def _reuse_row(db: Database, reuse: dict[str, object], need_tree: bool = True) -
         rows = [r for r in db.runs() if r["label"] == reuse["label"]]
         row = rows[-1] if rows else None
     if row is None or (need_tree and not (row.get("root") and row.get("host"))):
-        raise KeyError(f"reuse {reuse}: no run{' with a host and a root' if need_tree else ''} in the database")
+        what = " ".join(f"{k}={v}" for k, v in reuse.items())
+        raise NotFound(f"reuse {what}: no run{' with a host and a root' if need_tree else ''} in the database")
     return row
 
 
@@ -283,7 +289,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             host = None
         if host:
             mount = probes[host].mount
-            # An empty mount once gave a root of /<user>/... and a delete target outside every tree.
+            # An empty mount would give a root, and a delete target, outside every tree.
             if not mount:
                 problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
@@ -410,10 +416,6 @@ def _src_dir(project: Project, src: str, src_dir: Path | None, dry_run: bool = F
     if src_dir is not None:
         return Path(src_dir)
     try:
-        from . import checkout
-    except ImportError:
-        raise Refuse("no src_dir given and checkout is missing") from None
-    try:
         return Path(checkout.find(project, src))
     except checkout.CheckoutError:
         # A dry run checked nothing out; the tree would be at the path of the checkout.
@@ -446,7 +448,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         if p.spec and not p.problems and spec_path.exists():
             p.problems.append(f"already launched: {spec_path} exists")
         if p.queued and not dry_run:
-            db.upsert_run({**_run_row(p, batch), "state": "queued"})
+            db.upsert_run({**run_row(p, batch), "state": "queued"})
         if p.queued or p.problems:
             print(f"{p.run_id}: " + ("queued" if p.queued else "; ".join(p.problems)))
             continue
@@ -472,7 +474,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         print(f"{p.run_id}: {p.host or backend.name} {p.root}" + (" (dry)" if dry_run else ""))
         if dry_run:
             continue
-        db.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
+        db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
         try:
             handle = submit(backend, db, project, p.run_id, p.host, path, driver)
@@ -489,7 +491,8 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
     return out
 
 
-def _run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
+def run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
+    """The `runs` row of a planned run, before the driver starts."""
     return {"run_id": p.run_id, "batch": batch.batch, "label": p.label, "config": p.spec.get("config") or p.values.get("config"),
             "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host, "root": p.root or None,
             "tree_id": p.values.get("tree_id") or p.run_id, "created": int(time.time())}

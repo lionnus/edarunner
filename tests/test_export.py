@@ -4,15 +4,13 @@ import csv
 import hashlib
 import json
 import shutil
-from pathlib import Path
 
 import pytest
 
 from edarunner import config, export
-from edarunner.guards import Refuse
 from edarunner.db import Database
-
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
+from edarunner.guards import Refuse
+from helpers_driver import DEMO
 
 RUN_A_OLD = "20261001_0900_a_demo_gaaa111"
 RUN_A = "20261002_1130_a_demo_gaaa111"

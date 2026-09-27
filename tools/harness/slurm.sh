@@ -30,10 +30,12 @@ trap stop_pool EXIT
 SLURM_VERSION=$SLURM_VERSION compose up -d --no-build mysql slurmdbd slurmctld cpu-worker
 
 VIA=(docker exec slurmctld)
+idle=
 for _ in $(seq 90); do
-    [ "$("${VIA[@]}" sinfo -h -t idle -o %n 2>/dev/null | wc -l)" -ge 1 ] && break
+    [ "$("${VIA[@]}" sinfo -h -t idle -o %n 2>/dev/null | wc -l)" -ge 1 ] && { idle=1; break; }
     sleep 2
 done
+[ -n "$idle" ] || { echo "no idle slurm node after 180 s"; exit 1; }
 "${VIA[@]}" sinfo
 for w in $(docker ps --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=cpu-worker" -q); do
     docker exec "$w" python3 --version || docker exec "$w" dnf install -q -y python3
@@ -42,7 +44,10 @@ done
 # The licence fc: one seat, so two jobs that each ask fc:1 run one after the other.
 "${VIA[@]}" bash -c 'grep -q "^Licenses=" /etc/slurm/slurm.conf || echo "Licenses=fc:1" >> /etc/slurm/slurm.conf'
 "${VIA[@]}" scontrol reconfigure
-sleep 5
+for _ in $(seq 30); do
+    "${VIA[@]}" scontrol show lic fc >/dev/null 2>&1 && break
+    sleep 1
+done
 "${VIA[@]}" scontrol show lic fc
 
 BACKEND=slurm

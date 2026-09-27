@@ -12,9 +12,10 @@ from typing import Any
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from . import board
+from . import board, config
+from .config import ConfigError
 from .db import Database
-from .metrics import fill, owned_steps
+from .metrics import owned_steps
 from .model import Project
 
 Row = dict[str, Any]
@@ -222,8 +223,8 @@ def _log_steps(project: Project, run: Row, stage: str, first: int) -> list[Row]:
     spec = project.stages[stage].step_log
     values = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
     try:
-        rel = fill(spec["file"], values)
-    except KeyError:
+        rel = config.render(spec["file"], values)
+    except ConfigError:
         return []
     path = project.data / "results" / str(run["run_id"]) / rel
     if not path.is_file():
@@ -245,8 +246,7 @@ def _log_steps(project: Project, run: Row, stage: str, first: int) -> list[Row]:
 def runtime(project: Project, db: Database, run: Row) -> Row:
     """Stage, step and task times of one run, from stage_runs, step_runs and the step_log files."""
     run_id = run["run_id"]
-    rows = [dict(r) for r in db.conn.execute(
-        "SELECT * FROM stage_runs WHERE run_id=? ORDER BY started, stage, task, attempt", (run_id,))]
+    rows = db.stage_runs(run_id)
     # The driver records `[runtime] setup` as the stage `setup`, before every stage of the flow.
     order = {"setup": -1, **{n: i for i, n in enumerate(project.stages)}}
     stages = sorted((r for r in rows if not r["task"]), key=lambda r: (order.get(r["stage"], len(order)), r["attempt"]))
@@ -255,8 +255,7 @@ def runtime(project: Project, db: Database, run: Row) -> Row:
         r["source"] = "stage_runs"
     ended = {s["stage"]: s["ended"] for s in stages if s.get("ended")}
     owned = owned_steps(project)
-    steps = [{**dict(r), "source": "step_runs"} for r in db.conn.execute(
-        "SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))]
+    steps = [{**r, "source": "step_runs"} for r in db.step_runs(run_id)]
     have = {s["stage"] for s in steps}
     for name, st in project.stages.items():
         if st.step_log and name not in have:

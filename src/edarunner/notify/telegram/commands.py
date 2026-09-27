@@ -24,7 +24,8 @@ DESIGN = re.compile(r"^[\w.-]{1,64}$")
 LOG_LINES = 200
 # The words of the reply keyboard, in rows; a tap sends the word, which runs the command of that name.
 KEYBOARD = (("Status", "Hosts"), ("Events", "Tools", "Digest"))
-ALIASES = {"lic": "tools"}  # old names, gone in the next release
+# The old command names that 0.4.0 removed, with the command that replaces each.
+REMOVED = {"lic": "tools"}
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ BUILTINS = {b.name: b for b in (
     Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True, on_run=True),
     Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
     Builtin("compare", "<handle>...", "metrics side by side", "Compare", "pre"),
-    Builtin("metric", "<name> [--design H]", "one metric per run", "Compare", "pre"),
+    Builtin("metric", "<name> [--design SRC]", "one metric per run", "Compare", "pre"),
     Builtin("help", "", "this list", "Help", "html"),
     Builtin("start", "", "this list and the reply keyboard", "Help", "html"),
     Builtin("keyboard", "[off]", "show or remove the reply keyboard", "Help"),
@@ -127,7 +128,8 @@ class Commands:
         `run` is the run of the alert the message replies to: it fills the handle of a built-in
         and the run placeholders of a custom command.
         """
-        name = ALIASES.get(name, name)
+        if name in REMOVED and name not in self.tg.commands:
+            return Reply(name, f"/{name} was removed; use /{REMOVED[name]}", ok=False)
         if name not in self.tg.commands and name not in BUILTINS:
             name = "help"
         try:
@@ -230,7 +232,7 @@ class Commands:
     def cmd_metric(self, args: list[str]) -> str:
         """One metric for every run, or for the runs of one design."""
         if not args:
-            return "usage: /metric <name> [--design H]"
+            return "usage: /metric <name> [--design SRC]"
         design = args[args.index("--design") + 1] if "--design" in args[:-1] else None
         return self.actions.metric_text(args[0], design)
 

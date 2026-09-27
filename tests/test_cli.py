@@ -8,7 +8,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import socket
 import subprocess
 import sys
@@ -16,75 +15,17 @@ import time
 from pathlib import Path
 
 import pytest
+from helpers_cli import DATE, bdir, dead_pid, edr, seed
 
 from edarunner import board, cli, config, launch, watch
 from edarunner import db as db_mod
+from edarunner.db import Database
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
-from edarunner.db import Database
 from edarunner.model import Telegram
 from edarunner.notify import Notifier
 from edarunner.notify.telegram import TelegramBot
-
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
-DATE = "20260926_1200"
-
-
-@pytest.fixture
-def demo(tmp_path: Path, monkeypatch) -> Path:
-    """The demo copied under tmp_path/edr (the safety marker), its scratch and HOME under tmp_path, cwd in the copy."""
-    root = tmp_path / "edr" / "demo"
-    shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
-    (tmp_path / "scratch").mkdir()
-    site = root / "site.toml"
-    site.write_text(site.read_text().replace('"/tmp/edr-demo"', f'"{tmp_path / "scratch"}"'))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("EDR_BATCH", raising=False)
-    monkeypatch.chdir(root)
-    return root
-
-
-def edr(capsys, *argv: str) -> tuple[int, str, str]:
-    code = cli.main(list(argv))
-    out = capsys.readouterr()
-    return code, out.out, out.err
-
-
-def dead_pid() -> int:
-    p = subprocess.Popen(["sleep", "0"])
-    p.wait()
-    return p.pid
-
-
-def bdir(root: Path, batch: str = "demo") -> Path:
-    """The batch directory of the state: <HOME>/.edr/<project>/<batch>."""
-    return Path.home() / ".edr" / "demo" / batch
-
-
-def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batch: str = "demo",
-         src: str = "abc1234", date: str = DATE, tree: bool = True, **extra) -> str:
-    """A database row, a heartbeat and a run tree under the tmp scratch; returns the run id."""
-    run_id = f"{date}_{label}_demo_g{src}"
-    project = config.load_project(root)
-    now = int(time.time())
-    row = {"run_id": run_id, "batch": batch, "label": label, "config": "demo", "src": src, "host": "local",
-           "phase": phase, "state": "running", "started": now - 100, "updated": now - 5,
-           "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0}, **extra}
-    if tree:
-        run_root = Path(project.site.scratch[0]) / getpass.getuser() / "edr" / "demo" / run_id
-        (run_root / "out" / "11").mkdir(parents=True)
-        (run_root / "out" / "11" / "netlist.v").write_text("module top; endmodule\n")
-        (run_root / "log").mkdir()
-        row["root"] = str(run_root)
-        terminal = str(phase).startswith(board.TERMINAL)
-        hb = {**row, "driver_pid": pid, "pgids": [], "stage": "synth", "step": 2, "step_name": "elaborate",
-              "tasks": {}, "exit": 0 if terminal else None, "last_log": "step 2 elaborate"}
-        (project.state_dir / batch).mkdir(parents=True, exist_ok=True)
-        (project.state_dir / batch / f"{run_id}.json").write_text(json.dumps(hb))
-    with Database(project.data / "edr.db") as db:
-        db.upsert_batch({"batch": batch, "project": "demo", "source": src})
-        db.upsert_run(row)
-    return run_id
+from helpers_driver import DEMO
 
 
 def with_vars(root: Path, run_id: str) -> None:
@@ -245,7 +186,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert "\n- `abc1234`, used by batch `demo`\n- `def5678`, used by no batch\n" in out
     assert "🟢 has room, 🟡 is filling up, 🟠 is nearly full and 🔴 is full." in out
     assert "One run has not finished:" in out and "`c@demo` is running in stage `synth` at step 2 (elaborate) on `local`" in out
-    assert "`b@demo` (failed): `edr retire b@demo --why failed`" in out
+    assert "`b@demo` (failed): `edr retire b@demo --why FAILED:synth`" in out
     assert "user recorded `launch` on `a@demo`: local /x" in out and f"`{demo / 'AGENTS.md'}`" in out
     code, out, _ = edr(capsys, "brief", "--json")
     data = json.loads(out)["data"]
@@ -253,6 +194,15 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
                           "live", "decisions", "events", "read", "docs"} <= data.keys()
     assert data["hosts"][0]["marks"]["cores"] == "🔴" and [d["handle"] for d in data["decisions"]] == ["b@demo", "a@demo"]
 
+
+def test_brief_proposes_nothing_for_a_retired_run(demo: Path, capsys) -> None:
+    seed(demo, "b", "FAILED:synth", exit=5)
+    seed(demo, "c", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 3600)
+    assert edr(capsys, "retire", "b@demo", "--uncollected", "--why", "failed")[0] == 0
+    assert edr(capsys, "retire", "c@demo", "--uncollected", "--why", "gone")[0] == 0
+    code, out, _ = edr(capsys, "brief", "--json")
+    data = json.loads(out)["data"]
+    assert code == 0 and data["decisions"] == [] and data["batches"][0]["states"] == {"retired": 2}
 
 def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> None:
     b = seed(demo, "b", "FAILED:synth", exit=5, stage="synth", step=2)
@@ -274,13 +224,13 @@ def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> No
     assert "  - Step 2 (elaborate) started" in out and "watch recorded `failed` on `b@demo`: synth ended FAILED" in out
     assert "Error: no licence" in out and "line 11\n" in out and "line 10\n" not in out
     assert "`design__instance__area` is 12.5 u at `synth` step 3." in out
-    assert "The triage proposes `edr retire b@demo --why failed`." in out and "the run ended `FAILED`" in out
+    assert "The triage proposes `edr retire b@demo --why FAILED:synth`." in out and "the run ended `FAILED`" in out
     code, out, _ = edr(capsys, "status", "b@demo")
     rows = [ln.split()[0] for ln in out.splitlines() if ln.split()[:1] in (["setup"], ["synth"])]
     assert code == 0 and rows[:2] == ["setup", "synth"] and re.search(r"setup +1 +done +0 .* 0m", out)
     code, out, _ = edr(capsys, "--json", "brief", "--run", "b@demo")
     data = json.loads(out)["data"]
-    assert code == 0 and data["command"] == "edr retire b@demo --why failed" and data["state"] == "failed"
+    assert code == 0 and data["command"] == "edr retire b@demo --why FAILED:synth" and data["state"] == "failed"
     assert {"runtime", "events", "log_tail", "metrics", "reason"} <= data.keys()
     code, _, err = edr(capsys, "brief", "--run", "nope@demo")
     assert code == 1 and "nope" in err
@@ -495,6 +445,22 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     assert edr(capsys, "retire", "--batch", "empty", "--why", "x")[0] == 2
 
 
+def test_a_retired_live_run_stays_retired_and_the_watcher_does_not_resume_it(demo: Path, capsys, monkeypatch) -> None:
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 3600)
+    code, _, _ = edr(capsys, "retire", "b@demo", "--uncollected", "--why", "gone")
+    assert code == 0
+    resumed, sent = [], []
+    monkeypatch.setattr(watch, "_resume", lambda *a, **k: resumed.append(a))
+    monkeypatch.setattr(watch, "orphans", lambda *a: [])  # the sleeps of other tests on this machine
+    notifier = Notifier()
+    monkeypatch.setattr(notifier, "send", lambda *a, **k: sent.append(a))
+    project = config.load_project(demo)
+    with Database(project.data / "edr.db") as db:
+        assert watch.cycle(project, Ssh(project.site), db, [notifier])[b] == "retired"
+        assert db.run(b)["phase"] == "ABANDONED:gone" and not board.is_live(db.run(b))
+    assert resumed == [] and sent == []
+
+
 # metrics, export, hosts, tools
 
 
@@ -558,8 +524,6 @@ def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None
     code, out, _ = edr(capsys, "tools")
     assert code == 0 and out.splitlines()[0].split() == ["tool", "free", "total", "hosts", "note"]
     assert out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"]
-    code, out, err = edr(capsys, "lic")
-    assert code == 0 and out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"] and "deprecated" in err
     code, out, _ = edr(capsys, "--json", "tools")
     assert code == 0 and json.loads(out)["data"] == [{"tool": "demo", "free": 8, "total": 10, "hosts": {"local": "1.0"}}]
     site = demo / "site.toml"
@@ -742,6 +706,10 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
                "--host", "local", "--root", str(root))[0] == 1
     assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--src", "a",
                "--host", "local", "--root", str(root / "missing"))[0] == 1
+    other = root.with_name("20260904_0412_noconf_x_gabc1234")
+    other.mkdir()
+    assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--src", "a", "--host", "local",
+               "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
 
 
 def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys) -> None:
@@ -835,17 +803,10 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     assert not Path(row["root"]).exists()
 
 
-def test_stage_is_the_old_name_of_checkout(demo: Path, capsys) -> None:
-    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
-    code, out, err = edr(capsys, "--json", "stage", "HEAD", "--dry-run")
-    assert code == 0 and json.loads(out)["data"]["src"] and "deprecated" in err and not (demo / "wt").exists()
-
-
-def test_run_is_the_old_name_of_continue(demo: Path, capsys) -> None:
-    seed(demo, "a", "done")
-    code, out, err = edr(capsys, "--json", "run", "a@demo", "--stage", "pnr", "--on", "local", "--dry-run")
-    assert code == 0 and json.loads(out)["data"]["batch"] == "demo"
-    assert "edr: run is deprecated; use edr continue" in err
+@pytest.mark.parametrize("old,new", [("lic", "tools"), ("stage", "checkout"), ("run", "continue")])
+def test_a_removed_command_names_its_replacement(demo: Path, capsys, old: str, new: str) -> None:
+    code, out, err = edr(capsys, "--json", old, "x")
+    assert code == 1 and out == "" and err == f"edr: {old} was removed in 0.4.0; use edr {new}\n"
 
 
 def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Path, capsys) -> None:

@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from collections import Counter
@@ -33,7 +34,7 @@ Row = dict[str, Any]
 # compare.html loads Plotly from this file in data/board when a user put a copy there, else from the CDN.
 PLOTLY_FILE = "plotly.min.js"
 PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
-TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED")
+TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED", "ABANDONED")
 # Sort rank on a board; the live rows go before the finished ones.
 RANK = {"dead": 0, "failed": 0, "hung": 1, "incomplete": 1, "looping": 2, "over_budget": 3,
          "host_full": 4, "killed": 4, "superseded": 5, "stopped": 5, "stale": 6, "running": 8, "done": 9}
@@ -272,7 +273,8 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
         return f"edr stop {h} {STOP_FLAGS[state]}"
     if state == "done":
         return f"edr export --design {row.get('src')} --out exports/{row.get('src')}"
-    return f"edr retire {h} --why {state}"
+    # The reason names what was observed, the phase the run ended with; without one the person writes it.
+    return f"edr retire {h} --why {shlex.quote(str(row.get('phase') or '<why>'))}"
 
 
 def wide(rows: list[Row], now: float | None = None) -> Table | str:

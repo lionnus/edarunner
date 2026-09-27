@@ -27,6 +27,8 @@ class CheckoutError(Exception):
 
 @dataclass
 class CheckoutResult:
+    """A checked-out source: its path, its tag, the short hash of each nested repository, and whether it is dirty."""
+
     path: Path
     src: str
     nested: dict[str, str] = field(default_factory=dict)
@@ -81,7 +83,7 @@ def _short(repo: Path, ref: str) -> str:
 def _clone(src: Path, dst: Path, commit: str, dry_run: bool) -> None:
     """Clone `src` into `dst` at `commit`, detached; `--local` hardlinks the objects."""
     if dry_run:
-        print(f"dry-run: git clone --local --no-checkout {src} {dst} && git -C {dst} checkout --detach {commit}")
+        print(f"dry: git clone --local --no-checkout {src} {dst} && git -C {dst} checkout --detach {commit}")
         return
     runid.git("clone", "-q", "--local", "--no-checkout", str(src), str(dst))
     runid.git("checkout", "-q", "--detach", commit, cwd=dst)
@@ -98,7 +100,7 @@ def _pinned(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
     repo, wts = project.source.repo, project.source.worktrees
     if runid.git("remote", cwd=repo):
         if dry_run:
-            print(f"dry-run: git -C {repo} fetch")
+            print(f"dry: git -C {repo} fetch")
         else:
             runid.git("fetch", "-q", cwd=repo)
     src = _short(repo, ref)
@@ -146,7 +148,7 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
         for n in nested:
             _nested(tree / n, path / n, dry_run)
     if dry_run:
-        print(f"dry-run: {' '.join(cmd)}")
+        print(f"dry: {' '.join(cmd)}")
         return CheckoutResult(path, src, nested, True)
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     if r.returncode:

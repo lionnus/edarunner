@@ -8,11 +8,9 @@ import re
 import time
 from pathlib import Path
 
-from .config import load_hook
+from . import config
+from .config import ConfigError, load_hook
 from .model import Metric, Project, Stage, Task
-
-_PLACEHOLDER = re.compile(r"\{([\w.]+)\}")
-
 
 TOP = "<top>"
 _NUM = re.compile(r"-?\d+(\.\d*)?([eE][-+]?\d+)?$")
@@ -145,10 +143,10 @@ def _extract_one(
     try:
         if task is not None:
             values.update({f"task.{k}": v for k, v in task.fields.items()})
-            values["task_dir"] = task_dir or fill(stage.task_dir if stage else "", values)
-        pattern = fill(metric.file, values)
-    except KeyError as e:
-        text = f"{metric.file}: no value for placeholder {e}"
+            values["task_dir"] = task_dir or config.render(stage.task_dir if stage else "", values)
+        pattern = config.render(metric.file, values)
+    except ConfigError as e:
+        text = str(e)
         return [_row(run_id, stage_name, None, task_id, metric, None, text, now)]
     rows = []
     for step, path in _files(pattern, run_dir, metric.step):
@@ -181,7 +179,7 @@ def owned_steps(project: Project) -> dict[str, range]:
     """The step numbers each stage owns, in stage order.
 
     A `steps` list is indexed by the step number and continues the previous stage's
-    list. A list that is shorter than the steps before it names this stage's own
+    list. A list that is not longer than the steps before it names this stage's own
     steps only, so it continues from the previous end. A stage without `steps`
     owns no numbered step.
     """
@@ -211,8 +209,6 @@ def _files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | No
     return sorted(found)
 
 
-def fill(text: str, values: dict[str, object]) -> str:
-    return _PLACEHOLDER.sub(lambda m: str(values[m.group(1)]), text)
 
 
 def _row(

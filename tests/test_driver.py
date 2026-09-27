@@ -1,4 +1,9 @@
-"""edr_driver.py under helpers_driver.PY36 against the demo flow."""
+"""edr_driver.py under helpers_driver.PY36 against the demo flow.
+
+The tests that call `_load_driver` import the driver into the pytest interpreter, which is not
+PY36. The paths they test, the leases and the usage samples, also run under PY36 in every test
+that starts a driver with `start`.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,8 @@ import signal
 import socket
 import subprocess
 import threading
-import types
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -94,6 +99,32 @@ def test_sigterm_kills_the_group_and_reports(tmp_path: Path) -> None:
         pytest.fail("process group %d still alive" % pgid)
     assert not (Path(spec["root"]) / "reports" / "3").exists()
 
+
+
+def test_a_tool_that_ignores_sigterm_gets_sigkill_after_the_grace(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",))
+    pid_file = tmp_path / "tool.pid"
+    # The shell dies on SIGTERM; the tool under it ignores SIGTERM, as KLayout does.
+    spec["stages"][0]["cmd"] = f"bash -c 'trap \"\" TERM; echo $$ > {pid_file}; while :; do sleep 1; done' & wait"
+    proc = start(spec)
+    wait_for(spec, lambda h: h["phase"] == "stage:synth" and h["pgids"])
+    for _ in range(100):
+        if pid_file.is_file() and pid_file.read_text().strip():
+            break
+        time.sleep(0.05)
+    tool = int(pid_file.read_text())
+    proc.send_signal(signal.SIGTERM)
+    rc, hb = finish(proc, spec)
+    assert (rc, hb["phase"]) == (10, "KILLED:SIGTERM")
+    for _ in range(100):
+        try:
+            os.kill(tool, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(tool, signal.SIGKILL)
+        pytest.fail("the tool %d survived the stop" % tool)
 
 def test_stop_file_after_task_ends_the_group(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=1)
@@ -181,6 +212,18 @@ def test_checkpoint_without_resume_fails_before_the_command(tmp_path: Path) -> N
     assert (rc, hb["phase"], hb["exit"]) == (2, "FAILED:export", 2)
     assert hb["last_cmd"] is None and not (Path(spec["root"]) / "log" / "export.log").exists()
 
+
+
+def test_a_refusal_before_the_first_stage_names_its_reason(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",), start_at={"stage": "nope", "checkpoint": None})
+    rc, hb = finish(start(spec), spec)
+    log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log")
+    assert (rc, hb["phase"]) == (2, "FAILED:setup") and "start stage nope not in ['synth']" in log.read_text()
+    spec = render_spec(tmp_path / "full", stages=("synth",))
+    spec["stages"][0]["needs"] = {"disk_gb": 10 ** 9}
+    rc, hb = finish(start(spec), spec)
+    log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log")
+    assert (rc, hb["phase"]) == (3, "FAILED:synth") and "GB free, synth needs 1000000000.0" in log.read_text()
 
 def test_bad_spec_exits_2(tmp_path: Path) -> None:
     bad = tmp_path / "bad.spec.json"
@@ -304,6 +347,7 @@ def test_sighup_kills_the_group_and_reports(tmp_path: Path) -> None:
 # seat leases
 
 def _load_driver():
+    """The driver module in this interpreter, for the tests that patch its functions."""
     spec = importlib.util.spec_from_file_location("edr_driver_under_test", DRIVER)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]

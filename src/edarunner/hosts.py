@@ -29,6 +29,8 @@ class HostError(OSError):
 
 @dataclass
 class HostProbe:
+    """What one probe of a host found: its cores, RAM, scratch, GPUs and processes."""
+
     host: str
     free_cores: float
     free_ram_gb: float
@@ -242,10 +244,6 @@ class Ssh:
         out = self._run_ok(host, _probe_cmd(self.scratch_dirs(host)))
         return _parse_probe(host, out, self.site.tool_procs)
 
-    def pid_alive(self, host: str, pid: int) -> bool:
-        """True when `pid` runs on `host`; HostError when the host did not answer."""
-        return int(pid) in self.pids_alive(host, [pid])
-
     def pids_alive(self, host: str, pids: list[int]) -> set[int]:
         """The pids of `pids` that run on `host`, by one `ps`; HostError when the host did not answer."""
         wanted = {int(p) for p in pids}
@@ -273,7 +271,7 @@ class Ssh:
         rows = []
         for line in out.splitlines():
             parts = line.split(None, 4)
-            # ponytail: a comm with a space misaligns the row; such a comm never names a tool.
+            # A comm with a space misaligns the row; no tool name has one.
             if len(parts) == 5 and rx.search(parts[3]):
                 rows.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3], parts[4]))
         return rows

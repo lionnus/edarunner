@@ -18,9 +18,9 @@ from typing import Any
 
 from . import analysis, board, collect, config, launch, metrics
 from .backend import Backend, Live, make_backend, run_handle
+from .db import Database
 from .guards import Refuse
 from .hosts import HostError, Ssh
-from .db import Database
 from .model import SCHEDULERS, Project, Task
 from .notify import Notifier, alert_buttons
 from .notify.digest import Digest
@@ -70,7 +70,7 @@ STATES = {
                        "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, unless the run has a keep file", alert=True),
-    "orphan": State("a process of ours that matches `tool_procs`, outside every live run tree",
+    "orphan": State("a process of the current user that matches `tool_procs`, outside every live run tree",
                     "`SIGTERM`, only with `kill_orphan`", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),
@@ -468,7 +468,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     rows = [r for r in db.runs() if r["batch"] not in retired]
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
                                                            db.host_samples(int(now) - 86400)))
-    parameters = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM parameters")]
+    parameters = db.parameters()
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
     areas = analysis.last_areas(db, [r["run_id"] for r in rows])
     config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly, areas,
@@ -532,6 +532,9 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         run = db.run(hb["run_id"]) or {**hb, "batch": batch}
         h = handles.get(hb["run_id"])
         live = alive[h][0] if h in alive else None
+        if run.get("state") in ("retired", "abandoned"):
+            states[hb["run_id"]] = run["state"]
+            continue
         state, reasons = classify(project, ssh, db, run, hb, now, progress, live)
         states[hb["run_id"]] = state
         if dry_run:

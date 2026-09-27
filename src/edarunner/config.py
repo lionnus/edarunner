@@ -10,7 +10,8 @@ hold for every file:
 - A path is absolute or relative to the file that names it, and `~` expands.
 - A string may hold `{placeholders}`; the last section lists them. `${VAR}` belongs to the shell
   and stays as it is.
-- A hook is `python:<file>:<function>`, with `<file>` relative to the project directory.
+- A hook is `<file>:<function>`, with `<file>` relative to the project directory; a leading
+  `python:` is optional.
 
 `edr check` loads all four, imports every hook, probes the hosts and plans every batch under
 `jobs/`, so a wrong file stops there.
@@ -32,8 +33,32 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    BACKENDS, SCHEDULERS, Batch, BotCommand, Budget, Host, Job, Limits, Mail, Marks, Metric, Needs, Ntfy, Placement,
-    Project, Retry, Runtime, Safety, Scheduler, Site, Source, Stage, Sync, Task, Telegram, Tool,
+    BACKENDS,
+    SCHEDULERS,
+    Batch,
+    BotCommand,
+    Budget,
+    Host,
+    Job,
+    Limits,
+    Mail,
+    Marks,
+    Metric,
+    Needs,
+    Ntfy,
+    Placement,
+    Project,
+    Retry,
+    Runtime,
+    Safety,
+    Scheduler,
+    Site,
+    Source,
+    Stage,
+    Sync,
+    Task,
+    Telegram,
+    Tool,
 )
 
 T = TypeVar("T")
@@ -83,13 +108,15 @@ PLACEHOLDERS = {
     "task_dir": ("the task directory", "the strings of a task group, `collect`, metric files"),
     "task.<key>": ("a key of the task table", "the strings of a task group, `collect`, metric files"),
     "step": ("the step number", "a metric `file` with `step = \"*\"`"),
+    "handle": ("the handle of the run, `label@batch`", "a bot command sent as a reply to an alert"),
+    "run_root": ("the run tree", "a bot command sent as a reply to an alert"),
 }
 
 
 def render(template: str, values: Mapping[str, object]) -> str:
     """Fill every `{name}` and `{a.b}` in `template` from `values`.
 
-    A placeholder without a value is a ConfigError that names it: `missing` for one of the
+    A placeholder without a value is a load error that names it: `missing` for one of the
     table below that this string cannot use, `unknown` for a name edr never fills. A dict
     value flattens to dotted keys, so a task table gives `{task.kernel}`. `${VAR}` belongs
     to the shell and stays as it is.

@@ -8,6 +8,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from edarunner.config import ConfigError, render
 from edarunner.model import BotCommand
 
 DETACH_WATCH_S = 5.0  # a detached command that ends this soon failed to start, as a rule
@@ -31,13 +32,13 @@ def run_custom(c: BotCommand, args: list[str], env: dict[str, str], log_dir: Pat
             return f"refused: {n} must match {c.args[n]}", False
         env[n] = v
     try:
-        argv = [t.format_map(env) for t in c.run]
-        cwd = (c.cwd or "{root}").format_map(env)
-        skip = [t.format_map(env) for t in c.skip_if or []]
-        skip_reply = (c.skip_reply or "skipped").format_map(env)
-        done = c.reply.format_map(env)
-    except (KeyError, IndexError, ValueError) as e:
-        return f"/{c.name}: bad placeholder {e}", False
+        argv = [render(t, env) for t in c.run]
+        cwd = render(c.cwd or "{root}", env)
+        skip = [render(t, env) for t in c.skip_if or []]
+        skip_reply = render(c.skip_reply or "skipped", env)
+        done = render(c.reply, env)
+    except ConfigError as e:
+        return f"/{c.name}: {e}", False
     event("command", f"/{c.name} " + " ".join(f"{n}={v}" for n, v in zip(names, values)))
     if c.dry_run:
         return f"would run in {cwd}:\n{shlex.join(argv)}", True

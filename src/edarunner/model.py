@@ -51,19 +51,21 @@ class Tool:
     name: str
     seats: int | None = doc("the seat total, for `edr tools`", None)
     probe: list[str] = doc("an argv list that prints the free seats; it runs on the host with the run placeholders "
-                           "filled", factory=list)
+                           "filled, and `edr tools` runs it on the head node with `{root}` set to the project "
+                           "directory", factory=list)
     licence: str = doc("the licence or concurrency limit that counts the tool in the scheduler; a job asks it for "
                        "the most seats one of its stages needs, for its whole run", "",
-                       shown="none; the scheduler does not count the tool")
+                       shown="unset; the scheduler does not count the tool")
 
 
 @dataclass
 class BotCommand:
-    """One custom command of the bot: `[telegram.commands.<name>]` in `site.toml`.
+    """Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
 
-    Every string renders `{project}`, `{root}` and `{project_root}` (the project directory),
-    `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`. A command sent as a reply to an alert
-    also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run. No shell runs between the bot and
+    Every string renders `{project}`, `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`.
+    Here `{root}` and `{project_root}` both give the project directory, not a run tree. A command sent
+    as a reply to an alert also renders `{handle}`, `{run_id}`, `{run_root}` and `{host}` of that run;
+    `{run_root}` is the run tree. No shell runs between the bot and
     `run[0]`. A program that parses its argument itself, such as `tmux new-session <cmd>`,
     `ssh host <cmd>` or `sh -c`, does run a shell on the rendered value, so gate every placeholder
     inside such a token with an exact allowlist regex. Every value must match its regex in full, or
@@ -94,9 +96,9 @@ class Telegram:
     token_file: Path = doc("the bot token, mode 600", Path("~/.config/edarunner/telegram.token"))
     commands: dict[str, BotCommand] = field(default_factory=dict)
     user_id: int | None = doc("the one user whose messages and buttons the bot obeys", None,
-                              shown="none; the chat is the only gate")
+                              shown="unset; the chat is the only gate")
     topic_id: int | None = doc("the forum topic of every message; a command from another topic is ignored", None,
-                               shown="none; the main thread")
+                               shown="unset; the main thread")
 
 
 @dataclass
@@ -144,7 +146,8 @@ BACKENDS = ("ssh", "local", *SCHEDULERS)
 class Scheduler:
     """What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
     `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
-    driver writes into its first heartbeat. `docs/configure.md` shows a site file for each."""
+    driver writes into its first heartbeat. `docs/configure.md` shows a Slurm site file
+    and how each setting maps to HTCondor, Slurm and LSF."""
 
     backend: str = doc("`\"ssh\"` on the site hosts, `\"local\"` on the head node only, or `\"condor\"`, "
                        "`\"slurm\"`, `\"lsf\"`", "ssh")
@@ -224,11 +227,21 @@ class Stage:
     A flow that runs several steps inside one tool session stays one stage, and `edr` tracks the
     steps. The driver runs `progress` every 5 s in the stage's `cwd` and takes the first number it
     prints as the current step. `steps[step]` is the step name in the heartbeat and on the board,
-    and the checkpoint the watcher resumes from. A numbered step belongs to one stage. The `steps`
-    list of a stage is indexed by the step number and continues the list of the stage before it,
-    so a flow with two sessions over one numbering lists all names in the second stage. A list
-    that is not longer than the steps before it names the stage's own steps and continues from
-    the previous end. A stage without `steps` owns no numbered step.
+    and the checkpoint the watcher resumes from. A numbered step belongs to one stage.
+
+    The numbering starts at 0 and runs on across the stages. A later stage lists either every name
+    from step 0 or only its own names. Both forms below give `synth` the steps 0 to 3 and `pnr` the
+    steps 4 and 5:
+
+    ```toml
+    [stages.synth]
+    steps = ["setup", "analyze", "elaborate", "synth"]
+
+    [stages.pnr]
+    steps = ["cts", "route"]  # or all six names: "setup", ..., "cts", "route"
+    ```
+
+    A stage without `steps` owns no numbered step.
 
     A stage with `foreach = "tasks"` is a task group: `cmd` runs once per task of the job,
     `parallel` at a time, each in its own `task_dir` with its own log, budget and result. The
@@ -288,7 +301,7 @@ class Metric:
                          "`report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is "
                          "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
                          shown="one of the five")
-    unit: str = doc("unit text", "")
+    unit: str = doc("the unit, as text", "")
     canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
                          "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
                          "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "
@@ -311,7 +324,7 @@ class Task:
     """
 
     id: str
-    fields: dict[str, str] = doc("any key; `{task.<key>}` in the stage strings", key="tasks.<id>.<key>", shown="none")
+    fields: dict[str, str] = doc("any key; `{task.<key>}` in the stage strings", key="tasks.<id>.<key>", shown="unset")
     needs: Needs | None = doc("`{ cores, disk_gb, tools, ram_gb }`; replaces the stage's", None, key="tasks.<id>.needs")
     budget: Budget | None = doc("`{ hours, disk_gb, kill, per }`; replaces the stage's", None, key="tasks.<id>.budget")
 
@@ -325,9 +338,11 @@ class Source:
     ref: str = doc("the ref `edr checkout` takes without an argument", "HEAD")
     nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
                             factory=list)
-    run_id: str = doc("the run id template", "{date}_{label}_{build_tag}_g{src}")
-    build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)`; `\"\"` gives "
-                         "`{config}` plus `_KEYVALUE` per override", "")
+    run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows",
+                      "{date}_{label}_{build_tag}_g{src}")
+    build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)` or from "
+                         "`(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each "
+                         "override, such as `base_FREQ500`", "")
 
 
 @dataclass
@@ -388,7 +403,7 @@ class Placement:
     the job is queued. When no host of the site has a tool the job needs, `plan` reports it as a
     problem."""
 
-    max_per_host: int = doc("our runs per host", 2)
+    max_per_host: int = doc("the most runs of this project on one host", 2)
     min_free_cores: int = doc("free cores a host needs to take a run", 16)
     min_free_ram_gb: int = doc("free RAM a host needs, in GB", 60)
     avoid: list[str] = doc("hosts `auto` never picks", factory=list)
@@ -397,12 +412,12 @@ class Placement:
 
 @dataclass
 class Project:
-    """`edr.toml`: the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
+    """`edr.toml` holds the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
     `source.worktrees` render at load time with `{project}`, `{project_root}`, `{user}` and
     `{site_dir}`. Every other string keeps its placeholders until `plan`."""
 
     root: Path  # the project directory
-    project: str = doc("the project name; `{project}`")
+    project: str = doc("the project name, also available as `{project}`")
     site: Site = doc("the path of `site.toml`")
     source: Source = field()
     sync: Sync = field(default_factory=Sync)
@@ -457,7 +472,7 @@ class Job:
 
 @dataclass
 class Batch:
-    """`jobs/<batch>.toml`: the jobs of one batch on one source. A tag is a short hash, or
+    """`jobs/<batch>.toml` holds the jobs of one batch on one source. A tag is a short hash, or
     `<hash>-dirty-<8 hex>` for a snapshot of a tree with uncommitted changes. The date is pinned once
     per batch in `<state_dir>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
     ids. A batch name is used once; a second launch of the same batch finds its specs and does

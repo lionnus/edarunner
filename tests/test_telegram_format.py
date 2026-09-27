@@ -2,17 +2,18 @@
 
 import time
 
+from helpers_board import NOW, RUN, board_row, board_rows
+
 from edarunner.notify.telegram import format as fmt
-from test_board import NOW, RUN, _row, _rows
 
 
 def test_board_is_one_line_per_run_then_the_counts():
-    lines = fmt.board(_rows(), now=NOW, totals={"synth": 4}).splitlines()
+    lines = fmt.board(board_rows(), now=NOW, totals={"synth": 4}).splitlines()
     assert lines[:3] == ["🔴 <code>a@demo</code> dead, synth 3/4, 1h", "🟡 <code>b_nodw@demo</code> stale, synth 3/4, 15m",
                          "🟢 <code>c@demo</code> synth 3/4, 0m"]
     assert lines[4:] == ["🟠 <code>b_nodw@demo</code> incomplete, 1h", "⚪ <code>a@demo</code> done, 1h",
                          "<i>1 dead, 1 incomplete, 1 stale, 2 running, 1 done</i>"]
-    done = [_row("done", "<a>", "done")]
+    done = [board_row("done", "<a>", "done")]
     assert fmt.board(done * 32, now=NOW).splitlines()[-3:] == [
         "<i>… and 2 more</i>", "<i>nothing live</i>", "<i>32 done</i>"]
     assert "&lt;a&gt;@demo" in fmt.board(done, now=NOW) and fmt.board([], now=NOW) == "<i>no runs</i>"
@@ -25,7 +26,7 @@ def test_alert_marks_the_state_and_escapes_the_reason():
 
 
 def test_run_detail_of_a_dead_run():
-    row = _row("dead", "a", "stage:synth", "dead", age=5000)
+    row = board_row("dead", "a", "stage:synth", "dead", age=5000)
     hb = {"step": 3, "step_name": "elaborate", "stage": "synth", "last_log": "step 3 <elaborate>\n\n"}
     assert fmt.run_detail(row, hb, NOW).splitlines() == [
         "🔴 <code>a@demo</code> dead", "stage synth, step 3 elaborate", "on local, 1h",
@@ -58,6 +59,6 @@ def test_hosts_and_tools():
 
 
 def test_run_detail_strips_colour_codes_from_the_log_line():
-    row = _row("run1", "c", "stage:synth", "running")
+    row = board_row("run1", "c", "stage:synth", "running")
     hb = {"last_log": "ok\n\x1b[1;31mError:\x1b[0m timing <met>\x1b[K\n"}
     assert fmt.run_detail(row, hb, NOW).splitlines()[-1] == "<pre>Error: timing &lt;met&gt;</pre>"

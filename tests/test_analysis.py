@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+from helpers_cli import edr, seed
 
 from edarunner import analysis, board, config, metrics
 from edarunner.db import Database
-from test_cli import demo, edr, seed  # noqa: F401  (the fixture and the helpers of test_cli)
 
 SYNOPSYS = """\
 Report : area
@@ -288,9 +289,15 @@ def test_ingest_keeps_one_sample_per_heartbeat_and_the_detail_shows_them(demo: P
     assert code == 0 and "from run_samples" in out and tree.split()[-4:] == ["3", "3", "GB", "3"]
 
 
-def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
-    import sys
+def test_mlflow_export_without_mlflow_names_the_extra(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
+    seed(demo, "a", "done")
+    monkeypatch.setitem(sys.modules, "mlflow", None)
+    code, _, err = edr(capsys, "export", "--mlflow", str(tmp_path / "ml"))
+    assert code == 1 and "edarunner[mlflow]" in err
 
+
+def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
+    mlflow = pytest.importorskip("mlflow")  # CI installs the extra on one Python of the matrix
     a, b = seed(demo, "a", "done"), seed(demo, "b", "STOPPED")
     _metric(demo, a, "wns_ns", 2, -0.1)
     _metric(demo, a, "wns_ns", 3, 0.2)
@@ -298,11 +305,6 @@ def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path
     res.mkdir(parents=True)
     (res / "qor.rpt").write_text("slack 0.2\n")
     (res / "big.rpt").write_bytes(b"x" * (2 << 20))  # over 1 MiB: not an artifact
-    monkeypatch.setitem(sys.modules, "mlflow", None)
-    code, _, err = edr(capsys, "export", "--mlflow", str(tmp_path / "ml"))
-    assert code == 1 and "edarunner[mlflow]" in err
-    monkeypatch.delitem(sys.modules, "mlflow")
-    mlflow = pytest.importorskip("mlflow")
     monkeypatch.setenv("MLFLOW_DISABLE_AGENT_HINT", "1")
     code, out, _ = edr(capsys, "--json", "export", "--mlflow", str(tmp_path / "ml"))
     data = json.loads(out)["data"]
