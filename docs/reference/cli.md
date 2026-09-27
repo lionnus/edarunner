@@ -586,23 +586,26 @@ not collected unless --uncollected.
 ## notify
 
 ```
-edr notify [--dry-run] [--silent] text
+edr notify [--dry-run] [--board] [--digest] [--silent] [text]
 ```
 
 Sends one message through every notifier that the site configures. The
 first line names the project and the word note, as in every message of
-the bot; TEXT follows as plain text. docs/telegram.md shows a Claude Code
-hook that calls it.
+the bot; TEXT follows as plain text. --board sends the board of edr
+status and --digest the daily digest instead, so a cron line can mail
+either. docs/telegram.md shows a Claude Code hook that calls it.
 
 | Flag | Meaning |
 |---|---|
-| `text` | the message, as plain text |
+| `[text]` | the message, as plain text |
 | `--dry-run` | print what would happen and write nothing |
+| `--board` | send the board of edr status |
+| `--digest` | send the daily digest now; the watcher still sends its own |
 | `--silent` | send without a sound on the phone |
 
 | Exit | Meaning |
 |---|---|
-| 1 | no notifier is configured, or a send failed |
+| 1 | no notifier is configured, a send failed, or not exactly one of TEXT, --board and --digest |
 
 ## watch
 

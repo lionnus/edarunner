@@ -1073,16 +1073,23 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
-    """Send one message through every configured notifier."""
-    html = tgfmt.esc(a.text)
+    """Send one message, the board or the digest through every configured notifier."""
+    if (a.text is not None) + a.board + a.digest != 1:
+        raise Refuse("give TEXT, --board or --digest, one of them")
+    if a.board:
+        title, html = "board", Actions(c).status_text()
+    elif a.digest:
+        title, html = "digest", Actions(c).digest_text()
+    else:
+        title, html = "note", tgfmt.esc(a.text)
     if a.dry_run:
-        c.emit(tgfmt.head(c.project.project, "note") + "\n" + html + "\n(dry)", {"sent": 0, "text": a.text})
+        c.emit(tgfmt.head(c.project.project, title) + "\n" + html + "\n(dry)", {"sent": 0, "text": tgfmt.plain(html)})
         return Exit.DONE
     notifiers = make_notifiers(c.project.site, c.project, c.db, Actions(c))
     if not notifiers:
         raise Refuse("no notifier is configured; see docs/notify.md")
-    sent = sum(n.post("note", html, a.silent) for n in notifiers)
-    c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": a.text})
+    sent = sum(n.post(title, html, a.silent) for n in notifiers)
+    c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": tgfmt.plain(html)})
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
 
 
@@ -1493,13 +1500,17 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
-    s = command("notify", "send one message through every notifier", """
+    s = command("notify", "send one message, the board or the digest through every notifier", """
         Sends one message through every notifier that the site configures. The
         first line names the project and the word note, as in every message of
-        the bot; TEXT follows as plain text. docs/telegram.md shows a Claude Code
-        hook that calls it.
-        """, write=True, exits={Exit.REFUSED: "no notifier is configured, or a send failed"})
-    s.add_argument("text", help="the message, as plain text")
+        the bot; TEXT follows as plain text. --board sends the board of edr
+        status and --digest the daily digest instead, so a cron line can mail
+        either. docs/telegram.md shows a Claude Code hook that calls it.
+        """, write=True, exits={Exit.REFUSED: "no notifier is configured, a send failed, or not exactly one "
+                                              "of TEXT, --board and --digest"})
+    s.add_argument("text", nargs="?", help="the message, as plain text")
+    s.add_argument("--board", action="store_true", help="send the board of edr status")
+    s.add_argument("--digest", action="store_true", help="send the daily digest now; the watcher still sends its own")
     s.add_argument("--silent", action="store_true", help="send without a sound on the phone")
     s = command("watch", "the watcher", """
         The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
