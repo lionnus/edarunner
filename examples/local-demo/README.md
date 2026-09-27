@@ -44,7 +44,7 @@ The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 ```sh
 cd examples/local-demo
 bash setup.sh                 # repo/ with one commit
-edr checkout HEAD             # <src> and the path of the pinned worktree
+edr checkout HEAD             # <src> and the path of the pinned clone
 edr check                     # load the config, probe the host, check the hooks
 edr plan demo                 # one run id, host and root per job; writes nothing
 edr launch demo               # 2 started, 0 queued, 0 with problems
@@ -68,7 +68,7 @@ Where things land:
 
 | Path | Holds |
 |---|---|
-| `wt/<src>/` | the checked-out worktree |
+| `wt/<src>/` | the checked-out clone |
 | `/tmp/edr-demo/<user>/edr/demo/<run_id>/` | the run tree; `log/` holds one file per stage and task |
 | `~/.edr/demo/demo/` | `RUN_DATE`, the specs, the heartbeats, the queues, the driver log |
 | `~/.edr/demo/bin/edr_driver-<hash>.py` | the driver, one copy per driver version |
@@ -107,7 +107,7 @@ edr retire --batch gate --why "demo done"
 edr retire --batch bad --why "demo done"
 ```
 
-The state, the database, the source, the worktrees and the extra job
+The state, the database, the source, the clones and the extra job
 files stay. Remove them by hand:
 
 ```sh

@@ -35,7 +35,7 @@ writes nothing:
 
 `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` runs the whole
 flow dry, then checks that the state directory does not exist, the scratch
-is empty, and the worktree is the same byte for byte.
+is empty, and the checked-out tree is the same byte for byte.
 
 Do the dry run first. Read every target path. Then run the command.
 

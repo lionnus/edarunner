@@ -370,13 +370,15 @@ problem: line per fault, or an ok: line with the counts.
 edr checkout [--dry-run] [--dirty DIR] [ref]
 ```
 
-Fetches, then adds a detached worktree of ref (default source.ref) at
+Fetches, then makes a detached local clone of ref (default source.ref) at
 <worktrees>/<short hash>, and clones each source.nested repository into
-it at the HEAD the repository copy has. Prints <src> <path>.
+it at the HEAD the repository copy has. A local clone shares the git
+objects of the repository by hard links. Prints <src> <path>.
 
---dirty DIR copies a working tree instead, with its diff in source.diff;
-the tag is <hash>-dirty-<8 hex> and prints with (dirty). A clean tree
-under --dirty is checked out as a worktree.
+--dirty DIR clones the HEAD of a working tree and copies its files over
+the clone, with the diff in source.diff; the tag is <hash>-dirty-<8 hex>
+and prints with (dirty). A clean tree under --dirty is checked out as a
+clone.
 
 | Flag | Meaning |
 |---|---|

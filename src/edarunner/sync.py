@@ -53,12 +53,11 @@ def sync_tree(
 ) -> bool:
     """rsync `src_dir` to <host>:<root>/ with --delete; the guard runs first.
 
-    `.git` never goes: a worktree's `.git` file points at the repository on the head
-    node, and git on the host fails on it. The run id and the spec carry the source tag.
+    `.git` goes along, so the copy on the host is a git checkout of the pinned commit.
     """
     target = assert_safe_target(root, marker, min_depth)
     src = os.fspath(src_dir).rstrip("/") + "/"
-    argv = ["rsync", "-a", "--delete", *[f"--exclude={e}" for e in dict.fromkeys([".git", *excludes])]]
+    argv = ["rsync", "-a", "--delete", *[f"--exclude={e}" for e in excludes]]
     if host == "local":
         argv += [src, f"{target}/"]
     else:

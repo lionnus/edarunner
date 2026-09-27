@@ -11,8 +11,16 @@ database.
 - A project is a few TOML files: `edr.toml` declares the flow as stages,
   `tasks.toml` lists the task groups, `jobs/<batch>.toml` lists the jobs
   of a batch, and a private `site.toml` describes your hosts and tools.
-- `edr checkout` pins the source as a git worktree, or as a snapshot of a
-  dirty tree. Its short hash tags every run built from it.
+- `edr checkout` pins the source as a detached local clone, or as a
+  snapshot of a dirty tree. Its short hash tags every run built from it.
+  The copy on the host keeps `.git`, so the flow asks git for its
+  version there as it does anywhere else, and every command gets
+  `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID` in its environment.
+- `[runtime] setup` runs one command on the host before the first stage,
+  such as `uv sync --frozen`, and logs it to `log/setup.log`. A failure
+  ends the run as `FAILED:runtime` before any tool seat is taken, and
+  `when_changed` runs it again on a continued tree only when a listed
+  file changed.
 - `edr plan` prints the run ids, hosts and paths of a batch without
   writing anything, and `edr launch` starts one driver per job.
 - The driver is a single Python file that needs only `python3` 3.6 on the

@@ -61,10 +61,16 @@ the watcher's verdict, such as `running`, `dead` or `hung`.
 ## Source and checkout
 
 `edr checkout <ref>` pins one commit of the flow's repository as a
-detached worktree and prints its short hash, the source tag. A batch
+detached local clone and prints its short hash, the source tag. A batch
 names that tag as `source`. Every run of the batch works on a copy of
 that tree, so a later commit never changes a running flow. A tree
 with uncommitted changes gets the tag `<hash>-dirty-<8 hex>`.
+
+The copy on the host is a normal git checkout, so the flow asks git for
+its version. An optional `[runtime] setup` command, such as
+`uv sync --frozen`, builds the flow's environment on the host before the
+first stage; [configure.md](configure.md#source-and-runtime-on-the-host)
+explains both.
 
 The commands that select results (`edr metrics`, `edr export` and the
 bot's `/csv`) call this tag the design, as in `--design 3f9a2c1`. It is

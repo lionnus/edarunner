@@ -25,7 +25,7 @@ report files and the numbers in them.
 | `config.py` | loading and validation of the four TOML files, the type check against the model, placeholders, hooks |
 | `guards.py` | `assert_safe_target`, `assert_run_id` and `Refuse` |
 | `runid.py` | the git calls, the source tag, the run id template |
-| `checkout.py` | `edr checkout`: worktrees, nested repositories, the dirty snapshot |
+| `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe, placement, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
 | `launch.py` | spec rendering, `plan`, `launch`, `stop` |

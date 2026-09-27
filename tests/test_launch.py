@@ -21,7 +21,7 @@ from edarunner.backend import Handle, Request, SshBackend
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.db import Database
-from edarunner.model import Needs
+from edarunner.model import Needs, Runtime
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
@@ -253,6 +253,24 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     assert not again[0]["started"] and "already launched" in again[0]["problems"][0]
 
 
+def test_launch_runs_the_setup_and_the_stage_with_the_run_identity(env, tmp_path: Path) -> None:
+    project, batch, ssh, db = env
+    synth_only(batch)
+    project.runtime = Runtime(setup="echo {run_id} $EDR_SRC > setup.out", when_changed=["uv.lock"])
+    synth = project.stages["synth"]
+    synth.cmd = "echo $EDR_SRC $EDR_RUN_ID $EDR_TREE_ID > stage.out && " + synth.cmd
+    (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path))
+    run_id, root = row["run_id"], Path(row["root"])
+    spec = json.loads((tmp_path / "state" / "demo" / f"{run_id}.spec.json").read_text())
+    assert spec["runtime"] == {"setup": f"echo {run_id} $EDR_SRC > setup.out", "when_changed": ["uv.lock"]}
+    assert {k: spec["env"][k] for k in ("EDR_SRC", "EDR_RUN_ID", "EDR_TREE_ID")} == \
+        {"EDR_SRC": "HEAD", "EDR_RUN_ID": run_id, "EDR_TREE_ID": run_id}
+    hb = wait_hb(tmp_path / "state" / "demo" / f"{run_id}.json", lambda h: h["phase"] == "done")
+    assert hb["exit"] == 0
+    assert (root / "setup.out").read_text() == f"{run_id} HEAD\n" and (root / "log" / "setup.log").is_file()
+    assert (root / "stage.out").read_text() == f"HEAD {run_id} {run_id}\n"
+
+
 def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
     project, batch, ssh, db = env
     synth_only(batch)
@@ -301,7 +319,7 @@ def test_dry_run_writes_nothing(env, tmp_path: Path, capsys) -> None:
     assert [r["run_id"] for r in out] == [f"{DATE}_a_demo_gHEAD", f"{DATE}_b_nodw_demo_DW0_gHEAD"]
     assert all(not r["started"] and r["problems"] == [] for r in out)
     text = capsys.readouterr().out
-    assert "rsync -a --delete --exclude=.git" in text and f"{DATE}_a_demo_gHEAD" in text
+    assert "rsync -a --delete -e " not in text and "rsync -a --delete " in text and f"{DATE}_a_demo_gHEAD" in text
     assert launch.stop(ssh, db, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": 1, "pgids": [2]},
                        dry_run=True) and db.events() == []
 
@@ -368,16 +386,18 @@ def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("excludes", [[], [".venv"], [".git", ".venv"]])
-def test_sync_tree_never_copies_the_git_pointer(env, tmp_path: Path, excludes) -> None:
+def test_sync_tree_copies_git_unless_excluded(env, tmp_path: Path, excludes) -> None:
     project, batch, ssh, db = env
     src = tmp_path / "src"
     (src / ".venv").mkdir(parents=True)
-    (src / ".git").write_text("gitdir: /head/repo/.git/worktrees/src\n")
+    (src / ".git").mkdir()
+    (src / ".git" / "HEAD").write_text("ref")
     (src / ".venv" / "x").write_text("v")
     (src / "flow.sh").write_text("f")
     target = tmp_path / "a" / "edr" / "b"
     assert sync.sync_tree(ssh, "local", src, str(target), excludes, "/edr/", 3)
-    assert (target / "flow.sh").exists() and not (target / ".git").exists()
+    assert (target / "flow.sh").exists()
+    assert (target / ".git" / "HEAD").exists() == (".git" not in excludes)
     assert (target / ".venv").exists() == (".venv" not in excludes)
 
 

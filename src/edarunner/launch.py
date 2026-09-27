@@ -162,7 +162,7 @@ def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[
 
 
 def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
-    """The site env, then the project env rendered per run.
+    """The site env, then the project env rendered per run, then `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID`.
 
     A project value builds on the site: its `$NAME` or `${NAME}` takes the site value of
     NAME when the project does not set NAME under another key. The host expands the rest.
@@ -173,6 +173,7 @@ def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
         env[k] = string.Template.pattern.sub(
             lambda m, site=site: site.get(m.group("named") or m.group("braced") or "", m.group(0)),
             config.render(val, v))
+    env.update(EDR_SRC=str(v.get("src") or ""), EDR_RUN_ID=str(v["run_id"]), EDR_TREE_ID=str(v.get("tree_id") or v["run_id"]))
     return env
 
 
@@ -182,7 +183,7 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
     stages = stages or [project.stages[n] for n in names]
     state_dir = project.state_dir / batch.batch
     run_id = str(v["run_id"])
-    return {
+    spec: dict[str, Any] = {
         "schema": 1, "run_id": run_id, "batch": batch.batch, "project": project.project,
         "label": job.label, "config": job.config, "vars": job.vars, "host": v["host"], "root": v["root"],
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
@@ -191,6 +192,10 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
         "start_at": {"stage": stages[0].name, "checkpoint": None},
         "stages": [_stage_spec(project, s, tasks, v) for s in stages],
     }
+    if project.runtime.setup:
+        spec["runtime"] = {"setup": config.render(project.runtime.setup, v),
+                           "when_changed": list(project.runtime.when_changed)}
+    return spec
 
 
 # --- plan

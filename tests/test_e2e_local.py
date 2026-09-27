@@ -116,7 +116,8 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
 
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--why", "test", "--dry-run")
     assert code == 0 and all(p.is_dir() for p in roots.values()) and not (state / "demo" / "RETIRED").exists()
-    assert out.count("rm -rf ") == 3 and "(dry)" in out  # the export run names the tree of a again
+    # Three run trees, the export run naming the tree of a again, and the checked-out clone.
+    assert out.count("rm -rf ") == 4 and "(dry)" in out
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--why", "test")
     assert code == 0 and not any(p.exists() for p in roots.values()) and (state / "demo" / "RETIRED").is_file()
     assert (state / "demo" / f"{ids['a']}.json").is_file()  # the state outlives the tree
@@ -136,7 +137,7 @@ def test_dry_run_flow_writes_nothing(demo: Path, capsys, tmp_path: Path, monkeyp
     assert edr(capsys, "init", "--site", str(demo), "--dry-run")[0] == 0 and list(fresh.iterdir()) == []
     monkeypatch.chdir(demo)
     assert edr(capsys, "checkout", "HEAD", "--dry-run")[0] == 0 and not (demo / "wt").exists()
-    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]  # the fixture worktree
+    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]  # the fixture clone
     state, scratch = tmp_path / ".edr", tmp_path / "scratch"
     wt = listing(demo / "wt")
     assert edr(capsys, "checkout", "HEAD", "--dry-run")[0] == 0
@@ -162,7 +163,7 @@ def test_plan_and_launch_check_out_a_missing_source(demo: Path, capsys, tmp_path
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=demo / "repo", check=True,
                           capture_output=True, text=True).stdout.strip()
     code, out, _ = edr(capsys, "plan", "demo", "--dry-run")
-    assert code == 0 and f"worktree add --detach {demo / 'wt' / head} {head}" in out
+    assert code == 0 and f"git clone --local --no-checkout {demo / 'repo'} {demo / 'wt' / head}" in out
     assert f"checkout {head} {demo / 'wt' / head} (dry)" in out and not (demo / "wt").exists()
     code, out, err = edr(capsys, "launch", "demo", "--dry-run")
     assert code == 0, out + err
