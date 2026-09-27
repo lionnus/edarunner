@@ -334,7 +334,8 @@ class Source:
 class Sync:
     """The copy of the checked-out tree to the host, by `rsync --delete` behind the guard."""
 
-    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree", factory=list)
+    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree; `.git` is always excluded, "
+                             "because the `.git` file of a worktree points at the head node", factory=list)
     after: str = doc("a command on the head node after each sync, with the run placeholders", "")
 
 

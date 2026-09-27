@@ -27,6 +27,9 @@
   `${NAME}` gets the site's value in its place, so
   `PATH = "{root}/.venv/bin:$PATH"` keeps the site's `PATH`. A project
   value without such a reference still replaces the site's value.
+- The copy of the tree to the host always leaves out `.git`, also when
+  `[sync] exclude` does not list it. The `.git` file of a worktree points
+  at the head node, and git on the host failed on it.
 
 ## 0.3.0 (2026-09-27)
 

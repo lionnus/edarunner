@@ -367,6 +367,20 @@ def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
     assert (target / ".git" / "HEAD").exists()  # an excluded path survives the delete
 
 
+@pytest.mark.parametrize("excludes", [[], [".venv"], [".git", ".venv"]])
+def test_sync_tree_never_copies_the_git_pointer(env, tmp_path: Path, excludes) -> None:
+    project, batch, ssh, db = env
+    src = tmp_path / "src"
+    (src / ".venv").mkdir(parents=True)
+    (src / ".git").write_text("gitdir: /head/repo/.git/worktrees/src\n")
+    (src / ".venv" / "x").write_text("v")
+    (src / "flow.sh").write_text("f")
+    target = tmp_path / "a" / "edr" / "b"
+    assert sync.sync_tree(ssh, "local", src, str(target), excludes, "/edr/", 3)
+    assert (target / "flow.sh").exists() and not (target / ".git").exists()
+    assert (target / ".venv").exists() == (".venv" not in excludes)
+
+
 def test_publish_driver_one_copy_per_version(tmp_path: Path) -> None:
     dest = sync.publish_driver(tmp_path, launch.DRIVER_SRC)
     digest = hashlib.sha256(launch.DRIVER_SRC.read_bytes()).hexdigest()[:8]

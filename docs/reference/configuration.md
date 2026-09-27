@@ -54,7 +54,7 @@ The copy of the checked-out tree to the host, by `rsync --delete` behind the gua
 
 | Key | Meaning | Default |
 |---|---|---|
-| `exclude` | rsync exclude patterns for the copy of the tree | `[]` |
+| `exclude` | rsync exclude patterns for the copy of the tree; `.git` is always excluded, because the `.git` file of a worktree points at the head node | `[]` |
 | `after` | a command on the head node after each sync, with the run placeholders | `""` |
 
 ### [safety]

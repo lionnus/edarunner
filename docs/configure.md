@@ -224,6 +224,23 @@ host expands the last `$PATH` to its own path. A project value without
 such a reference, such as `LM_LICENSE_FILE = "2020@lic"`, replaces the
 site's value.
 
+### The copy of the tree
+
+`edr launch` copies the checked-out tree to the host with `rsync
+--delete`. `[sync] exclude` lists the paths that stay behind, such as a
+virtual environment that the host builds itself:
+
+```toml
+[sync]
+exclude = [".venv"]
+```
+
+`.git` never goes, whether the list names it or not. `edr checkout`
+makes a git worktree, and its `.git` is a file that points at the
+repository on the head node. On the host that pointer leads nowhere, so
+every git command in the flow would fail. The run id and the spec
+already record the source tag, and the flow on the host needs no git.
+
 ## 4. Write a batch
 
 ```toml
