@@ -619,6 +619,14 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
     """Stop one run through the driver, or the stop file with --after-task."""
     row = c.resolve(a.handle)
     hb = c.heartbeat(row)
+    if row.get("state") == "queued":
+        # The watcher launches every row in state queued; a stopped row never starts.
+        c.emit(f"{row['run_id']}: queued, marked stopped" + (" (dry)" if a.dry_run else ""),
+               {"run_id": row["run_id"], "stopped": True})
+        if not a.dry_run:
+            c.ledger.upsert_run({"run_id": row["run_id"], "state": "stopped"})
+            c.ledger.add_event("user", row["run_id"], "stop", f"queued: {a.why}")
+        return 0
     if not board.is_live(hb or row):
         c.emit(f"{row['run_id']}: already {(hb or row).get('phase')}")
         return 2

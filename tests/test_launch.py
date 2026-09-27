@@ -231,7 +231,7 @@ def test_pin_date_treats_an_empty_pin_as_missing(tmp_path: Path) -> None:
     assert sorted(p.name for p in pin.parent.iterdir()) == ["RUN_DATE"]
 
 
-@pytest.mark.parametrize("pid", [0, 1, -1, "7", 4242.0])
+@pytest.mark.parametrize("pid", [0, 1, -1, "7", 4242.0, None])
 def test_stop_refuses_a_bad_driver_pid(env, pid) -> None:
     project, batch, ssh, ledger = env
     with pytest.raises(Refuse):
