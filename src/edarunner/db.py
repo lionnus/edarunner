@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import sqlite3
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,29 @@ _PK = {
 
 Row = dict[str, Any]
 
+# The statfs f_type of a network filesystem, where SQLite WAL does not work.
+NETWORK_FS = {0x6969: "nfs", 0xFF534D42: "cifs", 0xFE534D42: "smb2", 0x01021997: "9p", 0x65735546: "fuse"}
+
+
+def fs_magic(path: str | os.PathLike) -> int | None:
+    """The statfs f_type of the filesystem that holds `path`, or None off Linux or on an error."""
+    if not sys.platform.startswith("linux"):
+        return None
+    buf = ctypes.create_string_buffer(256)  # struct statfs, f_type first
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.statfs(os.fsencode(path), buf) != 0:
+        return None
+    return ctypes.c_ulong.from_buffer(buf).value & 0xFFFFFFFF
+
+
+def network_fs(path: str | os.PathLike) -> str | None:
+    """The network filesystem that holds `path` or its nearest existing parent, such as "nfs"; None for a local or unknown one."""
+    p = Path(path).absolute()
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    magic = fs_magic(p)
+    return None if magic is None else NETWORK_FS.get(magic)
+
 
 def _now() -> int:
     return int(time.time())
@@ -46,7 +71,11 @@ def _text(value: Any) -> Any:
 
 
 class Database:
-    """One SQLite database, WAL mode, head node only. Use as a context manager."""
+    """One SQLite database, head node only. Use as a context manager.
+
+    The journal is WAL on a local filesystem. On a network filesystem it is DELETE with
+    `synchronous=FULL`, because WAL needs shared memory that such a filesystem does not give.
+    """
 
     def __init__(self, path: str | os.PathLike, threads: bool = False) -> None:
         """`threads=True` lets another thread use the connection; the caller serialises the calls."""
@@ -54,7 +83,11 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path, check_same_thread=not threads)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.network_fs = None if str(path) == ":memory:" else network_fs(self.path.parent)
+        mode = "DELETE" if self.network_fs else "WAL"
+        self.journal_mode: str = self.conn.execute(f"PRAGMA journal_mode={mode}").fetchone()[0]
+        if self.network_fs:
+            self.conn.execute("PRAGMA synchronous=FULL")
         self.init_schema()
         self._columns = {t: self._table_columns(t) for t in ("batches", "runs", "stage_runs", "artifacts")}
 

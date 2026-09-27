@@ -92,7 +92,8 @@ tail, and the watcher copies `log/` to the head node when a stage ends.
 `edr watch` runs on the head node, one process per project. It reads the
 heartbeats, classifies the runs, collects the results, extracts the
 metrics, starts queued jobs and sends the alerts. It never deletes a
-file or a tree. As a systemd user service:
+tree, and the only files it removes are stale seat leases. As a systemd
+user service:
 
 ```sh
 cp edr-watch.service ~/.config/systemd/user/edr-myflow.service
@@ -133,12 +134,17 @@ service up.
    group of the run is alive on the host.
 5. Find orphans: our processes that match `tool_procs` on a host and
    belong to no live run tree.
-6. Launch queued jobs whose host now fits, one per batch per cycle.
-7. Write the boards under `data/board/` and the pinned Telegram board;
+6. Sweep the seat leases in `<state_dir>/leases/`. A lease older than
+   2 minutes is stale when its run has no live heartbeat, is `dead`,
+   `retired` or `abandoned`, has left the lease's stage, or when the
+   lease is older than the stage budget. The watcher removes it and
+   writes a `lease` event with the reason.
+7. Launch queued jobs whose host now fits, one per batch per cycle.
+8. Write the boards under `data/board/` and the pinned Telegram board;
    [results.md](results.md) lists the files.
-8. Send the daily digest once a day, at the first cycle after
+9. Send the daily digest once a day, at the first cycle after
    `limits.digest_at`.
-9. Write `<state_dir>/watch.json` with the time, the cycle count and the pid.
+10. Write `<state_dir>/watch.json` with the time, the cycle count and the pid.
 
 Its memory between cycles is three rows of the database's `store` table.
 `progress` holds what each run looked like last time; `notified` the
@@ -157,15 +163,34 @@ and what it never does.
 A stage whose `needs.tools` names a tool with a probe starts with
 `gate:<stage>`. The driver runs the probe argv from the spec in the run
 tree, with the spec `env`. The first number on the first line is the
-free seats. The driver waits while that number is below the seats the
-stage needs. It polls every 5 s, up to `gate_max_s`; then the stage
-fails with exit 4. The reason goes into the driver log as `gate <stage>:
-wait for <tool>: <free> free, <needed> needed`, and into the heartbeat
-as `gate`. A probe that fails or prints no number counts as unknown: the
-driver logs it and runs the stage. In a task group the check runs before
-each claim, with the task's own `tools` when it has them. A short pool
-delays the next claim by 5 s. The driver knows no licence manager; the
-site hook does that work.
+free seats. Two drivers that read the same free seat would both start,
+so the driver also leases the seats it takes. The seats it may use are
+the free seats less the seats that other stages and tasks leased in the
+last `lease_s` seconds. After `lease_s` the tool holds its seat, and the
+probe no longer reports it free.
+
+When enough seats are left, the driver writes one lease file per seat,
+`<state_dir>/leases/<tool>/<run_id>.<stage>.<n>` (with `.<task>` after
+the stage in a task group), by a temporary file and a rename. The file
+holds the run id, the stage, the driver pid, the host, the time and the
+stage budget in seconds. Then it counts again, and backs off when an
+older lease of another run leaves too few seats, so of two drivers that
+read the same free seat, the later one waits.
+
+The driver waits while the seats are short. It polls every 5 s, up to
+`gate_max_s`; then the stage fails with exit 4. The reason goes into the
+driver log as `gate <stage>: wait for <tool>: <free> free, <held> held
+by others, <needed> needed`, into the heartbeat as `gate`, and into
+`edr status <handle>`. A probe that fails or prints no number counts as
+unknown: the driver logs it, leases the seats and runs the stage. In a
+task group the check and the lease run before each claim, with the
+task's own `tools` when it has them. A short pool delays the next claim
+by 5 s.
+
+The driver removes its lease files when the stage or the task ends, on
+every exit path: a failure, an exception, a stop and a signal. A driver
+killed with `SIGKILL` leaves its leases, and the watcher sweeps them. The
+driver knows no licence manager; the site hook does that work.
 
 A stage with `retry` that fails is tried again when `retry.match` is
 found in the last 80 lines of its log, after `retry.wait_s`, up to
