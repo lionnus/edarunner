@@ -241,3 +241,13 @@ def test_place_fixed_host_and_needs_subtraction(ssh: Ssh) -> None:
     probes = {"a": probe("a", cores=8, disk=100)}
     got = place(proj, [job("f", host="zz"), job("j1"), job("j2")], probes, {})
     assert got == {"f": "zz", "j1": "a", "j2": None}
+
+
+def test_check_local_needs_ssh_only_with_a_remote_host(ssh: Ssh, monkeypatch) -> None:
+    import shutil as _sh
+    real = _sh.which
+    monkeypatch.setattr(_sh, "which", lambda t: None if t == "ssh" else real(t))
+    ssh.site.hosts = {"local": ssh.site.hosts.get("local")} if "local" in ssh.site.hosts else {}
+    assert not [p for p in ssh.check_local() if "ssh" in p]
+    ssh.site.hosts["larain9"] = ssh.site.hosts.get("local")
+    assert any("ssh not on PATH" in p for p in ssh.check_local())

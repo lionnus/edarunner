@@ -225,7 +225,9 @@ class Ssh:
 
     def check_local(self) -> list[str]:
         """The faults of the head node, as `local: ...` lines: a missing tool, or a ps without the columns."""
-        missing = [t for t in HEAD_TOOLS if shutil.which(t) is None]
+        # A site with only the host `local` never opens an ssh connection.
+        needed = [t for t in HEAD_TOOLS if t != "ssh" or set(self.site.hosts) - {"local"}]
+        missing = [t for t in needed if shutil.which(t) is None]
         problems = [f"local: {t} not on PATH" for t in missing]
         if "local" not in self.site.hosts:  # else the host probe of the caller covers it
             try:
