@@ -88,14 +88,14 @@ needs = { cores = 16, disk_gb = 70, tools = ["pnr"] }
 budget = { hours = 14, disk_gb = 150 }
 retry = { match = "licen[cs]e", wait_s = 900, max = 3 }
 collect = ["flow/runs/{tree_id}/reports/"]
-collect_on_request = { netlist = ["flow/runs/{tree_id}/out/{netlist_stage}/"] }
+collect_on_request = { netlist = ["flow/runs/{tree_id}/out/{vars.netlist_stage}/"] }
 prune = { lib = ["flow/runs/{tree_id}/out/library"] }
 
 [stages.power]
 foreach = "tasks"
 parallel = 1
 task_dir = "sim/tests/{build_tag}/{task.test}"
-cmd = "env RUN_DIR={root}/flow/runs/{tree_id} NETLIST={root}/flow/runs/{tree_id}/out/{netlist_stage}/top.v flow/power/run.sh {task.kernel} CONFIG={config} {task.args}"
+cmd = "env RUN_DIR={root}/flow/runs/{tree_id} NETLIST={root}/flow/runs/{tree_id}/out/{vars.netlist_stage}/top.v flow/power/run.sh {task.kernel} CONFIG={config} {task.args}"
 after_each = "rm -f {task_dir}/wave.vcd"
 needs = { cores = 4, disk_gb = 60, tools = { sim = 1 } }
 budget = { hours = 8, disk_gb = 400, per = "task" }
@@ -123,15 +123,17 @@ json = "window_dur"
 unit = "fs"
 
 [metrics.energy_nj]
-expr = "power_w * window_fs / 1000000"
+stage = "power"
+file = "{task_dir}/power/phases.json"
+python = "hooks/energy.py:energy_nj"   # reads power.csv next to it; returns power_w * window_fs / 1e6
 unit = "nJ"
 canonical = "energy"
 ```
 
 The stages run in file order, `pnr` then `power`. A job that lists
 `stages = ["power"]` with `reuse` runs the kernels on an existing
-netlist. `netlist_stage` in the job names the step directory that holds
-it, and `{netlist_stage}` has no value without it.
+netlist. The job sets `vars = { netlist_stage = 11 }` to name the step
+directory that holds it. `{vars.netlist_stage}` has no value without it.
 
 Three details matter in this shape:
 
@@ -140,8 +142,9 @@ Three details matter in this shape:
   tree's id.
 - The flow needs its own `PATH`. The project `[env]` table carries it, and
   `$PATH` expands on the host.
-- A number the flow does not print comes from an `expr` metric over the
-  numbers it does print, such as the energy from a power and a window.
+- A number the flow does not print comes from a `python` hook that reads
+  the files the flow does print, such as the energy from a power and a
+  window. [results.md](results.md) shows the hook.
 
 ### One command per step
 
@@ -212,13 +215,20 @@ config = "base"
 label = "base_dw0"
 config = "base"
 overrides = { DW = 0 }
+vars = { netlist_stage = 11 }
 ```
 
 `source` is the tag that `edr checkout` printed; [run.md](run.md) shows
-the checkout. A job is one run: a label, a configuration name the flow
-understands, optional overrides that become `KEY=VALUE` tokens in the
-command, and optional `stages` and `tasks` lists. The run id is
-`<date>_<label>_<build_tag>_g<src>`.
+the checkout. A job is one run: a label, an optional configuration name
+the flow understands, optional overrides that become `KEY=VALUE` tokens in
+the command, and optional `stages` and `tasks` lists. The run id is
+`<date>_<label>_<build_tag>_g<src>`. A job without `config` and overrides
+has an empty build tag, and the run id drops that part with its `_`.
+
+The `vars` table holds any other value the flow needs. Each key is a
+placeholder `{vars.<name>}` in the stage strings, `[env]` and `collect`. A
+key must be an identifier. `overrides` reach the command as tokens, while
+`vars` go only where a string names them.
 
 ## 5. Check
 

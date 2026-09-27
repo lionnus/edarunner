@@ -72,6 +72,37 @@ unit; `--csv` writes the columns of `metrics.csv` below. Every row
 carries its source file. Read the source of a number before it goes in a
 table.
 
+## A number the flow does not print
+
+A metric has one of five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A
+number that comes from other numbers, such as an energy from a power and
+a window, needs a `python` hook. The hook gets the path of `file` and
+reads the other files itself:
+
+```toml
+[metrics.energy_nj]
+stage = "power"
+file = "{task_dir}/power/phases.json"
+python = "hooks/energy.py:energy_nj"
+unit = "nJ"
+```
+
+```python
+# hooks/energy.py
+import csv, json
+from pathlib import Path
+
+def energy_nj(path):
+    path = Path(path)
+    window_ns = json.loads(path.read_text())["window_ns"]
+    with open(path.parent / "reports" / "power.csv", newline="") as fh:
+        row = next(r for r in csv.DictReader(fh) if r["phase"] == "WHOLE")
+    return float(row["total_w"]) * window_ns
+```
+
+An exception in the hook gives a row with an empty value and the error
+in `source_file`. `examples/local-demo/hooks/energy.py` is this hook.
+
 `--run <handle> --over steps` prints one run along its steps, one column
 per metric. With `--metric`, the one metric, its change from the step
 before and the source file of each value:

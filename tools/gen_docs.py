@@ -57,6 +57,8 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [tools.<name>]", [model.Tool], ""),
     ("### [telegram]", [model.Telegram], ""),
     ("### [telegram.commands.<name>]", [], "One table per custom bot command; `bot.md` lists the keys."),
+    ("### [ntfy]", [model.Ntfy], ""),
+    ("### [mail]", [model.Mail], ""),
     ("## tasks.toml", [model.Task, (model.Project, ["task_resolver"])], ""),
     ("## jobs/<batch>.toml", [model.Batch], ""),
     ("### [[job]]", [model.Job], ""),

@@ -184,9 +184,9 @@ A stage that fails runs again when `match` is found in the last 80 lines of its 
 
 ### [metrics.<name>]
 
-A metric holds exactly one of the six parsers: `regex`, `csv`, `json`, `python`, `area_hier` or `expr`.
-`expr` allows numbers, metric names, `+ - * /` and a unary minus, nothing else; it is computed
-once every input exists, and with `stage` set only for those stages.
+A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A number
+the flow does not print, such as an energy from a power and a window, comes from a `python`
+hook that reads the input files itself.
 
 A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
 row per step directory found, under the stage that owns that step number. A file that does not
@@ -194,15 +194,14 @@ parse gives a row with an empty value and the error in `source_file`, never a cr
 
 | Key | Meaning | Default |
 |---|---|---|
-| `stage` | a stage name or a list: the stages whose files hold the number | `[]`; required without `expr` |
+| `stage` | a stage name or a list: the stages whose files hold the number | required |
 | `step` | `"*"` for one row per step, a number, or absent | `none` |
-| `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required without `expr` |
-| `regex` | a regex; group 1 is the value | one of the six |
-| `csv` | `{ where = { column = value }, column }`; the first row that matches `where` | one of the six |
-| `json` | a dotted path into a JSON file; a number indexes a list | one of the six |
-| `python` | a hook that gets the file path and returns a number | one of the six |
-| `area_hier` | the deepest instance depth to keep from a hierarchical area report, of Synopsys `report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is the top area, and each instance down to this depth becomes a row of the `area` table | one of the six |
-| `expr` | an expression over other metrics of the same run, stage, step and task | one of the six |
+| `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required |
+| `regex` | a regex; group 1 is the value | one of the five |
+| `csv` | `{ where = { column = value }, column }`; the first row that matches `where` | one of the five |
+| `json` | a dotted path into a JSON file; a number indexes a list | one of the five |
+| `python` | a hook that gets the file path and returns a number | one of the five |
+| `area_hier` | the deepest instance depth to keep from a hierarchical area report, of Synopsys `report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is the top area, and each instance down to this depth becomes a row of the `area` table | one of the five |
 | `unit` | unit text | `""` |
 | `canonical` | the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: `design__instance__area`, `design__instance__count`, `design__instance__utilization`, `timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; empty when the schema has no name | `""` |
 
@@ -277,6 +276,31 @@ The bot, the one chat it answers, and the custom commands; `docs/telegram.md` ex
 
 One table per custom bot command; `bot.md` lists the keys.
 
+### [ntfy]
+
+An ntfy topic: one push message per alert, with a priority by alert kind; `docs/notify.md`
+explains the setup.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `topic` | the topic; anyone who knows the name can read it, so pick a long random one | required |
+| `url` | the ntfy server | `"https://ntfy.sh"` |
+| `token_file` | an access token for a protected topic, mode 600 | `none` |
+
+### [mail]
+
+An SMTP server: one mail per alert and per `edr notify`. The board is never mailed.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `host` | the SMTP server | required |
+| `from` | the From address | required |
+| `to` | the recipients | required |
+| `port` | the SMTP port | `587` |
+| `starttls` | upgrade the connection with STARTTLS before the login | `true` |
+| `user` | the login name | the `from` address |
+| `password_file` | the password, mode 600; without it there is no login | `none` |
+
 ## tasks.toml
 
 `tasks.toml` is optional. A task is a table `[tasks.<id>]`, and every key of a task is a
@@ -326,12 +350,12 @@ plan problem.
 | Key | Meaning | Default |
 |---|---|---|
 | `label` | the run label; unique in the batch | required |
-| `config` | the configuration name the flow takes; `{config}` | required |
+| `config` | the configuration name the flow takes; `{config}`. Without it the build tag hook gets `""` and the run id drops the empty part | `""` |
 | `host` | a host name, or `"auto"` | `"auto"` |
 | `stages` | the stages to run, a subset of `edr.toml` in file order | every stage |
 | `tasks` | the task ids of the task groups | `[]` |
 | `overrides` | `KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens | `{}` |
-| `netlist_stage` | a number the flow needs to find its netlist; `{netlist_stage}` | `none` |
+| `vars` | `{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; `{vars.<name>}` in the stage strings, `[env]` and `collect` | `{}` |
 | `reuse` | `{ run_id = "..." }` or `{ label = "...", latest = true }`: start on the tree of that run. With `restore = "<name>"`, start on a fresh tree with the `collect_on_request.<name>` files of that run copied back from `data/results/` | `none` |
 
 ## Placeholders
@@ -350,11 +374,11 @@ to the shell and stays as it is.
 | `{date}` | the pinned date of the batch, `YYYYMMDD_HHMM` | the run id |
 | `{batch}` | the batch name | the run id, the stage strings |
 | `{label}` | the label of the job | the run id, the stage strings |
-| `{config}` | the configuration name of the job | the run id, the stage strings |
+| `{config}` | the configuration name of the job; `""` without one | the run id, the stage strings |
 | `{build_tag}` | the build tag of the job | the run id, the stage strings |
 | `{src}` | the source tag of the batch | the run id, the stage strings |
 | `{overrides}` | the overrides of the job as `KEY=VALUE` tokens separated by spaces | the stage strings |
-| `{netlist_stage}` | the `netlist_stage` of the job, only when the job sets it | the stage strings |
+| `{vars.<name>}` | a key of the job's `vars` table | the stage strings, `[env]`, `collect` |
 | `{run_id}` | the run id | the stage strings, `[env]`, `sync.after` |
 | `{host}` | the host of the run | the stage strings, `[env]`, `sync.after` |
 | `{mount}` | the scratch mount of the host | the stage strings, `[env]`, `sync.after` |

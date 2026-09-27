@@ -58,10 +58,10 @@ budget = { hours = 1 }
 collect = ["reports/"]
 
 [stages.export]
-cmd = "bash {root}/flow/flow.sh export {run_id} {config}"
+cmd = "bash {root}/flow/flow.sh export {run_id} {config} NETLIST_STAGE={vars.netlist_stage}"
 needs = { cores = 1, disk_gb = 0.1 }
 collect = []
-collect_on_request = { netlist = ["out/11/"] }
+collect_on_request = { netlist = ["out/{vars.netlist_stage}/"] }
 prune = { netlist = ["out"] }
 
 [stages.power]
@@ -104,6 +104,8 @@ json = "window_ns"
 unit = "ns"
 
 [metrics.energy_nj]
-expr = "power_w * window_ns"
+stage = "power"
+file = "{task_dir}/power/phases.json"
+python = "hooks/energy.py:energy_nj"
 unit = "nJ"
 canonical = "energy"

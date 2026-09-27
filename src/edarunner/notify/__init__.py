@@ -1,14 +1,16 @@
 """The notifier interface.
 
 The watcher calls `make_notifiers` once and then `send`, `edit` and `board`
-on every channel. The channels never import `cli` or `watch` at run time;
+on every channel: Telegram, ntfy and mail. The channels never import `cli` or `watch` at run time;
 they get their commands through the `cli.Actions` object the CLI hands in.
 """
 
 from __future__ import annotations
 
+import html
 import logging
 import os
+import re
 from typing import TYPE_CHECKING
 
 from edarunner.db import Database
@@ -52,18 +54,53 @@ def alert_buttons(handle: str) -> list[Button]:
     return [("keep 12h", f"keep12:{handle}"), ("ack", f"ack:{handle}"), ("stop", f"stop:{handle}")]
 
 
+# The shell command of each alert button, for a channel without buttons.
+BUTTON_CMDS = {"keep12": "edr keep {} --hours 12", "ack": "edr keep {} --ack", "stop": "edr stop {} --after-task"}
+
+
+def plain(text: str, buttons: list[Button] | None = None, cmd: str | None = None) -> str:
+    """An alert body as plain text: `text`, the command to run next, and one line per button."""
+    lines = [text, *([cmd] if cmd else [])]
+    for label, data in buttons or []:
+        action, _, handle = data.partition(":")
+        if action in BUTTON_CMDS:
+            lines.append(f"{label}: {BUTTON_CMDS[action].format(handle)}")
+    return "\n".join(lines)
+
+
+def untag(text: str) -> str:
+    """Telegram HTML as plain text."""
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
+
+
+def _private(path: object, channel: str) -> str | None:
+    """The expanded path of a secret file, or None when it is absent or readable by others."""
+    file = os.path.expanduser(str(path))
+    if not os.path.isfile(file):
+        log.info("%s: no secret file at %s, channel off", channel, file)
+    elif os.stat(file).st_mode & 0o077:
+        log.warning("%s: %s must be mode 600, channel off", channel, file)
+    else:
+        return file
+    return None
+
+
 def make_notifiers(site: Site, project: Project, db: Database, actions: Actions) -> list[Notifier]:
     """Build every configured channel. A channel without its secret is skipped."""
     out: list[Notifier] = []
     tg = site.telegram
-    if tg is not None:
-        token_file = os.path.expanduser(str(tg.token_file))
-        if not os.path.isfile(token_file):
-            log.info("telegram: no token file at %s, bot off", token_file)
-        elif os.stat(token_file).st_mode & 0o077:
-            log.warning("telegram: %s must be mode 600, bot off", token_file)
-        else:
-            from edarunner.notify.telegram import TelegramBot
+    if tg is not None and (token_file := _private(tg.token_file, "telegram")):
+        from edarunner.notify.telegram import TelegramBot
 
-            out.append(TelegramBot(site, project, db, actions, token_file))
+        out.append(TelegramBot(site, project, db, actions, token_file))
+    nt = getattr(site, "ntfy", None)
+    if nt is not None and (nt.token_file is None or _private(nt.token_file, "ntfy")):
+        from edarunner.notify.ntfy import NtfyNotifier
+
+        out.append(NtfyNotifier(project, nt))
+    mail = getattr(site, "mail", None)
+    if mail is not None and (mail.password_file is None or _private(mail.password_file, "mail")):
+        from edarunner.notify.mail import MailNotifier
+
+        out.append(MailNotifier(project, mail))
     return out

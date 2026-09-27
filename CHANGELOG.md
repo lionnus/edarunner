@@ -70,6 +70,25 @@
   `edr.toml`: `state = "..."` becomes `state_dir = "..."`, with the same
   value.
 
+- Breaking: the metric parser `expr` is gone; the `python` hook does
+  the same. A metric with `expr` stops the load with the hook form.
+  Migrate: `expr = "power_w * window_ns"` becomes `stage`, `file` and
+  `python = "hooks/<name>.py:<name>"`, where `<name>(path)` reads the
+  input files and returns the value.
+  `examples/local-demo/hooks/energy.py` shows the energy hook.
+- Two more notifiers next to Telegram: `[ntfy]` posts one push per
+  alert with a priority by kind, and `[mail]` sends one mail per alert
+  through SMTP. Both are stdlib only, and `edr notify` reaches every
+  channel. `docs/notify.md` shows the setup.
+- A job needs no `config`. Without it the build tag hook gets `""`, and
+  the run id drops the empty part with its `_`.
+- Breaking: the job key `netlist_stage` is gone. A job table `vars`
+  holds it and any other value, as `{vars.<name>}` in the stage strings,
+  `[env]` and `collect`. An old key or `{netlist_stage}` stops the load.
+  Migrate: in `jobs/*.toml`, `netlist_stage = 11` becomes
+  `vars = { netlist_stage = 11 }`; in `edr.toml`, `{netlist_stage}`
+  becomes `{vars.netlist_stage}`.
+
 ## 0.2.0 (2026-09-27)
 
 - The SQLite ledger is now the run database: `ledger.py` is `db.py`,

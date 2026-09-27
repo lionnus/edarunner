@@ -32,13 +32,15 @@ commands, the report files and the numbers in them.
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
-| `metrics.py` | the parsers, the hierarchical area report, `expr`, extraction |
+| `metrics.py` | the five parsers with the hierarchical area report, extraction |
 | `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |
 | `mlflow_export.py` | `edr export --mlflow`: the run database as a local MLflow tracking store; imports `mlflow` only when called |
 | `db.py` | the run database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
-| `notify/__init__.py` | the notifier interface and `make_notifiers` |
+| `notify/__init__.py` | the notifier interface, `make_notifiers`, and the plain text of an alert |
+| `notify/ntfy.py` | `NtfyNotifier`: one JSON post per alert to an ntfy server |
+| `notify/mail.py` | `MailNotifier`: one mail per alert through `smtplib` |
 | `notify/digest.py` | `Digest`, the daily summary that the watcher sends and `/digest` shows |
 | `notify/telegram/api.py` | `BotApi`, the HTTPS client: one method per Bot API call, the retry and the 429 wait |
 | `notify/telegram/format.py` | pure functions that turn database rows into Telegram HTML |
