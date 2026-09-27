@@ -91,6 +91,7 @@ result; a killed run keeps its tree until you retire it. See
 - `docs/design.md`: the contract between the modules, the file formats,
   the driver protocol, the CLI.
 - `docs/config.md`: every key of the four TOML files.
+- `docs/flows.md`: two real flows declared, one tool session with steps and one command per step.
 - `docs/telegram.md`: the bot, from BotFather to custom commands.
 - `AGENTS.md`: how an agent operates the farm through `edr`.
 
