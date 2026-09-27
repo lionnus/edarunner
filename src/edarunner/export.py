@@ -20,7 +20,7 @@ from .model import Project
 
 Row = dict[str, Any]
 
-RUN_COLUMNS = ["run_id", "label", "config", "design", "host", "phase", "started", "ended"]
+RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "design", "host", "phase", "started", "ended"]
 METRIC_COLUMNS = ["run_id", "label", "config", "design", "stage", "step", "task", "metric", "canonical", "value", "unit", "source"]
 
 
@@ -65,7 +65,7 @@ def export(
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "schema": 1,
         "sources": {r["src"]: design for r in runs},
-        "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "host", "phase")} for r in runs],
+        "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
         "files": [],
         "incomplete": [r["run_id"] for r in runs if is_live(r) or (r.get("counts") or {}).get("failed")],
@@ -103,7 +103,8 @@ def _select(ledger: Ledger, design: str, labels: list[str] | None) -> list[Row]:
 
 def _run_row(r: Row) -> list[Any]:
     ended = "" if is_live(r) else r.get("updated")
-    return [r["run_id"], r.get("label"), r.get("config"), r.get("src"), r.get("host"), r.get("phase"), r.get("started"), ended]
+    return [r["run_id"], r.get("label"), r.get("config"), r.get("build_tag"), r.get("src"), r.get("host"), r.get("phase"),
+            r.get("started"), ended]
 
 
 def _metric_row(m: Row) -> list[Any]:

@@ -465,7 +465,7 @@ row. Every CLI action that changes something inserts an event with
 `edr export --design SRC --out DIR [--labels a,b]` writes `DIR/manifest.json`
 (producer, created, schema, sources with commits, runs, tables, files
 with size and sha256, incomplete), `DIR/runs.csv`
-(`run_id,label,config,design,host,phase,started,ended`), `DIR/metrics.csv`
+(`run_id,label,config,build_tag,design,host,phase,started,ended`), `DIR/metrics.csv`
 (`run_id,label,config,design,stage,step,task,metric,canonical,value,unit,source`)
 and the `collect` files of the chosen runs under `DIR/<label>/`. The
 directory is written under a temporary name and renamed at the end.
