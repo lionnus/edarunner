@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
 import shutil
+import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -115,6 +118,16 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     assert " DW=0" in b.spec["stages"][0]["cmd"] and b.spec["stages"][0]["cmd"].endswith("DW=0")
 
 
+def test_plan_takes_the_probes_of_the_caller(env, tmp_path: Path, monkeypatch) -> None:
+    project, batch, ssh, ledger = env
+    monkeypatch.setattr(ssh, "probe", lambda host: pytest.fail(f"plan probed {host}"))
+    given = {"local": HostProbe("local", 4.0, 8.0, str(tmp_path / "given"), 50.0)}
+    a, b = launch.plan(project, batch, ssh, ledger, date=DATE, probes=given)
+    assert a.problems == [] and b.problems == [] and a.root.startswith(f"{tmp_path}/given/")
+    a, b = launch.plan(project, batch, ssh, ledger, date=DATE, probes={})
+    assert a.problems == ["local: no probe of the host"] and a.host is None and not a.queued
+
+
 def test_plan_reports_problems(env) -> None:
     project, batch, ssh, ledger = env
     batch.jobs[1].overrides = {"bad key": "1"}
@@ -181,6 +194,18 @@ def test_stop_kills_a_running_driver(env, tmp_path: Path) -> None:
     assert (hb_path.with_name(f"{row['run_id']}.stop")).read_text().strip() == "after-task"
 
 
+def test_stop_kills_a_process_group_by_pgid(env) -> None:
+    project, batch, ssh, ledger = env
+    p = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    assert os.getpgid(p.pid) == p.pid
+    row = {"run_id": "r", "host": "local", "batch": "demo"}
+    assert launch.stop(ssh, ledger, row, {"driver_pid": None, "pgids": [p.pid]}, why="test")
+    assert p.wait(timeout=10) == -signal.SIGTERM
+    with pytest.raises(ProcessLookupError):
+        os.killpg(p.pid, 0)
+    assert ledger.events()[-1]["text"] == f"test [driver None, pgids [{p.pid}], term, ended]"
+
+
 # dry run and guards
 
 
@@ -231,7 +256,7 @@ def test_pin_date_treats_an_empty_pin_as_missing(tmp_path: Path) -> None:
     assert sorted(p.name for p in pin.parent.iterdir()) == ["RUN_DATE"]
 
 
-@pytest.mark.parametrize("pid", [0, 1, -1, "7", 4242.0])
+@pytest.mark.parametrize("pid", [0, 1, -1, "7", 4242.0, None])
 def test_stop_refuses_a_bad_driver_pid(env, pid) -> None:
     project, batch, ssh, ledger = env
     with pytest.raises(Refuse):
@@ -245,6 +270,20 @@ def test_sync_tree_guards_the_target(env, tmp_path: Path) -> None:
         sync.sync_tree(ssh, "local", tmp_path, str(tmp_path / "no-marker"), [], "/edr/", 3)
     assert sync.sync_tree(ssh, "local", tmp_path, str(tmp_path / "a" / "edr" / "b"), [], "/edr/", 3, dry_run=True)
     assert not (tmp_path / "a").exists()
+
+
+def test_sync_tree_deletes_a_stale_file(env, tmp_path: Path) -> None:
+    project, batch, ssh, ledger = env
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "keep.txt").write_text("k")
+    target = tmp_path / "a" / "edr" / "b"
+    (target / ".git").mkdir(parents=True)
+    (target / "stale.txt").write_text("s")
+    (target / ".git" / "HEAD").write_text("ref")
+    assert sync.sync_tree(ssh, "local", src, str(target), [".git"], "/edr/", 3)
+    assert (target / "keep.txt").read_text() == "k" and not (target / "stale.txt").exists()
+    assert (target / ".git" / "HEAD").exists()  # an excluded path survives the delete
 
 
 def test_publish_driver_copies_by_rename(tmp_path: Path) -> None:
@@ -277,8 +316,8 @@ def test_remote_driver_uses_the_login_python(tmp_path: Path) -> None:
     pid = launch.start_driver(ssh, "larain7", tmp_path / "d.py", tmp_path / "s.json", tmp_path / "l.log",
                               {"PATH": "/usr/sepp/bin:$PATH"})
     assert pid == 4242
-    assert ssh.cmd.index("py=$(command -v python3)") < ssh.cmd.index("export PATH=")
-    assert 'nohup "$py"' in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
+    assert ssh.cmd.startswith("py=$(command -v python3); setsid nohup \"$py\" ")
+    assert "export" not in ssh.cmd and "/usr/sepp" not in ssh.cmd and "python3 " not in ssh.cmd.split("nohup")[1]
 
 
 def test_project_env_is_rendered_over_the_site_env(env) -> None:

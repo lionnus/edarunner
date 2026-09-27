@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import board, cli, config
+from edarunner import board, cli, config, launch
+from edarunner.hosts import Ssh
 from edarunner.ledger import Ledger
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -224,6 +225,72 @@ def test_stop_after_task_now_and_finished(demo: Path, capsys) -> None:
     with Ledger(demo / "data" / "edr.db") as led:
         texts = [e["text"] for e in led.events(run_id=b)]
     assert len(texts) == 2 and texts[0] == "after-task: later" and texts[1].startswith("gone [driver")
+
+
+def test_launch_exit_codes(demo: Path, capsys, monkeypatch) -> None:
+    def row(started=False, queued=False, *problems):
+        return {"run_id": "r", "label": "l", "host": "local", "root": "", "started": started, "queued": queued,
+                "problems": list(problems), "pid": None}
+    old, sync_failed = row(False, False, "already launched: x exists"), row(False, False, "sync failed")
+    monkeypatch.setattr(cli.Ctx, "batch", lambda self, name: name)
+    cases = [([row(True), old], 0), ([row(False, True), old], 0), ([row(True), sync_failed], 0),
+             ([old, old], 2), ([], 2), ([sync_failed, old], 1), ([sync_failed], 1)]
+    for rows, code in cases:
+        monkeypatch.setattr(launch, "launch", lambda *a, **k: rows)
+        assert edr(capsys, "launch", "demo")[0] == code, rows
+    monkeypatch.setattr(launch, "launch", lambda *a, **k: [row(), row()])
+    assert edr(capsys, "launch", "demo", "--dry-run")[0] == 0
+    monkeypatch.setattr(launch, "launch", lambda *a, **k: [row(), old])
+    assert edr(capsys, "launch", "demo", "--dry-run")[0] == 2
+
+
+def test_stop_waits_60_s_then_says_now(demo: Path, capsys, monkeypatch) -> None:
+    b = seed(demo, "b_nodw", "stage:synth", pid=os.getpid())
+    cmds: list[str] = []
+
+    class AliveSsh(Ssh):
+        def run(self, host, cmd, timeout_s=None):
+            cmds.append(cmd)
+            return 0, "1\n", ""
+
+    class Clock:
+        now, sleeps = 0.0, []
+
+        def time(self):
+            return self.now
+
+        def sleep(self, s):
+            self.sleeps.append(s)
+            self.now += s
+
+    clock = Clock()
+    monkeypatch.setattr(cli, "Ssh", AliveSsh)
+    monkeypatch.setattr(launch, "time", clock)
+    code, out, _ = edr(capsys, "stop", "b_nodw@demo", "--why", "t")
+    assert code == 3 and f"{b}: still alive; use --now" in out
+    assert cmds[0] == f"kill -TERM {os.getpid()}" and clock.sleeps == [2] * 30
+    assert cmds[1:] == [f"ps -p {os.getpid()} -o pid="] * 30
+    cmds.clear()
+    clock.sleeps.clear()
+    code, out, _ = edr(capsys, "stop", "b_nodw@demo", "--now", "--why", "t")
+    assert code == 3 and "use --now" not in out and clock.sleeps == [2] * 15
+    assert cmds[0] == f"kill -TERM {os.getpid()}" and cmds[-2] == f"kill -KILL {os.getpid()}"
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert [e["text"].endswith(", alive]") for e in led.events(run_id=b)] == [True, True]
+
+
+def test_stop_marks_a_queued_run_stopped(demo: Path, capsys) -> None:
+    q = seed(demo, "q", None, tree=False, state="queued")
+    code, out, _ = edr(capsys, "stop", "q@demo", "--why", "t", "--dry-run")
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert code == 0 and "(dry)" in out and led.run(q)["state"] == "queued"
+    code, out, _ = edr(capsys, "--json", "stop", "q@demo", "--why", "t")
+    assert code == 0 and json.loads(out)["data"] == {"run_id": q, "stopped": True}
+    with Ledger(demo / "data" / "edr.db") as led:
+        assert led.run(q)["state"] == "stopped" and led.runs(state="queued") == []
+        assert [(e["kind"], e["text"]) for e in led.events(run_id=q)] == [("stop", "queued: t")]
+    code, _, err = edr(capsys, "stop", "q@demo", "--why", "t")
+    assert code == 1 and "no driver pid" in err
 
 
 def test_actions_for_the_bot(demo: Path, capsys) -> None:
@@ -448,6 +515,21 @@ def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path
                          "--dry-run")
     assert code == 0, (out, err)
     assert "(dry)" in out and "ref.power" in out
+
+
+def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> None:
+    n = seed(demo, "n", None, started=int(time.time()))  # the demo dead_s is 90 s
+    (bdir(demo) / f"{n}.json").unlink()
+    root = Path(config.load_project(demo).site.scratch[0]) / getpass.getuser() / "edr" / "demo" / n
+    code, _, err = edr(capsys, "retire", "n@demo", "--uncollected", "--why", "x")
+    assert code == 1 and "no heartbeat yet" in err and root.is_dir()
+    code, _, err = edr(capsys, "retire", "n@demo", "--prune", "netlist", "--why", "x")
+    assert code == 1 and "no heartbeat yet" in err and (root / "out").is_dir()
+    with Ledger(demo / "data" / "edr.db") as led:
+        led.upsert_run({"run_id": n, "started": int(time.time()) - 3000})
+    code, _, err = edr(capsys, "retire", "n@demo", "--uncollected", "--why", "x")
+    assert code == 0, err
+    assert not root.exists()
 
 
 def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None:
