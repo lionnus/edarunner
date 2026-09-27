@@ -28,7 +28,7 @@ def test_schema_twice(tmp_path):
     with Ledger(db) as led:
         assert len(led.events()) == 1
         tables = {r[0] for r in led.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {"batches", "runs", "stage_runs", "params", "metrics", "artifacts", "events"} <= tables
+        assert {"batches", "runs", "stage_runs", "params", "metrics", "artifacts", "events", "kv"} <= tables
         assert led.db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
@@ -119,6 +119,16 @@ def test_events(tmp_path):
         assert [e["text"] for e in led.events(run_id=RUN_A)] == ["e1", "e3"]
         assert [e["text"] for e in led.events(since_s=0)] == ["e0", "e1", "e2", "e3", "e4"]
         assert led.events(since_s=2**40) == []
+
+
+def test_kv(tmp_path):
+    with Ledger(tmp_path / "edr.db") as led:
+        assert led.get_kv("x") is None and led.get_kv("x", {}) == {}
+        led.set_kv("x", {"a": [1, 2]})
+        led.set_kv("x", {"a": [1, 2, 3]})
+        assert led.get_kv("x") == {"a": [1, 2, 3]}
+    with Ledger(tmp_path / "edr.db") as led:
+        assert led.get_kv("x") == {"a": [1, 2, 3]}
 
 
 def test_board_json(tmp_path, monkeypatch):

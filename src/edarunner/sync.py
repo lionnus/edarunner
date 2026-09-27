@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,18 +15,24 @@ from .hosts import Ssh
 from .model import Project, Site
 
 
-def publish_driver(state: Path, batch: str, driver_src: Path, dry_run: bool = False) -> Path:
-    """Copy the driver to <state>/bin/<batch>/edr_driver.py by a temporary file and rename."""
-    dest = Path(state) / "bin" / batch / "edr_driver.py"
+def publish_driver(state: Path, driver_src: Path, dry_run: bool = False) -> Path:
+    """Copy the driver to <state>/bin/edr_driver-<sha256[:8]>.py by a temporary file and rename.
+
+    A copy that exists is reused. A new version is a new name, so a live driver never
+    sees its text change.
+    """
+    text = Path(driver_src).read_bytes()
+    dest = Path(state) / "bin" / f"edr_driver-{hashlib.sha256(text).hexdigest()[:8]}.py"
+    if dest.exists():
+        return dest
     if dry_run:
         print(f"dry: publish {driver_src} -> {dest}")
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # A write in place keeps the inode a live driver reads; the rename gives a new one.
     fd, tmp = tempfile.mkstemp(prefix=".edr_driver.", dir=dest.parent)
     os.close(fd)
     try:
-        shutil.copyfile(driver_src, tmp)
+        Path(tmp).write_bytes(text)
         os.chmod(tmp, 0o755)
         os.replace(tmp, dest)
     except BaseException:

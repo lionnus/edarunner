@@ -16,7 +16,7 @@ so you can read it.
 | Nothing deletes on its own. The watcher stops a run; it never removes a file. `retire` needs `--why` and refuses a tree whose results are not in `data/results/`. | A VCD that took 3.5 h to write was deleted before its number was read. | `watch._act`, `cli._retire_targets` |
 | Disk has a floor and a budget. Below `host_free_min_gb` the driver starts nothing new. After `grace_s` the watcher stops the newest run on that host. `budget.disk_gb` caps one tree. | Two runs filled two hosts for 18 days. | `Driver.host_full`, `Driver.budget_over`, `watch._act` |
 | The watcher watches itself. It writes `watch.json` every cycle. `edr watch --check` from cron exits 1 and notifies when that file is older than three cycles. A run with no progress for `hung_s` is `hung`. | A supervisor died and nobody noticed. The runs hung for two weeks. | `watch.check`, `watch.classify` |
-| The driver is published by a temporary file and a rename, never by a write in place. | A `cp` over a running script moved the text under a live bash. The driver read garbage, logged one failure twice and died. | `sync.publish_driver` |
+| The driver is published by a temporary file and a rename under a name that carries the hash of its text, never by a write in place. | A `cp` over a running script moved the text under a live bash. The driver read garbage, logged one failure twice and died. | `sync.publish_driver` |
 | A retired batch keeps its state. `RETIRED` in the batch directory tells the watcher to skip it. | Ten deleted runs still showed as live, and the stall check reported them for days. | `cli.cmd_retire`, `watch.read_heartbeats` |
 | One table holds one design. `metrics` and `export` take `--design` and have no default, and the tag matches exactly. | Three versions of one design were live together. A power run started on the wrong one and cost 7.5 h. | `cli.cmd_metrics`, `export._select` |
 | A tree that another run uses is never a delete target. `retire` refuses a root a live run uses and a root shared with a run whose results are not collected. | Every power run on a reused tree has that tree as its root. A retire of one would have taken the netlist of the others. | `cli._refuse_shared_root` |
@@ -46,7 +46,9 @@ because `kill -TERM -- -0` would signal every process of the user.
 
 `retire` refuses a run whose driver is alive, a live run with no
 heartbeat yet, a root another live run uses, and a root shared with an
-uncollected run. `docs/running.md` lists them with the way out.
+uncollected run. `docs/running.md` lists them with the way out. The
+staged tree that `retire --batch` removes passes `assert_safe_target`
+too, and `source.repo` is never a target.
 
 A guard raises `Refuse`. The verb prints `edr: <reason>` to stderr, exits
 1, and runs nothing after the refusal. The events table gets no row,

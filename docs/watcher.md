@@ -32,9 +32,9 @@ service up.
 7. Write the boards and the pinned Telegram board.
 8. Write `<state>/watch.json` with the time, the cycle count and the pid.
 
-Its memory between cycles is two files under `data/board/`:
-`progress.json`, what each run looked like last time, and
-`notified.json`, the states, the alerts sent and the grace clocks.
+Its memory between cycles is two rows of the ledger's `kv` table:
+`progress`, what each run looked like last time, and `notified`, the
+states, the alerts sent and the grace clocks.
 
 ## Run states
 
@@ -91,7 +91,9 @@ Every cycle writes `data/board/`:
 | `board.json` | the runs of the live batches, the last 50 events and the host probes, for a script |
 | `status.html` | a phone-width page: every run in board order, the last 50 events, the hosts |
 | `compare.html` | the runs with their params as columns, a compare table of the final metrics with the difference to the first ticked run, and four plots |
-| `last_board.json` | the row order of the last text board, so `#n` resolves |
+
+The row order of the last text board is the `last_board` row of the
+ledger's `kv` table, so `#n` resolves.
 
 `compare.html` is one self-contained page over the ledger's runs, params
 and metrics. Its tables work as they are. The plots (a metric over the

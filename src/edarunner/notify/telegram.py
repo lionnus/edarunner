@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.request import Request, urlopen
 
-from edarunner.config import load_json, save_json
 from edarunner.model import BotCommand, Project, Site
 from edarunner.notify import Button, Notifier
 
@@ -87,8 +86,7 @@ class TelegramBot(Notifier):
         self.token = Path(token_file).read_text().strip()
         self.chat_id = int(self.tg.chat_id)
         self.user_id = self.tg.user_id or None
-        self.state_file = Path(project.data) / "board" / "telegram.json"
-        self._state = load_json(self.state_file)
+        self._state: dict = ledger.get_kv("telegram", {})  # type: ignore[attr-defined]
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -177,7 +175,7 @@ class TelegramBot(Notifier):
             self.api("pinChatMessage", {"chat_id": self.chat_id, "message_id": mid, "disable_notification": True})
         with self._lock:
             self._state[key] = mid
-            save_json(self.state_file, self._state)
+            self.ledger.set_kv("telegram", self._state)  # type: ignore[attr-defined]
         return mid
 
     # The poll thread
@@ -364,8 +362,8 @@ class TelegramBot(Notifier):
             if skip and subprocess.run(skip, capture_output=True, cwd=cwd, timeout=c.timeout_s).returncode == 0:
                 return skip_reply
             if c.detach:
-                logf = self.state_file.parent / f"telegram-{c.name}.log"
-                self.state_file.parent.mkdir(parents=True, exist_ok=True)
+                logf = Path(self.project.data) / f"telegram-{c.name}.log"
+                logf.parent.mkdir(parents=True, exist_ok=True)
                 with open(logf, "ab") as f:
                     p = subprocess.Popen(argv, cwd=cwd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT)
                 return f"{reply or 'started'} (pid {p.pid}, log {logf})"

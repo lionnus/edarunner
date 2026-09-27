@@ -5,12 +5,13 @@ does on the host, what it writes, and how to act on a run that stopped.
 
 ## The driver
 
-`edr launch` copies `edr_driver.py` into `<state>/bin/<batch>/` by a
-temporary file and a rename, writes one spec per run and starts the
-driver on the host with the host's own `python3`:
+`edr launch` copies `edr_driver.py` to `<state>/bin/edr_driver-<hash>.py`,
+where `<hash>` is the first 8 hex digits of the sha256 of the file, writes
+one spec per run and starts the driver on the host with the host's own
+`python3`:
 
 ```sh
-setsid nohup python3 <state>/bin/<batch>/edr_driver.py <state>/<batch>/<run_id>.spec.json
+setsid nohup python3 <state>/bin/edr_driver-<hash>.py <state>/<batch>/<run_id>.spec.json
 ```
 
 The driver is one file, Python 3.6 or newer, standard library only. It
@@ -20,9 +21,12 @@ with stdin from `/dev/null` and stdout and stderr appended to a log in
 the run tree. The site `env` and the project `[env]` reach the command
 through the spec; `$VAR` in a value expands on the host.
 
-The rename matters: bash reads a script as it runs, so a copy in place
-would move the text under a live driver. Publish the driver only through
-`edr launch` or `edr run`.
+One copy serves every run of that driver version; a copy that exists is
+reused. A new version gets a new name, and the copy is made by a
+temporary file and a rename, so a live driver never sees its text change.
+The spec records the copy the run started with, and the watcher resumes
+the run with that copy. Publish the driver only through `edr launch` or
+`edr run`.
 
 ## The run tree
 
@@ -46,7 +50,7 @@ heartbeat; the head node reads the heartbeat.
 
 ```
 <state>/
-  bin/<batch>/edr_driver.py       the driver of the batch
+  bin/edr_driver-<hash>.py        one driver copy per version
   watch.json                      the watcher's own heartbeat
   <batch>/
     RUN_DATE                      the pinned date, YYYYMMDD_HHMM
@@ -69,6 +73,7 @@ it under `data[].spec`. The driver fills two placeholders itself:
 |---|---|
 | `run_id`, `batch`, `project`, `label`, `config`, `host` | identity, copied into the heartbeat |
 | `root` | the run tree; the driver exits 2 when it is not a directory |
+| `driver` | the driver copy the run started with; a resume uses it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
 | `shell`, `env` | every command runs through `shell -c` with `env` added |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s` |
@@ -186,9 +191,11 @@ proposes the command with `--from` filled from the heartbeat.
 
 `edr run <handle> --stage <S>` starts one stage on the tree of a run
 that ended: more tasks of a task group, a stage the job skipped, or a
-resume. The new run has its own id and heartbeat in a batch
-`run_<date>`, the label `<label>.<stage>`, and `{tree_id}` of the
-original run, so the flow keeps writing into the same directory.
+resume. The new run joins the batch of that run, so `retire --batch`
+takes both. It has its own id and heartbeat, with the time of the call
+as its date and the label `<label>.<stage>`, and `{tree_id}` of the
+original run, so the flow keeps writing into the same directory. A run
+on an imported tree joins `imported`.
 `--tasks` names the tasks, `--parallel` the width, `--on` another host
 when the tree is reachable there.
 
@@ -247,7 +254,11 @@ import time as `started` and `ended`.
 `rm -rf`. `--prune <name>` removes only the paths that `prune.<name>`
 names in the stages, such as a library or a build directory, and keeps
 the tree. `--batch <B>` retires every run of a batch and writes
-`RETIRED`, so the watcher skips it and the board drops it.
+`RETIRED`, so the watcher skips it and the board drops it. It then
+removes the staged tree of the batch's source under `source.worktrees`
+when no other batch that is not retired has the same source: a worktree
+with `git worktree remove --force`, a dirty snapshot with a plain
+delete, both on the head node. The source repository is never a target.
 
 Every target passes the guard first: an absolute path with the safety
 marker and at least `min_depth` components, not `/`, not the home
@@ -262,4 +273,5 @@ directory, not a one-component path. `retire` also refuses:
   `--uncollected`
 
 Run `edr watch --once` before a retire, so the results are on the head
-node, and `--dry-run` first, which prints every `rm -rf` target.
+node, and `--dry-run` first, which prints every `rm -rf` target and the
+staged tree.

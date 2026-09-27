@@ -143,9 +143,8 @@ class Ctx:
 
     def resolve(self, handle: str) -> Row:
         """The ledger row of label@batch, a run id prefix, or #n from the last board."""
-        last = config.load_json(self.project.data / "board" / "last_board.json")
         try:
-            run_id = self.ledger.resolve(handle, last if isinstance(last, list) else None)
+            run_id = self.ledger.resolve(handle, self.ledger.get_kv("last_board"))
         except KeyError as e:
             raise Refuse(str(e.args[0])) from None
         row = self.ledger.run(run_id)
@@ -158,9 +157,9 @@ class Ctx:
         return config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
 
     def save_board(self, rows: list[Row]) -> None:
-        """Keep the board order in last_board.json, so #n resolves next time."""
+        """Keep the board order in the ledger, so #n resolves next time."""
         if rows:
-            config.save_json(self.project.data / "board" / "last_board.json", [r["run_id"] for r in board.order(rows)])
+            self.ledger.set_kv("last_board", [r["run_id"] for r in board.order(rows)])
 
 
 # --- texts shared by the verbs and the bot
@@ -536,12 +535,11 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         job.tasks = a.tasks
     if a.parallel:
         project.stages[a.stage].parallel = a.parallel
-    # The stage in the label and a batch per call keep the new run id apart from the reused one.
+    # The run joins the batch of the tree it continues; the stage in the label and the time keep its id apart.
     job.label = f"{job.label}.{a.stage}"
-    batch.batch, batch.jobs = f"run_{time.strftime(launch.DATE_FMT)}", [job]
+    batch.batch, batch.jobs = str(row["batch"]), [job]
     state = project.state
-    date = launch.pin_date(state, batch.batch, a.dry_run)
-    (p,) = launch.plan(project, batch, c.ssh, c.ledger, date=date)
+    (p,) = launch.plan(project, batch, c.ssh, c.ledger, date=time.strftime(launch.DATE_FMT))
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
         return 1
@@ -549,14 +547,13 @@ def cmd_run(c: Ctx, a: argparse.Namespace) -> int:
         if not p.spec["stages"][0].get("resume"):
             raise Refuse(f"stage {a.stage} has no resume command; --from needs one")
         p.spec["start_at"]["checkpoint"] = a.from_
-    driver = sync.publish_driver(state, batch.batch, launch.DRIVER_SRC, a.dry_run)
-    spec_path = launch.write_spec(state, batch.batch, p, a.dry_run)
+    driver = sync.publish_driver(state, launch.DRIVER_SRC, a.dry_run)
+    spec_path = launch.write_spec(state, batch.batch, p, driver, a.dry_run)
     c.emit(f"{p.run_id}: {a.stage} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
            {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
     if a.dry_run:
         return 0
     now = int(time.time())
-    c.ledger.upsert_batch({"batch": batch.batch, "project": project.project, "source": p.src, "run_date": date})
     c.ledger.upsert_run({"run_id": p.run_id, "batch": batch.batch, "label": job.label, "config": job.config,
                          "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host,
                          "root": p.root, "created": now, "phase": "setup", "state": "running", "started": now,
@@ -689,6 +686,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         if root:
             _refuse_shared_root(c, row, str(host), str(root), retiring, bool(a.prune))
         checked.append((row, hb, host, root, targets))
+    worktree = _worktree_target(c, a.batch) if a.batch and not a.prune else None
     failed, done = 0, []
     for row, hb, host, root, targets in checked:
         run_id = row["run_id"]
@@ -714,8 +712,35 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         (project.state / a.batch).mkdir(parents=True, exist_ok=True)
         (project.state / a.batch / "RETIRED").touch()
         c.ledger.mark_batch_retired(a.batch)
+    if worktree is not None:
+        real = (worktree / ".git").exists()
+        print(f"{a.batch}: {'git worktree remove --force' if real else 'rm -rf'} {worktree}{dry}")
+        if not a.dry_run:
+            try:
+                if real:
+                    runid.git("worktree", "remove", "--force", str(worktree), cwd=project.source.repo)
+                else:
+                    shutil.rmtree(worktree)
+                c.ledger.add_event("user", "", "retire", f"{a.why}: worktree {worktree}")
+            except (runid.GitError, OSError) as e:
+                failed += 1
+                print(f"{a.batch}: worktree not removed: {e}", file=sys.stderr)
     c.data = {"retired": done, "failed": failed}
     return 3 if failed else 0
+
+
+def _worktree_target(c: Ctx, batch: str) -> Path | None:
+    """The staged tree of the batch's source, when no other batch that is not retired has it; guarded."""
+    rows = {b["batch"]: b for b in c.ledger.batches()}
+    src = str((rows.get(batch) or {}).get("source") or "")
+    if not src or any(b["batch"] != batch and not b.get("retired") and b.get("source") == src for b in rows.values()):
+        return None
+    path = c.project.source.worktrees / src
+    if not path.is_dir():
+        return None
+    if path.resolve() == c.project.source.repo.resolve():
+        raise Refuse(f"{path} is the source repository")
+    return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
 
 
 def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[str], prune: bool) -> None:
