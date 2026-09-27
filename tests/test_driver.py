@@ -182,6 +182,18 @@ def test_checkpoint_without_resume_fails_before_the_command(tmp_path: Path) -> N
     assert hb["last_cmd"] is None and not (Path(spec["root"]) / "log" / "export.log").exists()
 
 
+
+def test_a_refusal_before_the_first_stage_names_its_reason(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",), start_at={"stage": "nope", "checkpoint": None})
+    rc, hb = finish(start(spec), spec)
+    log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log")
+    assert (rc, hb["phase"]) == (2, "FAILED:setup") and "start stage nope not in ['synth']" in log.read_text()
+    spec = render_spec(tmp_path / "full", stages=("synth",))
+    spec["stages"][0]["needs"] = {"disk_gb": 10 ** 9}
+    rc, hb = finish(start(spec), spec)
+    log = Path(spec["state_file"]).with_suffix("").with_suffix(".driver.log")
+    assert (rc, hb["phase"]) == (3, "FAILED:synth") and "GB free, synth needs 1000000000.0" in log.read_text()
+
 def test_bad_spec_exits_2(tmp_path: Path) -> None:
     bad = tmp_path / "bad.spec.json"
     bad.write_text("{}")
