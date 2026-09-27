@@ -489,7 +489,11 @@ def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
-    """Probe every site host."""
+    """Probe every site host, or print the samples the watcher kept."""
+    if a.history:
+        rows = analysis.host_history(c.db.host_samples(_since(a.since)))
+        c.emit(analysis.host_history_view(rows), rows)
+        return Exit.DONE if rows else Exit.NOTHING
     rows = _mark_hosts(c, _probe_rows(c))
     if a.narrow:
         # A long cell, such as an error, folds inside its column instead of widening the table.
@@ -1151,7 +1155,16 @@ def _parser() -> argparse.ArgumentParser:
         free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
         our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
         ram, scratch and gpu in marks.
-        """, exits={Exit.HOSTS: "a host did not answer"})
+
+        --history probes nothing. It reads the host_samples table, where the
+        watcher keeps one probe per host and cycle for 30 days, and prints one
+        row per host: the first and last sample, and a line each of cores in
+        use (the load, capped at the cores), RAM, scratch and busy GPUs over
+        --since, each with its peak and its last value.
+        """, exits={Exit.HOSTS: "a host did not answer", Exit.NOTHING: "with --history, no sample"})
+    s.add_argument("--history", action="store_true",
+                   help="no probe: the samples the watcher kept, one line per host over --since")
+    s.add_argument("--since", default="1d", metavar="T", help="with --history: 30m, 2h, 1d or seconds; default 1d")
     s.add_argument("--narrow", action="store_true",
                    help="ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number")
     command("tools", "every site tool: free seats and hosts", """

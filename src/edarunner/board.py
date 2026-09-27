@@ -321,8 +321,33 @@ def _th(cells: list[Any]) -> str:
     return "<tr>" + "".join(f"<th>{_h(c)}</th>" for c in cells) + "</tr>"
 
 
-def status_html(rows: list[Row], events: list[Row], hosts: dict[str, Any], now: float | None = None) -> str:
-    """A phone-width page: every run in board order, the last 50 events, the hosts."""
+def _svg_lines(series: list[tuple[str, list[tuple[float, float]]]], t0: float, t1: float, w: int = 300,
+               h: int = 48) -> str:
+    """Polylines of (time, fraction from 0 to 1) points, one per (colour, points), over t0..t1."""
+    out = []
+    for colour, pts in series:
+        xy = " ".join(f"{(ts - t0) / ((t1 - t0) or 1) * w:.1f},{h - min(1.0, max(0.0, v)) * h:.1f}" for ts, v in pts)
+        if xy:
+            out.append(f'<polyline fill="none" stroke="{colour}" stroke-width="1.5" points="{xy}"/>')
+    return (f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img"><rect width="{w}" height="{h}" '
+            f'fill="none" stroke="#8884"/>{"".join(out)}</svg>')
+
+
+def host_charts(samples: list[Row], now: float) -> str:
+    """One small chart per host over the last day: cores in use (green) and RAM in use (blue), as a share of the total."""
+    by: dict[str, list[Row]] = {}
+    for s in samples:
+        by.setdefault(str(s["host"]), []).append(s)
+    return "".join(
+        f"<div class=hc><b>{_h(host)}</b> <small>{_h(len(ss))} samples</small><br>" + _svg_lines([
+            ("#2a7", [(s["ts"], min(s["load"] or 0, s["cores"] or 0) / s["cores"]) for s in ss if s["cores"]]),
+            ("#38c", [(s["ts"], (s["ram_used_gb"] or 0) / s["ram_gb"]) for s in ss if s["ram_gb"]]),
+        ], now - 86400, now) + "</div>" for host, ss in sorted(by.items()))
+
+
+def status_html(rows: list[Row], events: list[Row], hosts: dict[str, Any], now: float | None = None,
+                samples: list[Row] | None = None) -> str:
+    """A phone-width page: every run in board order, the last 50 events, the hosts and a chart per host."""
     now = now or time.time()
     label_of = {r.get("run_id"): r.get("label") for r in rows}
     run_rows = "".join(
@@ -342,7 +367,11 @@ def status_html(rows: list[Row], events: list[Row], hosts: dict[str, Any], now: 
     host_rows = _th(["host", *keys]) + "".join(
         _td([name, *([v.get(k, "") for k in keys] if isinstance(v, dict) else [v, *[""] * (len(keys) - 1)])])
         for name, v in sorted(hosts.items()))
-    return _STATUS.substitute(written=_h(_ts(now)), n=len(rows), runs=run_rows, events=event_rows, hosts=host_rows)
+    charts = host_charts(samples or [], now)
+    if charts:
+        charts = "<h3>hosts, last day</h3><p><small>green: cores in use, blue: RAM in use, of the host's total</small></p>" + charts
+    return _STATUS.substitute(written=_h(_ts(now)), n=len(rows), runs=run_rows, events=event_rows, hosts=host_rows,
+                              charts=charts)
 
 
 def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plotly_src: str | None) -> str:
@@ -362,7 +391,7 @@ td,th{padding:6px 4px;border-bottom:1px solid #ddd;text-align:left;font-size:14p
 small{color:#777;word-break:break-all}h3{margin:16px 0 6px}
 .st{font-weight:600}.s-running .st{color:#2a7}.s-stale .st{color:#e90}.s-dead .st,.s-failed .st,.s-hung .st{color:#d33}
 .s-done .st{color:#888}.s-incomplete .st,.s-over_budget .st,.s-looping .st{color:#a3c}.s-stopped .st,.s-killed .st{color:#bbb}
-select{font:inherit;margin:0 8px 8px 0}.up{color:#d33}.dn{color:#2a7}
+select{font:inherit;margin:0 8px 8px 0}.hc{margin:0 0 10px}.hc svg{max-width:100%;height:auto}.up{color:#d33}.dn{color:#2a7}
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}td,th{border-color:#333}small{color:#999}}
 """
 
@@ -375,6 +404,7 @@ _STATUS = Template("""<!doctype html><html><head><meta charset="utf-8">
 <table><tr><th>time</th><th>actor</th><th>run</th><th>kind</th><th>text</th></tr>$events</table>
 <h3>hosts</h3>
 <table>$hosts</table>
+$charts
 </body></html>
 """)
 

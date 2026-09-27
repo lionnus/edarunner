@@ -225,3 +225,30 @@ def test_step_log_needs_file_and_a_regex_that_compiles(demo: Path) -> None:
         toml.write_text(text.replace("[stages.pnr]\n", f"[stages.pnr]\nstep_log = {bad}\n"))
         with pytest.raises(config.ConfigError, match=msg):
             config.load_project(demo)
+
+
+def _probe(load: float, free_ram: float) -> dict:
+    return {"cores": 8, "load": load, "total_ram_gb": 64.0, "free_ram_gb": free_ram, "total_gb": 100.0,
+            "free_gb": 40.0, "gpus": 0, "gpus_idle": 0}
+
+
+def test_host_samples_history_and_the_status_chart(demo: Path, capsys) -> None:
+    import time
+
+    now = int(time.time())
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_host_samples(now - 40 * 86400, {"h1": _probe(1, 60)})
+        for k in range(4):
+            db.add_host_samples(now - 3600 * (3 - k), {"h1": _probe(2 * k, 64 - 16 * k), "h2": {"error": "timeout"}})
+        # 30 days are kept; a host that did not answer has no sample.
+        assert [(r["host"], r["load"]) for r in db.host_samples(0)] == [("h1", 0), ("h1", 2), ("h1", 4), ("h1", 6)]
+        samples = db.host_samples(now - 86400)
+    code, out, _ = edr(capsys, "hosts", "--history")
+    line = next(ln for ln in out.splitlines() if ln.startswith("h1"))
+    assert code == 0 and "6/6 of 8" in line and "48/48 of 64" in line and "60/60 of 100" in line
+    code, out, _ = edr(capsys, "--json", "hosts", "--history", "--since", "90m")
+    rows = json.loads(out)["data"]
+    assert [p[1] for p in rows[0]["cores_used"]] == [4, 6] and rows[0]["source"] == "host_samples"
+    html = board.status_html([], [], {}, now, samples)
+    assert html.count("<polyline") == 2 and "hosts, last day" in html and "<b>h1</b>" in html
+    assert "hosts, last day" not in board.status_html([], [], {}, now, [])

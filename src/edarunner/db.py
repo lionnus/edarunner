@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, coll
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, ts INTEGER, actor TEXT, run_id TEXT, kind TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS store(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS step_runs(run_id TEXT, stage TEXT, step INTEGER, started INTEGER, PRIMARY KEY(run_id, stage, step));
+CREATE TABLE IF NOT EXISTS host_samples(host TEXT, ts INTEGER, cores INTEGER, load REAL, ram_gb REAL, ram_used_gb REAL,
+  scratch_gb REAL, scratch_used_gb REAL, gpus INTEGER, gpus_busy INTEGER, PRIMARY KEY(host, ts));
 CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT, instance TEXT, depth INTEGER, area REAL,
   local_area REAL, cells INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
@@ -165,6 +167,23 @@ class Database:
             "INSERT OR REPLACE INTO step_runs(run_id, stage, step, started) VALUES(?, ?, ?, ?)",
             [(run_id, stage, int(step), int(ts)) for stage, steps in times.items() for step, ts in steps.items()])
         self.conn.commit()
+
+    def add_host_samples(self, ts: int, probes: dict[str, dict], keep_days: int = 30) -> None:
+        """One row per host that answered, from the probe dicts of `hosts.HostProbe`; rows older than `keep_days` go."""
+        rows = [(h, ts, p.get("cores"), p.get("load"), p.get("total_ram_gb"),
+                 round(p.get("total_ram_gb", 0) - p.get("free_ram_gb", 0), 2), p.get("total_gb"),
+                 round(p.get("total_gb", 0) - p.get("free_gb", 0), 2), p.get("gpus"),
+                 p.get("gpus", 0) - p.get("gpus_idle", 0)) for h, p in probes.items() if "error" not in p]
+        self.conn.executemany("INSERT OR REPLACE INTO host_samples VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        self.conn.execute("DELETE FROM host_samples WHERE ts<?", (ts - keep_days * 86400,))
+        self.conn.commit()
+
+    def host_samples(self, since_s: int, host: str | None = None) -> list[Row]:
+        """Host samples from `since_s` on, by host and time."""
+        where, args = "ts>=?", [since_s]
+        if host is not None:
+            where, args = where + " AND host=?", [since_s, host]
+        return self._rows(f"SELECT * FROM host_samples WHERE {where} ORDER BY host, ts", args)
 
     def add_artifact(self, row: Row) -> None:
         """Insert a collected file, or update its size and time."""

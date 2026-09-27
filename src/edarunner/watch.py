@@ -387,10 +387,12 @@ def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         except HostError as e:
             probes[host] = {"error": str(e)}
     bdir = project.data / "board"
+    db.add_host_samples(int(now), probes)
     db.write_board_json(bdir / "board.json", probes)
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
     rows = [r for r in db.runs() if r["batch"] not in retired]
-    config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now))
+    config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
+                                                           db.host_samples(int(now) - 86400)))
     parameters = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM parameters")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
     config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly))
