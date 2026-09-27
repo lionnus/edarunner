@@ -182,6 +182,60 @@ def narrow_text(rows: list[Row], width: int = 48, now: float | None = None) -> T
     return text
 
 
+def phone(rows: list[Row], width: int = 40, now: float | None = None, most: int = 40) -> str:
+    """One line per run, `state handle age`, in board order, then the counts. For the bot."""
+    now = now or time.time()
+    ordered = order(rows)
+    lines = []
+    for r in ordered[:most]:
+        st, age = state_of(r), hm(_age_s(r, now))
+        lines.append(f"{_SHORT.get(st, st)[:5]:<5} {handle(r)[:width - 11]:<{width - 11}} {age:>4}".rstrip())
+    if len(ordered) > most:
+        lines.append(f"+{len(ordered) - most} more")
+    counts = Counter(state_of(r) for r in ordered)
+    lines.append(" ".join(f"{_SHORT.get(k, k)}:{v}" for k, v in sorted(counts.items(), key=lambda kv: _RANK.get(kv[0], 7)))
+                 [:width] or "no runs")
+    return "\n".join(lines)
+
+
+def handle(row: Row) -> str:
+    """label@batch."""
+    return f"{_s(row.get('label'))}@{_s(row.get('batch'))}"
+
+
+def cols(head: list[str], body: list[list[Any]], width: int = 40) -> str:
+    """Plain columns in `width`: the first left-aligned and cut to fit, the rest right-aligned. None prints as '-'."""
+    rows = [head] + [["-" if c is None else _s(c) for c in r] for r in body]
+    w = [max(len(r[i]) for r in rows) for i in range(len(head))]
+    gap = " " * (2 if sum(w) + 2 * (len(w) - 1) <= width else 1)
+    w[0] = max(1, min(w[0], width - sum(w[1:]) - len(gap) * (len(w) - 1)))
+    return "\n".join(gap.join([r[0][:w[0]].ljust(w[0]), *(c.rjust(x) for c, x in zip(r[1:], w[1:]))])[:width].rstrip()
+                     for r in rows)
+
+
+STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "--why over-budget",
+              "host_full": "--now --why host-full", "superseded": "--after-task --why superseded"}
+
+
+def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
+    """The one command a person runs next for a run in `state`; None for a running run or an orphan."""
+    h = handle(row)
+    if state in ("running", "orphan"):
+        return None
+    if state == "queued":
+        return f"edr launch {row['batch']} --only {row['label']}"
+    if state == "stale":
+        return f"edr status {h} --live"
+    if state == "dead":
+        return f"edr run {h} --stage {hb.get('stage') or row.get('stage')}" + (
+            f" --from {hb['step_name']}" if hb.get("step_name") else "")
+    if state in STOP_FLAGS:
+        return f"edr stop {h} {STOP_FLAGS[state]}"
+    if state == "done":
+        return f"edr export --design {row.get('src')} --out exports/{row.get('src')}"
+    return f"edr retire {h} --why {state}"
+
+
 def wide(rows: list[Row], now: float | None = None) -> Table | str:
     """One line per run, every state, in board order."""
     now = now or time.time()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import tomllib
 import urllib.error
 from pathlib import Path
@@ -106,7 +107,10 @@ def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
 
 
 def last_reply(bot: TelegramBot) -> str:
-    return bot.api.of("sendMessage")[-1]["text"]
+    """The reply under its bold first line, which names the project."""
+    head, _, body = bot.api.of("sendMessage")[-1]["text"].partition("\n")
+    assert head.startswith("<b>demo · ") and head.endswith("</b>")
+    return body
 
 
 def test_make_notifiers_needs_a_private_token(tmp_path):
@@ -118,10 +122,12 @@ def test_make_notifiers_needs_a_private_token(tmp_path):
 
 
 @pytest.mark.parametrize("text,call", [
-    ("/status", ("status_text", (), {"narrow": True})),
-    ("/status@edr_bot", ("status_text", (), {"narrow": True})),
+    ("/status", ("status_text", (None,), {})),
+    ("/status@edr_bot", ("status_text", (None,), {})),
+    ("/status a@demo", ("status_text", ("a@demo",), {})),
     ("/events 5", ("events_text", (5,), {})),
-    ("/events", ("events_text", (10,), {})),
+    ("/events 500", ("events_text", (30,), {})),
+    ("/events", ("events_text", (8,), {})),
     ("/hosts", ("hosts_text", (), {})),
     ("/lic", ("lic_text", (), {})),
     ("/keep a@demo 6", ("keep", ("a@demo", 6, "telegram"), {})),
@@ -145,10 +151,13 @@ def test_bad_handle_is_an_answer(bot):
     assert "error" in last_reply(bot)
 
 
-def test_help_lists_builtins_and_custom(bot):
+def test_help_groups_builtins_and_custom(bot):
     bot.handle_update(msg("/nothing"))
+    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo · help</b>\n<b>Look</b>\n/status [handle] · ")
     text = last_reply(bot)
-    assert "/keep" in text and "/echo - echo a dir" in text
+    assert "<pre>" not in text and "/keep &lt;handle&gt; [hours] · add hours, default 12" in text
+    assert "<b>Custom</b>\n/echo &lt;dir&gt; · echo a dir" in text
+    assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Custom</b>"]
 
 
 def test_custom_good_argument_runs_argv(bot):
@@ -224,6 +233,7 @@ def callback(data: str, chat: int = CHAT, user: int = USER) -> dict:
     # A press in a group comes from a user id; without user_id only the chat that holds the button is checked.
     return {"update_id": 2, "callback_query": {"id": "cb1", "from": {"id": user}, "data": data,
                                                "message": {"message_id": 5, "chat": {"id": chat}, "text": "hung a@demo",
+                                                           "entities": [{"offset": 0, "length": 4, "type": "bold"}],
                                                            "reply_markup": markup}}}
 
 
@@ -235,7 +245,8 @@ def test_callback_buttons(bot):
     answers = bot.api.of("answerCallbackQuery")
     assert [a["callback_query_id"] for a in answers] == ["cb1", "cb1"]
     edits = bot.api.of("editMessageText")
-    assert edits[-1]["message_id"] == 5 and "ack ok" in edits[-1]["text"]
+    assert edits[-1]["message_id"] == 5 and edits[-1]["text"] == "hung a@demo\nack ok"
+    assert edits[-1]["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]  # the bold title stays
     assert edits[-1]["reply_markup"]["inline_keyboard"]  # the buttons stay
     assert [e["kind"] for e in bot.ledger.events] == ["button", "button"]
     bot.handle_update(callback("retire:a@demo"))
@@ -292,15 +303,16 @@ def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
 
 
 def test_alert_send_edits_a_repeat(bot):
-    mid = bot.send("hung", "run1", "no progress", alert_buttons("a@demo"))
+    mid = bot.send("hung", "run1", "hung a@demo\nno progress <3 h", alert_buttons("a@demo"), "edr stop a@demo --why hung")
     sent = bot.api.of("sendMessage")[-1]
     assert mid == "1" and sent["disable_notification"] is False
+    assert sent["text"] == "<b>demo · hung a@demo</b>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
     assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo"]
     assert bot.send("hung", "run1", "no progress for 3 h") == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
     assert bot.send("hung", "run2", "x") == "2"
     bot.edit("2", "resolved <ok>")
-    assert bot.api.of("editMessageText")[-1]["text"] == "<pre>resolved &lt;ok&gt;</pre>"
+    assert bot.api.of("editMessageText")[-1]["text"] == "<b>demo · resolved &lt;ok&gt;</b>"
 
 
 def test_board_is_created_once_then_edited(bot, tmp_path):
@@ -311,7 +323,9 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     assert bot.ledger.kv["telegram"]["board"] == 1 and not (tmp_path / "data").exists()
     bot.board("board v2")
     assert len(bot.api.of("sendMessage")) == 1
-    assert bot.api.of("editMessageText")[-1] == {"chat_id": CHAT, "message_id": 1, "text": pre("board v2"), "parse_mode": "HTML", "reply_markup": None}
+    edit = bot.api.of("editMessageText")[-1]
+    assert edit["message_id"] == 1 and edit["reply_markup"] is None
+    assert re.fullmatch(r"<b>demo · board \d\d:\d\d</b>\n<pre>board v2</pre>", edit["text"])
     # A new bot on the same ledger edits the same message.
     again = TelegramBot(bot.site, bot.project, bot.ledger, bot.actions, str(bot.tg.token_file))
     again.api = FakeApi()
