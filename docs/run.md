@@ -87,6 +87,29 @@ The logs are in the run tree on the host: `log/<stage>.log` for a stage,
 `log/<stage>.<task>.log` for a task. `edr status <handle>` shows the
 tail, and the watcher copies `log/` to the head node when a stage ends.
 
+## Brief a session
+
+`edr brief` prints the project as Markdown for someone who has never
+seen it: the source and its checked-out trees, the stages, the hosts
+with the marks of their last probe, the tool seats, the runs per batch,
+every run that needs a decision with the command the triage proposes,
+and the last ten events. `edr brief --run base@sweep1` tells the story
+of one run, from its stage and step times and its events to the last
+20 lines of its log and its metrics. Both take `--json`. A Claude Code
+session reads the briefing before its first prompt when the project's
+`.claude/settings.json` runs it as a `SessionStart` hook; the hook's
+output becomes part of the session's context:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "cd \"$CLAUDE_PROJECT_DIR\" && edr brief"}]}
+    ]
+  }
+}
+```
+
 ## The watcher
 
 `edr watch` runs on the head node, one process per project. It reads the
