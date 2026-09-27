@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-09-27)
 
 - The database uses the DELETE journal with `synchronous=FULL` when
   `data/` is on NFS, SMB, 9p or FUSE, and WAL elsewhere. WAL does not
