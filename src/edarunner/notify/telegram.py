@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.request import Request, urlopen
 
+from edarunner.board import MARK
 from edarunner.model import BotCommand, Project, Site
 from edarunner.notify import Button, Notifier
 
@@ -48,6 +49,9 @@ GROUPS = {
                 ("help", "", "this list")],
 }
 BUILTINS = {c: f"{h}: /{c} {a}" if a else h for g in GROUPS.values() for c, a, h in g}
+# Replies in Telegram HTML, and replies of aligned columns; any other reply is escaped prose.
+HTML = {"status", "events", "hosts", "lic", "help"}
+COLUMNS = {"compare", "metric"}
 # These verbs write their own ledger event.
 SELF_LOGGED = {"keep", "ack", "stop"}
 
@@ -64,6 +68,11 @@ def pre(text: str) -> str:
 def esc(text: object) -> str:
     """`text` escaped for parse_mode HTML."""
     return html.escape(str(text), quote=False)
+
+
+def fit(text: str) -> str:
+    """`text` cut at a line end to the message limit; a line holds no open tag."""
+    return text if len(text) <= LIMIT else text[:LIMIT].rsplit("\n", 1)[0] + "\n…"
 
 
 def _multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes]]) -> tuple[bytes, str]:
@@ -146,9 +155,14 @@ class TelegramBot(Notifier):
         return f"<b>{esc(self.project.project)} · {esc(title)}</b>"
 
     def alert(self, text: str, cmd: str | None = None) -> str:
-        """The first line of `text` as the title, the rest as prose, `cmd` in monospace."""
+        """The first line of `text` as the title, the rest as prose, `cmd` in monospace.
+
+        A title `state handle` gets the mark of the state and the handle in monospace.
+        """
         title, _, rest = text.partition("\n")
-        return self.head(title) + (f"\n{esc(rest)}" if rest else "") + (f"\n<code>{esc(cmd)}</code>" if cmd else "")
+        state, _, who = title.partition(" ")
+        top = f"{MARK[state]} {self.head(state)} <code>{esc(who)}</code>" if state in MARK and who else self.head(title)
+        return top + (f"\n{esc(rest)}" if rest else "") + (f"\n<code>{esc(cmd)}</code>" if cmd else "")
 
     def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
              cmd: str | None = None) -> str | None:
@@ -167,9 +181,9 @@ class TelegramBot(Notifier):
         self._call("editMessageText", self._edit_params(int(msg_id), self.alert(text), None))
 
     def board(self, text: str) -> None:
-        """Rewrite the pinned board silently; create and pin it once."""
+        """Rewrite the pinned board silently; create and pin it once. `text` is Telegram HTML."""
         try:
-            self._upsert("board", self.head("board " + time.strftime("%H:%M")) + "\n" + pre(text), None,
+            self._upsert("board", fit(self.head("board " + time.strftime("%H:%M")) + "\n" + text), None,
                          silent=True, pin=True)
         except ApiError as e:
             log.warning("telegram: %s", e)
@@ -261,9 +275,11 @@ class TelegramBot(Notifier):
     def _event(self, kind: str, text: str) -> None:
         self.ledger.add_event(actor="telegram", run_id="", kind=kind, text=text)  # type: ignore[attr-defined]
 
-    def _reply(self, title: str, text: object, prose: bool = False) -> None:
-        body = str(text) if prose else pre(str(text))
-        self._call("sendMessage", {"chat_id": self.chat_id, "text": self.head(title) + "\n" + body, "parse_mode": "HTML"})
+    def _reply(self, title: str, text: object, kind: str = "text") -> None:
+        """`kind` html is sent as it is, pre in a <pre> block, text escaped."""
+        body = pre(str(text)) if kind == "pre" else str(text) if kind == "html" else esc(text)
+        full = self.head(title) + "\n" + body
+        self._call("sendMessage", {"chat_id": self.chat_id, "text": full if kind == "pre" else fit(full), "parse_mode": "HTML"})
 
     # Commands
 
@@ -272,6 +288,7 @@ class TelegramBot(Notifier):
         name, args = parts[0][1:].split("@")[0], parts[1:]
         if name not in self.tg.commands and name not in BUILTINS:
             name = "help"
+        kind = "pre" if name in self.tg.commands or name in COLUMNS else "html" if name in HTML else "text"
         try:
             if name in self.tg.commands:
                 out = self._custom(self.tg.commands[name], args)
@@ -280,9 +297,9 @@ class TelegramBot(Notifier):
                 if name not in SELF_LOGGED:
                     self._event("command", text[:200])
         except Exception as e:  # a refused handle is an answer, not a crash
-            out = f"error: {e}"
+            out, kind = f"error: {e}", "text"
             self._event("refused", f"{text[:200]}: {e}")
-        self._reply(name, out, prose=name == "help")
+        self._reply(name, out, kind)
 
     def _handle(self, args: list[str]) -> str:
         if not args or not HANDLE.match(args[0]):

@@ -213,3 +213,15 @@ def test_rows_from_ledger(tmp_path):
     assert all(len(line) <= 48 for line in text.splitlines())
     assert text.splitlines()[2].startswith(" #1 DEAD")
     assert RUN["dead"] in board.status_html(raw, [], {"local": {"cores": 4}}, now=NOW)
+
+
+def test_phone_is_telegram_html():
+    lines = board.phone(_rows(), now=NOW, totals={"synth": 4}).splitlines()
+    assert lines[:3] == ["🔴 <code>a@demo</code> dead · synth 3/4 · 1h", "🟡 <code>b_nodw@demo</code> stale · synth 3/4 · 15m",
+                         "🟢 <code>c@demo</code> synth 3/4 · 0m"]
+    assert lines[4:] == ["🟠 <code>b_nodw@demo</code> incomplete · 1h", "⚪ <code>a@demo</code> done · 1h",
+                         "<i>1 dead · 1 incomplete · 1 stale · 2 running · 1 done</i>"]
+    done = [_row("done", "<a>", "done")]
+    assert board.phone(done * 32, now=NOW).splitlines()[-3:] == [
+        "<i>… and 2 more</i>", "<i>nothing live</i>", "<i>32 done</i>"]
+    assert "&lt;a&gt;@demo" in board.phone(done, now=NOW) and board.phone([], now=NOW) == "<i>no runs</i>"

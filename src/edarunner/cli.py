@@ -17,12 +17,14 @@ import json
 import logging
 import os
 import posixpath
+import re
 import shlex
 import shutil
 import sys
 import textwrap
 import time
 from dataclasses import asdict
+from html import escape as esc
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -288,7 +290,10 @@ def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> 
 
 
 class Actions:
-    """The verbs the Telegram bot may call; each one is a CLI verb without the printing. Every text fits 40 columns."""
+    """The verbs the Telegram bot may call; each one is a CLI verb without the printing.
+
+    The status, events, hosts and lic texts are Telegram HTML; the compare and metric texts are 40 plain columns.
+    """
 
     def __init__(self, c: Ctx) -> None:
         self.c = c
@@ -309,11 +314,11 @@ class Actions:
         return f"{board.handle(row)} stops after its task"
 
     def status_text(self, handle: str | None = None) -> str:
-        """The board, or stage, step, age and the last log line of one run."""
+        """The board, or the state, stage, step, host, age, next command and last log line of one run."""
         if handle is None:
             rows = self.c.rows()
             self.c.save_board(rows)
-            return board.phone(rows)
+            return board.phone(rows, totals=metrics.step_totals(self.c.project))
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.ledger.run(row["run_id"]) or row
@@ -322,45 +327,46 @@ class Actions:
         step = " ".join(str(v) for v in (hb.get("step") or row.get("step"), hb.get("step_name")) if v not in (None, ""))
         age = board.hm(None if row.get("updated") is None else time.time() - row["updated"])
         log_line = next((ln for ln in reversed(str(hb.get("last_log") or "").splitlines()) if ln.strip()), "-")
-        lines = [f"{state} {board.handle(row)}", f"stage {row.get('stage') or '-'}, step {step or '-'}",
-                 f"age {age} on {row.get('host') or '-'}", "last log:"]
-        lines += textwrap.wrap(log_line, 40, initial_indent="  ", subsequent_indent="  ", max_lines=4) or ["  -"]
-        return "\n".join(ln[:40] for ln in lines)
+        log_line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", log_line)
+        cmd = board.triage_cmd(row, state, hb)
+        lines = [f"{board.MARK.get(state, '⚪')} <code>{esc(board.handle(row))}</code> {esc(state)}",
+                 esc(f"stage {row.get('stage') or '-'}, step {step or '-'}"), esc(f"on {row.get('host') or '-'}, {age}")]
+        lines += [f"<code>{esc(cmd)}</code>"] if cmd else []
+        return "\n".join(lines + [f"<pre>{esc(log_line[-300:])}</pre>"])
 
     def events_text(self, n: int) -> str:
-        """Newest first: `HH:MM kind handle`, the reason indented under it, run ids replaced by handles."""
+        """Newest first: `HH:MM kind handle`, the reason indented under it in italics, run ids replaced by handles."""
         names = {r["run_id"]: board.handle(r) for r in self.c.ledger.runs()}
         lines = []
         for e in reversed(self.c.ledger.events(n=n)):
             text = str(e["text"] or "")
             for run_id, h in names.items():
                 text = text.replace(run_id, h)
-            head = f"{time.strftime('%H:%M', time.localtime(e['ts']))} {e['kind']} {names.get(e['run_id'], '')}"
-            lines.append(head.rstrip()[:40])
+            who = names.get(e["run_id"])
+            lines.append(f"{time.strftime('%H:%M', time.localtime(e['ts']))} <b>{esc(e['kind'])}</b>"
+                         + (f" <code>{esc(who)}</code>" if who else ""))
             if text and text != e["kind"]:
-                lines += textwrap.wrap(text, 40, initial_indent="  ", subsequent_indent="  ", max_lines=3)
-        return "\n".join(lines) or "no events"
+                lines.append(f"    <i>{esc(textwrap.shorten(text, 200, placeholder=' …'))}</i>")
+        return "\n".join(lines) or "<i>no events</i>"
 
     def hosts_text(self) -> str:
-        """`host cores scratch gpu`: used cores, free scratch GB and idle GPUs, each of the total."""
-        body, errors = [], []
+        """`host · used/total cores · free/total GB free · gpu idle/total` per host."""
+        lines = []
         for r in _probe_rows(self.c):
             if "error" in r:
-                errors += textwrap.wrap(f"{r['host']}: {r['error']}", 40, subsequent_indent="  ", max_lines=2)
+                lines.append(f"<b>{esc(r['host'])}</b> · <i>no answer</i>")
                 continue
             used = max(0, min(r["cores"], round(r["load"])))
-            body.append([r["host"], f"{used}/{r['cores']}", f"{r['free_gb']:.0f}/{r['total_gb']:.0f}",
-                         f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"])
-        return "\n".join([board.cols(["host", "cores", "scratch", "gpu"], body)] + errors)
+            gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
+            lines.append(f"<b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
+                         f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB free · gpu {gpu}")
+        return "\n".join(lines) or "<i>no hosts</i>"
 
     def lic_text(self) -> str:
-        """`licence free used ours` per licence; a failed probe as `licence: note`."""
-        rows = _lic_rows(self.c)
-        if not rows:
-            return "no licences"
-        body = [[r["licence"], f"{r['free']}/{r['pool']}", r["used"], r["ours"]] for r in rows if "free" in r]
-        notes = [ln for r in rows if "note" in r for ln in textwrap.wrap(f"{r['licence']}: {r['note']}", 40, max_lines=2)]
-        return "\n".join(([board.cols(["licence", "free", "used", "ours"], body)] if body else []) + notes)
+        """`licence · free/pool seats free` per licence; a failed probe shows its note."""
+        lines = [f"<b>{esc(r['licence'])}</b> · " + (f"{r['free']}/{r['pool']} seats free" if "free" in r
+                                                      else f"<i>{esc(r['note'])}</i>") for r in _lic_rows(self.c)]
+        return "\n".join(lines) or "<i>no licences</i>"
 
     def compare_text(self, handles: list[str]) -> str:
         """One block per metric: its name, then one `label value` line per run."""

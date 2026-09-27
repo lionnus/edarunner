@@ -38,6 +38,10 @@ STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "
          "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
          "imported": "dim", "abandoned": "dim", "resumed": "cyan"}
+# One mark per state for a bot message.
+MARK = {"running": "🟢", "queued": "🔵", "resumed": "🔵", "stale": "🟡", "host_full": "🟡", "superseded": "🟡",
+        "dead": "🔴", "hung": "🔴", "looping": "🔴", "over_budget": "🔴", "orphan": "🔴", "failed": "🔴", "killed": "🔴",
+        "incomplete": "🟠", "done": "⚪", "retired": "⚫", "stopped": "⚫", "imported": "⚫", "abandoned": "⚫"}
 # No markup: a task in a metric key looks like a tag, `power_w[k_small]`.
 _OPTS = {"markup": False, "highlight": False, "emoji": False}
 
@@ -182,19 +186,31 @@ def narrow_text(rows: list[Row], width: int = 48, now: float | None = None) -> T
     return text
 
 
-def phone(rows: list[Row], width: int = 40, now: float | None = None, most: int = 40) -> str:
-    """One line per run, `state handle age`, in board order, then the counts. For the bot."""
+def phone(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None, most: int = 30) -> str:
+    """Telegram HTML: `mark handle state · age` per run in board order, then the counts in italics.
+
+    A live run shows its stage and step; `totals` gives the step count of a stage.
+    """
     now = now or time.time()
     ordered = order(rows)
     lines = []
     for r in ordered[:most]:
-        st, age = state_of(r), hm(_age_s(r, now))
-        lines.append(f"{_SHORT.get(st, st)[:5]:<5} {handle(r)[:width - 11]:<{width - 11}} {age:>4}".rstrip())
+        st, parts = state_of(r), []
+        if st != "running":
+            parts.append(st)
+        if is_live(r) and r.get("stage"):
+            step = "" if r.get("step") is None else f" {r['step']}" + (
+                f"/{totals[r['stage']]}" if (totals or {}).get(r["stage"]) else "")
+            parts.append(f"{r['stage']}{step}")
+        parts.append(hm(_age_s(r, now)))
+        lines.append(f"{MARK.get(st, '⚪')} <code>{_h(handle(r))}</code> {_h(' · '.join(parts))}")
     if len(ordered) > most:
-        lines.append(f"+{len(ordered) - most} more")
+        lines.append(f"<i>… and {len(ordered) - most} more</i>")
+    if ordered and not any(is_live(r) for r in ordered):
+        lines.append("<i>nothing live</i>")
     counts = Counter(state_of(r) for r in ordered)
-    lines.append(" ".join(f"{_SHORT.get(k, k)}:{v}" for k, v in sorted(counts.items(), key=lambda kv: _RANK.get(kv[0], 7)))
-                 [:width] or "no runs")
+    lines.append("<i>" + (" · ".join(f"{v} {_h(k)}" for k, v in sorted(counts.items(), key=lambda kv: _RANK.get(kv[0], 7)))
+                          or "no runs") + "</i>")
     return "\n".join(lines)
 
 
