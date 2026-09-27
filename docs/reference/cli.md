@@ -29,7 +29,7 @@ event, not even an empty database.
 --why <text> is required on stop and retire, and optional on import. The
 text lands in the events table with the actor.
 
-A read command (check, compare, events, hosts, lic, metrics, notify, runtime, status, tools) never creates
+A read command (brief, check, compare, events, hosts, lic, metrics, notify, runtime, status, tools) never creates
 data/edr.db. Without the file it reads an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
@@ -56,6 +56,37 @@ to the newest batch directory in the state.
 | 130 | interrupted |
 
 A command below says where it refines a code.
+
+## brief
+
+```
+edr brief [--run HANDLE] [--json]
+```
+
+Prints a Markdown briefing for a person or an agent who has not seen
+the project before. It says what the project is: its name, root, source
+repository, the sources checked out under the worktrees directory and
+the backend. It lists the stages in order with what each one collects
+and the tools it needs, then the hosts with the marks of their last
+probe from the host_samples table and the tools with the seats their
+probe reports. The state follows: the runs per batch and state, the
+live runs, every run the triage proposes a command for with that
+command, and the last ten events. It ends with the project's CLAUDE.md
+and AGENTS.md, when they exist, and the documentation.
+
+--run tells the story of one run instead: its identity, its stage and
+step times from stage_runs and step_runs, its events with their
+reasons, the last 20 lines of its current stage log read from the host,
+the last value of each metric, and the command the triage proposes
+with the reason. --json gives either as an object.
+
+A Claude Code SessionStart hook that runs edr brief starts every
+session with the briefing; docs/run.md shows the hook.
+
+| Flag | Meaning |
+|---|---|
+| `--run HANDLE` | the story of one run: label@batch, a run id prefix, or #n from the last board |
+| `--json` | the same as edr --json brief |
 
 ## status
 

@@ -32,7 +32,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, analysis, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
+from . import __version__, analysis, board, brief, checkout, collect, config, export, launch, metrics, runid, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
@@ -61,7 +61,7 @@ def _since(text: str) -> int:
 
 
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "compare", "runtime", "check", "notify"})
+_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "lic", "metrics", "compare", "runtime", "check", "notify"})
 
 
 class Ctx:
@@ -425,6 +425,19 @@ class Actions:
 
 
 # --- commands
+
+def cmd_brief(c: Ctx, a: argparse.Namespace) -> int:
+    """The project briefing, or the story of one run, as Markdown."""
+    if a.run:
+        row = c.resolve(a.run)
+        row = next((r for r in c.rows(str(row["batch"])) if r["run_id"] == row["run_id"]), row)
+        data = brief.run_data(c, row, c.backend.file_host(row))
+        c.emit(brief.run_text(data), data)
+        return Exit.DONE
+    data = brief.project_data(c, _tool_rows(c))
+    c.emit(brief.project_text(data), data)
+    return Exit.DONE
+
 
 def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
     """The board, one run with its stages, metrics and log tail, or the daily digest."""
@@ -1197,6 +1210,29 @@ def _parser() -> argparse.ArgumentParser:
             s.add_argument("--why", required=True, help="the reason; it goes into the events table")
         return s
 
+    s = command("brief", "what a session reads first: the project, its flow, site and state", """
+        Prints a Markdown briefing for a person or an agent who has not seen
+        the project before. It says what the project is: its name, root, source
+        repository, the sources checked out under the worktrees directory and
+        the backend. It lists the stages in order with what each one collects
+        and the tools it needs, then the hosts with the marks of their last
+        probe from the host_samples table and the tools with the seats their
+        probe reports. The state follows: the runs per batch and state, the
+        live runs, every run the triage proposes a command for with that
+        command, and the last ten events. It ends with the project's CLAUDE.md
+        and AGENTS.md, when they exist, and the documentation.
+
+        --run tells the story of one run instead: its identity, its stage and
+        step times from stage_runs and step_runs, its events with their
+        reasons, the last 20 lines of its current stage log read from the host,
+        the last value of each metric, and the command the triage proposes
+        with the reason. --json gives either as an object.
+
+        A Claude Code SessionStart hook that runs edr brief starts every
+        session with the briefing; docs/run.md shows the hook.
+        """)
+    s.add_argument("--run", metavar="HANDLE", help="the story of one run: " + HANDLE)
+    s.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="the same as edr --json brief")
     s = command("status", "the board, or one run", """
         Without a handle, the board: one line per run of every batch that is not
         retired, live runs first and dead ones on top. The columns are the row
