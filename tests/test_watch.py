@@ -164,6 +164,8 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
     assert set(env.db.get_store("progress")) == set(states) and rid("d") in env.db.get_store("notified")
     assert len(json.loads((bdir / "board.json").read_text())["runs"]) == 9
+    probes = json.loads((bdir / "board.json").read_text())["hosts"]
+    assert {s["host"] for s in env.db.host_samples(0)} == {h for h, p in probes.items() if "error" not in p} != set()
     assert f'<script src="{board.PLOTLY_URL}">' in (bdir / "compare.html").read_text()
     assert json.loads((env.project.state_dir / "watch.json").read_text())["cycle"] == 1
     n_events, n_sent = len(env.events()), len(env.notifier.sent)

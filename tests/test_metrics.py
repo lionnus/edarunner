@@ -80,13 +80,13 @@ def test_demo_metrics(tmp_path):
     assert rows and all(set(r) == COLUMNS and r["run_id"] == RUN_ID for r in rows)
     area = by_name(rows, "area_cell_um2", "synth")
     assert [(r["step"], r["value"]) for r in area] == [(0, 1000.0), (1, 1010.5), (2, 1021.0), (3, 1031.5)]
-    assert area[0]["task"] == "" and area[0]["unit"] == "um2" and area[0]["canonical"] == "area.cell"
+    assert area[0]["task"] == "" and area[0]["unit"] == "um2" and area[0]["canonical"] == "design__instance__area"
     assert area[0]["source_file"] == "reports/0/area.rpt"
     assert [r["value"] for r in by_name(rows, "wns_ns", "pnr")] == [-0.04, -0.05]
     assert [r["step"] for r in by_name(rows, "area_cell_um2", "pnr")] == [4, 5]
     assert {r["task"]: r["value"] for r in by_name(rows, "power_w")} == {"k_small": 0.25, "k_big": 0.25}
     power = by_name(rows, "power_w")[0]
-    assert power["stage"] == "power" and power["step"] is None and power["canonical"] == "power.total"
+    assert power["stage"] == "power" and power["step"] is None and power["canonical"] == "power__total"
     assert power["source_file"] == "simulation/tests/demo/GEMM_M64_N64/power/reports/power.csv"
     assert {r["task"]: r["value"] for r in by_name(rows, "window_ns")} == {"k_small": 3400.0, "k_big": 3400.0}
     energy = by_name(rows, "energy_nj")

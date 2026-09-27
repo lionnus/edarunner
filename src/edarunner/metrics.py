@@ -14,6 +14,65 @@ from .model import Metric, Project, Stage, Task
 _PLACEHOLDER = re.compile(r"\{([\w.]+)\}")
 
 
+TOP = "<top>"
+_NUM = re.compile(r"-?\d+(\.\d*)?([eE][-+]?\d+)?$")
+
+
+def parse_area_hier(text: str) -> list[dict]:
+    """One row per instance of a hierarchical area report: instance, depth, area, local_area, cells.
+
+    The top is `<top>` at depth 0; a child's instance is its path from the top, `/` separated.
+    `area` includes the children, `local_area` does not. `cells` is None when the report has no count.
+    """
+    if "Hierarchical Area Report" in text:
+        return _area_openroad(text)
+    if "Hierarchical cell" in text:
+        return _area_synopsys(text)
+    raise ValueError("neither a Synopsys nor an OpenROAD hierarchical area report")
+
+
+def _area_synopsys(text: str) -> list[dict]:
+    # report_area -hierarchy: name, global total, percent, local comb, local noncomb, local black box, design.
+    lines = text[text.index("Hierarchical cell"):].splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("---")) + 1
+    rows: list[dict] = []
+    words: list[str] = []
+    for ln in lines[start:]:
+        if ln.startswith("---"):
+            break
+        words += ln.split()
+        # A long name can push the numbers onto the next line.
+        if len(words) < 6 or not all(_NUM.match(w) for w in words[1:6]):
+            continue
+        name, nums = words[0], [float(w) for w in words[1:6]]
+        words = []
+        top = not rows
+        rows.append({"instance": TOP if top else name, "depth": 0 if top else name.count("/") + 1,
+                     "area": nums[0], "local_area": round(sum(nums[2:5]), 6), "cells": None})
+    return rows
+
+
+def _area_openroad(text: str) -> list[dict]:
+    # Hierarchy name indented two spaces a level, then global area x5, global instances x5,
+    # local area x5 and local instances x5; each group starts with its total.
+    body = text[text.index("Hierarchical Area Report"):].splitlines()
+    rows: list[dict] = []
+    path: list[str] = []
+    started = False
+    for ln in body[1:]:
+        words = ln.split()
+        if len(words) == 21 and all(_NUM.match(w) for w in words[1:]):
+            started = True
+            depth = (len(ln) - len(ln.lstrip(" "))) // 2
+            name = words[0].replace("\\", "")
+            path = path[:max(depth - 1, 0)] + ([name] if depth else [])
+            rows.append({"instance": "/".join(path) if depth else TOP, "depth": depth, "area": float(words[1]),
+                         "local_area": float(words[11]), "cells": int(float(words[6]))})
+        elif started and words and not words[0].startswith("-"):
+            break
+    return rows
+
+
 def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
     """Parse one value from `path` with the parser of `metric`."""
     if metric.regex:
@@ -36,6 +95,8 @@ def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
     if metric.python:
         fn, _ = load_hook(project_root, metric.python)
         return float(fn(path))
+    if metric.area_hier:
+        return parse_area_hier(path.read_text(errors="replace"))[0]["area"]
     raise ValueError(f"metric {metric.name} has no parser")
 
 
@@ -51,7 +112,7 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
     now = int(time.time())
     base = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
     rows: list[dict] = []
-    owned = _owned_steps(project)
+    owned = owned_steps(project)
     for metric in project.metrics.values():
         for stage_name in metric.stage:
             if stages is not None and stage_name not in stages:
@@ -84,8 +145,8 @@ def _extract_one(
     try:
         if task is not None:
             values.update({f"task.{k}": v for k, v in task.fields.items()})
-            values["task_dir"] = task_dir or _render(stage.task_dir if stage else "", values)
-        pattern = _render(metric.file, values)
+            values["task_dir"] = task_dir or fill(stage.task_dir if stage else "", values)
+        pattern = fill(metric.file, values)
     except KeyError as e:
         text = f"{metric.file}: no value for placeholder {e}"
         return [_row(run_id, stage_name, None, task_id, metric, None, text, now)]
@@ -94,20 +155,29 @@ def _extract_one(
         if step is not None and step not in owned:
             continue  # a numbered step belongs to one stage; the others skip it
         rel = str(path.relative_to(run_dir))
+        instances = None
         try:
-            value, source = parse_file(metric, path, project.root), rel
+            if metric.area_hier:
+                instances = parse_area_hier(path.read_text(errors="replace"))
+                value, source = instances[0]["area"], rel
+                instances = [i for i in instances if i["depth"] <= metric.area_hier]
+            else:
+                value, source = parse_file(metric, path, project.root), rel
         except Exception as e:  # a parse error is a row, never a crash
             value, source = None, f"{rel}: {e}"
-        rows.append(_row(run_id, stage_name, step, task_id, metric, value, source, now))
+        row = _row(run_id, stage_name, step, task_id, metric, value, source, now)
+        if instances:
+            row["instances"] = instances
+        rows.append(row)
     return rows
 
 
 def step_totals(project: Project) -> dict[str, int]:
     """The step count of the flow at the end of each stage that has `steps`."""
-    return {k: r.stop for k, r in _owned_steps(project).items()}
+    return {k: r.stop for k, r in owned_steps(project).items()}
 
 
-def _owned_steps(project: Project) -> dict[str, range]:
+def owned_steps(project: Project) -> dict[str, range]:
     """The step numbers each stage owns, in stage order.
 
     A `steps` list is indexed by the step number and continues the previous stage's
@@ -141,7 +211,7 @@ def _files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | No
     return sorted(found)
 
 
-def _render(text: str, values: dict[str, object]) -> str:
+def fill(text: str, values: dict[str, object]) -> str:
     return _PLACEHOLDER.sub(lambda m: str(values[m.group(1)]), text)
 
 

@@ -62,32 +62,32 @@ stage = "synth"
 file = "reports/nangate45/gcd/base/synth_stat.txt"
 regex = 'Chip area for (?:top )?module \S+:\s+([0-9.]+)'
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"
 
 [metrics.area_floorplan_um2]
 stage = "floorplan"
 file = "logs/nangate45/gcd/base/2_1_floorplan.json"
 json = "floorplan__design__instance__area"
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"
 
 [metrics.wns_floorplan_ns]
 stage = "floorplan"
 file = "logs/nangate45/gcd/base/2_1_floorplan.json"
 json = "floorplan__timing__setup__ws"
 unit = "ns"
-canonical = "timing.wns"
+canonical = "timing__setup__ws"
 
 [metrics.area_place_um2]
 stage = "place"
 file = "logs/nangate45/gcd/base/3_5_place_dp.json"
 json = "detailedplace__design__instance__area"
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"
 
 [metrics.wns_place_ns]
 stage = "place"
 file = "logs/nangate45/gcd/base/3_5_place_dp.json"
 json = "detailedplace__timing__setup__ws"
 unit = "ns"
-canonical = "timing.wns"
+canonical = "timing__setup__ws"

@@ -16,7 +16,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import board, collect, config, launch, metrics
+from . import analysis, board, collect, config, launch, metrics
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .db import Database
@@ -129,6 +129,9 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
             db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
                                      "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
                                      "exit": s.get("exit"), "log": s.get("log")})
+        if hb.get("step_times"):
+            db.set_step_times(hb["run_id"], hb["step_times"])
+        db.add_run_sample(hb)
         for tid, t in (hb.get("tasks") or {}).items():
             db.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
                                      **{k: t.get(k) for k in _TASK_KEYS}})
@@ -428,13 +431,17 @@ def _boards(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         except HostError as e:
             probes[host] = {"error": str(e)}
     bdir = project.data / "board"
+    db.add_host_samples(int(now), probes)
     db.write_board_json(bdir / "board.json", probes)
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
     rows = [r for r in db.runs() if r["batch"] not in retired]
-    config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now))
+    config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
+                                                           db.host_samples(int(now) - 86400)))
     parameters = [dict(r) for r in db.conn.execute("SELECT run_id, key, value, source FROM parameters")]
     plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
-    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly))
+    areas = analysis.last_areas(db, [r["run_id"] for r in rows])
+    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly, areas,
+                                                                analysis.step_names(project)))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
     for n in notifiers:
         n.board(text)

@@ -116,13 +116,13 @@ def test_run_detail():
                "ended": None, "signature": None},
               {"stage": "power", "task": "k_bad", "attempt": 1, "status": "failed", "exit": 1, "started": NOW - 60,
                "ended": NOW - 50, "signature": "boom: kernel bad failed"}]
-    metrics = [{"stage": "synth", "step": 3, "task": "", "name": "area_cell_um2", "canonical": "area.cell",
+    metrics = [{"stage": "synth", "step": 3, "task": "", "name": "area_cell_um2", "canonical": "design__instance__area",
                 "value": 1031.5, "unit": "um2"}]
     text = board.plain(board.run_detail(row, stages, metrics, "line one\nline two\n", now=NOW))
     assert text.startswith(RUN["run1"] + "\nrunning  stage:synth  synth/3  exit -")
     assert "cost 2.0 core-h" in text and "counts done 1 failed 0" in text
     assert "k_bad" in text and "boom: kernel bad failed" in text
-    assert "area.cell" in text and "1031.5" in text
+    assert "design__instance__area" in text and "1031.5" in text
     assert text.endswith("log tail\nline one\nline two")
 
 
@@ -154,7 +154,7 @@ def _compare_input():
     metrics = []
     for i, r in enumerate(rows):
         metrics += [{"run_id": r["run_id"], "stage": "synth", "step": s, "task": "", "name": "area_cell_um2",
-                     "canonical": "area.cell", "value": 1000 + 10 * s + i, "unit": "um2"} for s in (1, 2, 3)]
+                     "canonical": "design__instance__area", "value": 1000 + 10 * s + i, "unit": "um2"} for s in (1, 2, 3)]
         metrics += [{"run_id": r["run_id"], "stage": "power", "step": None, "task": "k_small", "name": f"power_{ph}",
                      "canonical": f"power.{ph}", "value": 0.1 * (i + 1), "unit": "W"} for ph in ("A", "B", "total")]
     return rows, parameters, metrics
@@ -165,7 +165,7 @@ def test_compare_html_without_plotly():
     page = board.compare_html(rows, parameters, metrics, None)
     assert "<script src=" not in page
     blocks = _json_blocks(page)
-    assert set(blocks) == {"edr-runs", "edr-parameters", "edr-metrics"}
+    assert set(blocks) == {"edr-runs", "edr-parameters", "edr-metrics", "edr-areas", "edr-steps"}
     assert [r["run_id"] for r in blocks["edr-runs"]] == [RUN["run1"], RUN["fail"], RUN["done"]]
     assert blocks["edr-runs"][1]["state"] == "incomplete" and "cost" in blocks["edr-runs"][0]
     assert blocks["edr-parameters"] == parameters and blocks["edr-metrics"] == metrics
@@ -183,26 +183,37 @@ global.document = { getElementById: id => id in blocks ? { textContent: blocks[i
 global.matchMedia = () => ({ matches: false });
 eval(page.match(/<script>([\s\S]*?)<\/script>/)[1]);
 console.log(JSON.stringify({ runs: els['#runs'].innerHTML, cmp: els['#cmp'].innerHTML, plots: els['#plots'].hidden,
-                             traj: els['#traj'].innerHTML, sc: els['#sc'].innerHTML }));
+                             traj: els['#traj'].innerHTML, sc: els['#sc'].innerHTML, area: els['#areat'].innerHTML,
+                             areas: els['#areas'].textContent, ad: els['#ad'].innerHTML, pm: els['#pm'].innerHTML }));
 """
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_compare_script_runs_without_plotly(tmp_path):
     rows, parameters, metrics = _compare_input()
+    areas = {r["run_id"]: {"stage": "synth", "step": 3, "source_file": f"reports/3/{i}.rpt",
+                           "rows": [["<top>", 0, 100.0 + i], ["i_top", 1, 90.0 + i], ["i_top/x", 2, 50.0 * (i + 1)]]}
+             for i, r in enumerate(rows[:2])}
     page = tmp_path / "compare.html"
-    page.write_text(board.compare_html(rows, parameters, metrics, None))
+    page.write_text(board.compare_html(rows, parameters, metrics, None, areas, {3: "synth"}))
     out = subprocess.run(["node", "-e", _NODE_STUB, page.as_posix()], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["plots"] is True
     assert "<th>DW</th>" in got["runs"] and "a&lt;/script&gt;b" in got["runs"] and RUN["fail"] in got["runs"]
-    assert got["cmp"].startswith("<tr><th>metric</th><th>c</th><th>b_nodw</th><th>a</th></tr>")
-    assert ('<td>area.cell</td><td>1031</td><td>1032 <small class="up">+0.1%</small></td>'
-            '<td>1030 <small class="dn">-0.1%</small></td>') in got["cmp"]
+    # One filter box per column, and the first two runs ticked.
+    assert got["runs"].count('<input class="f"') == 10 and got["runs"].count(" checked>") == 2
+    assert got["cmp"].startswith("<tr><th>metric</th><th>c</th><th>b_nodw</th></tr>")
+    assert '<td>design__instance__area</td><td>1031</td><td>1032 <small class="up">+0.1%</small></td>' in got["cmp"]
     assert "<td>power.A[k_small]</td><td>0.2000</td><td>0.3000 <small class=\"up\">+50.0%</small>" in got["cmp"]
-    assert got["traj"] == "<option>area.cell</option>"
-    assert got["sc"].startswith("<option selected>label</option>")
+    assert got["traj"] == '<option value="design__instance__area">design__instance__area</option>'
+    assert got["sc"].startswith('<option value="label" selected>label</option>')
+    assert got["pm"].startswith('<option value="design__instance__area" selected>')
+    assert got["ad"] == '<option value="1" selected>1</option><option value="2">2</option>'
+    assert "<tr><td>i_top</td><td>91</td><td>90</td><td>-1</td><td>-1.1%</td></tr>" in got["area"]
+    assert "<tr><td>&lt;top&gt;</td><td>101</td><td>100</td><td>-1</td><td>-1.0%</td></tr>" in got["area"]
+    # The area selects follow the board order, where the second run comes first.
+    assert got["areas"] == "A: synth step 3, reports/3/1.rpt; B: synth step 3, reports/3/0.rpt"
 
 
 def test_rows_from_db(tmp_path):

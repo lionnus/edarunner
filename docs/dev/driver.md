@@ -68,6 +68,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `run_id`, `batch`, `project`, `label`, `config`, `host` | identity, copied into the heartbeat |
 | `root` | the run tree; the driver exits 2 when it is not a directory |
 | `driver` | the driver copy the run started with; a resume uses it |
+| `record` | `edarunner` (the version that launched), `driver_sha256`, and `tools` with the version the site file gives per tool of the host; the export manifest copies it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
 | `shell`, `env` | every command runs through `shell -c` with `env` added |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
@@ -102,7 +103,9 @@ the watcher marks such a run `dead` after `dead_s`.
 | `tasks` | per task: `phase`, `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
 | `counts` | `done`, `failed`, `skipped`, `running`, `queued`, over every task group of the run |
 | `started`, `updated`, `elapsed_s` | unix times; the watcher reads the age of `updated` |
-| `disk_free_gb`, `tree_gb` | free space at `root`; `du -s` of the tree every tenth heartbeat |
+| `disk_free_gb`, `tree_gb` | free space at `root`; `du -s` of the tree at most once per ten minutes |
+| `cpu_pct`, `rss_gb` | the CPU seconds of the run's process groups since the last sample, as a percent of one core, and their summed RSS, from `ps -e -o pgid=,cputimes=,rss=` every `heartbeat_s`; a process that ended takes its CPU seconds with it, so a drop reads as zero |
+| `step_times` | per stage, the unix time the driver first saw each step number from `progress`; a resumed step replaces its time in `step_runs` |
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
 | `last_cmd`, `last_log`, `log` | the last command, the last three lines of the current log, its path |
 | `keep_hours` | the hours the keep file adds |

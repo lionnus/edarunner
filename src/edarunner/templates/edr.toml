@@ -53,4 +53,4 @@ step = "*"
 file = "reports/{step}/area.rpt"
 regex = '^total\s+(\S+)'
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"

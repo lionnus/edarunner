@@ -93,7 +93,7 @@ def with_vars(root: Path, run_id: str) -> None:
 def add_metric(root: Path, run_id: str, name: str, value: float, step: int | None = 3, task: str = "") -> None:
     with Database(config.load_project(root).data / "edr.db") as db:
         db.add_metric({"run_id": run_id, "stage": "synth", "step": step, "task": task, "name": name,
-                        "canonical": "area.cell" if name == "area_cell_um2" else "", "value": value, "unit": "u"})
+                        "canonical": "design__instance__area" if name == "area_cell_um2" else "", "value": value, "unit": "u"})
 
 
 def keep_file(root: Path, run_id: str) -> dict:
@@ -340,8 +340,8 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert len(events) == 4
     assert b not in acts.events_text(8)
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
-    assert cmp[:3] == ["area.cell", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
-    assert len(acts.metric_text("area.cell", None).splitlines()) == 4 and acts.metric_text("area.cell", "zzz") == "no metrics"
+    assert cmp[:3] == ["design__instance__area", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
+    assert len(acts.metric_text("design__instance__area", None).splitlines()) == 4 and acts.metric_text("design__instance__area", "zzz") == "no metrics"
     assert acts.hosts_text().startswith("<b>local</b> ")
     assert acts.tools_text() == "<b>demo</b> 2/10 seats used, local"
     assert acts.metrics_csv("abc1234").decode().splitlines()[0].startswith("run_id,label,")
@@ -354,7 +354,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
         acts.log_tail("a@demo", 5)
     info = acts.run_info("a@demo")
     assert info["handle"] == "a@demo" and info["run_id"] == a and info["host"] == "local" and info["run_root"].endswith(a)
-    for text in ("\n".join(cmp), acts.metric_text("area.cell", None)):
+    for text in ("\n".join(cmp), acts.metric_text("design__instance__area", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
     capsys.readouterr()
 
@@ -433,7 +433,7 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--csv")
     lines = out.splitlines()
     assert code == 0 and lines[0].startswith("run_id,label,config,design,stage,step,task,metric") and len(lines) == 3
-    assert lines[1].startswith(f"{a},a,demo,abc1234,synth,3,,area_cell_um2,area.cell,1000.0,u,")
+    assert lines[1].startswith(f"{a},a,demo,abc1234,synth,3,,area_cell_um2,design__instance__area,1000.0,u,")
     code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--stage", "pnr")
     assert code == 2 and out == "no metrics\n"
     code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--step", "3")

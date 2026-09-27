@@ -47,7 +47,7 @@ _PROJECT_KEYS = {
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "ntfy",
               "mail", "marks"}
-_EXTRACTORS = ("regex", "csv", "json", "python")
+_EXTRACTORS = ("regex", "csv", "json", "python", "area_hier")
 
 
 class ConfigError(Exception):
@@ -418,6 +418,14 @@ def _stage(name: str, raw: object, file: Path) -> Stage:
             raw[key] = _build(cls, raw[key], file, f"{at}.{key}")
     if "needs" in raw:
         raw["needs"] = _needs(raw["needs"], file, f"{at}.needs")
+    if "step_log" in raw:
+        log = _table(raw["step_log"], {"file", "regex"}, file, f"{at}.step_log")
+        if not (log.get("file") and log.get("regex")):
+            raise ConfigError(f"{file}: {at}.step_log needs file and regex")
+        try:
+            re.compile(str(log["regex"]))
+        except re.error as e:
+            raise ConfigError(f"{file}: {at}.step_log.regex: {e}") from None
     return _build(Stage, raw, file, at, name=name)
 
 
@@ -461,6 +469,8 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         _table(raw["csv"], {"where", "column"}, file, f"{at}.csv")
     if sum(k in raw for k in _EXTRACTORS) != 1:
         raise ConfigError(f"{file}: {at} needs exactly one of {', '.join(_EXTRACTORS)}")
+    if "area_hier" in raw and not (type(raw["area_hier"]) is int and raw["area_hier"] >= 1):
+        raise ConfigError(f"{file}: {at}.area_hier is the deepest depth to keep, a number from 1")
     if not (raw.get("file") and raw["stage"]):
         raise ConfigError(f"{file}: {at} needs file and stage")
     return _build(Metric, raw, file, at, name=name)

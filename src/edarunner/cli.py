@@ -31,7 +31,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
+from . import __version__, analysis, board, checkout, collect, config, export, launch, metrics, runid, sync, watch
 from .config import ConfigError
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh
@@ -59,7 +59,7 @@ def _since(text: str) -> int:
 
 
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "check", "notify"})
+_READ_COMMANDS = frozenset({"status", "events", "hosts", "tools", "lic", "metrics", "compare", "runtime", "check", "notify"})
 
 
 class Ctx:
@@ -433,8 +433,9 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         stages = [dict(r) for r in c.db.conn.execute(
             "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
         mets = c.db.metrics(run_ids=[run_id])
-        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate")),
-               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets})
+        samples = c.db.run_samples(run_id)
+        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples),
+               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples})
         return Exit.DONE
     code = Exit.DONE
     while True:
@@ -489,7 +490,11 @@ def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
-    """Probe every site host."""
+    """Probe every site host, or print the samples the watcher kept."""
+    if a.history:
+        rows = analysis.host_history(c.db.host_samples(_since(a.since)))
+        c.emit(analysis.host_history_view(rows), rows)
+        return Exit.DONE if rows else Exit.NOTHING
     rows = _mark_hosts(c, _probe_rows(c))
     if a.narrow:
         # A long cell, such as an error, folds inside its column instead of widening the table.
@@ -522,15 +527,68 @@ def cmd_lic(c: Ctx, a: argparse.Namespace) -> int:
     return cmd_tools(c, a)
 
 
+def _area_table(rows: list[Row]) -> Table | str:
+    body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m["instance"], m["depth"], m["area"],
+             m.get("local_area"), m.get("cells")] for m in rows]
+    return board.table(["label", "design", "stage", "step", "instance", "depth", "area", "local", "cells"], body,
+                       styles={"label": "bold", "design": "dim"},
+                       right=("step", "depth", "area", "local", "cells")) if rows else "no area rows"
+
+
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
-    """The metrics of one design, as a table or CSV."""
-    rows = c.db.metrics(design=a.design, stage=a.stage, step=a.step)
+    """The metrics of one design, as a table or CSV; with --instance or --depth, its area rows."""
+    if a.instance is not None or a.depth is not None:
+        run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
+        rows = c.db.area(run_ids=run_ids, design=a.design, stage=a.stage, step=a.step, instance=a.instance,
+                         depth=a.depth)
+        c.emit(_area_table(rows), rows)
+        return Exit.DONE if rows else Exit.NOTHING
+    if not a.design and not a.run:
+        raise Refuse("metrics needs --design or --run")
+    run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
+    if a.over:
+        if not run_ids:
+            raise Refuse("--over steps needs --run")
+        rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
+        c.emit(analysis.over_steps_view(rows), rows)
+        return Exit.DONE if rows else Exit.NOTHING
+    rows = c.db.metrics(design=a.design, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
         c.emit(_metrics_table(rows), rows)
     return Exit.DONE if rows else Exit.NOTHING
+
+
+def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
+    """Two or more runs side by side."""
+    runs = [c.resolve(h) for h in a.handles]
+    if not a.area:
+        mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage, step=a.step)
+                if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
+        rows = analysis.side_by_side(c.project, runs, mets)
+        c.emit(analysis.side_by_side_view(runs, rows), {"runs": runs, "rows": rows})
+        return Exit.DONE if rows else Exit.NOTHING
+    picked, rows = analysis.area_delta(c.db, runs, a.depth, a.instance, a.stage, a.step)
+    c.emit(analysis.area_view(picked, rows, a.depth), {"runs": picked, "depth": a.depth, "rows": rows})
+    return Exit.DONE if rows else Exit.NOTHING
+
+
+def cmd_runtime(c: Ctx, a: argparse.Namespace) -> int:
+    """Stage, step and task times of one run, or a table of runs."""
+    if a.batch:
+        runs = c.db.runs(batch=a.batch)
+    elif a.handles:
+        runs = [c.resolve(h) for h in a.handles]
+    else:
+        raise Refuse("runtime needs a handle or --batch")
+    rts = [analysis.runtime(c.project, c.db, r) for r in runs]
+    if len(rts) == 1 and not a.batch:
+        c.emit(analysis.runtime_view(rts[0]), rts[0])
+    else:
+        c.emit(analysis.runtime_batch_view(c.project, rts), rts)
+    return Exit.DONE if any(rt["stages"] or rt["steps"] for rt in rts) else Exit.NOTHING
 
 
 def cmd_init(c: Ctx, a: argparse.Namespace) -> int:
@@ -767,7 +825,20 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
-    """Write a frozen snapshot of one design."""
+    """Write a frozen snapshot of one design, or the run database into an MLflow store."""
+    if a.mlflow:
+        if a.dry_run:
+            n = len([r for r in c.db.runs() if a.design is None or r.get("src") == a.design])
+            c.emit(f"{a.mlflow}: {n} runs (dry)", {"runs": n})
+            return Exit.DONE
+        from .mlflow_export import export_mlflow
+
+        res = export_mlflow(c.project, c.db, Path(a.mlflow), a.design)
+        c.db.add_event("user", "", "export", f"mlflow {a.design or 'every design'} -> {a.mlflow}")
+        c.emit(f"{res['tracking_uri']}: {len(res['written'])} runs written, {len(res['skipped'])} already there", res)
+        return Exit.DONE
+    if not a.design or not a.out:
+        raise Refuse("export needs --design and --out, or --mlflow DIR")
     labels = a.labels.split(",") if a.labels else None
     manifest = export.export(c.project, c.db, a.design, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
@@ -1060,7 +1131,8 @@ def _parser() -> argparse.ArgumentParser:
         done, incomplete, failed, over_budget, stopped or killed.
 
         With a handle, one run: identity, state, counts, disk, every stage and
-        task row, the metrics, and the log tail from the heartbeat.
+        task row, the CPU, RSS, tree size and free disk the driver sampled over
+        the run, the metrics, and the log tail from the heartbeat.
         """, exits={Exit.HOSTS: "with --live, a host did not answer"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH, else every batch")
@@ -1101,7 +1173,16 @@ def _parser() -> argparse.ArgumentParser:
         free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
         our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
         ram, scratch and gpu in marks.
-        """, exits={Exit.HOSTS: "a host did not answer"})
+
+        --history probes nothing. It reads the host_samples table, where the
+        watcher keeps one probe per host and cycle for 30 days, and prints one
+        row per host: the first and last sample, and a line each of cores in
+        use (the load, capped at the cores), RAM, scratch and busy GPUs over
+        --since, each with its peak and its last value.
+        """, exits={Exit.HOSTS: "a host did not answer", Exit.NOTHING: "with --history, no sample"})
+    s.add_argument("--history", action="store_true",
+                   help="no probe: the samples the watcher kept, one line per host over --since")
+    s.add_argument("--since", default="1d", metavar="T", help="with --history: 30m, 2h, 1d or seconds; default 1d")
     s.add_argument("--narrow", action="store_true",
                    help="ok, host, cores, RAM, scratch and GPUs only, in 48 columns, with no space between a mark and its number")
     command("tools", "every site tool: free seats and hosts", """
@@ -1115,17 +1196,65 @@ def _parser() -> argparse.ArgumentParser:
         the next release.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
     sub.add_parser("lic").set_defaults(fn=cmd_lic)  # no help: the old name stays out of the listing
-    s = command("metrics", "the metrics of one design", """
+    s = command("metrics", "the metrics of one design or one run", """
         Every metric of one design: label, design, stage, step, task, name,
         value and unit. --design is the source tag exactly as edr checkout printed
         it, -dirty-... included. It has no default, because one table holds one
-        design. --csv writes the columns of metrics.csv (docs/results.md) to
-        stdout.
+        design. --run takes one run instead. --csv writes the columns of
+        metrics.csv (docs/results.md) to stdout.
+
+        --run with --over steps prints the metrics along the steps of that run:
+        one row per step with its name, one column per metric. With --metric,
+        the one metric, its change from the step before, and its source file.
+
+        --instance or --depth prints the area rows of an area_hier metric
+        instead: label, design, stage, step, instance, depth, area with the
+        children, local area without them, and the cell count when the report
+        has one. --instance takes that instance and every instance below it.
         """, exits={Exit.NOTHING: "no metric row"})
-    s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--design", metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--run", metavar="HANDLE", help="one run: " + HANDLE)
+    s.add_argument("--metric", metavar="NAME", help="one metric, by name or canonical name")
+    s.add_argument("--over", choices=["steps"], help="with --run: the metrics along the steps")
     s.add_argument("--stage", metavar="S", help="the metrics of one stage")
     s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
+    s.add_argument("--instance", metavar="PATH", help="the area rows of this instance and every instance below it")
+    s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
+    s = command("compare", "two or more runs side by side", """
+        Puts two or more runs side by side. Without --area, one row per stage,
+        step, task and metric: the step name, the value of each run, and the
+        percent of each run to the first. --metric (repeatable), --stage and
+        --step narrow the rows; --json keeps the source file of every value.
+
+        --area compares the hierarchical
+        area: one row per instance at --depth (default 1; the top is 0), one
+        column per run, and the delta and the percent of each run to the
+        first. Each run is compared at its last step with an area report, or
+        at --stage and --step. The source file of each run is printed under
+        the table.
+        """, exits={Exit.NOTHING: "no row to compare"})
+    s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
+    s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
+    s.add_argument("--metric", action="append", metavar="NAME", help="this metric, by name or canonical name; repeatable")
+    s.add_argument("--depth", type=int, default=1, metavar="N", help="the instance depth; default 1")
+    s.add_argument("--instance", metavar="PATH", help="only this instance and the instances below it")
+    s.add_argument("--stage", metavar="S", help="this stage only; with --area, compare at this stage")
+    s.add_argument("--step", type=int, metavar="N", help="this step only; with --area, compare at this step number")
+    s = command("runtime", "stage, step and task times", """
+        With one handle, the times of one run: a row per stage attempt from
+        the stage_runs table, a row per step under it, and one row per task
+        group with the task count, the summed task time and the longest task.
+        A step starts when the driver first sees its number, or at the time
+        the stage's step_log finds in a collected file; it ends when the next
+        step starts or the stage ends. The source column names the table or
+        the file and line of each time. The total sums the stage attempts.
+
+        With several handles or --batch, one row per run: the wall time of
+        each stage, attempts summed, and the total.
+        """, exits={Exit.NOTHING: "no stage or step time"})
+    s.add_argument("handles", nargs="*", metavar="HANDLE", help=HANDLE)
+    s.add_argument("--batch", metavar="B", help="every run of the batch")
     command("init", "write edr.toml and the watch unit here", """
         Writes edr.toml and edr-watch.service into the current directory. --site
         is the directory or the file of the site file; init does not write that
@@ -1227,9 +1356,17 @@ def _parser() -> argparse.ArgumentParser:
         --design matches the source tag exactly. log/ and *.log stay out unless
         --with-logs. Refuses a DIR that exists and is not empty. docs/results.md
         explains the layout.
+
+        --mlflow DIR writes the run database into a local MLflow tracking store
+        in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
+        per run, of every design or of --design, with the parameters, the
+        metrics at their step, the stage and step times, and the collected
+        files up to 1 MiB. A run already in the store is skipped. It needs the
+        mlflow extra: pip install 'edarunner[mlflow]'.
         """, write=True)
-    s.add_argument("--design", required=True, metavar="SRC", help="the exact source tag of the runs, as in the run id")
-    s.add_argument("--out", required=True, metavar="DIR", help="the directory to write; it must be absent or empty")
+    s.add_argument("--design", metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--out", metavar="DIR", help="the directory to write; it must be absent or empty")
+    s.add_argument("--mlflow", metavar="DIR", help="write an MLflow tracking store in DIR instead")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")
     s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
     s = command("stop", "stop one run", """
