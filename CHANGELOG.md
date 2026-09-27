@@ -15,6 +15,9 @@
   HTCondor pool and on a Slurm cluster in containers;
   `tools/harness/` holds the scripts. LSF has rendering and contract
   tests only.
+
+## 0.3.0 (2026-09-27)
+
 - The database uses the DELETE journal with `synchronous=FULL` when
   `data/` is on NFS, SMB, 9p or FUSE, and WAL elsewhere. WAL does not
   work on a network filesystem. `edr check` prints a warning line with
