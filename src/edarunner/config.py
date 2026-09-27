@@ -262,7 +262,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         site = load_site(root / Path(site_path).expanduser())
     values["site_dir"] = str(site.path.parent)
     if "telegram" in raw:
-        site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id"})
+        site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id", "topic_id"})
 
     src = _table(raw.get("source", {}), {f.name for f in fields(Source)}, file, "source")
     source = Source(

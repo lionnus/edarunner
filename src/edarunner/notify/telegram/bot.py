@@ -39,11 +39,13 @@ class TelegramBot(Notifier):
         self.commands = Commands(actions, ledger, self.tg, lambda: self.project, self.repin)
         self.chat_id = int(self.tg.chat_id)
         self.user_id = self.tg.user_id or None
+        self.topic = self.tg.topic_id
         self._state: dict = ledger.get_kv("telegram", {})
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._rejected: set[int] = set()
+        self._topics: set[int] = set()
 
     def _call(self, fn: Any, *args: Any, **kw: Any) -> Any:
         """`fn(*args, **kw)` with an ApiError logged instead of raised."""
@@ -98,7 +100,7 @@ class TelegramBot(Notifier):
             except ApiError as e:
                 if "not found" not in str(e):
                     raise
-        mid = self.api.send_message(self.chat_id, text, silent=silent, markup=markup)
+        mid = self.api.send_message(self.chat_id, text, silent=silent, markup=markup, thread_id=self.topic)
         if pin:
             self.api.pin(self.chat_id, mid)
         with self._lock:
@@ -164,17 +166,32 @@ class TelegramBot(Notifier):
                 self._rejected.add(actor)
                 self.commands.event("rejected", f"user {actor} in chat {who} ignored")
             return
+        thread = m.get("message_thread_id") if m.get("is_topic_message") else None
+        if not self._in_topic(thread):
+            return
         if q:
             self._callback(q)
         elif msg and msg.get("text", "").startswith("/"):
             parts = msg["text"].split()
-            self._reply(self.commands.run(parts[0][1:].split("@")[0], parts[1:], msg["text"]))
+            self._reply(self.commands.run(parts[0][1:].split("@")[0], parts[1:], msg["text"]), thread)
 
-    def _reply(self, r: Reply) -> None:
-        """Send a reply under the bold first line."""
+    def _in_topic(self, thread: int | None) -> bool:
+        """True when the bot obeys a message of forum thread `thread`; the first one of a thread prints its id."""
+        if self.topic is not None:
+            # Another project's watcher answers in its own thread; this one stays silent.
+            return thread == self.topic
+        if thread is not None and thread not in self._topics:
+            self._topics.add(thread)
+            print(f"telegram: a message came from topic {thread} of chat {self.chat_id}; "
+                  f"set topic_id = {thread} in [telegram] of edr.toml", file=sys.stderr)
+        return True
+
+    def _reply(self, r: Reply, thread: int | None = None) -> None:
+        """Send a reply under the bold first line, into the project's topic or the thread of the command."""
         body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
         full = fmt.head(self.project.project, r.title) + "\n" + body
-        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full))
+        self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full),
+                   thread_id=self.topic or thread)
 
     def _callback(self, q: dict) -> None:
         """Act on a button press, answer it, and append the result to the message."""

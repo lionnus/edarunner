@@ -47,6 +47,7 @@ class Telegram:
     chat_id: int
     commands: dict[str, BotCommand] = field(default_factory=dict)
     user_id: int | None = None  # None: the chat is the only gate
+    topic_id: int | None = None  # the forum thread of every message; None: the main thread
 
 
 @dataclass

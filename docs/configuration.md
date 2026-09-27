@@ -102,7 +102,7 @@ first stage needs. No such host means the job is queued.
 
 ### [telegram]
 
-The table is optional. It takes three keys of the site's `[telegram]`
+The table is optional. It takes four keys of the site's `[telegram]`
 table and replaces them for this project only. A key it leaves out keeps
 the site's value. Without a `[telegram]` table in `site.toml`, the table
 here needs `chat_id`. The custom commands stay in `site.toml`.
@@ -112,6 +112,7 @@ here needs `chat_id`. The custom commands stay in `site.toml`.
 | `token_file` | the bot token of this project, mode 600 | the site's |
 | `chat_id` | the one chat the bot of this project answers | the site's |
 | `user_id` | the one user whose messages and buttons the bot obeys | the site's |
+| `topic_id` | the forum thread of every message of this project | the site's |
 
 `docs/telegram.md` says when a project needs its own bot.
 
@@ -233,6 +234,7 @@ run.
 | `token_file` | the bot token, mode 600 | `"~/.config/edarunner/telegram.token"` |
 | `chat_id` | the one chat the bot answers | required |
 | `user_id` | the one user whose messages and buttons the bot obeys | none; the chat is the only gate |
+| `topic_id` | the forum thread of every message; commands from another thread are ignored | none; the main thread |
 
 ### [telegram.commands.<name>]
 
