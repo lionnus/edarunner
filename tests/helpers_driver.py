@@ -18,8 +18,7 @@ RUN_ID = "20260926_1200_a_demo_gHEAD"
 STAGES = ("synth", "pnr", "export", "power")
 STEPS = ["setup", "analyze", "elaborate", "synth", "cts", "route", "export"]
 PROGRESS = "ls reports 2>/dev/null | grep -cE '^[0-9]+$'"
-LICENCE = {"name": "demo", "feature": "demo", "floor": 2, "seats_per_task": 1,
-           "probe": "bash {root}/flow/lmstat.sh"}
+TOOL = {"name": "demo", "seats": 1, "probe": ["bash", "{root}/flow/seats.sh"]}
 TASKS = {
     "k_small": {"kernel": "gemm", "test": "GEMM_M64_N64", "args": "M=64 N=64"},
     "k_big": {"kernel": "softmax", "test": "SOFTMAX_R197", "args": "ROWS=197", "budget": {"hours": 2}},
@@ -46,14 +45,14 @@ def render_spec(tmp_path: Path, stages=STAGES, tasks=("k_small", "k_big"), confi
     if not (root / "flow").exists():
         shutil.copytree(DEMO / "flow", root / "flow")
     ph = {"root": str(root), "run_id": RUN_ID, "config": config, "overrides": overrides}
-    lic = dict(LICENCE, probe=render(LICENCE["probe"], ph))
+    tool = dict(TOOL, probe=[render(a, ph) for a in TOOL["probe"]])
     flow = "bash {root}/flow/flow.sh"
     defs = {
         "synth": {
             "name": "synth", "cwd": str(root), "steps": STEPS[:4], "progress": PROGRESS,
             "cmd": render(flow + " synth {run_id} {config} LAST_STAGE=synth {overrides}", ph),
             "resume": render(flow + " synth {run_id} {config} FIRST_STAGE={checkpoint} LAST_STAGE=synth {overrides}", ph),
-            "needs": {"cores": 1, "disk_gb": 0.1}, "licence": lic,
+            "needs": {"cores": 1, "disk_gb": 0.1}, "tools": [tool],
             "budget": {"hours": 1, "disk_gb": 1, "kill": False},
             "retry": {"match": "licen[cs]e", "wait_s": 1, "max": 2}},
         "pnr": {
@@ -68,7 +67,7 @@ def render_spec(tmp_path: Path, stages=STAGES, tasks=("k_small", "k_big"), confi
         "power": {
             "name": "power", "cwd": str(root), "parallel": parallel,
             "after_each": "rm -f {task_dir}/wave.vcd",
-            "needs": {"cores": 1, "disk_gb": 0.05}, "licence": lic,
+            "needs": {"cores": 1, "disk_gb": 0.05}, "tools": [tool],
             "budget": {"hours": 1, "per": "task"},
             "tasks": [task_spec(t, ph) for t in tasks]},
     }

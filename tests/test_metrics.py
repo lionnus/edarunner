@@ -1,15 +1,14 @@
-"""Tests of metrics.extract, evaluate and parse_flexlm on the demo layout."""
+"""Tests of metrics.extract and evaluate on the demo layout."""
 
 from __future__ import annotations
 
 import json
-import subprocess
 import tomllib
 from pathlib import Path
 
 import pytest
 
-from edarunner.metrics import evaluate, extract, parse_flexlm
+from edarunner.metrics import evaluate, extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -140,14 +139,6 @@ def test_evaluate():
         evaluate("missing", {})
     with pytest.raises(ZeroDivisionError):
         evaluate("a / 0", {"a": 1})
-
-
-def test_parse_flexlm():
-    text = subprocess.run(["bash", str(DEMO / "flow" / "lmstat.sh")], capture_output=True, text=True).stdout
-    assert parse_flexlm(text, "demo") == (10, 2)
-    assert parse_flexlm(text, "other") is None
-    one = "Users of Fusion-Compiler-FE-NX:  (Total of 1 license issued;  Total of 1 license in use)\n"
-    assert parse_flexlm(one, "Fusion-Compiler-FE-NX") == (1, 1)
 
 
 def test_a_numbered_step_belongs_to_one_stage(tmp_path):
