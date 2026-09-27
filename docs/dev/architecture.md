@@ -32,7 +32,9 @@ commands, the report files and the numbers in them.
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
-| `metrics.py` | the four parsers, `expr`, extraction |
+| `metrics.py` | the parsers, the hierarchical area report, `expr`, extraction |
+| `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |
+| `mlflow_export.py` | `edr export --mlflow`: the run database as a local MLflow tracking store; imports `mlflow` only when called |
 | `db.py` | the run database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
@@ -66,13 +68,30 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    a `queued` row.
 4. The driver writes the heartbeat by rename, the logs into the tree,
    and the task queue in the state directory.
-5. `watch.cycle` ingests the heartbeats into `runs` and `stage_runs`,
-   classifies, acts, collects into `data/results`, extracts metrics into
-   `metrics`, writes `parameters`, resumes, launches queued rows, writes the
-   boards.
+5. `watch.cycle` ingests the heartbeats into `runs`, `stage_runs`,
+   `step_runs` and `run_samples`, classifies, acts, collects into
+   `data/results`, extracts metrics into `metrics` and `area`, writes
+   `parameters`, resumes, launches queued rows, keeps the host probes in
+   `host_samples`, and writes the boards.
 6. `export.export` selects the newest run per label of one source tag
    from the database and copies its results with a manifest.
 
-The read commands (`status`, `events`, `hosts`, `tools`, `metrics`, `check`)
+The read commands (`status`, `events`, `hosts`, `tools`, `metrics`, `compare`, `runtime`, `check`)
 ingest the heartbeats too, so the board follows the driver and not the
 last watcher cycle; that step is idempotent.
+
+## The analysis tables
+
+Four tables hold what the analysis views read. Each has one writer.
+
+| Table | Writer | Key |
+|---|---|---|
+| `area` | `Database.add_metric`, from the `instances` of an `area_hier` metric row | run, stage, step, metric name, instance; a unique index maps a missing step to -1 |
+| `step_runs` | `watch.ingest`, from the heartbeat's `step_times` | run, stage, step |
+| `run_samples` | `watch.ingest`, one row per heartbeat `updated` | run, time |
+| `host_samples` | `watch._boards`, one row per host that answered, 30 days kept | host, time |
+
+`analysis.py` reads them and never writes. The source of every number
+stays with it: `area` joins the metric row for its `source_file`, and a
+runtime row names `stage_runs`, `step_runs` or the file and line of a
+`step_log`.

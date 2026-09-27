@@ -107,14 +107,14 @@ step = "*"
 file = "flow/runs/{tree_id}/reports/{step}/area_hier.rpt"
 regex = '^i_top\s+(\S+)'
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"
 
 [metrics.power_w]
 stage = "power"
 file = "{task_dir}/power/reports/power.csv"
 csv = { where = { phase = "WHOLE", depth = "0" }, column = "total_w" }
 unit = "W"
-canonical = "power.total"
+canonical = "power__total"
 
 [metrics.window_fs]
 stage = "power"
@@ -178,14 +178,14 @@ stage = "synth"
 file = "yosys/reports/croc_area.rpt"
 regex = "Chip area for module '\\\\croc_chip':\\s+([0-9.]+)"
 unit = "um2"
-canonical = "area.cell"
+canonical = "design__instance__area"
 
 [metrics.wns_place_ns]
 stage = "place"
 file = "openroad/reports/02_croc.placement.rpt"
 regex = 'wns max\s+(-?[0-9.]+)'
 unit = "ns"
-canonical = "timing.wns"
+canonical = "timing__setup__ws"
 ```
 
 The source of this flow keeps its PDK in a directory that git ignores, so

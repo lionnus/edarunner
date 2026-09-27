@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- The canonical metric names follow METRICS2.1, the schema of the
+  OpenROAD metrics JSON, without the stage prefix: `design__instance__area`,
+  `timing__setup__ws`, `timing__setup__tns`, `power__total` and more. The
+  examples and the template use them. Rename a `canonical` value in
+  `edr.toml` to keep a board or a script that filters on it.
+  `compare.html` stacks the `power__*` parts instead of the `power.*`
+  phases.
+- A metric with `area_hier = <depth>` parses a Synopsys or an OpenROAD
+  hierarchical area report into the new `area` table.
+  `edr metrics --instance` and `--depth` print its rows, and
+  `edr compare A B --area --depth N` prints the area per block of two or
+  more runs with the delta to the first.
+- `edr compare A B` puts every metric per stage and step side by side,
+  with the delta and the percent to the first run. `edr metrics --run X
+  --over steps` prints one run along its steps. `edr metrics` takes
+  `--run` and `--metric`; `--design` is no longer required with `--run`.
+- `edr runtime` prints the time of each stage attempt, step and task
+  group of a run, or one row per run of a batch. The driver records when
+  it first sees each step (`step_times`, the `step_runs` table), and a
+  stage's `step_log` reads step start times from a collected log.
+- The watcher keeps each cycle's host probes in `host_samples` for 30
+  days. `edr hosts --history` prints them, and `status.html` draws the
+  cores and RAM in use per host over the last day.
+- The driver samples the CPU and RSS of its process groups at every
+  heartbeat and runs `du` at most once per ten minutes. The watcher
+  keeps each heartbeat in `run_samples`, and `edr status <handle>` shows
+  them.
+- `compare.html` has a filter per column of the runs table, the step
+  names on the metric-over-steps chart, the area delta of two runs, and
+  parallel coordinates over every shown run with one chosen metric.
+- The export manifest gives each run a `record`: host, start and end,
+  the edarunner version, the driver's sha256, the tool versions and the
+  stage times. The spec carries the same `record`.
+- `edr export --mlflow DIR` writes the run database into a local MLflow
+  tracking store, one MLflow run per run. It needs the new `mlflow`
+  extra.
+- Every generated reference page starts with its title as the H1.
 - The database table `kv` is now `store`, and `Database.get_kv` and
   `set_kv` are `get_store` and `set_store`. An existing `data/edr.db`
   migrates on the first open.
