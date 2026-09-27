@@ -298,9 +298,9 @@ edr retire --batch sweep2 --collect netlist,power_inputs --why "project done" --
 edr retire --batch sweep2 --collect netlist,power_inputs --why "project done"
 ```
 
-The dry run lists every copy and every `rm -rf`. The real run copies
-first and deletes nothing when a copy failed, so a tree is gone only
-when its files are on the head node. The `artifacts` table records
+The dry run prints the file count of every list and every `rm -rf`
+target. The real run copies first and deletes nothing when a copy
+failed, so a tree is gone only when its files are on the head node. The `artifacts` table records
 every copied file with its class, `always` or the list name, and
 `edr export` takes the small files from the same directory.
 
