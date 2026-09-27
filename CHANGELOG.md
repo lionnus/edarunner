@@ -20,9 +20,12 @@ database.
   such as `uv sync --frozen`, and logs it to `log/setup.log`. A failure
   ends the run as `FAILED:runtime` before any tool seat is taken, and
   `when_changed` runs it again on a continued tree only when a listed
-  file changed.
+  file changed. `edr status` and `edr brief --run` show it as the phase
+  `setup`, with its start, duration and outcome.
 - `edr plan` prints the run ids, hosts and paths of a batch without
-  writing anything, and `edr launch` starts one driver per job.
+  writing anything, and `edr launch` starts one driver per job. With
+  `--show-spec`, both print the environment, the commands and the collect
+  paths each run gets.
 - The driver is a single Python file that needs only `python3` 3.6 on the
   host. It runs the stages and task groups, applies time budgets and
   retries, waits for free licence seats, and writes a heartbeat file.

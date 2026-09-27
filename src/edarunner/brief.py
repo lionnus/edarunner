@@ -212,22 +212,25 @@ def project_text(d: Row, now: float | None = None) -> str:
     out = [f"# {d['project']}", ""]
     intro = f"This is the edarunner project `{d['project']}` in `{d['root']}`. Its flow comes from the git " \
             f"repository `{d['repo']}`."
-    if d["sources"]:
-        srcs = [f"`{s['tag']}`" + (f" (batch {_code(s['batches'])})" if s["batches"] else "") for s in d["sources"]]
-        intro += f" {_cap(_count(len(srcs), 'source is', 'sources are'))} checked out under `{d['worktrees']}`: {_join(srcs)}."
-    else:
+    if not d["sources"]:
         intro += f" No source is checked out under `{d['worktrees']}` yet; `edr checkout` adds one."
     backend = d["backend"]
     how = _BACKEND.get(backend) or (f"edr hands each run to the {backend} scheduler" if backend in SCHEDULERS
                                     else f"the backend is `{backend}`")
     out += [intro + f" The backend is `{backend}`: {how}.", ""]
+    if d["sources"]:
+        out += [f"{_cap(_count(len(d['sources']), 'source is', 'sources are'))} checked out under `{d['worktrees']}`:",
+                "", *(f"- `{s['tag']}`, " + (f"used by {'batch' if len(s['batches']) == 1 else 'batches'} "
+                                            f"{_code(s['batches'])}" if s["batches"] else "used by no batch")
+                      for s in d["sources"]), ""]
     if d["stages"]:
         out += ["## The flow", "", "A run passes these stages in this order:", "",
                 *(_stage_line(s) for s in d["stages"]), ""]
     if d["hosts"] or d["tools"]:
         out += ["## The site", ""]
         if d["hosts"]:
-            out += ["The hosts, with the marks of their last probe (🟢 has room, 🔴 is full):", "",
+            out += [("The hosts, with the marks of their last probe: 🟢 has room, 🟡 is filling up, 🟠 is nearly "
+                    "full and 🔴 is full. The thresholds come from `[marks]`."), "",
                     *(_host_line(h, now) for h in d["hosts"]), ""]
         if d["tools"]:
             out += ["The tools, with the seats their probe reports now:", "", *(_tool_line(t) for t in d["tools"]), ""]
@@ -288,6 +291,13 @@ def run_text(d: Row) -> str:
                 took = f" and ran for {analysis.dur(s['wall_s'])}" if s.get("wall_s") is not None else ", with no end recorded"
                 status = f", ending {s['status']}" if s.get("status") and s.get("ended") else ""
                 ex = f" with exit {s['exit']}" if s.get("exit") is not None and s.get("ended") else ""
+                if name == "setup" and s.get("status") == "skipped":
+                    out.append(f"- The runtime setup was skipped at {_when(s.get('started'))}, because the "
+                               "`when_changed` files had not changed.")
+                    continue
+                if name == "setup":
+                    out.append(f"- The runtime setup started {_when(s.get('started'))}{took}{status}{ex}.")
+                    continue
                 out.append(f"- Stage `{name}`, attempt {s['attempt']}, started {_when(s.get('started'))}{took}"
                            f"{status}{ex}.")
             for s in (x for x in rt["steps"] if x["stage"] == name):

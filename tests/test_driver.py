@@ -482,6 +482,9 @@ def test_runtime_setup_runs_in_the_root_before_the_first_stage(tmp_path: Path) -
     assert "# edr: echo $FLOW_ENV" in (root / "log" / "setup.log").read_text()
     stamp = json.loads((root / ".edr-runtime").read_text())
     assert stamp == {"setup": "echo $FLOW_ENV > setup.out", "files": {}}
+    setup = hb["stages"]["setup"]
+    assert (setup["status"], setup["exit"]) == ("done", 0) and setup["started"] <= setup["ended"]
+    assert setup["log"].endswith("log/setup.log") and set(hb["stages"]) == {"setup", "export"}
 
 
 def test_runtime_failure_ends_the_run_before_a_seat(tmp_path: Path) -> None:
@@ -490,7 +493,8 @@ def test_runtime_failure_ends_the_run_before_a_seat(tmp_path: Path) -> None:
     rc, hb = finish(start(spec), spec)
     root = Path(spec["root"])
     assert (rc, hb["phase"], hb["exit"]) == (5, "FAILED:runtime", 5)
-    assert hb["stages"] == {} and not (root / "log" / "synth.log").exists()
+    assert list(hb["stages"]) == ["setup"] and not (root / "log" / "synth.log").exists()
+    assert (hb["stages"]["setup"]["status"], hb["stages"]["setup"]["exit"]) == ("failed", 3)
     assert not (tmp_path / "state" / "leases" / "demo").exists()
     assert "broken" in (root / "log" / "setup.log").read_text() and not (root / ".edr-runtime").exists()
 
@@ -501,12 +505,17 @@ def test_runtime_setup_runs_again_only_when_a_watched_file_changed(tmp_path: Pat
     (root / "uv.lock").write_text("a\n")
     spec["runtime"] = {"setup": "echo ran >> setup.count", "when_changed": ["uv.lock"]}
 
+    setup: list[str] = []
+
     def runs() -> int:
-        assert finish(start(spec), spec)[0] == 0
+        rc, hb = finish(start(spec), spec)
+        assert rc == 0
+        setup.append(hb["stages"]["setup"]["status"])
         return len((root / "setup.count").read_text().splitlines())
 
     assert runs() == 1
     assert runs() == 1  # a continued tree with the same lock
+    assert setup == ["done", "skipped"]
     (root / "uv.lock").write_text("b\n")
     assert runs() == 2
     spec["runtime"]["when_changed"] = []

@@ -307,26 +307,29 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
     ex = row.get("exit")
     parts: list[RenderableType] = [
         Text(_s(row.get("run_id")) or "?", style="bold"),
-        Text.assemble(state_text(state_of(row)), f"  {_s(row.get('phase')) or '-'}  {_stage_step(row)}  "
-                      f"exit {'-' if ex is None else ex}"),
+        Text.assemble(state_text(state_of(row)), f"  {_s(row.get('phase')) or '-'}  {_stage_step(row)}" if ex is None
+                      else f"  {_stage_step(row)}  driver exit {ex} ({_s(row.get('phase')) or '-'})"),
         Text(f"label {_s(row.get('label'))}  config {_s(row.get('config'))}  batch {_s(row.get('batch'))}  "
              f"src {_s(row.get('src'))}{' dirty' if row.get('dirty') else ''}"),
         Text.assemble(f"host {_s(row.get('host'))}  root ", (_s(row.get("root")), "dim")),
         Text.assemble("started ", (_ts(row.get("started")), "dim"), "  updated ", (_ts(row.get("updated")), "dim"),
                       f" ({hm(_age_s(row, now))} ago)  cost {cost(row, now):.1f} core-h"),
-        Text("counts " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-")),
         Text(f"disk free {_s(row.get('disk_free_gb')) or '-'} GB  tree {_s(row.get('tree_gb')) or '-'} GB"),
     ]
     if gate and is_live(row):
         parts.insert(2, Text(f"gate waits for {gate}", style="yellow"))
+    if any(s.get("task") for s in stage_rows):
+        parts.insert(-1, Text("tasks " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-")))
     if row.get("killed_by"):
         parts.append(Text(f"killed by {row['killed_by']}", style="red"))
     if stage_rows:
         parts += [Text(""), Text("stages", style="bold"), table(
-            ["stage", "task", "attempt", "status", "exit", "started", "ended", "signature"],
+            ["stage", "task", "attempt", "status", "command exit", "started", "ended", "took", "signature"],
             [[s.get("stage"), s.get("task"), s.get("attempt"), state_text(s.get("status")), s.get("exit"),
-              _ts(s.get("started")), _ts(s.get("ended")), s.get("signature")] for s in stage_rows],
-            styles={"started": "dim", "ended": "dim"})]
+              _ts(s.get("started")), _ts(s.get("ended")),
+              hm(s["ended"] - s["started"]) if s.get("ended") and s.get("started") else None, s.get("signature")]
+             for s in stage_rows],
+            styles={"started": "dim", "ended": "dim"}, right=("took",))]
     sample_tab = samples_table(samples or [])
     if sample_tab is not None:
         first, last = _ts(samples[0]["ts"]), _ts(samples[-1]["ts"])

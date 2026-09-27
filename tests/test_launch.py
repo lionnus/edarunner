@@ -317,6 +317,29 @@ def test_dry_run_writes_nothing(env, tmp_path: Path, capsys) -> None:
                        dry_run=True) and db.events() == []
 
 
+def test_spec_text_shows_the_env_commands_and_collect_paths(env) -> None:
+    project, batch, ssh, db = env
+    project.runtime = Runtime(setup="uv sync")
+    a, _ = launch.plan(project, batch, ssh, db, date=DATE)
+    text = launch.spec_text(project, a.spec)
+    assert text.startswith(f"{a.run_id}:\n  env:\n") and f"    EDR_RUN_ID={a.run_id}\n" in text
+    assert f"  runtime setup in {a.root}: uv sync\n" in text and f"  stage synth, in {a.root}:\n    cmd: bash " in text
+    assert "    resume: " in text and "    collect: reports/\n" in text
+    assert "  stage power, a task group, 2 at a time, in " in text
+    assert f"    task {a.spec['stages'][3]['tasks'][0]['id']} in {a.root}/simulation/" in text and text.endswith("    collect: {task_dir}/power/")
+
+
+def test_launch_says_when_it_waits_for_the_stagger(env, tmp_path: Path, monkeypatch, capsys) -> None:
+    project, batch, ssh, db = env
+    waits: list[float] = []
+    monkeypatch.setattr(launch.time, "sleep", waits.append)
+    monkeypatch.setattr(launch.sync, "sync_tree", lambda *a, **k: True)
+    monkeypatch.setattr(launch, "submit", lambda *a, **k: Handle("local", "local:1", "local"))
+    rows = launch.launch(project, batch, ssh, db, stagger_s=7, src_dir=src_tree(tmp_path))
+    assert [r["started"] for r in rows] == [True, True] and waits == [7]
+    assert "waiting 7 s (stagger) before b_nodw\n" in capsys.readouterr().out
+
+
 def test_launch_refuses_a_dirty_source(env) -> None:
     project, batch, ssh, db = env
     batch.source = "abc1234-dirty-deadbeef"

@@ -16,7 +16,8 @@ Run flows on hosts, keep a run database, watch, export.
 edr finds edr.toml in the current directory or a parent, so it works from
 anywhere below the project. Without one it refuses.
 
---json on any command prints one object instead of the text:
+--json, before the command as in edr --json status or after it, prints
+one object instead of the text:
 {"code": 0, "data": {}, "output": "the text a person would see"}.
 code is the exit code, data the command's result as structured data, and
 output the text.
@@ -91,7 +92,7 @@ A command below says where it refines a code.
 ## brief
 
 ```
-edr brief [--run HANDLE] [--json]
+edr brief [--json] [--run HANDLE]
 ```
 
 Prints a Markdown briefing for a person or an agent who has not seen
@@ -116,13 +117,13 @@ session with the briefing; docs/run.md shows the hook.
 
 | Flag | Meaning |
 |---|---|
-| `--run HANDLE` | the story of one run: label@batch, a run id prefix, or #n from the last board |
 | `--json` | the same as edr --json brief |
+| `--run HANDLE` | the story of one run: label@batch, a run id prefix, or #n from the last board |
 
 ## status
 
 ```
-edr status [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [handle]
+edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [handle]
 ```
 
 Without a handle, the board: one line per run of every batch that is not
@@ -133,13 +134,18 @@ follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.
 
-With a handle, one run: identity, state, counts, disk, every stage and
-task row, the CPU, RSS, tree size and free disk the driver sampled over
-the run, the metrics, and the log tail from the heartbeat.
+With a handle, one run: identity, state, disk, every stage and task
+row, the CPU, RSS, tree size and free disk the driver sampled over the
+run, the metrics, and the log tail from the heartbeat. A finished run
+shows driver exit &lt;n&gt; (&lt;phase&gt;): the code of the driver, whose phase
+names the stage that failed. The command exit column of the stage table
+is the code of the stage command itself. The tasks line with the done
+and failed counts appears only for a run with a task group.
 
 | Flag | Meaning |
 |---|---|
 | `[handle]` | label@batch, a run id prefix, or #n from the last board |
+| `--json` | the same as edr --json status |
 | `--batch B` | one batch; default EDR_BATCH, else every batch |
 | `--narrow` | 48 columns, two lines per live run, for an ssh app on a phone |
 | `--watch` | redraw every heartbeat_s seconds; Ctrl-C ends it |
@@ -154,7 +160,7 @@ the run, the metrics, and the log tail from the heartbeat.
 ## events
 
 ```
-edr events [--since T] [--run HANDLE] [-n N]
+edr events [--json] [--since T] [--run HANDLE] [-n N]
 ```
 
 The last N events, oldest first: time, actor (user, watch or telegram),
@@ -162,6 +168,7 @@ run, kind and text.
 
 | Flag | Meaning |
 |---|---|
+| `--json` | the same as edr --json events |
 | `--since T` | only events newer than this: 30m, 2h, 1d or seconds |
 | `--run HANDLE` | the events of one run |
 | `-n N` | the last N events; default 50 |
@@ -173,7 +180,7 @@ run, kind and text.
 ## hosts
 
 ```
-edr hosts [--history] [--since T] [--narrow]
+edr hosts [--json] [--history] [--since T] [--narrow]
 ```
 
 Probes every host of the site file and prints one row per host: the
@@ -210,6 +217,7 @@ use (the load, capped at the cores), RAM, scratch and busy GPUs over
 
 | Flag | Meaning |
 |---|---|
+| `--json` | the same as edr --json hosts |
 | `--history` | no probe: the samples the watcher kept, one line per host over --since |
 | `--since T` | with --history: 30m, 2h, 1d or seconds; default 1d |
 | `--narrow` | only the mark (column ok), host, cores, RAM, scratch and GPUs, in 48 columns, with no space between a mark and its number |
@@ -222,7 +230,7 @@ use (the load, capped at the cores), RAM, scratch and busy GPUs over
 ## tools
 
 ```
-edr tools
+edr tools [--json]
 ```
 
 One row per tool of the site file. free and total are the seats the
@@ -231,6 +239,10 @@ directory as {root}. hosts lists the hosts that have the tool, with
 their versions. A tool without a probe shows - for the seats. --json
 gives tool, free, total, hosts (host to version) and note.
 
+| Flag | Meaning |
+|---|---|
+| `--json` | the same as edr --json tools |
+
 | Exit | Meaning |
 |---|---|
 | 3 | a probe failed, or printed no number |
@@ -238,7 +250,7 @@ gives tool, free, total, hosts (host to version) and note.
 ## metrics
 
 ```
-edr metrics [--design SRC] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
+edr metrics [--json] [--design SRC] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
 ```
 
 Every metric of one design: label, design, stage, step, task, name,
@@ -258,6 +270,7 @@ has one. --instance takes that instance and every instance below it.
 
 | Flag | Meaning |
 |---|---|
+| `--json` | the same as edr --json metrics |
 | `--design SRC` | the exact source tag of the runs, as in the run id |
 | `--run HANDLE` | one run: label@batch, a run id prefix, or #n from the last board |
 | `--metric NAME` | one metric, by name or canonical name |
@@ -275,7 +288,7 @@ has one. --instance takes that instance and every instance below it.
 ## extract
 
 ```
-edr extract [--dry-run] [--batch B] [--design SRC] [handle]
+edr extract [--dry-run] [--json] [--batch B] [--design SRC] [handle]
 ```
 
 Extracts every metric in edr.toml again from the files collected for
@@ -296,6 +309,7 @@ new, changed, unchanged and failed for each run.
 |---|---|
 | `[handle]` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json extract |
 | `--batch B` | every run of the batch |
 | `--design SRC` | every run of the exact source tag |
 
@@ -306,7 +320,7 @@ new, changed, unchanged and failed for each run.
 ## compare
 
 ```
-edr compare [--area] [--metric NAME] [--depth N] [--instance PATH] [--stage S] [--step N] HANDLE [HANDLE ...]
+edr compare [--json] [--area] [--metric NAME] [--depth N] [--instance PATH] [--stage S] [--step N] HANDLE [HANDLE ...]
 ```
 
 Puts two or more runs side by side. Without --area, one row per stage,
@@ -324,6 +338,7 @@ the table.
 | Flag | Meaning |
 |---|---|
 | `HANDLE ...` | label@batch, a run id prefix, or #n from the last board |
+| `--json` | the same as edr --json compare |
 | `--area` | the hierarchical area per instance |
 | `--metric NAME` | this metric, by name or canonical name; repeatable |
 | `--depth N` | the instance depth; default 1 |
@@ -338,7 +353,7 @@ the table.
 ## runtime
 
 ```
-edr runtime [--batch B] [HANDLE ...]
+edr runtime [--json] [--batch B] [HANDLE ...]
 ```
 
 With one handle, the times of one run: a row per stage attempt from
@@ -355,6 +370,7 @@ each stage, attempts summed, and the total.
 | Flag | Meaning |
 |---|---|
 | `HANDLE ...` | label@batch, a run id prefix, or #n from the last board |
+| `--json` | the same as edr --json runtime |
 | `--batch B` | every run of the batch |
 
 | Exit | Meaning |
@@ -364,7 +380,7 @@ each stage, attempts summed, and the total.
 ## init
 
 ```
-edr init [--dry-run] --site DIR
+edr init [--dry-run] [--json] --site DIR
 ```
 
 Writes edr.toml and edr-watch.service into the current directory. --site
@@ -374,18 +390,23 @@ file. Refuses when edr.toml exists.
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json init |
 | `--site DIR` | the site directory, or a site.toml path, required |
 
 ## check
 
 ```
-edr check
+edr check [--json]
 ```
 
 Loads the project, the site and every batch under jobs/, imports every
 hook, checks the driver file, probes every host once, names every tool
 the head node lacks, and plans every batch with those probes. Prints one
 problem: line per fault, or an ok: line with the counts.
+
+| Flag | Meaning |
+|---|---|
+| `--json` | the same as edr --json check |
 
 | Exit | Meaning |
 |---|---|
@@ -394,7 +415,7 @@ problem: line per fault, or an ok: line with the counts.
 ## checkout
 
 ```
-edr checkout [--dry-run] [--dirty DIR] [ref]
+edr checkout [--dry-run] [--json] [--dirty DIR] [ref]
 ```
 
 Fetches, then makes a detached local clone of ref (default source.ref) at
@@ -411,12 +432,13 @@ clone.
 |---|---|
 | `[ref]` | the git ref to check out; default source.ref |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json checkout |
 | `--dirty DIR` | snapshot this working tree instead of a ref |
 
 ## plan
 
 ```
-edr plan [--dry-run] [batch]
+edr plan [--dry-run] [--json] [--show-spec] [batch]
 ```
 
 Renders every job of the batch into a run spec and prints
@@ -431,10 +453,16 @@ and the git commands but checks nothing out. Apart from that checkout,
 plan writes nothing. A dirty source that has not been checked out is
 refused; add it with edr checkout --dirty DIR.
 
+--show-spec also prints the rendered spec of each run: the environment
+its commands get, the command of each stage and task, and the collect
+paths.
+
 | Flag | Meaning |
 |---|---|
 | `[batch]` | the batch name; default EDR_BATCH, else the newest |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json plan |
+| `--show-spec` | print the env, commands and collect paths of each run |
 
 | Exit | Meaning |
 |---|---|
@@ -443,14 +471,15 @@ refused; add it with edr checkout --dirty DIR.
 ## launch
 
 ```
-edr launch [--dry-run] [--only L] [--allow-dirty] [batch]
+edr launch [--dry-run] [--json] [--only L] [--allow-dirty] [--show-spec] [batch]
 ```
 
 Checks out a missing clean source the way plan does, then pins the date
 of the batch, publishes the driver into the state directory, syncs the
 checked-out tree to each host, writes one spec per run
-and starts one driver per run, stagger_s apart. Prints
-&lt;n&gt; started, &lt;n&gt; queued, &lt;n&gt; with problems. A job that no host fits is
+and starts one driver per run, stagger_s apart, with a waiting line
+before each wait. Prints &lt;n&gt; started, &lt;n&gt; queued, &lt;n&gt; with problems.
+--show-spec prints the rendered spec of each run as plan does. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec
 exists is already launched; a batch name is used once.
 
@@ -458,8 +487,10 @@ exists is already launched; a batch name is used once.
 |---|---|
 | `[batch]` | the batch name; default EDR_BATCH, else the newest |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json launch |
 | `--only L` | labels, comma separated |
 | `--allow-dirty` | launch a dirty snapshot source |
+| `--show-spec` | print the env, commands and collect paths of each run |
 
 | Exit | Meaning |
 |---|---|
@@ -470,7 +501,7 @@ exists is already launched; a batch name is used once.
 ## continue
 
 ```
-edr continue [--dry-run] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
+edr continue [--dry-run] [--json] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
 ```
 
 More work on the tree of an existing run: one stage, on the same tree,
@@ -486,6 +517,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 |---|---|
 | `handle` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json continue |
 | `--stage S` | the stage to run on the tree |
 | `--tasks ID ...` | the tasks of a task group; default the job's |
 | `--from CHECKPOINT` | resume the stage from this checkpoint |
@@ -501,7 +533,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 ## track
 
 ```
-edr track [--dry-run] --label L --stage S [--batch B] [--src TAG] [--root DIR] [--collect] ...
+edr track [--dry-run] [--json] --label L --stage S [--batch B] [--src TAG] [--root DIR] [--collect] ...
 ```
 
 Runs one command in the foreground under the driver, on this machine, and
@@ -531,6 +563,7 @@ the global table. docs/run.md lists the phases.
 |---|---|
 | `cmd` | the command, after -- |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json track |
 | `--label L` | the label of the run, required |
 | `--stage S` | the stage name; a stage of edr.toml lends its settings, required |
 | `--batch B` | the batch; default track |
@@ -552,7 +585,7 @@ the global table. docs/run.md lists the phases.
 ## keep
 
 ```
-edr keep [--dry-run] [--hours N] [--ack] handle
+edr keep [--dry-run] [--json] [--hours N] [--ack] handle
 ```
 
 Writes the keep file of a live run. --hours (default 12 when --ack is
@@ -563,6 +596,7 @@ cancels a pending kill or stop of the watcher.
 |---|---|
 | `handle` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json keep |
 | `--hours N` | hours to add to the budget of the running stage or task; default 12 without --ack |
 | `--ack` | cancel the watcher's pending kill or stop |
 
@@ -573,7 +607,7 @@ cancels a pending kill or stop of the watcher.
 ## import
 
 ```
-edr import [--dry-run] --run-id RUN_ID --label LABEL [--config CONFIG] --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
+edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
 ```
 
 Records a run that edr did not start, such as one you ran by hand. With
@@ -587,6 +621,7 @@ with YYYYMMDD_HHMM_.
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json import |
 | `--run-id RUN_ID` | the run id; it must start with YYYYMMDD_HHMM_, required |
 | `--label LABEL` | the label of the run, required |
 | `--config CONFIG` | the configuration name of the run; default empty |
@@ -603,7 +638,7 @@ with YYYYMMDD_HHMM_.
 ## export
 
 ```
-edr export [--dry-run] [--design SRC] [--out DIR] [--mlflow DIR] [--labels a,b] [--with-logs]
+edr export [--dry-run] [--json] [--design SRC] [--out DIR] [--mlflow DIR] [--labels a,b] [--with-logs]
 ```
 
 Writes a snapshot of one design to DIR: manifest.json, runs.csv,
@@ -622,6 +657,7 @@ mlflow extra: pip install 'edarunner[mlflow]'.
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json export |
 | `--design SRC` | the exact source tag of the runs, as in the run id |
 | `--out DIR` | the directory to write; it must be absent or empty |
 | `--mlflow DIR` | write an MLflow tracking store in DIR instead |
@@ -631,7 +667,7 @@ mlflow extra: pip install 'edarunner[mlflow]'.
 ## stop
 
 ```
-edr stop [--dry-run] --why WHY [--after-task] [--now] handle
+edr stop [--dry-run] --why WHY [--json] [--after-task] [--now] handle
 ```
 
 Stops one run through the pids the driver recorded, never through a
@@ -649,6 +685,7 @@ has no driver pid is refused.
 | `handle` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--why WHY` | the reason; it goes into the events table, required |
+| `--json` | the same as edr --json stop |
 | `--after-task` | write the stop file; the running task ends first |
 | `--now` | SIGKILL after 30 s |
 
@@ -660,13 +697,19 @@ has no driver pid is refused.
 ## retire
 
 ```
-edr retire [--dry-run] --why WHY [--batch B] [--collect NAMES] [--prune T] [--uncollected] [handle]
+edr retire [--dry-run] --why WHY [--json] [--batch B] [--collect NAMES] [--prune T] [--uncollected] [handle]
 ```
 
 Removes the run tree on the host, or with --prune T the paths that
 prune.T names in the stages, after the guard on every target. --batch
 retires every run of the batch and marks it RETIRED, so the watcher
 skips it. A live run gets the phase ABANDONED:&lt;why&gt;.
+
+The logs and results survive a retire. The watcher has already copied
+log/ and the collect paths of every finished stage to
+data/results/&lt;run id&gt;/ on the head node, and retire refuses a tree
+without that copy unless --uncollected. edr watch --once makes the copy
+now.
 
 --collect NAME,... first copies the named collect_on_request lists of
 every run into data/results/&lt;run id&gt;/, and removes nothing when one copy
@@ -683,6 +726,7 @@ not collected unless --uncollected.
 | `[handle]` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--why WHY` | the reason; it goes into the events table, required |
+| `--json` | the same as edr --json retire |
 | `--batch B` | every run of the batch, then mark it RETIRED |
 | `--collect NAMES` | copy these collect_on_request lists, comma separated, to the head node first |
 | `--prune T` | remove the prune targets named T instead of the tree |
@@ -696,7 +740,7 @@ not collected unless --uncollected.
 ## notify
 
 ```
-edr notify [--dry-run] [--board] [--digest] [--silent] [text]
+edr notify [--dry-run] [--json] [--board] [--digest] [--silent] [text]
 ```
 
 Sends one message through every notifier that the site configures. The
@@ -709,6 +753,7 @@ line can mail either.
 |---|---|
 | `[text]` | the message, as plain text |
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json notify |
 | `--board` | send the board of edr status |
 | `--digest` | send the daily digest now; the watcher still sends its own |
 | `--silent` | send without a sound on the phone |
@@ -720,7 +765,7 @@ line can mail either.
 ## watch
 
 ```
-edr watch [--dry-run] [--once] [--check]
+edr watch [--dry-run] [--json] [--once] [--check]
 ```
 
 The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
@@ -732,6 +777,7 @@ docs/run.md explains the cycle.
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json watch |
 | `--once` | one cycle; exit 1 when it failed |
 | `--check` | exit 1 when watch.json is older than three cycles |
 
