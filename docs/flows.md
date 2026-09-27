@@ -29,7 +29,6 @@ collect_on_request = { netlist = ["flow/runs/{tree_id}/out/{netlist_stage}/"] }
 prune = { lib = ["flow/runs/{tree_id}/out/library"] }
 
 [stages.power]
-after = { stage = "pnr", step = "route" }
 foreach = "tasks"
 parallel = 1
 task_dir = "sim/tests/{build_tag}/{task.test}"
@@ -66,6 +65,11 @@ unit = "nJ"
 canonical = "energy"
 ```
 
+The stages run in file order, `pnr` then `power`. A job that lists
+`stages = ["power"]` with `reuse` runs the kernels on an existing
+netlist; `netlist_stage` in the job names the step directory that holds
+it, and `{netlist_stage}` has no value without it.
+
 The first run taught three lessons:
 
 - `{tree_id}` names the tree the flow writes in. A run that reuses a tree
@@ -85,7 +89,7 @@ match the tool version they were written for.
 
 ```toml
 [env]
-PATH = "/usr/sepp/bin:$PATH"
+PATH = "/opt/eda/bin:$PATH"
 
 [stages.synth]
 cwd = "yosys"
@@ -95,14 +99,12 @@ budget = { hours = 2 }
 collect = ["yosys/reports/", "yosys/croc.log"]
 
 [stages.floorplan]
-after = "synth"
 cwd = "openroad"
 cmd = "oseda -2026.04 ./run_backend.sh --floorplan"
 budget = { hours = 1 }
 collect = ["openroad/reports/"]
 
 [stages.place]
-after = "floorplan"
 cwd = "openroad"
 cmd = "oseda -2026.04 ./run_backend.sh --placement"
 budget = { hours = 3 }
@@ -139,4 +141,4 @@ retry rule or a stop of your own. Everything inside a stage is a step,
 which `edr` tracks through `progress`, extracts metrics from per step, and
 resumes through `{checkpoint}`. A stage with `foreach = "tasks"` fans out
 into tasks that run in parallel on the host and share one queue across
-shards.
+shards. `docs/configuration.md` has every key.
