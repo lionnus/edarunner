@@ -242,6 +242,80 @@ node lacks, and plans every batch under `jobs/`. It prints one `problem:`
 line per fault and exits 1, or `ok: 2 hosts, 3 stages, 5 metrics, 1
 batches` and exits 0.
 
+## A scheduler
+
+A lab with HTCondor, Slurm or LSF lets the scheduler pick the host. The
+driver is then the job itself: the scheduler starts it, and the driver
+writes the same heartbeat as on an ssh host. The site file names the
+backend in `[scheduler]`:
+
+```toml
+schema = 1
+scratch = []
+
+[scheduler]
+backend = "slurm"                   # "condor", "slurm" or "lsf"
+submit_via = ["ssh", "submithost"]  # empty: the head node submits itself
+tree_root = "/net/share/{user}"     # a filesystem every node mounts
+max_jobs = 20                       # runs of the project in the scheduler at once
+queue = "long"                      # the Slurm partition or the LSF queue
+options = ["--account=chip"]        # raw submit lines or arguments
+
+[tools.fc]
+seats = 10
+probe = ["{site_dir}/hooks/flexlm_free.sh", "fc"]
+licence = "fc"                      # the licence name in the scheduler
+```
+
+| Backend | Submits | Asks each cycle | Stops | Handle |
+|---|---|---|---|---|
+| `condor` | `condor_submit -terse <run_id>.sub` | `condor_q <ids> -af ClusterId ProcId JobStatus HoldReason` | `condor_rm` | `condor:<cluster>.<proc>` |
+| `slurm` | `sbatch --parsable <run_id>.sbatch` | `squeue -h -o "%i %T %r" -j <ids>`, then `sacct` for the jobs that left the queue | `scancel` | `slurm:<jobid>` |
+| `lsf` | `bsub ...` | `bjobs -noheader -o "jobid stat" <ids>` | `bkill` | `lsf:<jobid>` |
+
+The submit file and the script lie next to the spec in the state
+directory, so `submit_via` must reach a host that reads the state
+directory at the same path. Every scheduler command runs through
+`submit_via`, and one command per cycle asks for every run at once.
+
+`plan` probes no host under a scheduler. The run tree goes to
+`<tree_root>/<run_prefix>/<run_id>`, and `launch` copies the source there
+from the head node. A job with `host = "auto"` goes wherever the
+scheduler puts it; a named host becomes a requirement of the job. The
+host of a run is the name the driver writes into its first heartbeat.
+Above `max_jobs` a job is `queued`, and the watcher submits it when a
+run of the project ends.
+
+The job asks for the most cores, `needs.ram_gb` and `needs.disk_gb` of
+its stages, the sum of the stage budgets as a wall time when every stage
+has one, and one scheduler licence per tool with `licence`:
+
+| Request | HTCondor | Slurm | LSF |
+|---|---|---|---|
+| cores | `request_cpus = N` | `--cpus-per-task=N --nodes=1` | `-n N -R "span[hosts=1]"` |
+| `needs.ram_gb` | `request_memory` in MB | `--mem` in MB | `-R "rusage[mem=NGB]" -M NGB` |
+| `needs.disk_gb` | `request_disk` in KB | none; the driver checks it | `-R "rusage[tmp=NGB]"` |
+| wall time | `periodic_remove` after the seconds | `--time=H:MM:00` | `-W H:MM` |
+| licence | `concurrency_limits = fc:1` | `--licenses=fc:1` | `-R "rusage[fc=1]"` |
+| a named host | `requirements = (Machine == "h")` | `--nodelist=h` | `-m h` |
+| no restart | `periodic_hold = NumJobStarts > 1` | `--no-requeue` | `-rn` |
+| `options` | lines before `queue` | `#SBATCH` lines | arguments before the driver |
+
+The licence is a second gate. The scheduler counts it for the whole job,
+from the start of the job to its end. The probe of the tool still runs
+before each stage, because the licence server also serves users outside
+the scheduler. `edr check` asks HTCondor (`condor_config_val -negotiator
+FC_LIMIT`) or Slurm (`scontrol show lic fc`) whether the licence exists,
+because a name the scheduler does not know never holds a job back. It
+says so in a warning when it cannot ask, and always for LSF.
+
+What stays in the site file under a scheduler: the `[tools]` names,
+seats and probes, `env`, and the bot. `[hosts]` is optional and serves
+only `edr hosts`, `retire` and `collect` over ssh. `scratch`,
+`tool_procs` and `[placement]` in `edr.toml` have no effect. The
+watcher looks for orphans only on ssh hosts; a scheduler ends the
+processes of its own jobs.
+
 ## Next
 
 [run.md](run.md) checks out the source, launches the batch and runs the

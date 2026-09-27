@@ -22,7 +22,10 @@ and the stop of `host_full`; any keep file holds off the stop of `superseded`.
 | `host_full` | 🟡 | the driver set `host_full`: free space below `host_free_min_gb` | yes | `stop --now` on the newest run of that host, unless that run has `ack` | `edr stop <label>@<batch> --now --why host-full` |
 | `superseded` | 🟡 | a newer batch runs the same label at another source | yes | `stop --after-task`, unless the run has a keep file | `edr stop <label>@<batch> --after-task --why superseded` |
 | `orphan` | 🔴 | a process of ours that matches `tool_procs`, outside every live run tree | yes | `SIGTERM`, only with `kill_orphan` |  |
-| `queued` | 🔵 | no host fits the job |  | a launch when a host fits, one per batch per cycle | `edr launch <batch> --only <label>` |
+| `queued` | 🔵 | no host fits the job, or the scheduler holds `max_jobs` runs of the project |  | a launch when a host fits or a job ends, one per batch per cycle | `edr launch <batch> --only <label>` |
+| `pending` | 🔵 | the scheduler has the job in its queue and the driver has not started |  | none | `edr status <label>@<batch> --live` |
+| `held` | 🟠 | the scheduler holds the job and runs it only after a person releases it | yes | none | `edr stop <label>@<batch> --why held` |
+| `suspended` | 🟡 | the scheduler suspended the job; the heartbeat stands still until it resumes |  | none | `edr status <label>@<batch> --live` |
 | `imported` | ⚫ | `edr import` recorded the run |  | none | `edr retire <label>@<batch> --why imported` |
 | `done` | ⚪ | the run ended `done` |  | none | `edr export --design <src> --out exports/<src>` |
 | `incomplete` | 🟠 | the run ended `INCOMPLETE`: a task failed or was skipped | yes | none | `edr retire <label>@<batch> --why incomplete` |

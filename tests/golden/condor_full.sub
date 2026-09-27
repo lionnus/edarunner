@@ -1,0 +1,21 @@
+universe = vanilla
+executable = /s/bin/edr_driver-ab.py
+arguments = /s/b/r1.spec.json
+transfer_executable = false
+should_transfer_files = NO
+output = /s/b/r1.driver.log
+error = /s/b/r1.driver.err
+log = /s/b/r1.condor.log
++EdrRunId = "r1"
++EdrProject = "demo"
+request_cpus = 4
+request_memory = 8192
+request_disk = 1572864
+periodic_remove = (RemoteWallClockTime - CumulativeSuspensionTime) > 9000
+periodic_hold = NumJobStarts > 1
+concurrency_limits = fc:1,vcs:2
+requirements = (Machine == "node7")
+environment = "EDR_SCHED_ID=$(ClusterId).$(ProcId)"
+getenv = false
++EdrTag = "a"
+queue

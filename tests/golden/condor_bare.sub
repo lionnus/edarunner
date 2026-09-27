@@ -1,0 +1,15 @@
+universe = vanilla
+executable = /s/bin/edr_driver-ab.py
+arguments = /s/b/r2.spec.json
+transfer_executable = false
+should_transfer_files = NO
+output = /s/b/r2.driver.log
+error = /s/b/r2.driver.err
+log = /s/b/r2.condor.log
++EdrRunId = "r2"
++EdrProject = ""
+request_cpus = 1
+periodic_hold = NumJobStarts > 1
+environment = "EDR_SCHED_ID=$(ClusterId).$(ProcId)"
+getenv = false
+queue

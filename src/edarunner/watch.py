@@ -21,7 +21,7 @@ from .backend import Backend, Live, make_backend, run_handle
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .db import Database
-from .model import Project, Task
+from .model import SCHEDULERS, Project, Task
 from .notify import Notifier, alert_buttons
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
@@ -72,7 +72,11 @@ STATES = {
                         "`stop --after-task`, unless the run has a keep file", alert=True),
     "orphan": State("a process of ours that matches `tool_procs`, outside every live run tree",
                     "`SIGTERM`, only with `kill_orphan`", alert=True),
-    "queued": State("no host fits the job", "a launch when a host fits, one per batch per cycle"),
+    "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
+                    "a launch when a host fits or a job ends, one per batch per cycle"),
+    "pending": State("the scheduler has the job in its queue and the driver has not started", "none"),
+    "held": State("the scheduler holds the job and runs it only after a person releases it", "none", alert=True),
+    "suspended": State("the scheduler suspended the job; the heartbeat stands still until it resumes", "none"),
     "imported": State("`edr import` recorded the run", "none"),
     "done": State("the run ended `done`", "none"),
     "incomplete": State("the run ended `INCOMPLETE`: a task failed or was skipped", "none", alert=True),
@@ -166,6 +170,10 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
     hb, lim = heartbeat, project.limits
     if not board.is_live(hb):
         return board.state_of(hb), []
+    if live is Live.HELD:
+        return "held", ["held by the scheduler"]
+    if live is Live.SUSPENDED:
+        return "suspended", ["suspended by the scheduler"]
     age, host, pid = now - (hb.get("updated") or 0), hb.get("host") or run.get("host"), hb.get("driver_pid")
     # A reason text stays the same from cycle to cycle, or every cycle would re-send the alert.
     if age > lim.dead_s:
@@ -175,7 +183,7 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
             return "dead", [f"heartbeat older than {lim.dead_s} s, driver {pid} gone on {host}"]
         return "stale", [f"heartbeat older than {lim.dead_s} s, driver {pid} alive"]
     if age > lim.stale_s:
-        return "stale", ["suspended by the scheduler" if live is Live.SUSPENDED else f"heartbeat older than {lim.stale_s} s"]
+        return "stale", [f"heartbeat older than {lim.stale_s} s"]
     found = []
     if hb.get("looping"):
         found.append(("looping", "driver reported it"))
@@ -353,8 +361,11 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
     driver = spec.get("driver")
     if rec.get("resumed") or not stage or not stage.get("resume") or not driver:
         return
-    host = str(run["host"])
-    alive = [g for g in hb.get("pgids") or [] if int(g) > 1 and ssh.run(host, f"kill -0 -- -{int(g)}")[0] == 0]
+    sched = backend.name in SCHEDULERS
+    # A scheduler ends the process family of its job, and the tree under tree_root is read on any node.
+    host = None if sched else str(run["host"])
+    alive = [] if sched else [g for g in hb.get("pgids") or [] if int(g) > 1
+                              and ssh.run(str(host), f"kill -0 -- -{int(g)}")[0] == 0]
     if alive:
         # The tool outlived its driver; a resume now would write the same tree twice.
         if not rec.get("resume_wait"):
@@ -449,6 +460,30 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
         n.board(text)
 
 
+def _waiting(name: str, db: Database, seen: set[str]) -> dict[str, Any]:
+    """The live runs in a scheduler that wrote no heartbeat yet, with their handles."""
+    if name not in SCHEDULERS:
+        return {}
+    out = {}
+    for r in db.runs():
+        if r["run_id"] not in seen and board.is_live(r) and r.get("state") not in ("queued", "retired", "abandoned"):
+            if h := run_handle(name, r, {}):
+                out[r["run_id"]] = h
+    return out
+
+
+def _unstarted(db: Database, run_id: str, live: Live, why: str, dry_run: bool) -> tuple[str, list[str]]:
+    """The state of a scheduler job before its first heartbeat; a job that left the queue failed."""
+    if live is Live.GONE:
+        if not dry_run:
+            db.upsert_run({"run_id": run_id, "phase": "FAILED:scheduler", "exit": None})
+        return "failed", [f"the job left the scheduler before the driver started: {why}"]
+    state = {Live.PENDING: "pending", Live.HELD: "held", Live.SUSPENDED: "suspended", Live.RUNNING: "running"}.get(live, "stale")
+    if not dry_run:
+        db.upsert_run({"run_id": run_id, "state": state})
+    return state, [why] if why and state != "running" else []
+
+
 def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
           dry_run: bool = False, backend: Backend | None = None) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing.
@@ -464,8 +499,17 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     for batch, hb in heartbeats:
         if board.is_live(hb) and (h := run_handle(backend.name, db.run(hb["run_id"]) or {}, hb)):
             handles[hb["run_id"]] = h
+    waiting = _waiting(backend.name, db, {hb["run_id"] for _, hb in heartbeats})
+    handles.update(waiting)
     alive = backend.alive(list(handles.values())) if handles else {}
     states: dict[str, str] = {}
+    for run_id, h in waiting.items():
+        state, reasons = _unstarted(db, run_id, *alive[h], dry_run)
+        states[run_id] = state
+        if dry_run:
+            print(f"{run_id}: {state} {'; '.join(reasons)}".rstrip())
+        else:
+            actions(project, ssh, db, notifiers, db.run(run_id) or {"run_id": run_id}, state, reasons, now, notes)
     for batch, hb in heartbeats:
         run = db.run(hb["run_id"]) or {**hb, "batch": batch}
         h = handles.get(hb["run_id"])
@@ -480,7 +524,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
         if state == "dead":
             _resume(project, ssh, backend, db, run, hb, progress, now)
-    for o in orphans(project, ssh, db):
+    for o in [] if backend.name in SCHEDULERS else orphans(project, ssh, db):
         states[o["key"]] = "orphan"
         if dry_run:
             print(f"{o['key']}: orphan {o['phase']} ({o['etimes']} s)")

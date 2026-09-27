@@ -52,6 +52,9 @@ class Tool:
     seats: int | None = doc("the seat total, for `edr tools`", None)
     probe: list[str] = doc("an argv list that prints the free seats; it runs on the host with the run placeholders "
                            "filled", factory=list)
+    licence: str = doc("the licence or concurrency limit that counts the tool in the scheduler; a job asks it for "
+                       "the most seats one of its stages needs, for its whole run", "",
+                       shown="none; the scheduler does not count the tool")
 
 
 @dataclass
@@ -132,8 +135,29 @@ class Marks:
     gpu: list[float] = doc("the busy GPUs over all GPUs", factory=lambda: [0.6, 0.8, 0.9])
 
 
-# The values of `[scheduler] backend`.
-BACKENDS = ("ssh", "local")
+# The values of `[scheduler] backend`; the last three hand the run to a batch scheduler.
+SCHEDULERS = ("condor", "slurm", "lsf")
+BACKENDS = ("ssh", "local", *SCHEDULERS)
+
+
+@dataclass
+class Scheduler:
+    """What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
+    `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
+    driver writes into its first heartbeat. `docs/configure.md` shows a site file for each."""
+
+    backend: str = doc("`\"ssh\"` on the site hosts, `\"local\"` on the head node only, or `\"condor\"`, "
+                       "`\"slurm\"`, `\"lsf\"`", "ssh")
+    submit_via: list[str] = doc("an argv prefix of every scheduler command, such as `[\"ssh\", \"submithost\"]` or "
+                                "`[\"docker\", \"exec\", \"pool\"]`; empty runs the command on the head node",
+                                factory=list)
+    tree_root: str = doc("where the run trees go, `<tree_root>/<run_prefix>/<run_id>`; on a filesystem the head "
+                         "node and every node of the scheduler mount. Required with a scheduler", "")
+    max_jobs: int = doc("runs of the project in the scheduler at once; a job above it is `queued`, and the watcher "
+                        "submits it when a run ends; 0 is no limit", 0)
+    queue: str = doc("the Slurm partition or the LSF queue; HTCondor has none", "")
+    options: list[str] = doc("raw text: lines appended to the HTCondor submit file, `#SBATCH` options for Slurm, "
+                             "extra `bsub` arguments for LSF", factory=list)
 
 
 @dataclass
@@ -149,8 +173,7 @@ class Site:
     ssh_timeout_s: int = doc("seconds a remote command may take", 45, key="ssh.timeout_s")
     tool_procs: str = doc("a regex over process names, for the orphan check and the host table", "")
     nfs_export: str = doc("a path the head node reads when ssh to a host fails at collect", "")
-    scheduler_backend: str = doc("what starts and watches a driver: `\"ssh\"` on the site hosts, or `\"local\"` on "
-                                 "the head node only", "ssh", key="scheduler.backend")
+    scheduler: Scheduler = field(default_factory=Scheduler)
     hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
     telegram: Telegram | None = None
@@ -167,6 +190,8 @@ class Needs:
     disk_gb: float = doc("free space at the run tree, in GB; below it a task is skipped, and the run fails at "
                          "its first stage", 0.0)
     tools: dict[str, int] = doc("a list of names, or `{ name = seats }`, from the site `[tools]`", factory=dict)
+    ram_gb: float = doc("the RAM a scheduler reserves for the job, in GB: the most any stage of the job asks; "
+                        "0 takes the scheduler's default", 0.0)
 
 
 @dataclass
@@ -215,7 +240,7 @@ class Stage:
     cwd: str = doc("the working directory, relative to the run tree", ".")
     steps: list[str] = doc("the step names the flow passes, indexed by step number", factory=list)
     progress: str = doc("a command that prints the current step number", "")
-    needs: Needs = doc("`{ cores, disk_gb, tools }`; the table below", factory=Needs)
+    needs: Needs = doc("`{ cores, disk_gb, tools, ram_gb }`; the table below", factory=Needs)
     budget: Budget = doc("`{ hours, disk_gb, kill, per }`; the table below", factory=Budget)
     retry: Retry | None = doc("`{ match, wait_s, max }`; the table below", None)
     collect: list[str] = doc("paths under the run tree the watcher copies when the stage ends", factory=list)
@@ -285,7 +310,7 @@ class Task:
 
     id: str
     fields: dict[str, str] = doc("any key; `{task.<key>}` in the stage strings", key="tasks.<id>.<key>", shown="none")
-    needs: Needs | None = doc("`{ cores, disk_gb, tools }`; replaces the stage's", None, key="tasks.<id>.needs")
+    needs: Needs | None = doc("`{ cores, disk_gb, tools, ram_gb }`; replaces the stage's", None, key="tasks.<id>.needs")
     budget: Budget | None = doc("`{ hours, disk_gb, kill, per }`; replaces the stage's", None, key="tasks.<id>.budget")
 
 

@@ -1,0 +1,1 @@
+bsub -J r1 -o /s/b/r1.driver.log -n 4 -R 'span[hosts=1]' -R 'rusage[mem=8GB]' -M 8GB -R 'rusage[tmp=1.5GB]' -W 2:30 -R 'rusage[fc=1:vcs=2]' -m node7 -q long -env none -rn -P a python3 /s/bin/edr_driver-ab.py /s/b/r1.spec.json

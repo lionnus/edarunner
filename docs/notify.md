@@ -22,7 +22,7 @@ The title is `<project>: <kind>`, and an alert title adds the run handle.
 
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
-| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command and the keep, ack and stop buttons | one push per change, with the next command, the button commands and three copy buttons | one mail per change, with the next command and the button commands |
+| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command and the keep, ack and stop buttons | one push per change, with the next command, the button commands and three copy buttons | one mail per change, with the next command and the button commands |
 | alert: `orphan` | the watcher | one message with the kill command, no buttons | one push, the same text | one mail, the same text |
 | `watch stale` | `edr watch --check` | one message | one urgent push | one mail |
 | `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |

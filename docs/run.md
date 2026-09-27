@@ -151,6 +151,15 @@ Its memory between cycles is three rows of the database's `store` table.
 states, the alerts sent and the grace clocks; `digest` the day and the
 time of the last digest.
 
+Under a scheduler three more states come from the scheduler, not from
+the heartbeat. `pending`: the job waits in the scheduler queue and the
+driver has not written a heartbeat. `held`: the scheduler will not run
+the job until a person releases it, for example after a second start or
+a memory limit; it alerts, and `edr stop` removes the job. `suspended`:
+the scheduler stopped the job, so its heartbeat stands still; the run is
+not `dead` while the scheduler reports it suspended. A job that leaves
+the queue before its first heartbeat ends `FAILED:scheduler`.
+
 The watcher sends one alert per run and state for the states that
 [reference/states.md](reference/states.md) marks. A repeat with a new
 reason edits the earlier message in place, so an alert never repeats.

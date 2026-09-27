@@ -464,9 +464,10 @@ def test_stale_leases_are_swept_with_an_event(env: Env) -> None:
 @pytest.mark.parametrize("age, live, state, reason", [
     (200, Live.GONE, "dead", "heartbeat older than 90 s, driver 4242 gone on local"),
     (200, Live.RUNNING, "stale", "heartbeat older than 90 s, driver 4242 alive"),
-    (200, Live.SUSPENDED, "stale", "heartbeat older than 90 s, driver 4242 alive"),
+    (200, Live.SUSPENDED, "suspended", "suspended by the scheduler"),
     (200, Live.UNKNOWN, "stale", "heartbeat older than 90 s, local did not answer"),
-    (60, Live.SUSPENDED, "stale", "suspended by the scheduler"),
+    (60, Live.SUSPENDED, "suspended", "suspended by the scheduler"),
+    (5, Live.HELD, "held", "held by the scheduler"),
     (60, Live.RUNNING, "stale", "heartbeat older than 30 s"),
     (5, Live.GONE, "running", None),  # a fresh heartbeat outweighs the backend: the file may lag on NFS
 ])
@@ -504,3 +505,17 @@ def test_hung_reads_the_samples_of_the_heartbeat_without_ssh(env: Env, monkeypat
     assert env.cycle(NOW + 1)[rid("a")] == "running"
     assert env.cycle(NOW + 2)[rid("a")] == "hung"
     assert not [c for c in cmds if "stat -c" in str(c) or "cputimes" in str(c)]
+
+
+def test_a_scheduler_job_before_its_first_heartbeat(env: Env) -> None:
+    fake = FakeBackend()
+    fake.name = "condor"
+    env.db.upsert_run({"run_id": rid("p"), "batch": "demo", "label": "p", "phase": "setup", "handle": "condor:1.0"})
+    env.db.upsert_run({"run_id": rid("q"), "batch": "demo", "label": "q", "state": "queued"})
+    fake.states["1.0"] = [Live.PENDING, Live.HELD, Live.GONE]
+    assert env.cycle(backend=fake)[rid("p")] == "pending"
+    assert env.cycle(NOW + 1, backend=fake)[rid("p")] == "held"
+    assert env.notifier.sent == [("held", rid("p"))]
+    assert env.cycle(NOW + 2, backend=fake)[rid("p")] == "failed"
+    assert env.db.run(rid("p"))["phase"] == "FAILED:scheduler" and rid("q") not in env.cycle(NOW + 3, backend=fake)
+    assert fake.asked == [["1.0"]] * 3
