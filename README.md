@@ -83,8 +83,9 @@ phone. The Telegram bot keeps the same narrow board pinned in the chat
 and rewrites it every watcher cycle.
 
 `edr hosts` shows each machine: cores used of total, RAM and scratch free
-of total, GPUs idle of total with their memory free of total, tool processes ours and
-others, and our runs. A host without `nvidia-smi` shows `-` for the GPUs.
+of total, GPUs idle of total with their memory free of total, tool
+processes ours and others, and our runs. A host without `nvidia-smi`
+shows `-` for the GPUs.
 
 ```text
 host   cores            load   ram GB  mount      scratch GB            gpu  gpu GB  tools  runs
