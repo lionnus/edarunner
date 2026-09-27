@@ -182,9 +182,9 @@ A stage that fails runs again when `match` is found in the last 80 lines of its 
 
 ### [metrics.<name>]
 
-A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `expr`.
-`expr` allows numbers, metric names, `+ - * /` and a unary minus, nothing else; it is computed
-once every input exists, and with `stage` set only for those stages.
+A metric holds exactly one of the four parsers: `regex`, `csv`, `json` or `python`. A number
+the flow does not print, such as an energy from a power and a window, comes from a `python`
+hook that reads the input files itself.
 
 A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
 row per step directory found, under the stage that owns that step number. A file that does not
@@ -192,14 +192,13 @@ parse gives a row with an empty value and the error in `source_file`, never a cr
 
 | Key | Meaning | Default |
 |---|---|---|
-| `stage` | a stage name or a list: the stages whose files hold the number | `[]`; required without `expr` |
+| `stage` | a stage name or a list: the stages whose files hold the number | required |
 | `step` | `"*"` for one row per step, a number, or absent | `none` |
-| `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required without `expr` |
-| `regex` | a regex; group 1 is the value | one of the five |
-| `csv` | `{ where = { column = value }, column }`; the first row that matches `where` | one of the five |
-| `json` | a dotted path into a JSON file; a number indexes a list | one of the five |
-| `python` | a hook that gets the file path and returns a number | one of the five |
-| `expr` | an expression over other metrics of the same run, stage, step and task | one of the five |
+| `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required |
+| `regex` | a regex; group 1 is the value | one of the four |
+| `csv` | `{ where = { column = value }, column }`; the first row that matches `where` | one of the four |
+| `json` | a dotted path into a JSON file; a number indexes a list | one of the four |
+| `python` | a hook that gets the file path and returns a number | one of the four |
 | `unit` | unit text | `""` |
 | `canonical` | a name shared across projects, such as `area.cell` | `""` |
 

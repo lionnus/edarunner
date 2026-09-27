@@ -104,6 +104,8 @@ json = "window_ns"
 unit = "ns"
 
 [metrics.energy_nj]
-expr = "power_w * window_ns"
+stage = "power"
+file = "{task_dir}/power/phases.json"
+python = "hooks/energy.py:energy_nj"
 unit = "nJ"
 canonical = "energy"

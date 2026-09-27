@@ -39,7 +39,7 @@ def test_demo_end_to_end():
     assert p.stages["pnr"].retry is None and p.stages["export"].prune == {"netlist": ["out"]}
     assert p.metrics["area_cell_um2"].stage == ["synth", "pnr"] and p.metrics["area_cell_um2"].step == "*"
     assert p.metrics["power_w"].stage == ["power"] and p.metrics["power_w"].csv["column"] == "total_w"
-    assert p.metrics["energy_nj"].stage == [] and p.metrics["energy_nj"].expr == "power_w * window_ns"
+    assert p.metrics["energy_nj"].stage == ["power"] and p.metrics["energy_nj"].python == "hooks/energy.py:energy_nj"
     assert p.tasks["k_big"].fields == {"kernel": "softmax", "test": "SOFTMAX_R197", "args": "ROWS=197"}
     assert p.tasks["k_big"].budget.hours == 2 and p.tasks["k_small"].budget is None
     assert p.task_resolver == ""
@@ -84,6 +84,9 @@ def test_render_and_placeholders():
         ('tools = ["demo"]', "tools = 1", "stages.synth.needs.tools must be a list of names or"),
         ('tools = ["demo"]', 'tools = { demo = "2" }', "stages.synth.needs.tools must be a list of names or"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
+        ('python = "hooks/energy.py:energy_nj"', 'expr = "power_w * window_ns"',
+         r'metrics.energy_nj.expr is gone; write stage, file and python = "hooks/energy_nj.py:energy_nj" with '
+         r"def energy_nj\(path\): that reads the inputs and returns power_w \* window_ns"),
         ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
         ("host_free_min_gb = 1", 'host_free_min_gb = "1"', "limits.host_free_min_gb must be float, not str"),
         ("stagger_s = 0", "stagger_s = 0\nkill_hung = 1", "limits.kill_hung must be bool, not int"),
@@ -256,7 +259,7 @@ def test_pattern_resolver(tmp_path):
     root = demo_copy(tmp_path)
     tasks = root / "tasks.toml"
     tasks.write_text(tasks.read_text() + '\n[pattern]\nresolver = "python:hooks/tasks.py:spec_of"\n')
-    (root / "hooks").mkdir()
+    (root / "hooks").mkdir(exist_ok=True)
     (root / "hooks" / "tasks.py").write_text(
         "def spec_of(task_id):\n"
         '    k, _, n = task_id.partition("_")\n'

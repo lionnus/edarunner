@@ -47,7 +47,7 @@ _PROJECT_KEYS = {
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "ntfy",
               "mail", "marks"}
-_EXTRACTORS = ("regex", "csv", "json", "python", "expr")
+_EXTRACTORS = ("regex", "csv", "json", "python")
 
 
 class ConfigError(Exception):
@@ -447,6 +447,9 @@ def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path)
 def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Metric:
     at = f"metrics.{name}"
     raw = dict(_table(raw, None, file, at))
+    if "expr" in raw:
+        raise ConfigError(f"{file}: {at}.expr is gone; write stage, file and python = \"hooks/{name}.py:{name}\" "
+                          f"with def {name}(path): that reads the inputs and returns {raw['expr']}")
     stage = raw.get("stage", [])
     raw["stage"] = [stage] if isinstance(stage, str) else stage
     for s in raw["stage"]:
@@ -458,7 +461,7 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         _table(raw["csv"], {"where", "column"}, file, f"{at}.csv")
     if sum(k in raw for k in _EXTRACTORS) != 1:
         raise ConfigError(f"{file}: {at} needs exactly one of {', '.join(_EXTRACTORS)}")
-    if "expr" not in raw and not (raw.get("file") and raw["stage"]):
+    if not (raw.get("file") and raw["stage"]):
         raise ConfigError(f"{file}: {at} needs file and stage")
     return _build(Metric, raw, file, at, name=name)
 

@@ -30,6 +30,7 @@ Two switches make failures:
 |---|---|
 | `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; five metrics; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
 | `site.toml` | one host, `local`, with the tool `demo` in version `1.0`; the scratch `/tmp/edr-demo`; the tool `demo` with 10 seats and its probe |
+| `hooks/energy.py` | the metric hook of `energy_nj`: the power times the window of one task |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
 | `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`, and `vars = { netlist_stage = 11 }` for `export`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
 | `setup.sh` | makes `repo/`, a git repository with `flow/`; the source the batch stages |

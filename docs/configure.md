@@ -123,7 +123,9 @@ json = "window_dur"
 unit = "fs"
 
 [metrics.energy_nj]
-expr = "power_w * window_fs / 1000000"
+stage = "power"
+file = "{task_dir}/power/phases.json"
+python = "hooks/energy.py:energy_nj"   # reads power.csv next to it; returns power_w * window_fs / 1e6
 unit = "nJ"
 canonical = "energy"
 ```
@@ -140,8 +142,9 @@ Three details matter in this shape:
   tree's id.
 - The flow needs its own `PATH`. The project `[env]` table carries it, and
   `$PATH` expands on the host.
-- A number the flow does not print comes from an `expr` metric over the
-  numbers it does print, such as the energy from a power and a window.
+- A number the flow does not print comes from a `python` hook that reads
+  the files the flow does print, such as the energy from a power and a
+  window. [results.md](results.md) shows the hook.
 
 ### One command per step
 

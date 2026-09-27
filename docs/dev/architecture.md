@@ -32,7 +32,7 @@ commands, the report files and the numbers in them.
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
-| `metrics.py` | the four parsers, `expr`, extraction |
+| `metrics.py` | the four parsers, extraction |
 | `db.py` | the run database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |

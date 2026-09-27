@@ -227,9 +227,9 @@ class Stage:
 
 @dataclass
 class Metric:
-    """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `expr`.
-    `expr` allows numbers, metric names, `+ - * /` and a unary minus, nothing else; it is computed
-    once every input exists, and with `stage` set only for those stages.
+    """A metric holds exactly one of the four parsers: `regex`, `csv`, `json` or `python`. A number
+    the flow does not print, such as an energy from a power and a window, comes from a `python`
+    hook that reads the input files itself.
 
     A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
     row per step directory found, under the stage that owns that step number. A file that does not
@@ -238,17 +238,15 @@ class Metric:
 
     name: str
     stage: list[str] = doc("a stage name or a list: the stages whose files hold the number", factory=list,
-                           shown="`[]`; required without `expr`")
+                           shown="required")
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
     file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
-                    shown="required without `expr`")
-    regex: str = doc("a regex; group 1 is the value", "", shown="one of the five")
+                    shown="required")
+    regex: str = doc("a regex; group 1 is the value", "", shown="one of the four")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
-                                        "`where`", None, shown="one of the five")
-    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
-    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the five")
-    expr: str = doc("an expression over other metrics of the same run, stage, step and task", "",
-                    shown="one of the five")
+                                        "`where`", None, shown="one of the four")
+    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the four")
+    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the four")
     unit: str = doc("unit text", "")
     canonical: str = doc("a name shared across projects, such as `area.cell`", "")
 
