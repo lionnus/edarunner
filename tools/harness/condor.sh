@@ -74,11 +74,13 @@ EOF
         local pid; pid=$(cat "$WORK/condor/master.pid" 2>/dev/null || true)
         if [ -n "$pid" ] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then kill "$pid"; fi
     }
+    trap stop_pool EXIT
 elif [ "$RUNTIME" = docker ]; then
     docker run -d --name "$NAME" -v "$WORK:$WORK" -v "$EDR_CONF:/etc/condor/config.d/99-edr.conf:ro" "$IMAGE" >/dev/null
     stop_pool() { docker rm -f "$NAME" >/dev/null; }
+    trap stop_pool EXIT
     # The jobs write the state directory of the caller, so they run with the caller's uid.
-    JOB_USER=$(docker exec "$NAME" getent passwd "$(id -u)" | cut -d: -f1)
+    JOB_USER=$(docker exec "$NAME" getent passwd "$(id -u)" | cut -d: -f1 || true)
     if [ -z "$JOB_USER" ]; then
         JOB_USER=edr
         docker exec "$NAME" useradd -m -u "$(id -u)" "$JOB_USER"
@@ -87,12 +89,13 @@ elif [ "$RUNTIME" = docker ]; then
 else
     echo "RUNTIME is docker or singularity"; exit 2
 fi
-trap stop_pool EXIT
 
+slot=
 for _ in $(seq 90); do
-    [ "$("${VIA[@]}" condor_status -af Name 2>/dev/null | wc -l)" -ge 1 ] && break
+    [ "$("${VIA[@]}" condor_status -af Name 2>/dev/null | wc -l)" -ge 1 ] && { slot=1; break; }
     sleep 2
 done
+[ -n "$slot" ] || { echo "no condor slot after 180 s"; exit 1; }
 "${VIA[@]}" condor_status -af Name | sed 's/^/slot: /'
 "${VIA[@]}" condor_version | head -1
 

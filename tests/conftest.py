@@ -4,7 +4,7 @@ import pytest
 
 try:
     from edarunner.notify.telegram import api
-except ImportError:  # the driver job runs the driver tests on Python 3.6 without the package
+except ImportError:  # the driver job runs pytest with --no-project, so the package is not installed
     api = None
 
 
