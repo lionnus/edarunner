@@ -1,7 +1,8 @@
 """The ssh wrapper, the host probe and the placement. See docs/design.md 3.1, 3.2, 6.
 
-Every remote command is one short shell string. The host `local` runs on
-the head node without ssh.
+Every remote command is one short shell string, run by `sh -c` so the
+login shell of the host (tcsh on many farms) never parses it. The host
+`local` runs on the head node without ssh.
 """
 
 from __future__ import annotations
@@ -158,7 +159,7 @@ class Ssh:
             argv = ["/bin/bash", "-c", cmd] if isinstance(cmd, str) else list(cmd)
         else:
             text = cmd if isinstance(cmd, str) else shlex.join(cmd)
-            argv = ["ssh", *self.site.ssh_options, host, text]
+            argv = ["ssh", *self.site.ssh_options, host, "sh -c " + shlex.quote(text)]
         try:
             p = subprocess.run(
                 argv,
