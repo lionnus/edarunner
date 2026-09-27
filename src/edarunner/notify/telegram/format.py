@@ -130,13 +130,14 @@ def resources(probe: Row) -> list[tuple[str, str]]:
 
 
 def hosts(rows: Iterable[Row]) -> str:
-    """`host · cores used/total · ram used/total GB · scratch used/total GB · gpu used/total` per host."""
+    """`host · mark cores used/total · mark ram used/total GB · …` per host; `marks` of a row holds the marks."""
     lines = []
     for r in rows:
         if "error" in r:
-            lines.append(f"<b>{esc(r['host'])}</b> · <i>no answer</i>")
+            lines.append(f"{runs.NO_ANSWER} <b>{esc(r['host'])}</b> · <i>no answer</i>")
             continue
-        lines.append(f"<b>{esc(r['host'])}</b> · " + " · ".join(f"{name} {value}" for name, value in resources(r)))
+        lines.append(f"<b>{esc(r['host'])}</b> · " + " · ".join(f"{r['marks'][name]} {name} {value}"
+                                                              for name, value in resources(r)))
     return fit("\n".join(lines)) or "<i>no hosts</i>"
 
 

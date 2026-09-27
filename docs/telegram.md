@@ -142,16 +142,18 @@ stage and step, the host and the age, the proposed command in monospace,
 and the last log line in a `<pre>` block. `/events` shows one line
 `HH:MM kind handle` per event, the kind in bold, and the reason indented
 under it in italics; it shows a handle in place of a run id. `/hosts`
-shows one line per host with every resource as used of total:
+shows one line per host, with the mark of `edr hosts` and the used of
+total of every resource:
 
 ```
-hostA · cores 21/32 · ram 93/376 GB · scratch 195/1538 GB · gpu 0/1
+hostA · 🟢 cores 21/32 · 🟡 ram 93/376 GB · 🟢 scratch 195/1538 GB · 🟢 gpu 0/1
 ```
 
-A host without a GPU has no `gpu` part, and a host that fails the probe
-shows `no answer`. `/lic` shows `demo · 3/8 seats used` per licence. `/help` is prose, so a tap on a
-command sends it. `/compare` and `/metric` reply with a `<pre>` block
-of aligned columns.
+The hosts come in the order of `edr hosts`, the worst mark first. A host
+without a GPU has no `gpu` part, and a host that fails the probe shows
+`⚫ no answer`. `/lic` shows `demo · 3/8 seats used` per licence.
+`/help` is prose, so a tap on a command sends it. `/compare` and
+`/metric` reply with a `<pre>` block of aligned columns.
 
 A custom command replies with the output of its program as it is. Give
 the program a narrow format, or the phone wraps the lines.

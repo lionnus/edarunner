@@ -429,8 +429,8 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
 def test_hosts_and_lic_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     head, row = out.splitlines()[0], out.splitlines()[2]
-    assert code == 0 and head.split() == ["host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
-    assert row.split()[0] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
+    assert code == 0 and head.split() == ["ok", "host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
+    assert row.split()[1] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
     assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
     code, out, _ = edr(capsys, "lic")
@@ -463,23 +463,45 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     code, out, _ = edr(capsys, "hosts")
     lines = out.splitlines()
     assert code == 3 and len(lines) == 5 and "\x1b" not in out
-    a = next(ln for ln in lines if ln.startswith("hostA"))
-    assert a.split() == ["hostA", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "120/256", "/scratch", "800/2000",
-                         "\u2588" * 5 + "\u2591" * 3, "1/4", "290/320", "4/2", "3"]
-    local = next(ln for ln in lines if ln.startswith("local"))
-    assert local.split() == ["local", "0/8", "\u2591" * 8, "0.2", "35/62.3", "/tmp/x", "15.5/15.6", "\u2591" * 8, "-", "-", "3/0", "0"]
-    assert next(ln for ln in lines if ln.startswith("hostB")).split()[1:] == ["error:", "hostB:", "rc", "255:", "timeout"]
+    assert [ln.split()[:2] for ln in lines[2:]] == [["⚫", "hostB"], ["🟠", "hostA"], ["🟢", "local"]]
+    a = next(ln for ln in lines if " hostA " in ln)
+    assert a.split() == ["🟠", "hostA", "🟠", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "🟢", "120/256", "/scratch", "🟢",
+                         "800/2000", "\u2588" * 5 + "\u2591" * 3, "🟡", "1/4", "290/320", "4/2", "3"]
+    local = next(ln for ln in lines if " local " in ln)
+    assert local.split() == ["🟢", "local", "🟢", "0/8", "\u2591" * 8, "0.2", "🟢", "35/62.3", "/tmp/x", "🟢", "15.5/15.6",
+                             "\u2591" * 8, "-", "-", "3/0", "0"]
+    assert next(ln for ln in lines if " hostB " in ln).split()[2:] == ["error:", "hostB:", "rc", "255:", "timeout"]
     code, out, _ = edr(capsys, "hosts", "--narrow")
     lines = out.splitlines()
     assert code == 3 and all(len(ln) <= 48 for ln in lines)
-    assert lines[0].split() == ["host", "cores", "ram", "GB", "scratch", "GB", "gpu"]
-    assert next(ln for ln in lines if ln.startswith("hostA")).split() == ["hostA", "52/64", "120/256", "800/2000", "1/4"]
+    assert lines[0].split() == ["ok", "host", "cores", "ram", "GB", "scratch", "GB", "gpu"]
+    assert next(ln for ln in lines if " hostA " in ln).split() == ["🟠", "hostA", "🟠52/64", "🟢120/256", "🟢800/2000", "🟡1/4"]
     code, out, _ = edr(capsys, "--json", "hosts")
-    data = {r["host"]: r for r in json.loads(out)["data"]}
+    data = json.loads(out)["data"]
+    assert [r["host"] for r in data] == ["hostB", "hostA", "local"]
+    data = {r["host"]: r for r in data}
     assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
+    assert data["hostA"]["marks"] == {"cores": "🟠", "ram": "🟢", "scratch": "🟢", "gpu": "🟡"}
+    assert data["local"]["marks"]["gpu"] == "-" and set(data["hostB"]["marks"].values()) == {"⚫"}
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     text = acts.hosts_text().splitlines()
-    assert "<b>hostA</b> · cores 52/64 · ram 136/256 GB · scratch 1200/2000 GB · gpu 3/4" in text and "<b>hostB</b> · <i>no answer</i>" in text
+    assert ("<b>hostA</b> · 🟠 cores 52/64 · 🟢 ram 136/256 GB · 🟢 scratch 1200/2000 GB · 🟡 gpu 3/4" in text
+            and "⚫ <b>hostB</b> · <i>no answer</i>" in text and text[0].startswith("⚫"))
+
+
+def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
+    site = demo / "site.toml"
+    site.write_text(site.read_text() + "".join(f"\n[hosts.{h}]\ncores = 8\nram_gb = 8\n" for h in ("b", "a", "c")))
+    (demo / "edr.toml").write_text((demo / "edr.toml").read_text() + "\n[marks]\nram = [0.1, 0.2, 0.3]\n")
+    ram_used = {"local": 0.0, "a": 0.25, "b": 0.3, "c": 0.3}
+
+    def probe(self, host):
+        return HostProbe(host, 8, 10 - 10 * ram_used[host], "/s", 10, cores=8, total_ram_gb=10, total_gb=10)
+
+    monkeypatch.setattr(Ssh, "probe", probe)
+    code, out, _ = edr(capsys, "--json", "hosts")
+    data = json.loads(out)["data"]
+    assert code == 0 and [(r["host"], r["marks"]["ram"]) for r in data] == [("b", "🔴"), ("c", "🔴"), ("a", "🟠"), ("local", "🟢")]
 
 
 def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
