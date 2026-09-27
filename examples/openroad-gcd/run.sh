@@ -6,10 +6,8 @@ cd "$(dirname "$0")"
 EDR=${EDR:-edr}
 CAP_S=${CAP_S:-900}
 
-rm -rf repo wt data
-mkdir repo && cp design/config.mk repo/
-git -C repo init -q -b main && git -C repo add -A
-git -C repo -c user.name=gcd -c user.email=gcd@example.com commit -q -m "gcd design"
+rm -rf wt data
+bash setup.sh
 
 src=$($EDR --json stage HEAD | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["src"])')
 $EDR check

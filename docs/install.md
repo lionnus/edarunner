@@ -1,7 +1,7 @@
 # Install and first run
 
-After this page `edr` is on your head node, the demo batch ran on one
-machine, and you know what a compute host needs.
+After this page `edr` is on your head node, a real OpenROAD flow ran
+under it on one machine, and you know what a compute host needs.
 
 ## Install the controller
 
@@ -21,19 +21,60 @@ with `no edr.toml in <dir> or above; run edr init`.
 
 ## Five minutes on one machine
 
-`examples/local-demo` is a fake flow that runs on the head node alone. It
-needs no EDA tool, no licence and no second host.
+`examples/openroad-gcd` takes the GCD design of OpenROAD-flow-scripts
+(ORFS) through Yosys and OpenROAD on the head node. You need `edr`, git,
+and either an ORFS install or the `openroad/orfs` image that CI uses. With
+Docker, start the image in a clone of the repository and install `edr`
+inside it:
 
 ```sh
-git clone https://github.com/lionnus/edarunner && cd edarunner/examples/local-demo
-bash setup.sh                 # a small git repository with the fake flow
+git clone https://github.com/lionnus/edarunner && cd edarunner
+docker run --rm -it -v "$PWD":/edarunner -w /edarunner openroad/orfs:26Q3-657-gb74a7293e bash
+apt-get update -qq && apt-get install -y -qq rsync     # the image has no rsync
+curl -LsSf https://astral.sh/uv/install.sh | sh && . ~/.local/bin/env
+uv tool install /edarunner
+```
+
+With ORFS installed on the machine, skip the container and set `ORFS` to
+your checkout. `examples/openroad-gcd/README.md` shows the same run with
+Singularity. Then run the flow:
+
+```sh
+cd examples/openroad-gcd
+bash setup.sh                 # a small git repository with the design config
 edr checkout HEAD             # a pinned worktree of the source; prints its short hash
 edr check                     # load the config, probe the hosts, check the hooks
-edr plan demo                 # run ids, hosts, every path; writes nothing
-edr launch demo               # one driver per run on the host `local`
+edr plan gcd                  # run ids, hosts, every path; writes nothing
+edr launch gcd                # one driver on the host `local`
 edr status                    # the board
-edr watch --once              # collect, extract metrics, classify
-edr metrics --design <src> --csv   # <src> is the hash that `edr checkout` printed
+edr watch --once              # collect the reports and extract the metrics
+edr metrics --design <src>    # <src> is the hash that `edr checkout` printed
+```
+
+Synthesis, floorplan and placement take about half a minute. Once the
+board says `done`, `edr watch --once` collects the reports, and
+`edr metrics` prints the area and the setup slack of each stage.
+`examples/openroad-gcd/README.md` says which report each number comes
+from.
+
+## The complete setup
+
+[edarunner-example](https://github.com/lionnus/edarunner-example) is a
+complete setup split the way a lab would split it: a site template with
+the hosts, the licences and the bot, and a project that takes the Croc
+SoC from RTL to GDS. Copy the site once per lab and the project once per
+design.
+
+## Without any EDA tool
+
+`examples/local-demo` runs a scripted stand-in for a flow, so it needs no
+EDA tool and no licence. The tests use it, and it is the quickest way to
+try a failure, a resume or the seat gate. The commands are the same as
+above with the batch `demo`:
+
+```sh
+cd examples/local-demo && bash setup.sh
+edr checkout HEAD && edr launch demo
 ```
 
 The two runs end `done` within a minute. `examples/local-demo/README.md`

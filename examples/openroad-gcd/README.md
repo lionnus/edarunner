@@ -22,7 +22,8 @@ runner may lack it.
 | `site.toml` | one host, `local`, with the scratch `/tmp` |
 | `jobs/gcd.toml` | one job, `gcd`, config `nangate45`, on `local` |
 | `design/config.mk` | the design config of the run tree; it includes the ORFS one |
-| `run.sh` | the whole run: the source repository, `stage`, `check`, `plan`, `launch`, `watch --once` until the run ends, `status`, `metrics`, `export` |
+| `setup.sh` | makes `repo/`, a git repository with `config.mk`; the source the batch stages |
+| `run.sh` | the whole run for CI: `setup.sh`, `stage`, `check`, `plan`, `launch`, `watch --once` until the run ends, `status`, `metrics`, `export` |
 
 `repo/`, `wt/` and `data/` are made by the run, and git ignores them.
 
@@ -55,6 +56,9 @@ before the first `__`.
 
 ## Run it
 
+The top-level `README.md` runs the example step by step in the Docker
+image. `run.sh` does the same in one call:
+
 ```sh
 cd examples/openroad-gcd
 bash run.sh
@@ -67,3 +71,28 @@ The three stages take about 30 s on two cores; the CI job takes about
 for the run in seconds (default 900). The script fails when the run does
 not end `done`, or when the area and the timing rows are missing from
 `edr metrics --csv`. The export lands in `data/exports/<src>/`.
+
+## Run it with Singularity
+
+Singularity and Apptainer run the same image without root. The image has
+no `rsync`, and without root you cannot install one inside it, so bind
+the host binary. On a host whose `rsync` links `libpopt`, bind that
+library too, because the image lacks it:
+
+```sh
+singularity exec -B "$PWD" -B /usr/bin/rsync:/usr/local/bin/rsync \
+  -B /lib64/libpopt.so.0:/usr/local/lib/libpopt.so.0 --env LD_LIBRARY_PATH=/usr/local/lib \
+  docker://openroad/orfs:26Q3-657-gb74a7293e bash
+```
+
+Inside, `edr` needs Python 3.11 and the image has 3.10. With `uv` in
+your home directory, make a separate environment in the checkout:
+
+```sh
+export PATH=~/.local/bin:$PATH
+uv venv --python 3.11 .venv-orfs && uv pip install --python .venv-orfs/bin/python -e .
+export PATH=$PWD/.venv-orfs/bin:$PATH
+```
+
+Bind any other directory that the Python of `uv` lives in. On an AlmaLinux
+8 head node this run took 35 s from `edr launch` to `done`.
