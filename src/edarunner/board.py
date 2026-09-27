@@ -1,16 +1,26 @@
 """Boards: 48-column text, the wide table, one run's detail, status.html and compare.html.
 
 A row is a `runs` row of the ledger; `counts` may be a dict or JSON text.
+The tables are rich renderables; `plain` turns one into text for a bot.
 """
 
 from __future__ import annotations
 
 import html
+import io
 import json
+import os
+import re
+import sys
 import time
 from collections import Counter
 from string import Template
 from typing import Any
+
+from rich import box
+from rich.console import Console, Group, RenderableType
+from rich.table import Table
+from rich.text import Text
 
 Row = dict[str, Any]
 
@@ -24,6 +34,34 @@ _RANK = {"dead": 0, "failed": 0, "hung": 1, "incomplete": 1, "looping": 2, "over
 _SHORT = {"running": "RUN", "dead": "DEAD", "hung": "HUNG", "looping": "LOOP", "over_budget": "OVER",
           "host_full": "FULL", "superseded": "SUPER", "incomplete": "INC", "failed": "FAIL", "stopped": "STOP",
           "killed": "KILL"}
+STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "yellow", "superseded": "yellow",
+         "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
+         "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
+         "imported": "dim", "abandoned": "dim", "resumed": "cyan"}
+# No markup: a task in a metric key looks like a tag, `power_w[k_small]`.
+_OPTS = {"markup": False, "highlight": False, "emoji": False}
+
+
+# rendering
+
+def console() -> Console:
+    """Stdout: colour on a terminal, none in a pipe or under NO_COLOR, and no wrap in a pipe."""
+    tty = sys.stdout.isatty()
+    return Console(color_system=None if os.environ.get("NO_COLOR") else "auto", width=None if tty else 400, **_OPTS)
+
+
+def plain(renderable: str | RenderableType, width: int = 200) -> str:
+    """A renderable as text without colour, for a bot message or a test."""
+    if isinstance(renderable, str):
+        return renderable
+    buf = io.StringIO()
+    Console(file=buf, width=width, force_terminal=False, color_system=None, **_OPTS).print(renderable)
+    return "\n".join(ln.rstrip() for ln in buf.getvalue().splitlines())
+
+
+def state_text(state: Any) -> Text:
+    """A state or a stage status in its colour."""
+    return Text(_s(state) or "-", style=STYLE.get(_s(state), ""))
 
 
 # row helpers
@@ -94,11 +132,15 @@ def _stage_step(row: Row) -> str:
     return "-" if not stage else stage if row.get("step") is None else f"{stage}/{row['step']}"
 
 
-def table(head: list[str], body: list[list[Any]]) -> str:
-    """Left-aligned text columns; None prints as '-', and a short row is padded."""
-    rows = [head, *[["-" if c is None else str(c) for c in r] + [""] * (len(head) - len(r)) for r in body]]
-    w = [max(len(r[i]) for r in rows) for i in range(len(head))]
-    return "\n".join(" ".join(f"{c:<{w[i]}}" for i, c in enumerate(r)).rstrip() for r in rows)
+def table(head: list[str], body: list[list[Any]], styles: dict[str, str] | None = None,
+          right: tuple[str, ...] = ()) -> Table:
+    """Columns under a rule; `styles` per column name, `right` names the right-aligned ones. None prints as '-'."""
+    t = Table(box=box.SIMPLE_HEAD, show_edge=False, pad_edge=False, collapse_padding=True)
+    for h in head:
+        t.add_column(h, style=(styles or {}).get(h), justify="right" if h in right else "left")
+    for r in body:
+        t.add_row(*(c if isinstance(c, Text) else "-" if c is None else str(c) for c in r))
+    return t
 
 
 # text boards
@@ -123,44 +165,59 @@ def narrow(rows: list[Row], width: int = 48, now: float | None = None) -> str:
     return "\n".join(lines)
 
 
-def wide(rows: list[Row], now: float | None = None) -> str:
+def narrow_text(rows: list[Row], width: int = 48, now: float | None = None) -> Text:
+    """The narrow board with the state of each run in its colour."""
+    text = Text(narrow(rows, width, now))
+    for m in re.finditer(r"(?m)^ *#\d+ (\S+)", text.plain):
+        state = next((s for s in STYLE if _SHORT.get(s, s)[:5] == m.group(1)), None)
+        if state:
+            text.stylize(STYLE[state], m.start(1), m.end(1))
+    return text
+
+
+def wide(rows: list[Row], now: float | None = None) -> Table | str:
     """One line per run, every state, in board order."""
     now = now or time.time()
-    body = [[f"#{n}", r.get("label"), r.get("host"), state_of(r), r.get("phase"), _stage_step(r),
+    body = [[f"#{n}", r.get("label"), r.get("host"), state_text(state_of(r)), r.get("phase"), _stage_step(r),
              hm(_age_s(r, now)), _fd(r), f"{cost(r, now):.1f}"] for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"
-    return table(["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body)
+    return table(["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body,
+                 styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "cost"))
 
 
-def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None) -> str:
+def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None) -> Group:
     """One run: identity, state, counts, stage rows, metrics and the log tail."""
     now = now or time.time()
     ex = row.get("exit")
-    lines = [
-        _s(row.get("run_id")) or "?",
-        f"{state_of(row)}  {_s(row.get('phase')) or '-'}  {_stage_step(row)}  exit {'-' if ex is None else ex}",
-        f"label {_s(row.get('label'))}  config {_s(row.get('config'))}  batch {_s(row.get('batch'))}  "
-        f"src {_s(row.get('src'))}{' dirty' if row.get('dirty') else ''}",
-        f"host {_s(row.get('host'))}  root {_s(row.get('root'))}",
-        f"started {_ts(row.get('started'))}  updated {_ts(row.get('updated'))} ({hm(_age_s(row, now))} ago)  "
-        f"cost {cost(row, now):.1f} core-h",
-        "counts " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-"),
-        f"disk free {_s(row.get('disk_free_gb')) or '-'} GB  tree {_s(row.get('tree_gb')) or '-'} GB",
+    parts: list[RenderableType] = [
+        Text(_s(row.get("run_id")) or "?", style="bold"),
+        Text.assemble(state_text(state_of(row)), f"  {_s(row.get('phase')) or '-'}  {_stage_step(row)}  "
+                      f"exit {'-' if ex is None else ex}"),
+        Text(f"label {_s(row.get('label'))}  config {_s(row.get('config'))}  batch {_s(row.get('batch'))}  "
+             f"src {_s(row.get('src'))}{' dirty' if row.get('dirty') else ''}"),
+        Text.assemble(f"host {_s(row.get('host'))}  root ", (_s(row.get("root")), "dim")),
+        Text.assemble("started ", (_ts(row.get("started")), "dim"), "  updated ", (_ts(row.get("updated")), "dim"),
+                      f" ({hm(_age_s(row, now))} ago)  cost {cost(row, now):.1f} core-h"),
+        Text("counts " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-")),
+        Text(f"disk free {_s(row.get('disk_free_gb')) or '-'} GB  tree {_s(row.get('tree_gb')) or '-'} GB"),
     ]
     if row.get("killed_by"):
-        lines.append(f"killed by {row['killed_by']}")
+        parts.append(Text(f"killed by {row['killed_by']}", style="red"))
     if stage_rows:
-        lines += ["", "stages", table(["stage", "task", "attempt", "status", "exit", "started", "ended", "signature"], [
-            [s.get("stage"), s.get("task"), s.get("attempt"), s.get("status"), s.get("exit"),
-             _ts(s.get("started")), _ts(s.get("ended")), s.get("signature")] for s in stage_rows])]
+        parts += [Text(""), Text("stages", style="bold"), table(
+            ["stage", "task", "attempt", "status", "exit", "started", "ended", "signature"],
+            [[s.get("stage"), s.get("task"), s.get("attempt"), state_text(s.get("status")), s.get("exit"),
+              _ts(s.get("started")), _ts(s.get("ended")), s.get("signature")] for s in stage_rows],
+            styles={"started": "dim", "ended": "dim"})]
     if metrics:
-        lines += ["", "metrics", table(["stage", "step", "task", "name", "value", "unit"], [
-            [m.get("stage"), m.get("step"), m.get("task"), m.get("canonical") or m.get("name"), m.get("value"),
-             m.get("unit")] for m in metrics])]
+        parts += [Text(""), Text("metrics", style="bold"), table(
+            ["stage", "step", "task", "name", "value", "unit"],
+            [[m.get("stage"), m.get("step"), m.get("task"), m.get("canonical") or m.get("name"), m.get("value"),
+              m.get("unit")] for m in metrics], right=("step", "value"))]
     if tail:
-        lines += ["", "log tail", tail.rstrip()]
-    return "\n".join(lines)
+        parts += [Text(""), Text("log tail", style="bold"), Text(tail.rstrip())]
+    return Group(*parts)
 
 
 # html pages
