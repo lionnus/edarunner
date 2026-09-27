@@ -64,6 +64,7 @@ def export(
         "producer": f"edarunner {__version__}",
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "schema": 1,
+        "project": project.project,
         "source": design,
         "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
