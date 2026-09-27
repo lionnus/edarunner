@@ -31,6 +31,15 @@ def identity(spec, env):
     return {"host": spec.get("host") or socket.gethostname(), "sched_id": sched or None}
 
 
+def group_alive(pgid):
+    # type: (int) -> bool
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def usage(pgids):
     # type: (list) -> tuple
     """(CPU seconds, RSS in GB) of every process in `pgids`, from /proc, else from ps; (None, None) when ps fails.
@@ -169,6 +178,7 @@ class Driver(object):
         self.keep_file = os.path.join(spec_dir, self.run_id + ".keep.json")
         self.lock = threading.RLock()
         self.procs = {}  # pgid -> Popen
+        self.signalled = {}  # pgid -> Popen of every group kill_all reached; its shell may exit first
         self.killed = None
         self.stop_mode = None
         self.over_budget = None
@@ -300,6 +310,8 @@ class Driver(object):
         self.kill_all(signum)
 
     def kill_all(self, sig):
+        with self.lock:
+            self.signalled.update(self.procs)
         for pgid in list(self.procs):
             self.killpg(pgid, sig)
 
@@ -389,13 +401,18 @@ class Driver(object):
             return None, ""
 
     def reap(self, timeout):
+        """Wait up to `timeout` for every recorded process group to end, then SIGKILL the groups.
+
+        The test is the group, not the direct child: a tool that ignores SIGTERM outlives its shell."""
         end = time.time() + timeout
-        for pgid, p in list(self.procs.items()):
-            try:
-                p.wait(max(0.1, end - time.time()))
-            except subprocess.TimeoutExpired:
-                self.killpg(pgid, signal.SIGKILL)
-                p.wait()
+        with self.lock:
+            procs = list({**self.signalled, **self.procs}.items())
+        for pgid, p in procs:
+            while time.time() < end and (p.poll() is None or group_alive(pgid)):
+                time.sleep(TICK_S)
+        for pgid, p in procs:
+            self.killpg(pgid, signal.SIGKILL)
+            p.wait()
             self.forget(p)
 
     # limits

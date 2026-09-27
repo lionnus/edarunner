@@ -95,6 +95,32 @@ def test_sigterm_kills_the_group_and_reports(tmp_path: Path) -> None:
     assert not (Path(spec["root"]) / "reports" / "3").exists()
 
 
+
+def test_a_tool_that_ignores_sigterm_gets_sigkill_after_the_grace(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",))
+    pid_file = tmp_path / "tool.pid"
+    # The shell dies on SIGTERM; the tool under it ignores SIGTERM, as KLayout does.
+    spec["stages"][0]["cmd"] = f"bash -c 'trap \"\" TERM; echo $$ > {pid_file}; while :; do sleep 1; done' & wait"
+    proc = start(spec)
+    wait_for(spec, lambda h: h["phase"] == "stage:synth" and h["pgids"])
+    for _ in range(100):
+        if pid_file.is_file() and pid_file.read_text().strip():
+            break
+        time.sleep(0.05)
+    tool = int(pid_file.read_text())
+    proc.send_signal(signal.SIGTERM)
+    rc, hb = finish(proc, spec)
+    assert (rc, hb["phase"]) == (10, "KILLED:SIGTERM")
+    for _ in range(100):
+        try:
+            os.kill(tool, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(tool, signal.SIGKILL)
+        pytest.fail("the tool %d survived the stop" % tool)
+
 def test_stop_file_after_task_ends_the_group(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=1)
     proc = start(spec)
