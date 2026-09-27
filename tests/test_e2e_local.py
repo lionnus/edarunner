@@ -64,7 +64,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     date = (state / "demo" / "RUN_DATE").read_text().strip()
     ids = {"a": f"{date}_a_demo_g{src}", "b_nodw": f"{date}_b_nodw_demo_DW0_g{src}"}
     assert (state / "bin" / "demo" / "edr_driver.py").is_file() and (state / "demo" / f"{ids['a']}.spec.json").is_file()
-    assert edr(capsys, "launch", "demo")[0] == 1  # already launched
+    assert edr(capsys, "launch", "demo")[0] == 2  # already launched
     code, out, _ = edr(capsys, "keep", "a@demo", "--hours", "1", "--ack")
     assert code == 0 and json.loads((state / "demo" / f"{ids['a']}.keep.json").read_text()) == {"hours": 1, "ack": True}
 
