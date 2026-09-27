@@ -90,7 +90,7 @@ flow that calls `python` from the venv of the tree.
 | `cmd` | the command; runs once per task in a group | required |
 | `resume` | the command with `{checkpoint}` for a resume | `""` |
 | `cwd` | working directory, relative to the run tree | `"."` |
-| `steps` | step names the flow passes | `[]` |
+| `steps` | step names the flow passes, indexed by step number; the list continues the previous stage's, or names this stage's own steps when it is shorter. A stage owns the step numbers its list adds | `[]` |
 | `progress` | command that prints the current step number | `""` |
 | `needs` | `{ cores, disk_gb, licence }`; `licence` is a name or `{ name = seats }` and must exist in the site | `{ cores = 1, disk_gb = 0.0 }` |
 | `budget` | `{ hours, disk_gb, kill, per }`; `per` is `"stage"` or `"task"` | `{ kill = false, per = "stage" }` |
@@ -109,7 +109,7 @@ flow that calls `python` from the venv of the tree.
 | Key | Meaning | Default |
 |---|---|---|
 | `stage` | a stage name or a list; every name must exist | `[]` (only with `expr`) |
-| `step` | `"*"`, a number, or absent | none |
+| `step` | `"*"`, a number, or absent; a row is emitted only under the stage that owns the step | none |
 | `file` | file to read; required unless `expr` | `""` |
 | `regex` | group 1 is the value | one of five |
 | `csv` | `{ where = { col = value }, column }` | one of five |

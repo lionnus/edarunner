@@ -158,6 +158,13 @@ absent), `file`, one of `regex` (group 1), `csv` (`where`, `column`),
 path, returns a float) or `expr` (over other metric names of the same
 run, stage, step and task), `unit`, `canonical`.
 
+A numbered step belongs to one stage. A stage's `steps` list is indexed
+by the step number and continues the previous stage's list, so the demo's
+`pnr` lists all six names and owns steps 4 and 5. A list shorter than the
+steps before it names the stage's own steps and continues from the
+previous end. A `step = "*"` metric emits a row for a step only under the
+stage that owns it, and a stage without `steps` takes no numbered step.
+
 ### 3.2 site.toml
 
 ```toml

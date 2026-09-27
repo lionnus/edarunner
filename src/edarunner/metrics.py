@@ -83,6 +83,7 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
     now = int(time.time())
     base = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
     rows: list[dict] = []
+    owned = _owned_steps(project)
     for metric in project.metrics.values():
         if metric.expr:
             continue
@@ -90,7 +91,8 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
             stage = project.stages.get(stage_name)
             group = stage is not None and stage.is_group
             for task in list(tasks.values()) if group else [None]:
-                rows += _extract_one(project, metric, stage_name, stage, task, base, run_dir, now)
+                rows += _extract_one(project, metric, stage_name, stage, task, base, run_dir, now,
+                                     owned.get(stage_name, range(0)))
     rows += _expressions(project, rows, run["run_id"], now)
     return rows
 
@@ -104,6 +106,7 @@ def _extract_one(
     base: dict[str, object],
     run_dir: Path,
     now: int,
+    owned: range = range(0),
 ) -> list[dict]:
     run_id = str(base["run_id"])
     task_id = task.id if task else ""
@@ -120,6 +123,8 @@ def _extract_one(
         return [_row(run_id, stage_name, None, task_id, metric, None, text, now)]
     rows = []
     for step, path in _files(pattern, run_dir, metric.step):
+        if step is not None and step not in owned:
+            continue  # a numbered step belongs to one stage; the others skip it
         rel = str(path.relative_to(run_dir))
         try:
             value, source = parse_file(metric, path, project.root), rel
@@ -150,6 +155,27 @@ def _expressions(project: Project, rows: list[dict], run_id: str, now: int) -> l
                 value, source = None, f"{metric.expr}: {e}"
             out.append(_row(run_id, stage, step, task, metric, value, source, now))
     return out
+
+
+def _owned_steps(project: Project) -> dict[str, range]:
+    """The step numbers each stage owns, in stage order.
+
+    A `steps` list is indexed by the step number and continues the previous stage's
+    list. A list that is shorter than the steps before it names this stage's own
+    steps only, so it continues from the previous end. A stage without `steps`
+    owns no numbered step.
+    """
+    owned: dict[str, range] = {}
+    lo = 0
+    for name, stage in project.stages.items():
+        if not stage.steps:
+            continue
+        hi = len(stage.steps)
+        if hi <= lo:
+            hi = lo + len(stage.steps)
+        owned[name] = range(lo, hi)
+        lo = hi
+    return owned
 
 
 def _files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | None, Path]]:

@@ -238,12 +238,12 @@ def test_collect_extract_and_params_once(env: Env, monkeypatch) -> None:
     rows = env.ledger.metrics(run_ids=[run_id])
     by = {(r["stage"], r["step"], r["name"]): r["value"] for r in rows}
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
-    assert len(by) == 16 and all(v is not None for v in by.values())
+    assert len(by) == 8 and all(v is not None for v in by.values())
     params = {r["key"]: r["value"] for r in env.ledger.db.execute("SELECT key, value FROM params WHERE run_id=?", (run_id,))}
     assert params == {"config": "demo", "DW": "0", "src": "gabc1234"}
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
-    assert calls == [run_id] and len(env.ledger.metrics(run_ids=[run_id])) == 16
+    assert calls == [run_id] and len(env.ledger.metrics(run_ids=[run_id])) == 8
 
 
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
