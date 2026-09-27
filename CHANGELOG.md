@@ -6,6 +6,8 @@ The first release.
 
 - `edr`, the controller, with the seventeen verbs of `docs/design.md`
   section 10, among them `import` for a tree that edr did not make.
+  `import --results DIR` links collected files of a run whose tree is gone
+  and extracts its metrics, so `metrics` and `export` cover legacy results.
 - `edr_driver.py`, the one-file driver for Python 3.6 or newer: stages,
   task groups with a shared queue, licence gates, budgets, retries, the
   heartbeat, the stop and keep files.
