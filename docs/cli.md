@@ -115,7 +115,7 @@ Probes every host of the site file and prints one row per host:
 | `mount` | the largest writable scratch of the host's list |
 | `scratch GB` | that mount, free of total, with a bar of the used part |
 | `gpu` | GPUs idle of total; idle means under 5 % utilisation and under 5 % memory in use |
-| `gpu GB` | GPU memory used of total, summed over the GPUs |
+| `gpu GB` | GPU memory free of total, summed over the GPUs |
 | `tools` | processes that match `tool_procs`, ours and others |
 | `runs` | our driver processes |
 

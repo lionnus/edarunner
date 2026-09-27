@@ -210,7 +210,7 @@ def _hosts_table(rows: list[Row], narrow: bool) -> Table:
             continue
         body.append([r["host"], f"{used}/{cores}", board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
                      board.bar(r["total_gb"] - r["free_gb"], r["total_gb"]), gpu,
-                     f"{r['gpu_used_gb']:g}/{r['gpu_total_gb']:g}" if r["gpus"] else "-",
+                     f"{r['gpu_total_gb'] - r['gpu_used_gb']:g}/{r['gpu_total_gb']:g}" if r["gpus"] else "-",
                      f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]])
     return board.table(head, body, styles={"host": "bold", "mount": "dim"},
                        right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
