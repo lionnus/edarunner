@@ -10,6 +10,7 @@ theme:
   name: material
   logo: icon.svg
   favicon: icon.svg
+  font: false
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
