@@ -66,12 +66,12 @@ def _read_csv(path):
 def test_export_one_design(world, tmp_path):
     project, led = world
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, led, "aaa", out)
+    manifest = export.export(project, led, "aaa111", out)
 
     assert [r["run_id"] for r in manifest["runs"]] == [RUN_A, RUN_B]
     assert manifest["runs"][0] == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "src": "aaa111",
                                    "host": "local", "phase": "done"}
-    assert manifest["sources"] == {"aaa111": "aaa"}
+    assert manifest["source"] == "aaa111"
     assert manifest["schema"] == 1 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [RUN_B]
     assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2}
@@ -108,13 +108,15 @@ def test_labels_and_refusals(world, tmp_path):
     project, led = world
     manifest = export.export(project, led, "aaa111", tmp_path / "x", labels=["a"])
     assert [r["label"] for r in manifest["runs"]] == ["a"] and manifest["incomplete"] == []
-    assert export.export(project, led, "bbb", tmp_path / "y")["incomplete"] == [RUN_C]
+    assert export.export(project, led, "bbb222", tmp_path / "y")["incomplete"] == [RUN_C]
     with pytest.raises(Refuse, match="not empty"):
-        export.export(project, led, "aaa", tmp_path / "x")
+        export.export(project, led, "aaa111", tmp_path / "x")
     with pytest.raises(Refuse, match="no run"):
         export.export(project, led, "zzz", tmp_path / "z")
+    with pytest.raises(Refuse, match="no run"):  # a prefix of a source tag is not a match
+        export.export(project, led, "aaa", tmp_path / "z")
     with pytest.raises(Refuse, match="no run"):
-        export.export(project, led, "aaa", tmp_path / "z", labels=["nope"])
+        export.export(project, led, "aaa111", tmp_path / "z", labels=["nope"])
     with pytest.raises(Refuse, match="empty design"):
         export.export(project, led, "", tmp_path / "z")
     assert not (tmp_path / "z").exists()
@@ -123,20 +125,20 @@ def test_labels_and_refusals(world, tmp_path):
 def test_dry_run_writes_nothing(world, tmp_path, capsys):
     project, led = world
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, led, "aaa", out, dry_run=True)
+    manifest = export.export(project, led, "aaa111", out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
     assert paths == ["runs.csv", "metrics.csv", "a/reports/3/area.rpt", "a/sim/power/reports/power.csv",
                      "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
-    real = export.export(project, led, "aaa", out)
+    real = export.export(project, led, "aaa111", out)
     assert [(f["path"], f["sha256"]) for f in manifest["files"]] == [(f["path"], f["sha256"]) for f in real["files"]]
 
 
 def test_with_logs_copies_the_logs(world, tmp_path):
     project, led = world
     out = tmp_path / "with_logs"
-    manifest = export.export(project, led, "aaa", out, labels=["a"], with_logs=True)
+    manifest = export.export(project, led, "aaa111", out, labels=["a"], with_logs=True)
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
     assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "a/log/synth.log",

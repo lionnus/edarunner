@@ -44,7 +44,7 @@ def export(
         raise Refuse(f"'{out}' exists and is not empty")
     runs = _select(ledger, design, labels)
     if not runs:
-        raise Refuse(f"no run has a source that starts with '{design}'" + (f" and a label in {labels}" if labels else ""))
+        raise Refuse(f"no run has the source '{design}'" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
     metrics = ledger.metrics(run_ids=ids)
 
@@ -64,7 +64,7 @@ def export(
         "producer": f"edarunner {__version__}",
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "schema": 1,
-        "sources": {r["src"]: design for r in runs},
+        "source": design,
         "runs": [{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
         "files": [],
@@ -93,10 +93,10 @@ def export(
 
 
 def _select(ledger: Ledger, design: str, labels: list[str] | None) -> list[Row]:
-    """The newest run per label whose src starts with `design`, in label order."""
+    """The newest run per label with the exact source tag `design`, in label order."""
     newest: dict[str, Row] = {}
     for r in ledger.runs():
-        if (r.get("src") or "").startswith(design) and (labels is None or r["label"] in labels):
+        if r.get("src") == design and (labels is None or r["label"] in labels):
             newest[r["label"]] = r
     return [newest[k] for k in sorted(newest)]
 
