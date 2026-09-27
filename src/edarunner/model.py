@@ -321,7 +321,7 @@ class Source:
     """The git repository of the flow, and how `edr checkout` pins a version of it."""
 
     repo: Path = doc("the git repository of the flow")
-    worktrees: Path = doc("where `edr checkout` adds a worktree per commit")
+    worktrees: Path = doc("where `edr checkout` puts a local clone per commit")
     ref: str = doc("the ref `edr checkout` takes without an argument", "HEAD")
     nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
                             factory=list)
@@ -334,9 +334,22 @@ class Source:
 class Sync:
     """The copy of the checked-out tree to the host, by `rsync --delete` behind the guard."""
 
-    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree; `.git` is always excluded, "
-                             "because the `.git` file of a worktree points at the head node", factory=list)
+    exclude: list[str] = doc("rsync exclude patterns for the copy of the tree; `.git` goes along unless "
+                             "the list names it", factory=list)
     after: str = doc("a command on the head node after each sync, with the run placeholders", "")
+
+
+@dataclass
+class Runtime:
+    """One command that prepares the run tree on the host, such as `uv sync --frozen` for a Python
+    environment. The driver runs it in the tree root after the sync and before the first stage, with
+    the environment of the stages, and logs it to `log/setup.log`. A failure ends the run
+    `FAILED:runtime` before any stage takes a tool seat."""
+
+    setup: str = doc("the command; it takes the run placeholders", "", shown="none")
+    when_changed: list[str] = doc("files relative to the tree root; on a tree that ran the same `setup` before, "
+                                  "such as under `edr continue`, the command runs again only when one of them "
+                                  "changed. Empty runs it every time", factory=list)
 
 
 @dataclass
@@ -393,6 +406,7 @@ class Project:
     site: Site = doc("the path of `site.toml`")
     source: Source = field()
     sync: Sync = field(default_factory=Sync)
+    runtime: Runtime = field(default_factory=Runtime)
     safety: Safety = field(default_factory=Safety)
     limits: Limits = field(default_factory=Limits)
     placement: Placement = field(default_factory=Placement)
