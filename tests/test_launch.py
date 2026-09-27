@@ -24,7 +24,7 @@ from edarunner.model import Needs
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
-SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "host", "root", "state_file",
+SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "vars", "host", "root", "state_file",
              "queue_dir", "shell", "env", "limits", "start_at", "stages"}
 
 
@@ -182,15 +182,35 @@ def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
     assert launch.build_tag(project, b) == "demo-x2"
 
 
-def test_netlist_stage_is_a_plain_job_field(env) -> None:
+def test_job_vars_fill_the_stage_strings_and_env(env) -> None:
     project, batch, ssh, db = env
     synth_only(batch)
-    project.stages["synth"].cmd += " NETLIST={netlist_stage}"
+    batch.jobs[0].vars = {}
+    project.stages["synth"].cmd += " NETLIST={vars.netlist_stage}"
     (p,) = launch.plan(project, batch, ssh, db, date=DATE)
-    assert p.problems == [f"missing placeholder {{netlist_stage}} in '{project.stages['synth'].cmd}'"]
-    batch.jobs[0].netlist_stage = 7
+    assert p.problems == [f"missing placeholder {{vars.netlist_stage}} in '{project.stages['synth'].cmd}'"]
+    batch.jobs[0].vars = {"netlist_stage": "7", "corner": "ss"}
+    project.env = {"CORNER": "{vars.corner}"}
     (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     assert p.problems == [] and p.spec["stages"][0]["cmd"].endswith(" NETLIST=7")
+    assert p.spec["env"]["CORNER"] == "ss" and p.spec["vars"] == {"netlist_stage": "7", "corner": "ss"}
+
+
+def test_a_job_without_config(env, tmp_path: Path) -> None:
+    project, batch, ssh, db = env
+    synth_only(batch)
+    job = batch.jobs[0]
+    job.config = ""
+    assert launch.build_tag(project, job) == ""
+    (p,) = launch.plan(project, batch, ssh, db, date=DATE)
+    assert p.problems == [] and p.run_id == f"{DATE}_a_gHEAD" and p.spec["config"] == ""
+    job.overrides = {"DW": "0"}
+    assert launch.build_tag(project, job) == "DW0"
+    hook = tmp_path / "tag.py"
+    hook.write_text("def build_tag(config, overrides):\n    return repr(config)\n")
+    project.source.build_tag = f"python:{hook}:build_tag"
+    assert launch.build_tag(project, job) == "''"
+    assert launch.render_run_id("{build_tag}_{label}-{config}", {"build_tag": "", "label": "a", "config": ""}) == "a"
 
 
 def test_plan_reuses_a_database_run(env) -> None:

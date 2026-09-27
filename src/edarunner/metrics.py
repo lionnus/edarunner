@@ -2,44 +2,16 @@
 
 from __future__ import annotations
 
-import ast
 import csv
 import json
-import operator
 import re
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 from .config import load_hook
 from .model import Metric, Project, Stage, Task
 
 _PLACEHOLDER = re.compile(r"\{([\w.]+)\}")
-_OPS: dict[type, Callable[[float, float], float]] = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-}
-
-
-def evaluate(expr: str, names: dict[str, float]) -> float:
-    """Evaluate `expr` over `names`; only numbers, names and + - * / are allowed."""
-
-    def ev(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return ev(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return float(node.value)
-        if isinstance(node, ast.Name):
-            return float(names[node.id])
-        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
-            return _OPS[type(node.op)](ev(node.left), ev(node.right))
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-            return -ev(node.operand)
-        raise ValueError(f"{type(node).__name__} is not allowed in a metric expr")
-
-    return ev(ast.parse(expr, mode="eval"))
 
 
 def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
@@ -81,8 +53,6 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
     rows: list[dict] = []
     owned = _owned_steps(project)
     for metric in project.metrics.values():
-        if metric.expr:
-            continue
         for stage_name in metric.stage:
             if stages is not None and stage_name not in stages:
                 continue
@@ -91,7 +61,6 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
             for task in list(tasks.values()) if group else [None]:
                 rows += _extract_one(project, metric, stage_name, stage, task, base, run_dir, now,
                                      owned.get(stage_name, range(0)), task_dirs.get(task.id) if task else None)
-    rows += _expressions(project, rows, run["run_id"], now)
     return rows
 
 
@@ -131,29 +100,6 @@ def _extract_one(
             value, source = None, f"{rel}: {e}"
         rows.append(_row(run_id, stage_name, step, task_id, metric, value, source, now))
     return rows
-
-
-def _expressions(project: Project, rows: list[dict], run_id: str, now: int) -> list[dict]:
-    groups: dict[tuple, dict[str, float]] = {}
-    for r in rows:
-        if r["value"] is not None:
-            groups.setdefault((r["stage"], r["step"], r["task"]), {})[r["name"]] = r["value"]
-    out = []
-    for metric in project.metrics.values():
-        if not metric.expr:
-            continue
-        for (stage, step, task), names in groups.items():
-            if metric.stage and stage not in metric.stage:
-                continue
-            try:
-                value, source = evaluate(metric.expr, names), metric.expr
-                names[metric.name] = value
-            except KeyError:
-                continue  # an input metric has not arrived yet
-            except Exception as e:
-                value, source = None, f"{metric.expr}: {e}"
-            out.append(_row(run_id, stage, step, task, metric, value, source, now))
-    return out
 
 
 def step_totals(project: Project) -> dict[str, int]:

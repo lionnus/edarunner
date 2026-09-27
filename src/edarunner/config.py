@@ -32,7 +32,7 @@ from types import NoneType, UnionType
 from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
-    BACKENDS, Batch, BotCommand, Budget, Host, Job, Limits, Marks, Metric, Needs, Placement,
+    BACKENDS, Batch, BotCommand, Budget, Host, Job, Limits, Mail, Marks, Metric, Needs, Ntfy, Placement,
     Project, Retry, Safety, Site, Source, Stage, Sync, Task, Telegram, Tool,
 )
 
@@ -45,8 +45,9 @@ _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "telegram",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env", "marks",
 }
-_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "marks", "scheduler"}
-_EXTRACTORS = ("regex", "csv", "json", "python", "expr")
+_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "tools", "nfs_export", "telegram", "ntfy",
+              "mail", "marks", "scheduler"}
+_EXTRACTORS = ("regex", "csv", "json", "python")
 
 
 class ConfigError(Exception):
@@ -64,11 +65,11 @@ PLACEHOLDERS = {
     "date": ("the pinned date of the batch, `YYYYMMDD_HHMM`", "the run id"),
     "batch": ("the batch name", "the run id, the stage strings"),
     "label": ("the label of the job", "the run id, the stage strings"),
-    "config": ("the configuration name of the job", "the run id, the stage strings"),
+    "config": ("the configuration name of the job; `\"\"` without one", "the run id, the stage strings"),
     "build_tag": ("the build tag of the job", "the run id, the stage strings"),
     "src": ("the source tag of the batch", "the run id, the stage strings"),
     "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
-    "netlist_stage": ("the `netlist_stage` of the job, only when the job sets it", "the stage strings"),
+    "vars.<name>": ("a key of the job's `vars` table", "the stage strings, `[env]`, `collect`"),
     "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),
     "host": ("the host of the run", "the stage strings, `[env]`, `sync.after`"),
     "mount": ("the scratch mount of the host", "the stage strings, `[env]`, `sync.after`"),
@@ -97,7 +98,7 @@ def render(template: str, values: Mapping[str, object]) -> str:
     def sub(m: re.Match[str]) -> str:
         key = m.group(1)
         if key not in values:
-            known = key in PLACEHOLDERS or key.startswith(("task.", "tool."))
+            known = key in PLACEHOLDERS or key.startswith(("task.", "tool.", "vars."))
             raise ConfigError(f"{'missing' if known else 'unknown'} placeholder {{{key}}} in '{template}'")
         return str(values[key])
 
@@ -276,6 +277,10 @@ def load_site(path: PathLike) -> Site:
     hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
     telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
     given = {k: raw[k] for k in ("env", "tool_procs", "nfs_export") if k in raw}
+    if "ntfy" in raw:
+        given["ntfy"] = _channel(Ntfy, raw["ntfy"], file, "ntfy", "token_file")
+    if "mail" in raw:
+        given["mail"] = _channel(Mail, raw["mail"], file, "mail", "password_file")
     given.update({f"ssh_{k}": v for k, v in ssh.items()})
     sched = _table(raw.get("scheduler", {}), {"backend"}, file, "scheduler")
     if "backend" in sched:
@@ -286,6 +291,19 @@ def load_site(path: PathLike) -> Site:
         given["scheduler_backend"] = sched["backend"]
     return Site(path=file, scratch=_need(raw, "scratch", file, ""), hosts=hosts, tools=tools, telegram=telegram,
                 marks=_marks(raw.get("marks", {}), file, Marks()), **given)
+
+
+def _channel(cls: type[T], raw: object, file: Path, at: str, secret: str) -> T:
+    """A notifier table; the secret file is relative to `file`, and a `from` key fills `sender`."""
+    t = dict(_table(raw, None, file, at))
+    if "sender" in t:
+        raise ConfigError(f"{file}: unknown key '{at}.sender'")
+    if cls is Mail:
+        t["sender"] = _need(t, "from", file, at)
+        del t["from"]
+    if isinstance(t.get(secret), str):
+        t[secret] = _path(t[secret], file)
+    return _build(cls, t, file, at)
 
 
 def _host(name: str, raw: object, tools: dict[str, Tool], file: Path) -> Host:
@@ -346,6 +364,9 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         raise ConfigError(f"{file}: 'state' is now 'state_dir'")
     raw = _table(raw, _PROJECT_KEYS, file, "")
     _schema(raw, file)
+    if "{netlist_stage}" in repr(raw):
+        raise ConfigError(f"{file}: {{netlist_stage}} is gone; write {{vars.netlist_stage}} and set "
+                          "vars = { netlist_stage = <n> } in the job")
     name = _need(raw, "project", file, "")
     values: dict[str, object] = {"project": name, "project_root": str(root), "user": getpass.getuser()}
     if site_path is None:
@@ -433,6 +454,9 @@ def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path)
 def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Metric:
     at = f"metrics.{name}"
     raw = dict(_table(raw, None, file, at))
+    if "expr" in raw:
+        raise ConfigError(f"{file}: {at}.expr is gone; write stage, file and python = \"hooks/{name}.py:{name}\" "
+                          f"with def {name}(path): that reads the inputs and returns {raw['expr']}")
     stage = raw.get("stage", [])
     raw["stage"] = [stage] if isinstance(stage, str) else stage
     for s in raw["stage"]:
@@ -444,7 +468,7 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         _table(raw["csv"], {"where", "column"}, file, f"{at}.csv")
     if sum(k in raw for k in _EXTRACTORS) != 1:
         raise ConfigError(f"{file}: {at} needs exactly one of {', '.join(_EXTRACTORS)}")
-    if "expr" not in raw and not (raw.get("file") and raw["stage"]):
+    if not (raw.get("file") and raw["stage"]):
         raise ConfigError(f"{file}: {at} needs file and stage")
     return _build(Metric, raw, file, at, name=name)
 
@@ -506,6 +530,14 @@ def _job(raw: object, index: int, project: Project, file: Path) -> Job:
     at = f"job[{index}]"
     raw = dict(_table(raw, None, file, at))
     raw["overrides"] = {k: str(v) for k, v in raw.get("overrides", {}).items()}
+    if "netlist_stage" in raw:
+        raise ConfigError(f"{file}: {at}.netlist_stage is gone; write vars = {{ netlist_stage = {raw['netlist_stage']} }}")
+    for k, v in _table(raw.get("vars", {}), None, file, f"{at}.vars").items():
+        if not re.fullmatch(r"[A-Za-z_]\w*", k):
+            raise ConfigError(f"{file}: {at}.vars key {k!r} is not an identifier")
+        if isinstance(v, (dict, list)):
+            raise ConfigError(f"{file}: {at}.vars.{k} must be a string or a number")
+    raw["vars"] = {k: str(v) for k, v in raw.get("vars", {}).items()}
     for s in raw.get("stages", []):
         if s not in project.stages:
             raise ConfigError(f"{file}: {at}.stages names unknown stage '{s}'")

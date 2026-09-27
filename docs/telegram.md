@@ -9,6 +9,7 @@ uses long polling over outbound HTTPS, so it needs no open port and no
 webhook. [reference/configuration.md](reference/configuration.md) lists
 the keys of `[telegram]`, and [reference/bot.md](reference/bot.md) every
 command. [guarantees.md](guarantees.md) says what the bot never does.
+[notify.md](notify.md) shows the other channels, ntfy and mail.
 
 ## Set up the bot
 

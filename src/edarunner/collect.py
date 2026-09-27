@@ -85,7 +85,8 @@ def collect_run(
     `host` is where the tree is read, as the backend names it; empty means the run's host."""
     spec = load_spec(project, run)
     only = spec_stages(spec)
-    c = _Copier(project, ssh, db, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), host)
+    c = _Copier(project, ssh, db, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), spec.get("vars"),
+                host)
     if c.result.failures:
         return c.result
     finished, running = stage_state(project, heartbeat, only)
@@ -107,7 +108,7 @@ def collect_on_request(
     """Copy the `collect_on_request` list `name` of every stage; the artifact class is `name`."""
     spec = load_spec(project, run)
     only = spec_stages(spec)
-    c = _Copier(project, ssh, db, run, {}, dry_run, spec_task_dirs(spec, str(run.get("root") or "")))
+    c = _Copier(project, ssh, db, run, {}, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), spec.get("vars"))
     if c.result.failures:
         return c.result
     tasks = list(run.get("tasks") or [])
@@ -123,13 +124,17 @@ def collect_on_request(
 
 
 def restore_on_request(
-    project: Project, ssh: Ssh, db: Database, run: dict, name: str, host: str, root: str, dry_run: bool = False
+    project: Project, ssh: Ssh, db: Database, run: dict, name: str, host: str, root: str, dry_run: bool = False,
+    job_vars: dict[str, str] | None = None,
 ) -> CollectResult:
-    """Copy the `collect_on_request` list `name` of `run` from data/results/<run_id>/ into <host>:<root>."""
+    """Copy the `collect_on_request` list `name` of `run` from data/results/<run_id>/ into <host>:<root>.
+
+    `job_vars` fill `{vars.<name>}` where the spec of `run` lacks them.
+    """
     spec = load_spec(project, run)
     heartbeat = load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
     c = _Copier(project, ssh, db, {**run, "host": host, "root": root}, {}, dry_run,
-                spec_task_dirs(spec, str(run.get("root") or "")))
+                spec_task_dirs(spec, str(run.get("root") or "")), {**(job_vars or {}), **spec.get("vars", {})})
     if c.result.failures:
         return c.result
     only = spec_stages(spec)
@@ -146,13 +151,13 @@ def restore_on_request(
 class _Copier:
     def __init__(
         self, project: Project, ssh: Ssh, db: Database, run: dict, heartbeat: dict, dry_run: bool,
-        task_dirs: dict[str, str] | None = None, host: str = "",
+        task_dirs: dict[str, str] | None = None, job_vars: dict[str, str] | None = None, host: str = "",
     ) -> None:
         self.project, self.ssh, self.db, self.dry_run = project, ssh, db, dry_run
         self.task_dirs = task_dirs or {}
         self.result = CollectResult()
         scalars = {k: v for k, v in {**heartbeat, **run}.items() if isinstance(v, (str, int, float))}
-        self.values = placeholders(project, **scalars)
+        self.values = placeholders(project, **scalars, vars=job_vars or {})
         self.run_id = str(self.values.get("run_id", ""))
         self.host = host or str(self.values.get("host", ""))
         self.root = str(self.values.get("root", ""))

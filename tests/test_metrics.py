@@ -1,14 +1,13 @@
-"""Tests of metrics.extract and evaluate on the demo layout."""
+"""Tests of metrics.extract on the demo layout."""
 
 from __future__ import annotations
 
 import json
+import shutil
 import tomllib
 from pathlib import Path
 
-import pytest
-
-from edarunner.metrics import evaluate, extract
+from edarunner.metrics import extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
@@ -18,7 +17,8 @@ COLUMNS = {"run_id", "stage", "step", "task", "name", "canonical", "value", "uni
 
 
 def demo_project(root: Path) -> Project:
-    """Build a Project from the demo edr.toml with the parts extract reads."""
+    """Build a Project from the demo edr.toml with the parts extract reads; the demo hooks go to `root`."""
+    shutil.copytree(DEMO / "hooks", root / "hooks", dirs_exist_ok=True)
     cfg = tomllib.loads((DEMO / "edr.toml").read_text())
     stages = {
         n: Stage(name=n, foreach=s.get("foreach", ""), task_dir=s.get("task_dir", ""), steps=s.get("steps", []))
@@ -36,7 +36,6 @@ def demo_project(root: Path) -> Project:
             csv=m.get("csv"),
             json=m.get("json", ""),
             python=m.get("python", ""),
-            expr=m.get("expr", ""),
             unit=m.get("unit", ""),
             canonical=m.get("canonical", ""),
         )
@@ -111,12 +110,13 @@ def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
     csv_bad = [r for r in by_name(rows, "power_w") if r["task"] == "k_small"]
     assert csv_bad[0]["value"] is None and "WHOLE" in csv_bad[0]["source_file"]
     assert [r["task"] for r in by_name(rows, "window_ns")] == ["k_small"]
-    assert by_name(rows, "energy_nj") == []
+    (energy,) = by_name(rows, "energy_nj")
+    assert energy["task"] == "k_small" and energy["value"] is None and "no WHOLE row" in energy["source_file"]
 
 
 def test_python_parser_and_fixed_step(tmp_path):
     results_tree(tmp_path / "results")
-    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks").mkdir(exist_ok=True)
     (tmp_path / "hooks" / "p.py").write_text("def read(path):\n    return open(path).read().split()[1]\n")
     project = demo_project(tmp_path)
     project.metrics = {
@@ -127,18 +127,6 @@ def test_python_parser_and_fixed_step(tmp_path):
     assert [(r["stage"], r["step"], r["value"], r["source_file"]) for r in rows] == [
         ("synth", 2, 1021.0, "reports/2/area.rpt"),
     ]
-
-
-def test_evaluate():
-    assert evaluate("(a + b) * 2 - c / 4", {"a": 1, "b": 2, "c": 8}) == 4.0
-    assert evaluate("-a", {"a": 1.5}) == -1.5
-    for bad in ("__import__('os')", "a ** 2", "a.b", "[1]", "'x'"):
-        with pytest.raises(ValueError):
-            evaluate(bad, {"a": 1})
-    with pytest.raises(KeyError):
-        evaluate("missing", {})
-    with pytest.raises(ZeroDivisionError):
-        evaluate("a / 0", {"a": 1})
 
 
 def test_a_numbered_step_belongs_to_one_stage(tmp_path):

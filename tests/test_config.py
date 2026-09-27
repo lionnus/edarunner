@@ -39,7 +39,7 @@ def test_demo_end_to_end():
     assert p.stages["pnr"].retry is None and p.stages["export"].prune == {"netlist": ["out"]}
     assert p.metrics["area_cell_um2"].stage == ["synth", "pnr"] and p.metrics["area_cell_um2"].step == "*"
     assert p.metrics["power_w"].stage == ["power"] and p.metrics["power_w"].csv["column"] == "total_w"
-    assert p.metrics["energy_nj"].stage == [] and p.metrics["energy_nj"].expr == "power_w * window_ns"
+    assert p.metrics["energy_nj"].stage == ["power"] and p.metrics["energy_nj"].python == "hooks/energy.py:energy_nj"
     assert p.tasks["k_big"].fields == {"kernel": "softmax", "test": "SOFTMAX_R197", "args": "ROWS=197"}
     assert p.tasks["k_big"].budget.hours == 2 and p.tasks["k_small"].budget is None
     assert p.task_resolver == ""
@@ -84,6 +84,9 @@ def test_render_and_placeholders():
         ('tools = ["demo"]', "tools = 1", "stages.synth.needs.tools must be a list of names or"),
         ('tools = ["demo"]', 'tools = { demo = "2" }', "stages.synth.needs.tools must be a list of names or"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
+        ('python = "hooks/energy.py:energy_nj"', 'expr = "power_w * window_ns"',
+         r'metrics.energy_nj.expr is gone; write stage, file and python = "hooks/energy_nj.py:energy_nj" with '
+         r"def energy_nj\(path\): that reads the inputs and returns power_w \* window_ns"),
         ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
         ("host_free_min_gb = 1", 'host_free_min_gb = "1"', "limits.host_free_min_gb must be float, not str"),
         ("stagger_s = 0", "stagger_s = 0\nkill_hung = 1", "limits.kill_hung must be bool, not int"),
@@ -236,6 +239,25 @@ def test_duplicate_label(tmp_path):
         config.load_batch(config.load_project(root), "demo")
 
 
+def test_job_vars_and_optional_config(tmp_path):
+    root = demo_copy(tmp_path)
+    jobs = root / "jobs" / "demo.toml"
+    text = jobs.read_text()
+    b = config.load_batch(config.load_project(root), "demo")
+    assert b.jobs[0].vars == {"netlist_stage": "11"} and b.jobs[1].vars == {}
+    jobs.write_text(text.replace('label = "b_nodw"\nconfig = "demo"\n', 'label = "b_nodw"\n'))
+    assert config.load_batch(config.load_project(root), "demo").jobs[1].config == ""
+    for old, new, match in (("vars = { netlist_stage = 11 }", 'vars = { "not-id" = 1 }', "vars key 'not-id' is not an identifier"),
+                            ("vars = { netlist_stage = 11 }", "vars = { x = [1] }", r"job\[0\].vars.x must be a string or a number"),
+                            ("vars = { netlist_stage = 11 }", "netlist_stage = 11",
+                             r"job\[0\].netlist_stage is gone; write vars = \{ netlist_stage = 11 \}")):
+        jobs.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_batch(config.load_project(root), "demo")
+    with pytest.raises(ConfigError, match=r"\{netlist_stage\} is gone; write \{vars.netlist_stage\}"):
+        config.load_project(demo_copy(tmp_path / "x", "out/{vars.netlist_stage}/", "out/{netlist_stage}/"))
+
+
 def test_site_path_forms(tmp_path, monkeypatch):
     root = demo_copy(tmp_path, 'site = "site.toml"', 'site = "etc/site.toml"')
     (root / "etc").mkdir()
@@ -252,7 +274,7 @@ def test_pattern_resolver(tmp_path):
     root = demo_copy(tmp_path)
     tasks = root / "tasks.toml"
     tasks.write_text(tasks.read_text() + '\n[pattern]\nresolver = "python:hooks/tasks.py:spec_of"\n')
-    (root / "hooks").mkdir()
+    (root / "hooks").mkdir(exist_ok=True)
     (root / "hooks" / "tasks.py").write_text(
         "def spec_of(task_id):\n"
         '    k, _, n = task_id.partition("_")\n'

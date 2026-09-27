@@ -675,9 +675,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
         # An imported tree has no jobs file; the database row is the job.
         batch, job = None, None
     if job is None:
-        if not row.get("config"):
-            raise Refuse(f"{run_id}: no job {row['label']} in jobs/{row['batch']}.toml and no config in the database")
-        job = Job(label=str(row["label"]), config=str(row["config"]))
+        job = Job(label=str(row["label"]), config=str(row.get("config") or ""))
         batch = Batch(batch=str(row["batch"]), source=str(row["src"] or ""), jobs=[job],
                       path=project.root / "jobs" / f"{row['batch']}.toml")
     job.reuse, job.stages, job.host = {"run_id": run_id}, [a.stage], a.on or "auto"
@@ -1011,7 +1009,7 @@ def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     notifiers = make_notifiers(c.project.site, c.project, c.db, Actions(c))
     if not notifiers:
-        raise Refuse("no notifier is configured; see docs/telegram.md")
+        raise Refuse("no notifier is configured; see docs/notify.md")
     sent = sum(n.post("note", html, a.silent) for n in notifiers)
     c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": a.text})
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
