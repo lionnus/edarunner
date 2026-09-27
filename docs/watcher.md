@@ -3,7 +3,7 @@
 `edr watch` runs on the head node, one process per project. It reads the
 heartbeats, classifies every run, collects the results, extracts the
 metrics, starts queued jobs and sends the alerts. It never deletes a
-file or a tree. `docs/getting-started.md` shows how to run it as a
+tree, and the only files it removes are stale seat leases. `docs/getting-started.md` shows how to run it as a
 service.
 
 ## The cycle
@@ -28,11 +28,16 @@ service up.
    group of the run is alive on the host.
 5. Find orphans: our processes that match `tool_procs` on a host and
    belong to no live run tree.
-6. Launch queued jobs whose host now fits, one per batch per cycle.
-7. Write the boards and the pinned Telegram board.
-8. Send the daily digest once a day, at the first cycle after
+6. Sweep the seat leases in `<state_dir>/leases/`. A lease older than
+   2 minutes is stale when its run has no live heartbeat, is `dead`,
+   `retired` or `abandoned`, has left the lease's stage, or when the
+   lease is older than the stage budget. The watcher removes it and
+   writes a `lease` event with the reason.
+7. Launch queued jobs whose host now fits, one per batch per cycle.
+8. Write the boards and the pinned Telegram board.
+9. Send the daily digest once a day, at the first cycle after
    `limits.digest_at`.
-9. Write `<state_dir>/watch.json` with the time, the cycle count and the pid.
+10. Write `<state_dir>/watch.json` with the time, the cycle count and the pid.
 
 Its memory between cycles is three rows of the database's `store` table:
 `progress`, what each run looked like last time, `notified`, the
@@ -113,7 +118,7 @@ than three cycles, or missing, it prints why, sends an alert and exits
 
 ## What the watcher never does
 
-- It never deletes a file or a tree.
+- It never deletes a tree, and it removes no file but a stale seat lease.
 - It never kills without `kill_hung` or `kill_orphan`, and never after
   an `ack`.
 - It never resumes a run twice.

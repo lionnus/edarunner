@@ -76,7 +76,7 @@ it under `data[].spec`. The driver fills two placeholders itself:
 | `driver` | the driver copy the run started with; a resume uses it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
 | `shell`, `env` | every command runs through `shell -c` with `env` added |
-| `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s` |
+| `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
 | `stages` | the stages in run order |
 
@@ -85,8 +85,9 @@ A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
 `parallel`, `prepare`, `after_each`, `budget`, `tools` and `tasks`, each
 task with `id`, `cmd`, `dir`, `needs`, `budget` and, when its own
 `needs` names tools, `tools`. A `tools` entry is `{"name", "seats",
-"probe"}`: the seats needed and the probe argv, rendered; a tool without
-a probe is not in the list.
+"probe", "leases"}`: the seats needed, the probe argv, rendered, and the
+lease directory `<state_dir>/leases/<tool>/`, which the launch creates; a
+tool without a probe is not in the list.
 
 ### The heartbeat
 
@@ -106,7 +107,7 @@ a torn file.
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
 | `last_cmd`, `last_log`, `log` | the last command, the last three lines of the current log, its path |
 | `keep_hours` | the hours the keep file adds |
-| `gate` | why the run waits at a gate, such as `fc: 0 free, 1 needed`; null when it does not |
+| `gate` | why the run waits at a gate, such as `fc: 1 free, 1 held by others, 1 needed`; null when it does not |
 | `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
 
 A heartbeat keeps its last phase after the driver dies. `edr status
@@ -152,15 +153,35 @@ the signal to every process group it started, waits up to 10 s, sends
 A stage whose `needs.tools` names a tool with a probe starts with
 `gate:<stage>`. The driver runs the probe argv from the spec in the run
 tree, with the spec `env`. The first number on the first line is the
-free seats. The driver waits while that number is below the seats the
-stage needs. It polls every 5 s, up to `gate_max_s`; then the stage
-fails with exit 4. The reason goes into the driver log as `gate <stage>:
-wait for <tool>: <free> free, <needed> needed`, and into the heartbeat
-as `gate`. A probe that fails or prints no number counts as unknown: the
-driver logs it and runs the stage. In a task group the check runs before
-each claim, with the task's own `tools` when it has them. A short pool
-delays the next claim by 5 s. The driver knows no licence manager; the
-site hook does that work.
+free seats. Two drivers that read the same free seat would both start,
+so the driver also leases the seats it takes. The seats it may use are
+the free seats less the seats that other stages and tasks leased in the
+last `lease_s` seconds. After `lease_s` the tool holds its seat, and the
+probe no longer reports it free.
+
+When enough seats are left, the driver writes one lease file per seat,
+`<leases>/<tool>/<run_id>.<stage>.<n>` (with `.<task>` after the stage
+in a task group), by a temporary file and a rename. The file holds the
+run id, the stage, the driver pid, the host, the time and the stage
+budget in seconds. Then it counts again, and backs off when an older
+lease of another run leaves too few seats, so of two drivers that read
+the same free seat, the later one waits.
+
+The driver waits while the seats are short. It polls every 5 s, up to
+`gate_max_s`; then the stage fails with exit 4. The reason goes into the
+driver log as `gate <stage>: wait for <tool>: <free> free, <held> held
+by others, <needed> needed`, into the heartbeat as `gate`, and into
+`edr status <handle>`. A probe that fails or prints no number counts as
+unknown: the driver logs it, leases the seats and runs the stage. In a
+task group the check and the lease run before each claim, with the
+task's own `tools` when it has them. A short pool delays the next claim
+by 5 s.
+
+The driver removes its lease files when the stage or the task ends, on
+every exit path: a failure, an exception, a stop and a signal. A driver
+killed with `SIGKILL` leaves its leases; the watcher sweeps them
+(`docs/watcher.md`). The driver knows no licence manager; the site hook
+does that work.
 
 ## Retries
 

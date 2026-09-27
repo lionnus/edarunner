@@ -82,6 +82,7 @@ say what each one does.
 | `streak` | equal failure signatures in a row that stop a task group | `3` |
 | `heartbeat_s` | period of the heartbeat and of the watcher cycle | `60` |
 | `gate_max_s` | longest wait at a tool gate | `14400` |
+| `lease_s` | time a seat lease counts against other runs; the tool holds the seat by then | `600` |
 | `kill_hung` | the watcher kills a hung run after `grace_s` | `false` |
 | `kill_orphan` | the watcher kills an orphan tool process after `grace_s` | `false` |
 | `digest_at` | the local time, `HH:MM`, of the daily digest; empty is off | `""` |
@@ -247,7 +248,8 @@ the table replaces the site's keys for this project only.
 
 A tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
 the probe on the host and reads the first line it prints, `free` or `free total`, and waits while
-`free` is below the seats the stage needs. A probe that fails or prints no number counts as
+`free`, less the seats other runs leased in the last `lease_s`, is below the seats the stage
+needs; then it leases its seats in `<state_dir>/leases/<tool>/`. A probe that fails or prints no number counts as
 unknown and lets the stage run. A hook that keeps a reserve for others subtracts it before it
 prints. A tool without a probe is present or not, with no gate. A name that no `[tools]` table
 declares is an error where it appears. The core knows no licence manager;

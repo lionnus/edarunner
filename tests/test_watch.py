@@ -418,3 +418,39 @@ def test_run_forever_once_returns_1_when_the_cycle_failed(env: Env, monkeypatch)
     assert watch.run_forever(env.project, env.ssh, env.db, [env.notifier], once=True) == 0
     monkeypatch.setattr(watch, "cycle", boom)
     assert watch.run_forever(env.project, env.ssh, env.db, [env.notifier], once=True) == 1
+
+
+def test_stale_leases_are_swept_with_an_event(env: Env) -> None:
+    env.heartbeat("live")
+    env.heartbeat("gone", phase="KILLED:SIGKILL", exit=10)
+    env.heartbeat("d", age=200)
+    env.heartbeat("moved", stage="pnr")
+    d = env.project.state_dir / "leases" / "demo"
+    d.mkdir(parents=True)
+
+    def lease(label: str, age: float, budget_s: float | None = None, run_id: str | None = None) -> str:
+        run_id = run_id or rid(label)
+        (d / f"{run_id}.synth.0").write_text(json.dumps({"run_id": run_id, "key": f"{run_id}.synth", "stage": "synth",
+                                                         "pid": 4242, "host": "local", "ts": NOW - age, "budget_s": budget_s}))
+        return f"{run_id}.synth.0"
+
+    keep = [lease("live", 300, 3600), lease("young", 10, run_id=rid("unknown"))]
+    lease("gone", 300)
+    lease("d", 300)
+    lease("moved", 300)
+    lease("other", 300)
+    (d / f".{rid('live')}.synth.1.tmp").write_text("{")
+    assert len(env.cycle(dry_run=True)) == 4 and len(list(d.iterdir())) == 7
+    env.cycle()
+    assert sorted(p.name for p in d.iterdir() if not p.name.startswith(".")) == sorted(keep)
+    texts = {e["run_id"]: e["text"] for e in env.db.events(n=500) if e["kind"] == "lease"}
+    assert texts == {
+        rid("gone"): f"stale lease demo/{rid('gone')}.synth.0: the run ended KILLED:SIGKILL",
+        rid("d"): f"stale lease demo/{rid('d')}.synth.0: the run is dead",
+        rid("moved"): f"stale lease demo/{rid('moved')}.synth.0: the run left stage synth",
+        rid("other"): f"stale lease demo/{rid('other')}.synth.0: no live heartbeat of the run"}
+    lease("live", 3601, 3600)
+    env.cycle(NOW + 1)
+    assert not (d / f"{rid('live')}.synth.0").exists()
+    assert any(e["text"] == f"stale lease demo/{rid('live')}.synth.0: older than the stage budget of 3600 s"
+               for e in env.db.events(n=50))

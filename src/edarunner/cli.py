@@ -118,7 +118,7 @@ class Ctx:
         name = name or os.environ.get("EDR_BATCH")
         if name:
             return name
-        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name != "bin"]
+        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name not in ("bin", "leases")]
         if not dirs:
             raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name
@@ -433,7 +433,7 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         stages = [dict(r) for r in c.db.conn.execute(
             "SELECT * FROM stage_runs WHERE run_id=? ORDER BY stage, task, attempt", (run_id,))]
         mets = c.db.metrics(run_ids=[run_id])
-        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or "")),
+        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate")),
                {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets})
         return Exit.DONE
     code = Exit.DONE

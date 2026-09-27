@@ -655,6 +655,10 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
     hb_path.write_text(json.dumps(hb))
     row = {r["run_id"]: r for r in json.loads(edr(capsys, "--json", "status")[1])["data"]["runs"]}[b]
     assert row["state"] == "dead"
+    hb.update(phase="gate:synth", gate="demo: 0 free, 1 held by others, 1 needed", updated=now)
+    hb_path.write_text(json.dumps(hb))
+    code, out, _ = edr(capsys, "status", "b_nodw@demo")
+    assert code == 0 and "gate waits for demo: 0 free, 1 held by others, 1 needed" in out
     hb.update(phase="INCOMPLETE:1f0s", exit=8, updated=now, counts={"done": 0, "failed": 1})
     hb_path.write_text(json.dumps(hb))
     code, out, _ = edr(capsys, "status")
