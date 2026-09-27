@@ -1,0 +1,39 @@
+site_name: edarunner
+site_url: https://lionnus.github.io/edarunner/
+repo_url: https://github.com/lionnus/edarunner
+docs_dir: docs
+strict: true
+validation:
+  anchors: warn
+
+theme:
+  name: material
+  logo: icon.svg
+  favicon: icon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+extra_css:
+  - extra.css
+
+plugins:
+  - search
+  - awesome-pages
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
