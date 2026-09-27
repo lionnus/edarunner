@@ -15,6 +15,11 @@
 - `edr tools` replaces `edr lic`: free and total seats per tool, and the
   hosts that have it. `lic` and `/lic` still answer for one release. The
   heartbeat field `licence_unknown` is gone; `gate` says why a run waits.
+- `edr hosts` marks each resource from 🟢 to 🔴 by the thresholds of a
+  new `[marks]` table in `site.toml`, which `edr.toml` may override. A
+  new first column `ok` holds the worst mark, and the rows go by it.
+  `--json` gives the marks of each host in `marks`.
+- The `/hosts` reply of the bot starts each host with its worst mark.
 
 ## 0.1.1 (2026-09-27)
 

@@ -117,6 +117,12 @@ here needs `chat_id`. The custom commands stay in `site.toml`.
 
 `docs/telegram.md` says when a project needs its own bot.
 
+### [marks]
+
+The table is optional. It takes the keys of the site's `[marks]` table
+and replaces them for this project only. A key it leaves out keeps the
+site's value.
+
 ### [stages.<name>]
 
 A stage is one command of the flow. Stages run in the order of the file.
@@ -216,6 +222,20 @@ The host `local` is the head node itself, reached without ssh. A job that
 names a host outside this table is a `check` problem. A tool in `tools`
 must be declared under `[tools]`. The version is text the flow may use
 as `{tool.<name>.version}`, for an install path per host.
+
+### [marks]
+
+The thresholds of the resource marks in `edr hosts`. Each key is a list
+of three ascending fractions between 0 and 1. A resource turns 🟡 at the
+first, 🟠 at the second and 🔴 at the third. Below the first it is 🟢.
+Any other list stops at load with the key in the message.
+
+| Key | Used fraction | Default |
+|---|---|---|
+| `cores` | the load average over the cores | `[0.6, 0.8, 0.9]` |
+| `ram` | the RAM in use over the total | `[0.6, 0.8, 0.9]` |
+| `scratch` | the used part of the scratch mount | `[0.7, 0.85, 0.95]` |
+| `gpu` | the busy GPUs over all GPUs | `[0.6, 0.8, 0.9]` |
 
 ### [tools.<name>]
 

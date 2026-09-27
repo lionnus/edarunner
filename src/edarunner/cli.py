@@ -193,27 +193,44 @@ def _probe_rows(c: Ctx) -> list[Row]:
     return out
 
 
+def _mark_hosts(c: Ctx, rows: list[Row]) -> list[Row]:
+    """Give each probe row its `marks`; sort the rows by the worst mark, black and red first, then by host."""
+    for r in rows:
+        r["marks"] = board.host_marks(None if "error" in r else HostProbe(**r), c.project.site.marks)
+    return sorted(rows, key=lambda r: (board.SEVERITY.index(board.worst_mark(r["marks"].values())), r["host"]))
+
+
 def _hosts_table(rows: list[Row], narrow: bool) -> Table:
-    """One row per host: used or free of total, a bar for the cores and the scratch, GPUs when the host has any."""
-    head = ["host", "cores", "ram GB", "scratch GB", "gpu"] if narrow else [
-        "host", "cores", "", "load", "ram GB", "mount", "scratch GB", "", "gpu", "gpu GB", "tools", "runs"]
+    """One row per host: the worst mark, then used or free of total with a mark, a bar for the cores and the scratch."""
+    head = ["ok", "host", "cores", "ram GB", "scratch GB", "gpu"] if narrow else [
+        "ok", "host", "cores", "", "load", "ram GB", "mount", "scratch GB", "", "gpu", "gpu GB", "tools", "runs"]
     body = []
     for r in rows:
+        m = r["marks"]
+        ok = board.worst_mark(m.values())
         if "error" in r:
-            body.append([r["host"], Text("error: " + r["error"], style="red", justify="left")])
+            body.append([ok, r["host"], Text("error: " + r["error"], style="red", justify="left")])
             continue
         cores, used = r["cores"], max(0, min(r["cores"], round(r["load"])))
-        ram, disk = f"{r['free_ram_gb']:g}/{r['total_ram_gb']:g}", f"{r['free_gb']:g}/{r['total_gb']:g}"
-        gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
+        sep = "" if narrow else " "  # 48 columns leave no room for the space
+        cpu, ram = f"{m['cores']}{sep}{used}/{cores}", f"{m['ram']}{sep}{r['free_ram_gb']:g}/{r['total_ram_gb']:g}"
+        disk = f"{m['scratch']}{sep}{r['free_gb']:g}/{r['total_gb']:g}"
+        gpu = f"{m['gpu']}{sep}{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
         if narrow:
-            body.append([r["host"], f"{used}/{cores}", ram, disk, gpu])
+            body.append([ok, r["host"], cpu, ram, disk, gpu])
             continue
-        body.append([r["host"], f"{used}/{cores}", board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
+        body.append([ok, r["host"], cpu, board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
                      board.bar(r["total_gb"] - r["free_gb"], r["total_gb"]), gpu,
                      f"{r['gpu_total_gb'] - r['gpu_used_gb']:g}/{r['gpu_total_gb']:g}" if r["gpus"] else "-",
                      f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]])
-    return board.table(head, body, styles={"host": "bold", "mount": "dim"},
-                       right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
+    t = board.table(head, body, styles={"host": "bold", "mount": "dim"},
+                    right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
+    if narrow:
+        # One space between columns, and only the cores column, which holds an error, folds.
+        t.padding = (0, 0)
+        for col in t.columns:
+            col.no_wrap = col.header != "cores"
+    return t
 
 
 def _seats(text: str) -> tuple[int, int | None] | None:
@@ -368,7 +385,7 @@ class Actions:
                 continue
             used = max(0, min(r["cores"], round(r["load"])))
             gpu = f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
-            lines.append(f"<b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
+            lines.append(f"{board.worst_mark(board.host_marks(HostProbe(**r), self.c.project.site.marks).values())} <b>{esc(r['host'])}</b> · {used}/{r['cores']} cores · "
                          f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB free · gpu {gpu}")
         return "\n".join(lines) or "<i>no hosts</i>"
 
@@ -472,7 +489,7 @@ def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
     """Probe every site host."""
-    rows = _probe_rows(c)
+    rows = _mark_hosts(c, _probe_rows(c))
     if a.narrow:
         # A long cell, such as an error, folds inside its column instead of widening the table.
         c.console.width = 48
