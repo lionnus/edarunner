@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -421,12 +422,12 @@ def test_run_reuse_dry_and_collect(demo: Path, capsys) -> None:
     assert code == 1 and "no resume" in err  # export has no resume command
     code, out, _ = edr(capsys, "--json", "run", "a@demo", "--stage", "pnr", "--on", "local", "--from", "cts", "--dry-run")
     data = json.loads(out)["data"]
-    assert code == 0 and data["batch"].startswith("run_") and data["host"] == "local"
-    assert data["run_id"] == f"{data['batch'][4:]}_a.pnr_demo_gabc1234"
+    assert code == 0 and data["batch"] == "demo" and data["host"] == "local"
+    assert re.fullmatch(r"\d{8}_\d{4}_a\.pnr_demo_gabc1234", data["run_id"])
     spec = data["spec"]
     assert spec["start_at"] == {"stage": "pnr", "checkpoint": "cts"} and [s["name"] for s in spec["stages"]] == ["pnr"]
     assert spec["root"] == spec["stages"][0]["cwd"] and f"pnr {data['run_id']} demo" in spec["stages"][0]["cmd"]
-    assert data["run_id"] != a and not bdir(demo, data["batch"]).exists()
+    assert data["run_id"] != a and not (bdir(demo) / f"{data['run_id']}.spec.json").exists()
     code, _, err = edr(capsys, "run", "a@demo", "--stage", "export", "--on", "mars", "--dry-run")
     assert code == 1
     code, out, _ = edr(capsys, "run", "a@demo", "--collect", "netlist")

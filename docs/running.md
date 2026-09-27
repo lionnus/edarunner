@@ -186,9 +186,11 @@ proposes the command with `--from` filled from the heartbeat.
 
 `edr run <handle> --stage <S>` starts one stage on the tree of a run
 that ended: more tasks of a task group, a stage the job skipped, or a
-resume. The new run has its own id and heartbeat in a batch
-`run_<date>`, the label `<label>.<stage>`, and `{tree_id}` of the
-original run, so the flow keeps writing into the same directory.
+resume. The new run joins the batch of that run, so `retire --batch`
+takes both. It has its own id and heartbeat, with the time of the call
+as its date and the label `<label>.<stage>`, and `{tree_id}` of the
+original run, so the flow keeps writing into the same directory. A run
+on an imported tree joins `imported`.
 `--tasks` names the tasks, `--parallel` the width, `--on` another host
 when the tree is reachable there.
 
