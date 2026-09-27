@@ -1,10 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="264" height="64" viewBox="0 0 264 64">
   <style>
-    .w { fill: #6e7781; font-family: sans-serif; font-size: 32px; font-weight: 700; }
-    @media (prefers-color-scheme: dark) { .w { fill: #c9d1d9; } }
+    .k { stroke: #0d1117; }
+    .w { font-family: Helvetica, Arial, sans-serif; font-size: 32px; font-weight: 700; }
+    .eda { fill: #0d1117; }
+    .run { fill: #008000; }
+    @media (prefers-color-scheme: dark) { .k { stroke: #e6edf3; } .eda { fill: #e6edf3; } }
   </style>
-  <path d="M20 3v7M32 3v7M44 3v7M20 54v7M32 54v7M44 54v7M3 20h7M3 32h7M3 44h7M54 20h7M54 32h7M54 44h7" fill="none" stroke="#3b7dd8" stroke-width="3" stroke-linecap="round"/>
-  <rect x="11" y="11" width="42" height="42" rx="7" fill="none" stroke="#3b7dd8" stroke-width="3.5"/>
-  <path d="M27 21v22l17-11z" fill="#f28c38"/>
-  <text class="w" x="76" y="43" textLength="180" lengthAdjust="spacing">edarunner</text>
+  <path class="k" d="M20 3v7M32 3v7M44 3v7M20 54v7M32 54v7M44 54v7M3 20h7M3 32h7M3 44h7M54 20h7M54 32h7M54 44h7" fill="none" stroke-width="3" stroke-linecap="round"/>
+  <rect class="k" x="11" y="11" width="42" height="42" rx="7" fill="none" stroke-width="3.5"/>
+  <path class="run" d="M18.5 24v16l13-8z"/>
+  <rect class="run" x="35" y="24" width="3.5" height="16" rx="1"/>
+  <rect class="run" x="41.5" y="24" width="3.5" height="16" rx="1"/>
+  <text class="w" x="74" y="44" textLength="180" lengthAdjust="spacing"><tspan class="eda">EDA</tspan><tspan class="run">runner</tspan></text>
 </svg>
