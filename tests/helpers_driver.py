@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -11,7 +12,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 DEMO = REPO / "examples" / "local-demo"
 DRIVER = REPO / "src" / "edarunner" / "driver" / "edr_driver.py"
-PY36 = "/usr/bin/python3"
+# The interpreter of the driver under test: 3.6 when the machine has one, else the system python3.
+PY36 = os.environ.get("EDR_DRIVER_PYTHON") or shutil.which("python3.6") or "/usr/bin/python3"
 RUN_ID = "20260926_1200_a_demo_gHEAD"
 STAGES = ("synth", "pnr", "export", "power")
 STEPS = ["setup", "analyze", "elaborate", "synth", "cts", "route", "export"]
@@ -102,7 +104,7 @@ def write_spec(spec: dict) -> Path:
 
 
 def start(spec: dict) -> subprocess.Popen:
-    """Start the driver on the spec with Python 3.6; its own log sits next to the spec."""
+    """Start the driver on the spec with PY36; its own log sits next to the spec."""
     spec_path = write_spec(spec)
     log = open(spec_path.with_suffix("").with_suffix(".driver.log"), "ab")
     return subprocess.Popen([PY36, str(DRIVER), str(spec_path)], stdin=subprocess.DEVNULL,

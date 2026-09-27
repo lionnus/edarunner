@@ -1,4 +1,4 @@
-"""edr_driver.py under /usr/bin/python3 against the demo flow."""
+"""edr_driver.py under helpers_driver.PY36 against the demo flow."""
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ from helpers_driver import DRIVER, PY36, RUN_ID, finish, heartbeat, render_spec,
 
 
 def test_compiles_on_py36() -> None:
+    probe = [PY36, "-c", "import sys; print(sys.version_info[:2] == (3, 6))"]
+    try:
+        is36 = subprocess.run(probe, stdout=subprocess.PIPE, text=True).stdout.strip() == "True"
+    except OSError:
+        is36 = False
+    if not is36:
+        pytest.skip(f"{PY36} is not Python 3.6; set EDR_DRIVER_PYTHON")
     subprocess.run([PY36, "-m", "py_compile", str(DRIVER)], check=True)
 
 
