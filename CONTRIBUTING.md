@@ -44,11 +44,11 @@ CI measures the coverage and fails under 88 %:
 .venv/bin/python -m pytest -q --cov=edarunner --cov-fail-under=88
 ```
 
-`tests/test_driver.py::test_compiles_on_py36` needs a Python 3.6. It uses
-`EDR_DRIVER_PYTHON`, else `python3.6` on `PATH`, else `/usr/bin/python3`,
-and skips without a 3.6. CI runs the driver tests in a `python:3.6`
-container. CI also runs the OpenROAD example `examples/openroad-gcd` in a
-container. [docs/dev/testing.md](docs/dev/testing.md) describes each job.
+`tests/test_driver.py::test_compiles_on_py36` skips unless
+`EDR_DRIVER_PYTHON`, or else `python3.6` on `PATH`, is a Python 3.6. CI runs the driver tests against
+the Python 3.6 of a `python:3.6` container, and the OpenROAD example
+`examples/openroad-gcd` in the `openroad/orfs` image.
+[docs/dev/testing.md](docs/dev/testing.md) describes each job.
 
 Add a test for a change to a module in `tests/test_<module>.py`.
 

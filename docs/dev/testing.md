@@ -29,9 +29,13 @@ test in `tests/test_<module>.py`.
 and stop, and answers `alive` from a scripted list of states per handle.
 A watcher test passes it as `backend=` to `watch.cycle`.
 
-`tests/test_driver.py::test_compiles_on_py36` needs a Python 3.6. It
-uses `EDR_DRIVER_PYTHON`, else `python3.6` on `PATH`, else
-`/usr/bin/python3`, and skips without a 3.6.
+The driver tests start `edr_driver.py` with the interpreter that
+`tests/helpers_driver.py` picks: `EDR_DRIVER_PYTHON` when it is set, else
+`python3.6` on `PATH`, else the system `python3`. The tests that patch a
+driver function import the driver into the pytest interpreter instead.
+`tests/test_driver.py::test_compiles_on_py36` compiles the driver with
+that interpreter and skips when it is not a Python 3.6, so set
+`EDR_DRIVER_PYTHON` to a 3.6 to run it on a desk machine.
 
 `examples/openroad-gcd/run.sh` runs a real open flow under `edr` on the
 head node; it needs the ORFS tools, and CI runs it in a container.
@@ -43,7 +47,7 @@ head node; it needs the ORFS tools, and CI runs it in a container.
 | Job | Runs |
 |---|---|
 | `tests` | `pytest` with coverage on Python 3.11 and 3.12. The run fails under 88 %. The 3.11 run uploads `coverage.svg`. |
-| `driver` | `tests/test_driver.py` in a `python:3.6` container, the floor of the compute hosts. The image's interpreter is linked to `/usr/bin/python3`, the fallback of `tests/helpers_driver.py` and of `test_compiles_on_py36`. |
+| `driver` | `tests/test_driver.py` in a `python:3.6` container with `--init`, the floor of the compute hosts. pytest runs under a Python 3.11 from uv, and `EDR_DRIVER_PYTHON=/usr/local/bin/python3.6` makes every driver the tests start, and `test_compiles_on_py36`, use the image's 3.6. |
 | `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. About 2 min, 1 min of it the image pull. |
 | `condor` | `tools/harness/condor.sh` with `RUNTIME=docker`: the `htcondor/mini` image as a one-machine pool, and the local demo through the `condor` backend with `submit_via = ["docker", "exec", "-u", <user>, "edr-mini"]`, where the user has the uid of the runner. It asserts that two runs end `done`, that the concurrency limit `fc` of one runs them one after the other, and that `edr stop` ends a third run `KILLED`. |
 | `slurm` | `tools/harness/slurm.sh`: the `giovtorres/slurm-docker-cluster` compose setup with `Licenses=fc:1`, and the same demo and assertions through the `slurm` backend with `submit_via = ["docker", "exec", "slurmctld"]`. |
