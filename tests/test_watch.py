@@ -77,7 +77,7 @@ class Rec(Notifier):
 class Env:
     def __init__(self, tmp_path: Path) -> None:
         self.tmp = tmp_path
-        self.project = replace(load_project(DEMO), state=tmp_path / "state", data=tmp_path / "data")
+        self.project = replace(load_project(DEMO), state_dir=tmp_path / "state", data=tmp_path / "data")
         lim = self.project.limits
         lim.stale_s, lim.dead_s, lim.hung_s, lim.grace_s = 30, 90, 3600, 10
         self.ssh = FakeSsh(self.project.site)
@@ -97,8 +97,8 @@ class Env:
               "disk_free_gb": 100.0, "tree_gb": 1.0, "exit": None, "killed_by": None, "last_cmd": "x",
               "last_log": "step 1", "log": str(root / "log" / "synth.log")}
         hb.update(extra)
-        (self.project.state / batch).mkdir(parents=True, exist_ok=True)
-        (self.project.state / batch / f"{run_id}.json").write_text(json.dumps(hb))
+        (self.project.state_dir / batch).mkdir(parents=True, exist_ok=True)
+        (self.project.state_dir / batch / f"{run_id}.json").write_text(json.dumps(hb))
         # launch writes src; the heartbeat has no src.
         self.db.upsert_run({"run_id": run_id, "batch": batch, "label": label, "src": src})
         return hb
@@ -125,8 +125,8 @@ def listing(root: Path) -> dict[str, int]:
 def test_read_heartbeats_skips_retired_spec_keep_and_torn(env: Env) -> None:
     a = env.heartbeat("a")
     env.heartbeat("b", batch="old")
-    (env.project.state / "old" / "RETIRED").touch()
-    d = env.project.state / "demo"
+    (env.project.state_dir / "old" / "RETIRED").touch()
+    d = env.project.state_dir / "demo"
     (d / f"{a['run_id']}.spec.json").write_text("{}")
     (d / f"{a['run_id']}.keep.json").write_text('{"hours": 1}')
     (d / f"{rid('torn')}.json").write_text('{"run_id": "torn", "phase')
@@ -165,15 +165,15 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert set(env.db.get_store("progress")) == set(states) and rid("d") in env.db.get_store("notified")
     assert len(json.loads((bdir / "board.json").read_text())["runs"]) == 9
     assert f'<script src="{board.PLOTLY_URL}">' in (bdir / "compare.html").read_text()
-    assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 1
+    assert json.loads((env.project.state_dir / "watch.json").read_text())["cycle"] == 1
     n_events, n_sent = len(env.events()), len(env.notifier.sent)
     (bdir / board.PLOTLY_FILE).write_text("// a local copy\n")
     assert env.cycle(NOW + 1) == states
     assert f'<script src="{board.PLOTLY_FILE}">' in (bdir / "compare.html").read_text()
     assert (len(env.events()), len(env.notifier.sent)) == (n_events, n_sent)
-    assert json.loads((env.project.state / "watch.json").read_text())["cycle"] == 2
+    assert json.loads((env.project.state_dir / "watch.json").read_text())["cycle"] == 2
     assert listing(env.tmp / "scratch") == roots
-    assert env.ssh.killed == [] and not list(env.project.state.glob("*/*.stop"))
+    assert env.ssh.killed == [] and not list(env.project.state_dir.glob("*/*.stop"))
 
 
 def test_hung_after_unchanged_progress_and_kill(env: Env) -> None:
@@ -181,7 +181,7 @@ def test_hung_after_unchanged_progress_and_kill(env: Env) -> None:
     lim.hung_s, lim.grace_s = 0, 0
     env.heartbeat("a")
     b = env.heartbeat("b", pgids=[4400])
-    (env.project.state / "demo" / f"{b['run_id']}.keep.json").write_text('{"hours": 0, "ack": true}')
+    (env.project.state_dir / "demo" / f"{b['run_id']}.keep.json").write_text('{"hours": 0, "ack": true}')
     assert env.cycle() == {rid("a"): "running", rid("b"): "running"}
     lim.kill_hung = True
     assert env.cycle(NOW + 1) == {rid("a"): "hung", rid("b"): "hung"}
@@ -197,7 +197,7 @@ def test_host_full_stops_the_newest_after_grace(env: Env, monkeypatch) -> None:
     b = env.heartbeat("b", date=NEW)
     stops: list[dict] = []
     monkeypatch.setattr(launch, "stop", lambda ssh, db, run, hb, **kw: stops.append({**kw, "run_id": run["run_id"]}) or True)
-    keep = env.project.state / "demo" / f"{b['run_id']}.keep.json"
+    keep = env.project.state_dir / "demo" / f"{b['run_id']}.keep.json"
     assert env.cycle()[rid("a")] == "host_full" and stops == []
     keep.write_text('{"hours": 1, "ack": true}')
     env.cycle(NOW + 6)
@@ -216,13 +216,13 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
     for label in ("a", "k", "f"):
         env.heartbeat(label, batch="demo2", date=NEW, src="gdef5678")
     env.heartbeat("e", batch="demo2", date=NEW, src="gdef5678", phase="FAILED:synth", exit=5)
-    (env.project.state / "demo" / f"{k['run_id']}.keep.json").write_text('{"hours": 12}')
+    (env.project.state_dir / "demo" / f"{k['run_id']}.keep.json").write_text('{"hours": 12}')
     states = env.cycle()
     assert states[rid("a")] == "superseded" and states[rid("k")] == "superseded"
     assert states[rid("f")] == "host_full" and states[rid("e")] == "running"
-    stops = {p.name for p in (env.project.state / "demo").glob("*.stop")}
+    stops = {p.name for p in (env.project.state_dir / "demo").glob("*.stop")}
     assert stops == {f"{a['run_id']}.stop", f"{f['run_id']}.stop"}
-    assert (env.project.state / "demo" / f"{a['run_id']}.stop").read_text().strip() == "after-task"
+    assert (env.project.state_dir / "demo" / f"{a['run_id']}.stop").read_text().strip() == "after-task"
     assert (rid("a"), "stop") in env.events() and (rid("k"), "stop") not in env.events()
     n = env.events().count((rid("f"), "stop"))
     env.cycle(NOW + 1)
@@ -269,7 +269,7 @@ def test_a_failed_stage_yields_no_metrics(env: Env) -> None:
 
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     hb = env.heartbeat("c", age=200, step=2, step_name="elaborate")
-    spec_path = env.project.state / "demo" / f"{hb['run_id']}.spec.json"
+    spec_path = env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json"
     spec_path.write_text(json.dumps({"run_id": hb["run_id"], "start_at": {"stage": "synth", "checkpoint": None},
                                      "driver": "/x/bin/edr_driver-0badc0de.py",
                                      "stages": [{"name": "synth", "cmd": "x", "resume": "x FIRST_STAGE={checkpoint}"}]}))
@@ -318,10 +318,10 @@ def test_orphans_are_reported_and_killed_only_when_asked(env: Env) -> None:
 def test_dry_run_writes_nothing(env: Env, capsys) -> None:
     env.heartbeat("a")
     env.heartbeat("d", age=200)
-    before = listing(env.project.state)
+    before = listing(env.project.state_dir)
     states = env.cycle(dry_run=True)
     assert states == {rid("a"): "running", rid("d"): "dead"}
-    assert listing(env.project.state) == before and not (env.project.data / "board").exists()
+    assert listing(env.project.state_dir) == before and not (env.project.data / "board").exists()
     assert [r["phase"] for r in env.db.runs()] == [None, None] and env.db.events() == []
     assert env.notifier.sent == []
     out = capsys.readouterr().out
@@ -331,7 +331,7 @@ def test_dry_run_writes_nothing(env: Env, capsys) -> None:
 def test_check_on_a_stale_watch_json(env: Env) -> None:
     env.project.limits.heartbeat_s = 5
     assert watch.check(env.project, [env.notifier]) == 1
-    wj = env.project.state / "watch.json"
+    wj = env.project.state_dir / "watch.json"
     wj.parent.mkdir(parents=True, exist_ok=True)
     wj.write_text(json.dumps({"ts": time.time(), "cycle": 3, "pid": 1}))
     assert watch.check(env.project, [env.notifier]) == 0
@@ -373,7 +373,7 @@ def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
     (new / "power" / "reports").mkdir(parents=True)
     (new / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
     (new / "power" / "phases.json").write_text('{"window_ns": 10}\n')
-    (env.project.state / "demo" / f"{hb['run_id']}.spec.json").write_text(json.dumps({"stages": [
+    (env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json").write_text(json.dumps({"stages": [
         {"name": "power", "tasks": [{"id": "k_new", "dir": str(new)}]}]}))
     env.cycle()
     results = env.project.data / "results" / hb["run_id"]

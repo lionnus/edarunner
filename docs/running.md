@@ -5,13 +5,13 @@ does on the host, what it writes, and how to act on a run that stopped.
 
 ## The driver
 
-`edr launch` copies `edr_driver.py` to `<state>/bin/edr_driver-<hash>.py`,
+`edr launch` copies `edr_driver.py` to `<state_dir>/bin/edr_driver-<hash>.py`,
 where `<hash>` is the first 8 hex digits of the sha256 of the file, writes
 one spec per run, the JSON file the driver reads, and starts the driver
 on the host with the host's own `python3`:
 
 ```sh
-setsid nohup python3 <state>/bin/edr_driver-<hash>.py <state>/<batch>/<run_id>.spec.json
+setsid nohup python3 <state_dir>/bin/edr_driver-<hash>.py <state_dir>/<batch>/<run_id>.spec.json
 ```
 
 The driver is one file, Python 3.6 or newer, standard library only. It
@@ -44,12 +44,12 @@ Every command starts with a line `# edr: <cmd>` in its log.
 
 ## The state directory
 
-`state` in `edr.toml` names a directory on a filesystem every host
+`state_dir` in `edr.toml` names a directory on a filesystem every host
 mounts. The hosts read the driver and the spec there and write the
 heartbeat; the head node reads the heartbeat.
 
 ```
-<state>/
+<state_dir>/
   bin/edr_driver-<hash>.py        one driver copy per version
   watch.json                      the watcher's own heartbeat
   <batch>/

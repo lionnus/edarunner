@@ -57,5 +57,5 @@ class Digest:
         return note.get("state") in (note.get("msgs") or {})
 
     def _acked(self, row: dict) -> bool:
-        keep = config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.keep.json")
+        keep = config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.keep.json")
         return bool(keep.get("ack"))

@@ -34,7 +34,7 @@ class CollectResult:
 
 def load_spec(project: Project, run: dict) -> dict:
     """The run's spec from the state directory, or {} when it has none (an imported tree)."""
-    return load_json(project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json")
+    return load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.spec.json")
 
 
 def spec_stages(spec: dict) -> list[str] | None:
@@ -124,7 +124,7 @@ def restore_on_request(
 ) -> CollectResult:
     """Copy the `collect_on_request` list `name` of `run` from data/results/<run_id>/ into <host>:<root>."""
     spec = load_spec(project, run)
-    heartbeat = load_json(project.state / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
+    heartbeat = load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
     c = _Copier(project, ssh, db, {**run, "host": host, "root": root}, {}, dry_run,
                 spec_task_dirs(spec, str(run.get("root") or "")))
     if c.result.failures:

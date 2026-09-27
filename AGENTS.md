@@ -107,7 +107,7 @@ when a long task ends or needs a person.
   past the run.
 - Never trust the board for a running count. `edr status --live` asks the
   hosts.
-- Never write under `<state>`, a run tree or the driver copy by hand.
+- Never write under `<state_dir>`, a run tree or the driver copy by hand.
   `edr keep` and `edr stop --after-task` write the keep and stop files, and
   `edr launch` publishes the driver by rename.
 - Never relaunch a batch under its old name to get new directories.

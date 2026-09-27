@@ -24,8 +24,8 @@ def fill(e: Env) -> None:
         db.upsert_run({"run_id": rid(label), "batch": "demo", "label": label, "phase": phase, "state": state,
                         "stage": "synth" if phase else None, "started": NOW - 7200 if phase else None,
                         "updated": updated})
-    (e.project.state / "demo").mkdir(parents=True)
-    (e.project.state / "demo" / f"{rid('k')}.keep.json").write_text('{"hours": 0, "ack": true}')
+    (e.project.state_dir / "demo").mkdir(parents=True)
+    (e.project.state_dir / "demo" / f"{rid('k')}.keep.json").write_text('{"hours": 0, "ack": true}')
     hosts = {"hostA": {"host": "hostA", "free_gb": 100.0, "total_gb": 1000.0},
              "hostB": {"host": "hostB", "free_gb": 900.0, "total_gb": 1000.0},
              "hostC": {"host": "hostC", "error": "timeout"},

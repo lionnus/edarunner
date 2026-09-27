@@ -84,17 +84,17 @@ _NOTIFY = frozenset(s for s, st in STATES.items() if st.alert)
 # files
 
 def _hb(project: Project, run: Row) -> dict:
-    return config.load_json(project.state / str(run.get("batch")) / f"{run['run_id']}.json")
+    return config.load_json(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.json")
 
 
 def _keep(project: Project, run: Row) -> dict:
-    return config.load_json(project.state / str(run.get("batch")) / f"{run['run_id']}.keep.json")
+    return config.load_json(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.keep.json")
 
 
 def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
     """Every heartbeat of every batch without RETIRED (or of `batches`), as (batch, heartbeat)."""
     out = []
-    for bdir in sorted(p for p in project.state.glob("*") if p.is_dir() and p.name != "bin"):
+    for bdir in sorted(p for p in project.state_dir.glob("*") if p.is_dir() and p.name != "bin"):
         if (bdir / "RETIRED").exists() or (batches is not None and bdir.name not in batches):
             continue
         for f in sorted(bdir.glob("*.json")):
@@ -201,9 +201,9 @@ def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
     lim, host, run_id = project.limits, run.get("host"), run["run_id"]
     if any(r.startswith("superseded:") for r in reasons):
-        stop_path = project.state / str(run.get("batch")) / f"{run_id}.stop"
+        stop_path = project.state_dir / str(run.get("batch")) / f"{run_id}.stop"
         if not _keep(project, run) and not stop_path.exists():
-            launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state, actor="watch")
+            launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state_dir, actor="watch")
         if state == "superseded":
             return True
     if state == "host_full":
@@ -334,7 +334,7 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
 
 def _resume(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, now: float) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
-    spec_path = project.state / str(run["batch"]) / f"{run_id}.spec.json"
+    spec_path = project.state_dir / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
     stage = next((s for s in spec.get("stages") or [] if s.get("name") == hb.get("stage")), None)
     driver = spec.get("driver")
@@ -436,8 +436,8 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         digest.mark_sent(now)
     db.set_store("progress", progress)
     db.set_store("notified", notes)
-    n = int(config.load_json(project.state / "watch.json").get("cycle") or 0) + 1
-    config.save_json(project.state / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
+    n = int(config.load_json(project.state_dir / "watch.json").get("cycle") or 0) + 1
+    config.save_json(project.state_dir / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states
 
 
@@ -473,7 +473,7 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
 
 def check(project: Project, notifiers: list[Notifier] = ()) -> int:
     """1 (and an alert) when watch.json is older than three cycles, else 0."""
-    w = config.load_json(project.state / "watch.json")
+    w = config.load_json(project.state_dir / "watch.json")
     age = time.time() - float(w.get("ts") or 0)
     if age <= 3 * project.limits.heartbeat_s:
         return 0

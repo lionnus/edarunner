@@ -153,7 +153,7 @@ def test_spec_tasks_and_stages_win_over_the_task_table(env) -> None:
     new = root / "simulation" / "tests" / "demo" / "NEW_TEST"
     write(new / "power" / "reports" / "power.csv", "phase,total_w\nWHOLE,0.5\n")
     write(new / "power" / "phases.json", '{"window_ns": 10}\n')
-    spec_dir = project.state / "demo"
+    spec_dir = project.state_dir / "demo"
     spec_dir.mkdir(parents=True, exist_ok=True)
     (spec_dir / f"{RUN_ID}.spec.json").write_text(json.dumps({"stages": [
         {"name": "power", "tasks": [{"id": "k_new", "dir": str(new)}]}]}))

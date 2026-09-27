@@ -32,7 +32,7 @@ service up.
 7. Write the boards and the pinned Telegram board.
 8. Send the daily digest once a day, at the first cycle after
    `limits.digest_at`.
-9. Write `<state>/watch.json` with the time, the cycle count and the pid.
+9. Write `<state_dir>/watch.json` with the time, the cycle count and the pid.
 
 Its memory between cycles is three rows of the database's `store` table:
 `progress`, what each run looked like last time, `notified`, the
@@ -101,7 +101,7 @@ job.
 
 ## The check
 
-`edr watch --check` reads `<state>/watch.json`. When the file is older
+`edr watch --check` reads `<state_dir>/watch.json`. When the file is older
 than three cycles, or missing, it prints why, sends an alert and exits
 1. A cron line every few minutes catches a watcher that died:
 

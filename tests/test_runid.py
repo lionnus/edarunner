@@ -30,7 +30,7 @@ def project(tmp_path):
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     edr = root / "edr.toml"
     text = edr.read_text().replace('nested = []', 'nested = ["sub"]')
-    text = text.replace('state = "~/.edr/{project}"', f'state = "{tmp_path}/state"')
+    text = text.replace('state_dir = "~/.edr/{project}"', f'state_dir = "{tmp_path}/state"')
     edr.write_text(text)
     repo = root / "repo"
     repo.mkdir()

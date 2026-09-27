@@ -76,8 +76,8 @@ def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batc
         terminal = str(phase).startswith(board.TERMINAL)
         hb = {**row, "driver_pid": pid, "pgids": [], "stage": "synth", "step": 2, "step_name": "elaborate",
               "tasks": {}, "exit": 0 if terminal else None, "last_log": "step 2 elaborate"}
-        (project.state / batch).mkdir(parents=True, exist_ok=True)
-        (project.state / batch / f"{run_id}.json").write_text(json.dumps(hb))
+        (project.state_dir / batch).mkdir(parents=True, exist_ok=True)
+        (project.state_dir / batch / f"{run_id}.json").write_text(json.dumps(hb))
     with Database(project.data / "edr.db") as db:
         db.upsert_batch({"batch": batch, "project": "demo", "source": src})
         db.upsert_run(row)

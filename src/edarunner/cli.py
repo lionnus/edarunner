@@ -118,9 +118,9 @@ class Ctx:
         name = name or os.environ.get("EDR_BATCH")
         if name:
             return name
-        dirs = [p for p in self.project.state.glob("*") if p.is_dir() and p.name != "bin"]
+        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name != "bin"]
         if not dirs:
-            raise Refuse(f"no batch given and no batch directory in {self.project.state}")
+            raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name
 
     def batch(self, name: str | None) -> Batch:
@@ -168,7 +168,7 @@ class Ctx:
 
     def heartbeat(self, row: Row) -> dict:
         """The heartbeat of a run, or {} when the driver wrote none."""
-        return config.load_json(self.project.state / str(row["batch"]) / f"{row['run_id']}.json")
+        return config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.json")
 
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""
@@ -307,7 +307,7 @@ def _metrics_table(rows: list[Row]) -> Table | str:
 def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
     """Write the keep file next to the spec; a field not given keeps its current value."""
     run_id = row["run_id"]
-    path = c.project.state / str(row["batch"]) / f"{run_id}.keep.json"
+    path = c.project.state_dir / str(row["batch"]) / f"{run_id}.keep.json"
     cur = config.load_json(path)
     data = {"hours": cur.get("hours", 0) if hours is None else hours,
             "ack": bool(cur.get("ack")) if ack is None else ack}
@@ -345,7 +345,7 @@ class Actions:
         c, row = self.c, self.c.resolve(handle)
         if not board.is_live(row):
             return f"{board.handle(row)} already {row['phase']}"
-        launch.stop(c.ssh, c.db, row, {}, after_task=True, why=why, state=c.project.state, actor=actor)
+        launch.stop(c.ssh, c.db, row, {}, after_task=True, why=why, state=c.project.state_dir, actor=actor)
         return f"{board.handle(row)} stops after its task"
 
     def status_text(self, handle: str | None = None) -> str:
@@ -673,7 +673,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
     # The run joins the batch of the tree it continues; the stage in the label and the time keep its id apart.
     job.label = f"{job.label}.{a.stage}"
     batch.batch, batch.jobs = str(row["batch"]), [job]
-    state = project.state
+    state = project.state_dir
     (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT))
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
@@ -791,7 +791,7 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.NOTHING
     # The driver's own handler ends the run in seconds; limits.grace_s is the watcher's delay.
     ok = launch.stop(c.ssh, c.db, row, hb, after_task=a.after_task, now=a.now, grace_s=30 if a.now else 60,
-                     dry_run=a.dry_run, why=a.why, state=c.project.state)
+                     dry_run=a.dry_run, why=a.why, state=c.project.state_dir)
     c.data = {"run_id": row["run_id"], "stopped": ok}
     if not ok and not a.now:
         print(f"{row['run_id']}: still alive; use --now")
@@ -804,7 +804,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         raise Refuse("retire needs a handle or --batch")
     project, dry = c.project, " (dry)" if a.dry_run else ""
     rows = c.db.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
-    if a.batch and not rows and not (project.state / a.batch).is_dir():
+    if a.batch and not rows and not (project.state_dir / a.batch).is_dir():
         c.emit(f"no runs in batch {a.batch}")
         return Exit.NOTHING
     checked, retiring = [], {r["run_id"] for r in rows}
@@ -849,13 +849,13 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
             phase = f"ABANDONED:{a.why}"
             if hb:
                 hb["phase"], hb["exit"] = phase, 1 if hb.get("exit") is None else hb["exit"]
-                config.save_json(project.state / str(row["batch"]) / f"{run_id}.json", hb)
+                config.save_json(project.state_dir / str(row["batch"]) / f"{run_id}.json", hb)
             c.db.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
         c.db.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
         done.append(run_id)
     if a.batch and not a.prune and not a.dry_run:
-        (project.state / a.batch).mkdir(parents=True, exist_ok=True)
-        (project.state / a.batch / "RETIRED").touch()
+        (project.state_dir / a.batch).mkdir(parents=True, exist_ok=True)
+        (project.state_dir / a.batch / "RETIRED").touch()
         c.db.mark_batch_retired(a.batch)
     if worktree is not None:
         real = (worktree / ".git").exists()

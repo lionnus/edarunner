@@ -32,7 +32,7 @@ TG = ("In `edr.toml` the table takes `token_file`, `chat_id`, `user_id` and `top
 # The sections of configuration.md: the heading, the dataclasses (or some of their fields) it lists, and the
 # prose above the table; "" takes the docstring of the first dataclass.
 CONFIG: list[tuple[str, list[Part], str]] = [
-    ("## edr.toml", [(model.Project, ["project", "site", "state", "data", "run_prefix", "telegram_poll", "env"])], ""),
+    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "env"])], ""),
     ("### [source]", [model.Source], ""),
     ("### [sync]", [model.Sync], ""),
     ("### [safety]", [model.Safety], ""),

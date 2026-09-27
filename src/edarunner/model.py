@@ -315,7 +315,7 @@ class Placement:
 
 @dataclass
 class Project:
-    """`edr.toml`: the project, its flow and its limits. `site`, `state`, `data`, `source.repo` and
+    """`edr.toml`: the project, its flow and its limits. `site`, `state_dir`, `data`, `source.repo` and
     `source.worktrees` render at load time with `{project}`, `{project_root}`, `{user}` and
     `{site_dir}`. Every other string keeps its placeholders until `plan`."""
 
@@ -329,7 +329,7 @@ class Project:
     placement: Placement = field(default_factory=Placement)
     stages: dict[str, Stage] = field(default_factory=dict)  # in file order
     metrics: dict[str, Metric] = field(default_factory=dict)
-    state: Path = doc("the state directory, on a filesystem every host mounts", Path("~/.edr/{project}"))
+    state_dir: Path = doc("the state directory, on a filesystem every host mounts", Path("~/.edr/{project}"))
     data: Path = doc("the head-node data directory: `edr.db`, `results/`, `board/`", Path("data"))
     run_prefix: str = doc("the run tree prefix under the host scratch", "{user}/edr/{project}")
     telegram_poll: bool = doc("`false`: this project's watcher sends alerts and the board but does not poll "
@@ -371,7 +371,7 @@ class Job:
 class Batch:
     """`jobs/<batch>.toml`: the jobs of one batch on one source. A tag is a short hash, or
     `<hash>-dirty-<8 hex>` for a snapshot of a tree with uncommitted changes. The date is pinned once
-    per batch in `<state>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
+    per batch in `<state_dir>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
     ids. A batch name is used once; a second launch of the same batch finds its specs and does
     nothing."""
 

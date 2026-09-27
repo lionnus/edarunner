@@ -3,7 +3,7 @@
 schema = 1
 project = "$project"
 site = "$site"
-state = "~/.edr/{project}"
+state_dir = "~/.edr/{project}"
 data = "data"
 run_prefix = "{user}/edr/{project}"
 

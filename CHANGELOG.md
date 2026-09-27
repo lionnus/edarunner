@@ -13,6 +13,10 @@
   run of the flow only. `run` still answers for one release, with a
   deprecation line on stderr. Replace `edr run` with `edr continue` in
   scripts and hooks. Its event kind is now `continue`.
+- Breaking: the `edr.toml` key `state` is now `state_dir`. An old key
+  stops the load with `'state' is now 'state_dir'`. Rename the key in
+  `edr.toml`: `state = "..."` becomes `state_dir = "..."`, with the same
+  value.
 
 ## 0.2.0 (2026-09-27)
 
