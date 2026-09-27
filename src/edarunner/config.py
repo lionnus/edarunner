@@ -40,13 +40,48 @@ class ConfigError(Exception):
 
 # --- placeholders
 
+# Every placeholder edr fills: its value, and the strings that may use it.
+PLACEHOLDERS = {
+    "project": ("the project name", "everywhere"),
+    "project_root": ("the project directory", "everywhere"),
+    "site_dir": ("the directory of the site file", "everywhere"),
+    "user": ("the login name", "everywhere"),
+    "date": ("the pinned date of the batch, `YYYYMMDD_HHMM`", "the run id"),
+    "batch": ("the batch name", "the run id, the stage strings"),
+    "label": ("the label of the job", "the run id, the stage strings"),
+    "config": ("the configuration name of the job", "the run id, the stage strings"),
+    "build_tag": ("the build tag of the job", "the run id, the stage strings"),
+    "src": ("the source tag of the batch", "the run id, the stage strings"),
+    "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
+    "netlist_stage": ("the `netlist_stage` of the job, only when the job sets it", "the stage strings"),
+    "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),
+    "host": ("the host of the run", "the stage strings, `[env]`, `sync.after`"),
+    "mount": ("the scratch mount of the host", "the stage strings, `[env]`, `sync.after`"),
+    "root": ("the run tree", "the stage strings, `[env]`, `sync.after`"),
+    "tree_id": ("the run id of the tree the flow writes in: the reused run's id under `reuse`, else `{run_id}`",
+                "the stage strings"),
+    "cores": ("`needs.cores` of the stage or task", "the stage strings"),
+    "checkpoint": ("the step name a resume starts from", "`resume`"),
+    "task_dir": ("the task directory", "the strings of a task group, `collect`, metric files"),
+    "task.<key>": ("a key of the task table", "the strings of a task group, `collect`, metric files"),
+    "step": ("the step number", "a metric `file` with `step = \"*\"`"),
+}
+
+
 def render(template: str, values: Mapping[str, object]) -> str:
-    """Fill every {name} and {a.b} from `values`; a missing name is a ConfigError."""
+    """Fill every `{name}` and `{a.b}` in `template` from `values`.
+
+    A placeholder without a value is a ConfigError that names it: `missing` for one of the
+    table below that this string cannot use, `unknown` for a name edr never fills. A dict
+    value flattens to dotted keys, so a task table gives `{task.kernel}`. `${VAR}` belongs
+    to the shell and stays as it is.
+    """
 
     def sub(m: re.Match[str]) -> str:
         key = m.group(1)
         if key not in values:
-            raise ConfigError(f"missing placeholder {{{key}}} in '{template}'")
+            known = key in PLACEHOLDERS or key.startswith("task.")
+            raise ConfigError(f"{'missing' if known else 'unknown'} placeholder {{{key}}} in '{template}'")
         return str(values[key])
 
     return _PH.sub(sub, template)
