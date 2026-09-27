@@ -228,6 +228,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     seed(demo, "b", "FAILED:synth", exit=5)
     seed(demo, "c", "stage:synth")
     (demo / "wt" / "abc1234").mkdir(parents=True)
+    (demo / "wt" / "def5678").mkdir(parents=True)
     with Database(demo / "data" / "edr.db") as db:
         db.add_event("user", a, "launch", "local /x")
         db.add_host_samples(int(time.time()) - 60, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
@@ -240,7 +241,9 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert "- `power` is a task group that runs 2 tasks at a time" in out
     assert "`local` at the probe 60 seconds ago: cores 🔴, ram 🟢, scratch 🟢." in out
     assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
-    assert "One source is checked out under" in out and ": `abc1234` (batch `demo`)." in out
+    assert "2 sources are checked out under" in out
+    assert "\n- `abc1234`, used by batch `demo`\n- `def5678`, used by no batch\n" in out
+    assert "🟢 has room, 🟡 is filling up, 🟠 is nearly full and 🔴 is full." in out
     assert "One run has not finished:" in out and "`c@demo` is running in stage `synth` at step 2 (elaborate) on `local`" in out
     assert "`b@demo` (failed): `edr retire b@demo --why failed`" in out
     assert "user recorded `launch` on `a@demo`: local /x" in out and f"`{demo / 'AGENTS.md'}`" in out
