@@ -1,4 +1,5 @@
-"""The backends that start, watch and stop a driver: `ssh` on the site hosts, `local` on the head node.
+"""The backends that start, watch and stop a driver: `ssh` on the site hosts, `local` on the head node,
+and the batch schedulers of `schedulers.py`.
 
 A backend knows how a driver starts and whether it still runs. Everything else of a run, the
 spec, the heartbeat, the stop and keep files, lives in the state directory and is the same for
@@ -19,7 +20,7 @@ from typing import Any, Protocol
 
 from .guards import Refuse
 from .hosts import HostError, HostProbe, Ssh
-from .model import BACKENDS, Site
+from .model import SCHEDULERS, Site
 
 
 class Live(Enum):
@@ -35,7 +36,11 @@ class Live(Enum):
 
 @dataclass(frozen=True)
 class Request:
-    """What one run asks of a backend: the driver, its spec and its log, and a host when the run has one."""
+    """What one run asks of a backend: the driver, its spec and its log, and a host when the run has one.
+
+    The resources are for a scheduler, which reserves them for the whole job: the most cores, RAM and
+    disk any stage asks, the wall time when every stage has a budget, and the scheduler licences with
+    the most seats any stage needs."""
 
     run_id: str
     spec: Path
@@ -43,6 +48,14 @@ class Request:
     log: Path
     host: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    project: str = ""
+    cores: int = 1
+    ram_gb: float = 0.0
+    disk_gb: float = 0.0
+    hours: float | None = None
+    licences: dict[str, int] = field(default_factory=dict)
+    queue: str = ""
+    options: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -62,7 +75,7 @@ class Handle:
     def parse(cls, text: str) -> Handle:
         """The handle that `str(handle)` wrote into `runs.handle`."""
         backend, _, ident = text.partition(":")
-        host = ident.rpartition(":")[0] if backend in (*BACKENDS, "track") else ""
+        host = ident.rpartition(":")[0] if backend in ("ssh", "local", "track") else ""
         return cls(backend, ident, host or None)
 
     @property
@@ -91,11 +104,21 @@ class Backend(Protocol):
 def make_backend(site: Site, ssh: Ssh | None = None) -> Backend:
     """The backend of `[scheduler] backend`; `ssh` is the wrapper it uses, a new one when None."""
     ssh = ssh or Ssh(site)
-    return LocalBackend(ssh) if site.scheduler_backend == "local" else SshBackend(ssh)
+    name = site.scheduler.backend
+    if name in SCHEDULERS:
+        from .schedulers import BY_NAME
+        return BY_NAME[name](site.scheduler)
+    return LocalBackend(ssh) if name == "local" else SshBackend(ssh)
 
 
 def run_handle(name: str, run: dict[str, Any], hb: dict[str, Any]) -> Handle | None:
-    """The handle of a run: the driver pid of the heartbeat, else the handle the backend gave at submit."""
+    """The handle of a run: the driver pid of the heartbeat, else the handle the backend gave at submit.
+
+    Under a scheduler it is the job id: the one of the last submit, else the one the driver wrote."""
+    if name in SCHEDULERS:
+        if str(run.get("handle") or "").startswith(f"{name}:"):
+            return Handle.parse(str(run["handle"]))
+        return Handle(name, str(hb["sched_id"])) if hb.get("sched_id") else None
     host, pid = hb.get("host") or run.get("host"), hb.get("driver_pid")
     if host and pid:
         return Handle(name, f"{host}:{pid}", str(host))

@@ -137,7 +137,7 @@ takes tasks from the same pool; `docs/run.md` explains the queue and shards.
 | `cwd` | the working directory, relative to the run tree | `"."` |
 | `steps` | the step names the flow passes, indexed by step number | `[]` |
 | `progress` | a command that prints the current step number | `""` |
-| `needs` | `{ cores, disk_gb, tools }`; the table below | `{ cores = 1, disk_gb = 0.0, tools = {} }` |
+| `needs` | `{ cores, disk_gb, tools, ram_gb }`; the table below | `{ cores = 1, disk_gb = 0.0, tools = {}, ram_gb = 0.0 }` |
 | `budget` | `{ hours, disk_gb, kill, per }`; the table below | `{ kill = false, per = "stage" }` |
 | `retry` | `{ match, wait_s, max }`; the table below | `none` |
 | `collect` | paths under the run tree the watcher copies when the stage ends | `[]` |
@@ -159,6 +159,7 @@ What a stage, or a task with its own `needs`, needs before it starts.
 | `cores` | the cores; `{cores}` in the stage strings | `1` |
 | `disk_gb` | free space at the run tree, in GB; below it a task is skipped, and the run fails at its first stage | `0.0` |
 | `tools` | a list of names, or `{ name = seats }`, from the site `[tools]` | `{}` |
+| `ram_gb` | the RAM a scheduler reserves for the job, in GB: the most any stage of the job asks; 0 takes the scheduler's default | `0.0` |
 
 #### budget
 
@@ -218,7 +219,21 @@ remote command runs through `sh -c`, so the login shell of a host may be `csh` o
 | `ssh.timeout_s` | seconds a remote command may take | `45` |
 | `tool_procs` | a regex over process names, for the orphan check and the host table | `""` |
 | `nfs_export` | a path the head node reads when ssh to a host fails at collect | `""` |
-| `scheduler.backend` | what starts and watches a driver: `"ssh"` on the site hosts, or `"local"` on the head node only | `"ssh"` |
+
+### [scheduler]
+
+What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
+`plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
+driver writes into its first heartbeat. `docs/configure.md` shows a site file for each.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `backend` | `"ssh"` on the site hosts, `"local"` on the head node only, or `"condor"`, `"slurm"`, `"lsf"` | `"ssh"` |
+| `submit_via` | an argv prefix of every scheduler command, such as `["ssh", "submithost"]` or `["docker", "exec", "pool"]`; empty runs the command on the head node | `[]` |
+| `tree_root` | where the run trees go, `<tree_root>/<run_prefix>/<run_id>`; on a filesystem the head node and every node of the scheduler mount. Required with a scheduler | `""` |
+| `max_jobs` | runs of the project in the scheduler at once; a job above it is `queued`, and the watcher submits it when a run ends; 0 is no limit | `0` |
+| `queue` | the Slurm partition or the LSF queue; HTCondor has none | `""` |
+| `options` | raw text: lines appended to the HTCondor submit file, `#SBATCH` options for Slurm, extra `bsub` arguments for LSF | `[]` |
 
 ### [hosts.<name>]
 
@@ -261,6 +276,7 @@ declares is an error where it appears. The core knows no licence manager;
 |---|---|---|
 | `seats` | the seat total, for `edr tools` | `none` |
 | `probe` | an argv list that prints the free seats; it runs on the host with the run placeholders filled | `[]` |
+| `licence` | the licence or concurrency limit that counts the tool in the scheduler; a job asks it for the most seats one of its stages needs, for its whole run | none; the scheduler does not count the tool |
 
 ### [telegram]
 
@@ -319,7 +335,7 @@ budget = { hours = 8 }
 | Key | Meaning | Default |
 |---|---|---|
 | `tasks.<id>.<key>` | any key; `{task.<key>}` in the stage strings | none |
-| `tasks.<id>.needs` | `{ cores, disk_gb, tools }`; replaces the stage's | `none` |
+| `tasks.<id>.needs` | `{ cores, disk_gb, tools, ram_gb }`; replaces the stage's | `none` |
 | `tasks.<id>.budget` | `{ hours, disk_gb, kill, per }`; replaces the stage's | `none` |
 | `pattern.resolver` | a hook `id -> table` for ids the file does not list | `""` |
 

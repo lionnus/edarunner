@@ -10,12 +10,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, collect, config, hosts, sync
-from .backend import Backend, Handle, Request, check_pid, gone, make_backend
+from . import __version__, board, collect, config, hosts, sync
+from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .guards import Refuse, assert_safe_target
 from .db import Database
-from .model import Batch, Budget, Job, Project, Stage, Task
+from .model import SCHEDULERS, Batch, Budget, Job, Project, Stage, Task
 
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
 DATE_FMT = "%Y%m%d_%H%M"
@@ -34,6 +34,7 @@ class RunPlan:
     problems: list[str] = field(default_factory=list)
     src: str = ""
     build_tag: str = ""
+    tree_host: str = ""  # where the tree is synced: the host, or `local` for a tree under a scheduler's tree_root
     reuse: str = ""  # the run id whose tree this run continues, or whose archive it restores
     restore: str = ""  # the collect_on_request list copied back from data/results of `reuse`
     values: dict[str, object] = field(default_factory=dict)
@@ -117,6 +118,7 @@ def lease_dir(state: Path, tool: str) -> Path:
 def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:
     needs = _merge(stage.needs, task.needs)
     tools = needs.pop("tools")
+    needs.pop("ram_gb")  # the scheduler's, not the driver's
     v = {**values, **{f"task.{k}": x for k, x in task.fields.items()}, "cores": needs["cores"]}
     v["task_dir"] = os.path.normpath(os.path.join(str(values["root"]), config.render(stage.task_dir, v)))
     out = {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"],
@@ -128,6 +130,7 @@ def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, obj
 
 def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[str, object]) -> dict[str, Any]:
     needs = _merge(stage.needs, None)
+    needs.pop("ram_gb")
     v = {**values, "cores": needs["cores"]}
     out: dict[str, Any] = {"name": stage.name, "cwd": os.path.normpath(os.path.join(str(v["root"]), stage.cwd)),
                            "needs": needs}
@@ -212,6 +215,7 @@ def _check_overrides(project: Project, job: Job, names: list[str]) -> list[str]:
 def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
               probes: dict[str, hosts.HostProbe], errors: dict[str, str], placed: dict[str, str | None]) -> RunPlan:
     names = job.stages or list(project.stages)
+    sched = project.site.scheduler.backend in SCHEDULERS
     problems = _check_overrides(project, job, names)
     src, host, mount, root, reused, tag, tree = batch.source, None, "", "", "", "", ""
     restore = str(job.reuse.get("restore") or "") if job.reuse else ""
@@ -237,7 +241,12 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
                             build_tag=tag, src=src, overrides=job.overrides, vars=job.vars)
     run_id = render_run_id(project.source.run_id, v)
-    if _fresh(job):
+    if _fresh(job) and sched:
+        # The scheduler picks the host, and the tree lies where every node reads it.
+        host = None if job.host == "auto" else job.host
+        mount = os.path.expanduser(config.render(project.site.scheduler.tree_root, v))
+        root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
+    elif _fresh(job):
         host = job.host if job.host != "auto" else placed.get(job.label)
         if host in errors:
             problems.append(f"{host}: {errors[host]}")
@@ -249,7 +258,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
                 problems.append(f"{host}: no writable scratch found")
             root = f"{mount}/{config.render(project.run_prefix, v)}/{run_id}"
     tools = hosts.job_tools(project, job)
-    lack = hosts.missing_tools(project.site, host, tools) if host else \
+    lack = [] if sched else hosts.missing_tools(project.site, host, tools) if host else \
         [t for t in sorted(tools) if not any(h.has(t) for h in project.site.hosts.values())]
     if lack:
         problems.append((f"{host} lacks" if host else "no host has") + " the tools: " + ", ".join(lack))
@@ -257,7 +266,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
     v.update(run_id=run_id, tree_id=tree or run_id, host=host, mount=mount, root=root,
              **hosts.tool_versions(project.site, host))
     spec: dict[str, Any] = {}
-    if host and not problems:
+    if (host or (sched and root)) and not problems:
         try:
             assert_safe_target(root, project.safety.marker, project.safety.min_depth)
             tasks = [config.resolve_task(project, t) for t in job.tasks]
@@ -268,8 +277,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
         except (ConfigError, Refuse, KeyError) as e:
             problems.append(str(e))
     return RunPlan(run_id=run_id, label=job.label, host=host, root=root, spec=spec,
-                   queued=host is None and not problems, problems=problems, src=src, build_tag=tag,
-                   reuse=reused, restore=restore, values=v)
+                   queued=not spec and not problems, problems=problems, src=src, build_tag=tag,
+                   tree_host="local" if sched and _fresh(job) else host or "", reuse=reused, restore=restore, values=v)
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
@@ -281,6 +290,8 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
     """
     date = date or pin_date(project.state_dir, batch.batch, dry_run=True)
     jobs = [j for j in batch.jobs if not only or j.label in only]
+    if project.site.scheduler.backend in SCHEDULERS:
+        return _slots(project, db, [_plan_job(project, batch, j, db, date, {}, {}, {}) for j in jobs])
     wanted = {j.host for j in jobs if _fresh(j)}
     names = (set(project.site.hosts) if "auto" in wanted else set()) | (wanted - {"auto"})
     errors: dict[str, str] = {}
@@ -296,6 +307,42 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
     auto = [j for j in jobs if j.host == "auto" and _fresh(j)]
     placed = hosts.place(project, auto, probes, {h: p.our_runs for h, p in probes.items()}) if auto else {}
     return [_plan_job(project, batch, j, db, date, probes, errors, placed) for j in jobs]
+
+
+def _slots(project: Project, db: Database, plans: list[RunPlan]) -> list[RunPlan]:
+    """Queue the plans above `[scheduler] max_jobs`, less the runs of the project the scheduler holds now."""
+    sched = project.site.scheduler
+    if not sched.max_jobs:
+        return plans
+    held = sum(1 for r in db.runs() if str(r.get("handle") or "").startswith(f"{sched.backend}:") and board.is_live(r))
+    free = sched.max_jobs - held
+    for p in plans:
+        if p.spec and not p.problems:
+            if free <= 0:
+                p.spec, p.queued = {}, True
+            free -= 1
+    return plans
+
+
+def request(project: Project, run_id: str, host: str | None, spec_path: Path, driver: Path) -> Request:
+    """What the run of a written spec asks of the backend, over the stages the spec lists."""
+    spec = config.load_json(spec_path)
+    stages = [project.stages[s["name"]] for s in spec.get("stages") or [] if s.get("name") in project.stages]
+    licences: dict[str, int] = {}
+    for st in stages:
+        for tool, seats in st.needs.tools.items():
+            if name := project.site.tools[tool].licence:
+                licences[name] = max(licences.get(name, 0), seats)
+    # A task group runs `parallel` tasks at once, each with the cores of the stage.
+    cores = max((st.needs.cores * (st.parallel if st.is_group else 1) for st in stages), default=1)
+    timed = bool(stages) and all(st.budget.hours and st.budget.per == "stage" for st in stages)
+    sched = project.site.scheduler
+    return Request(run_id=run_id, spec=spec_path, driver=Path(driver), log=spec_path.with_name(f"{run_id}.driver.log"),
+                   host=host, env=dict(project.site.env), project=project.project, cores=cores,
+                   ram_gb=max((st.needs.ram_gb for st in stages), default=0.0),
+                   disk_gb=stages[0].needs.disk_gb if stages else 0.0,
+                   hours=sum(st.budget.hours or 0 for st in stages) if timed else None,
+                   licences=licences, queue=sched.queue, options=list(sched.options))
 
 
 # --- launch
@@ -324,9 +371,7 @@ def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: b
 def submit(backend: Backend, db: Database, project: Project, run_id: str, host: str | None, spec_path: Path,
            driver: Path) -> Handle:
     """Start the driver of a written spec through the backend and record the handle in `runs`."""
-    log = spec_path.with_name(f"{run_id}.driver.log")
-    handle = backend.submit(Request(run_id=run_id, spec=spec_path, driver=Path(driver), log=log, host=host,
-                                    env=dict(project.site.env)))
+    handle = backend.submit(request(project, run_id, host, spec_path, driver))
     db.upsert_run({"run_id": run_id, "handle": str(handle)})
     return handle
 
@@ -362,7 +407,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
                "problems": p.problems, "started": False, "pid": None}
         out.append(row)
         spec_path = state / batch.batch / f"{p.run_id}.spec.json"
-        if p.host and not p.problems and spec_path.exists():
+        if p.spec and not p.problems and spec_path.exists():
             p.problems.append(f"already launched: {spec_path} exists")
         if p.queued and not dry_run:
             db.upsert_run({**_run_row(p, batch), "state": "queued"})
@@ -372,11 +417,11 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         if started and stagger > 0:
             time.sleep(stagger)
         if not p.reuse or p.restore:
-            ok = sync.sync_tree(ssh, p.host, _src_dir(project, p.src, src_dir), p.root, project.sync.exclude,
+            ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.src, src_dir), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
             if ok and p.restore:
                 res = collect.restore_on_request(project, ssh, db, db.run(p.reuse) or {}, p.restore,
-                                                 p.host, p.root, dry_run, p.spec.get("vars"))
+                                                 p.tree_host, p.root, dry_run, p.spec.get("vars"))
                 print(f"{p.run_id}: restore {p.restore} of {p.reuse}: {res.files} files" + (" (dry)" if dry_run else ""))
                 for f in res.failures:
                     print(f"{p.run_id}: {f}")
@@ -387,11 +432,11 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
                 p.problems.append("sync failed")
                 continue
         path = write_spec(state, batch.batch, p, driver, dry_run)
-        print(f"{p.run_id}: {p.host} {p.root}" + (" (dry)" if dry_run else ""))
+        print(f"{p.run_id}: {p.host or backend.name} {p.root}" + (" (dry)" if dry_run else ""))
         if dry_run:
             continue
         db.upsert_run({**_run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
-        db.add_event("user", p.run_id, "launch", f"{p.host} {p.root}")
+        db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
         handle = submit(backend, db, project, p.run_id, p.host, path, driver)
         row["pid"], row["handle"] = handle.pid, str(handle)
         row["started"] = True
@@ -422,18 +467,22 @@ def stop(ssh: hosts.Ssh, db: Database, run_row: dict[str, Any], heartbeat: dict[
             db.add_event(actor, run_id, "stop", f"after-task: {why}")
         return True
     pid, pgids = heartbeat.get("driver_pid"), [g for g in heartbeat.get("pgids") or [] if g]
-    if pid is None and not pgids:
+    backend = backend or make_backend(ssh.site, ssh)
+    # A scheduler stops its job by id, also before the driver wrote a heartbeat.
+    job = run_handle(backend.name, run_row, heartbeat) if backend.name in SCHEDULERS else None
+    if pid is None and not pgids and job is None:
         raise Refuse(f"{run_id}: no driver pid in the heartbeat; nothing to signal")
-    print(f"{run_id}: TERM driver {pid} and pgids {pgids} on {host}" + (" (dry)" if dry_run else ""))
+    print(f"{run_id}: " + (f"stop {job}" if job else f"TERM driver {pid} and pgids {pgids} on {host}")
+          + (" (dry)" if dry_run else ""))
     if dry_run:
         return True
-    check_pid(pid)
-    backend = backend or make_backend(ssh.site, ssh)
-    handle = Handle(backend.name, f"{host}:{pid if pid is not None else ''}", host)
+    if job is None:
+        check_pid(pid)
+    handle = job or Handle(backend.name, f"{host}:{pid if pid is not None else ''}", host)
     # The driver's own handler kills its groups and writes KILLED; the pgids follow for a dead driver.
     backend.stop(handle, False, pgids)
     end = time.time() + grace_s
-    alive = pid is not None
+    alive = pid is not None or job is not None
     while alive and time.time() < end:
         time.sleep(2)
         alive = not gone(backend, handle)
