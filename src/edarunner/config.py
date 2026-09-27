@@ -26,7 +26,7 @@ PathLike = str | os.PathLike[str]
 # `${VAR}` belongs to the shell, so a `$` before the brace is not a placeholder.
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
-    "schema", "project", "site", "state", "data", "run_prefix", "telegram_poll",
+    "schema", "project", "site", "state", "data", "run_prefix", "telegram_poll", "telegram",
     "source", "sync", "safety", "limits", "placement", "stages", "metrics", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "hosts", "licences", "nfs_export", "telegram"}
@@ -214,17 +214,7 @@ def load_site(path: PathLike) -> Site:
              for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
     licences = {n: _build(Licence, t, file, f"licences.{n}", name=n)
                 for n, t in _table(raw.get("licences", {}), None, file, "licences").items()}
-    telegram = None
-    if "telegram" in raw:
-        tg = _table(raw["telegram"], {f.name for f in fields(Telegram)}, file, "telegram")
-        commands = {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
-                    for n, t in _table(tg.get("commands", {}), None, file, "telegram.commands").items()}
-        telegram = _build(Telegram, {
-            **tg,
-            "token_file": _path(tg.get("token_file", "~/.config/edarunner/telegram.token"), file),
-            "chat_id": _need(tg, "chat_id", file, "telegram"),
-            "commands": commands,
-        }, file, "telegram")
+    telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
     return Site(
         path=file,
         scratch=_need(raw, "scratch", file, ""),
@@ -237,6 +227,23 @@ def load_site(path: PathLike) -> Site:
         nfs_export=raw.get("nfs_export", ""),
         telegram=telegram,
     )
+
+
+def _telegram(raw: object, file: Path, base: Telegram | None, allowed: set[str]) -> Telegram:
+    """The [telegram] table of `file`; a key it leaves out keeps its value from `base`."""
+    tg = dict(_table(raw, allowed, file, "telegram"))
+    token = tg.get("token_file", "~/.config/edarunner/telegram.token" if base is None else None)
+    if token is not None:
+        if not isinstance(token, str):
+            raise ConfigError(f"{file}: telegram.token_file must be str, not {type(token).__name__}")
+        tg["token_file"] = _path(token, file)
+    if "commands" in tg:
+        tg["commands"] = {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
+                          for n, t in _table(tg["commands"], None, file, "telegram.commands").items()}
+    if base is None:
+        _need(tg, "chat_id", file, "telegram")
+    return _build(Telegram, {**({f.name: getattr(base, f.name) for f in fields(Telegram)} if base else {}), **tg},
+                  file, "telegram")
 
 
 # --- edr.toml and tasks.toml
@@ -254,6 +261,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     else:
         site = load_site(root / Path(site_path).expanduser())
     values["site_dir"] = str(site.path.parent)
+    if "telegram" in raw:
+        site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id"})
 
     src = _table(raw.get("source", {}), {f.name for f in fields(Source)}, file, "source")
     source = Source(
