@@ -85,13 +85,15 @@ the chat and rewrites it every watcher cycle.
 `edr hosts` shows each machine: cores used of total, RAM and scratch free
 of total, GPUs idle of total with their memory free of total, tool
 processes ours and others, and our runs. A host without `nvidia-smi`
-shows `-` for the GPUs.
+shows `-` for the GPUs. A mark from 🟢 to 🔴 stands in front of each
+resource, and the `ok` column holds the worst one, so the full hosts
+come first.
 
 ```text
-host   cores            load   ram GB  mount      scratch GB            gpu  gpu GB  tools  runs
-────────────────────────────────────────────────────────────────────────────────────────────────
-hostA  52/64  ██████░░  51.5  120/256  /scratch     800/2000  █████░░░  1/4  290/320    4/2     2
-hostB   3/32  █░░░░░░░   3.1   98/128  /scratch2    150/1000  ███████░    -       -    1/0     1
+ok  host      cores            load      ram GB  mount       scratch GB               gpu   gpu GB  tools  runs
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+🟠  hostA  🟠 52/64  ██████░░  51.5  🟢 120/256  /scratch   🟢 800/2000  █████░░░  🟡 1/4  290/320    4/2     2
+🟠  hostB   🟢 3/32  █░░░░░░░   3.1   🟢 98/128  /scratch2  🟠 150/1000  ███████░       -        -    1/0     1
 ```
 
 ## How it works
@@ -107,7 +109,7 @@ once per task, the tasks run in parallel on the host, each with its own
 directory, budget and result, and shards claim tasks from one queue.
 
 `edr launch` renders one spec per job, copies the one-file driver to the
-host and starts it. The driver runs the stages, waits for licence seats,
+host and starts it. The driver runs the stages, waits for tool seats,
 applies budgets and retries, and writes a heartbeat file every minute.
 
 `edr watch` on the head node reads the heartbeats, classifies every run
@@ -136,7 +138,7 @@ as root, and nothing is installed on a compute host.
 | `git worktree` | one pinned checkout per source tag under `wt/`; an uncommitted tree becomes a snapshot commit |
 | `sqlite3`, through Python | the ledger |
 | `systemd --user` or tmux, and cron | the watcher, and the check that it is still there |
-| `lmutil` | the seats of a FlexLM licence server; optional |
+| a site hook, such as `examples/site/hooks/flexlm_free.sh` | the free seats of a tool; optional, and the core reads one number from it |
 
 `edr launch` copies the driver, one Python file, into the state directory
 on the shared filesystem, writes the spec of the run next to it, and

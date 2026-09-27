@@ -19,7 +19,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | `/status [handle]` | the board, or one run |
 | `/events [n]` | the last events, newest first |
 | `/hosts` | used cores, free scratch, idle GPUs |
-| `/lic` | free licence seats |
+| `/tools` | free seats and hosts per tool |
 | `/board` | pin a new board message |
 
 ### Act on a run

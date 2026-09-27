@@ -55,6 +55,24 @@ def _first_needs(project: Project, job: Job) -> Needs:
     return project.stages[names[0]].needs if names else Needs()
 
 
+def job_tools(project: Project, job: Job) -> set[str]:
+    """The tools the stages of a job need, over every stage it runs."""
+    return {t for n in job.stages or list(project.stages) for t in project.stages[n].needs.tools}
+
+
+def missing_tools(site: Site, host: str, tools: set[str]) -> list[str]:
+    """The tools of `tools` that `host` lacks; a host outside the site table lacks none."""
+    h = site.hosts.get(host)
+    return sorted(t for t in tools if h is not None and not h.has(t))
+
+
+def tool_versions(site: Site, host: str | None) -> dict[str, str]:
+    """`tool.<name>.version` of every tool `host` has; "" when the site file gives no version."""
+    h = site.hosts.get(host or "")
+    have = h.tools if h and h.tools is not None else {n: "" for n in site.tools}
+    return {f"tool.{n}.version": v for n, v in have.items()}
+
+
 def _fits(pl: Placement, p: HostProbe, running: int, needs: Needs) -> bool:
     return (
         p.host not in pl.avoid
@@ -71,7 +89,7 @@ def place(
     probes: dict[str, HostProbe],
     running_per_host: dict[str, int],
 ) -> dict[str, str | None]:
-    """Give each job a host by the [placement] rules of edr.toml; None means queue."""
+    """Give each job a host by the [placement] rules of edr.toml and the tools it needs; None means queue."""
     pl = project.placement
     free = {h: replace(p) for h, p in probes.items()}
     running = dict(running_per_host)
@@ -85,13 +103,14 @@ def place(
             free[host].free_gb -= needs.disk_gb
 
     for job in jobs:
-        needs = _first_needs(project, job)
+        needs, tools = _first_needs(project, job), job_tools(project, job)
         if job.host != "auto":
             out[job.label] = job.host
             take(job.host, needs)
             continue
         ranked = sorted(free, key=lambda h: (prefer.get(h, len(prefer)), -free[h].free_cores))
-        host = next((h for h in ranked if _fits(pl, free[h], running.get(h, 0), needs)), None)
+        host = next((h for h in ranked if _fits(pl, free[h], running.get(h, 0), needs)
+                     and not missing_tools(project.site, h, tools)), None)
         out[job.label] = host
         if host is not None:
             take(host, needs)

@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from edarunner import config, launch, sync
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.ledger import Ledger
+from edarunner.model import Needs
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "local-demo"
 DATE = "20260926_1200"
@@ -103,17 +105,16 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     assert synth["cmd"].split() == ["bash", f"{root}/flow/flow.sh", "synth", a.run_id, "demo", "LAST_STAGE=synth"]
     assert "FIRST_STAGE={checkpoint}" in synth["resume"] and synth["cwd"] == root
     assert synth["needs"] == {"cores": 1, "disk_gb": 0.1} and synth["steps"] == ["setup", "analyze", "elaborate", "synth"]
-    assert synth["licence"] == {"name": "demo", "feature": "demo", "floor": 2, "seats_per_task": 1,
-                                "probe": f"bash {root}/flow/lmstat.sh"}
+    assert synth["tools"] == [{"name": "demo", "seats": 1, "probe": ["bash", f"{root}/flow/seats.sh"]}]
     assert synth["budget"] == {"hours": 1, "disk_gb": 1} and synth["retry"] == {"match": "licen[cs]e", "wait_s": 1, "max": 2}
-    assert "retry" not in pnr and "licence" not in export and "cmd" not in power
+    assert "retry" not in pnr and "tools" not in export and "cmd" not in power
     assert power["parallel"] == 2 and power["after_each"] == "rm -f {task_dir}/wave.vcd"
-    assert power["licence"]["seats_per_task"] == 1 and power["budget"] == {"hours": 1, "per": "task"}
+    assert power["tools"] == synth["tools"] and power["budget"] == {"hours": 1, "per": "task"}
     small, big = power["tasks"]
     assert small["dir"] == f"{root}/simulation/tests/demo/GEMM_M64_N64"
     assert small["cmd"] == f"DEMO_CONFIG=demo bash {root}/flow/kernel.sh gemm GEMM_M64_N64 M=64 N=64"
     assert small["needs"] == {"cores": 1, "disk_gb": 0.05} and small["budget"] == {"hours": 1, "per": "task"}
-    assert big["budget"] == {"hours": 2, "per": "task"}
+    assert big["budget"] == {"hours": 2, "per": "task"} and "tools" not in small and "tools" not in big
     left = [s for s in strings(spec) if "{" in s.replace("{checkpoint}", "").replace("{task_dir}", "")]
     assert left == []
     assert " DW=0" in b.spec["stages"][0]["cmd"] and b.spec["stages"][0]["cmd"].endswith("DW=0")
@@ -141,6 +142,29 @@ def test_plan_reports_problems(env) -> None:
     project.stages["export"].cmd = "true"
     _, b = launch.plan(project, batch, ssh, ledger, date=DATE)
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
+
+
+def test_plan_needs_the_tools_of_the_host(env) -> None:
+    project, batch, ssh, ledger = env
+    synth_only(batch)
+    project.stages["synth"].cmd += " TOOL={tool.demo.version}"
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == [] and p.spec["stages"][0]["cmd"].endswith(" TOOL=1.0")
+    project.site.hosts["local"].tools = {}
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == ["local lacks the tools: demo"] and p.spec == {}
+    batch.jobs[0].host = "auto"
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == ["no host has the tools: demo"] and p.host is None and not p.queued
+    project.site.hosts["hostB"] = replace(project.site.hosts["local"], name="hostB", tools=None)
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    assert p.problems == [] and p.host == "hostB" and p.spec["stages"][0]["cmd"].endswith(" TOOL=")
+    project.site.hosts["local"].tools = None
+    project.tasks["k_big"].needs = Needs(tools={"demo": 2})
+    batch.jobs[0].stages, batch.jobs[0].tasks, batch.jobs[0].host = ["power"], ["k_small", "k_big"], "local"
+    (p,) = launch.plan(project, batch, ssh, ledger, date=DATE)
+    small, big = p.spec["stages"][0]["tasks"]
+    assert "tools" not in small and big["tools"] == [{"name": "demo", "seats": 2, "probe": ["bash", f"{p.root}/flow/seats.sh"]}]
 
 
 def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
