@@ -1,6 +1,6 @@
-# The local demo: a fake flow with three stages and a task group, on the
-# head node. `bash setup.sh` makes the source repository; then
-# `edr checkout HEAD`, `edr plan demo`, `edr launch demo`, `edr watch --once`.
+# The local demo: a stand-in flow of shell scripts with three stages and a
+# task group, on the head node. `bash setup.sh` makes the source repository;
+# then `edr checkout HEAD`, `edr plan demo`, `edr launch demo`, `edr watch --once`.
 schema = 1
 project = "demo"
 site = "site.toml"

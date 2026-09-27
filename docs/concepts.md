@@ -1,8 +1,7 @@
 # Concepts
 
-After this page you can read every other page, the board and the
-reference without a second lookup. Each term below is one thing with one
-name.
+This page defines the terms that the rest of the documentation, the board
+and the reference use.
 
 ![Where each part runs: the head node, the shared filesystem, the compute hosts and the phone](diagrams/where-it-runs.svg)
 
@@ -20,8 +19,8 @@ machines. One site file serves every project of a user, and every project
 has its own database, state directory and watcher. `edr` works from any
 directory below `edr.toml` and sees that project only.
 
-The core knows no EDA tool. Every command, report file and number comes
-from the project file.
+edarunner itself knows no EDA tool. Every command, report file and number
+comes from the project file.
 
 ## Stage, step and task
 
@@ -67,14 +66,20 @@ names that tag as `source`. Every run of the batch works on a copy of
 that tree, so a later commit never changes a running flow. A tree
 with uncommitted changes gets the tag `<hash>-dirty-<8 hex>`.
 
+The commands that select results (`edr metrics`, `edr export` and the
+bot's `/csv`) call this tag the design, as in `--design 3f9a2c1`. It is
+the version of your source, not the name of a chip.
+
 ## Host, head node and driver
 
 The head node is the machine that runs `edr` and the watcher. A compute
 host is a machine in `[hosts]` of the site file that runs the flow;
-`local` is the head node itself. Nothing is installed on a host.
+`local` is the head node itself. Nothing is installed on a host. With a
+`[scheduler]` table in the site file, an HTCondor, Slurm or LSF cluster
+picks the host instead, and the driver runs as the job.
 
-The driver is one file, `edr_driver.py`, that `edr launch` starts on the
-host for each run. It runs the stages in order in the run tree,
+The driver is a single file, `edr_driver.py`, that `edr launch` starts on
+the host for each run. It runs the stages in order in the run tree,
 `<scratch>/<user>/edr/<project>/<run_id>/`, a copy of the checked-out
 tree. It writes a heartbeat file every `heartbeat_s` seconds, 60 by
 default.
@@ -85,9 +90,9 @@ and write the heartbeat; the head node reads the heartbeat.
 
 ## Database
 
-The run database is one SQLite file, `data/edr.db`, on the head node.
-Every run, every stage attempt, every metric, every collected file and
-every action with its reason lands there. Only the head node opens it.
+The run database is one SQLite file, `data/edr.db`, on the head node. It
+records every run, stage attempt, metric and collected file, and every
+action together with its reason. Only the head node opens it.
 [results.md](results.md) lists the tables.
 
 ## Watcher
@@ -95,12 +100,12 @@ every action with its reason lands there. Only the head node opens it.
 `edr watch` is one process per project on the head node. Every cycle it
 reads the heartbeats, classifies each run, collects the results,
 extracts the metrics, starts queued jobs, writes the boards and sends the
-alerts. It never deletes a tree, and removes no file but a stale seat
-lease. The Telegram bot is a thread inside it.
+alerts. It never deletes a run tree; the only files it removes are
+expired licence-seat leases ([guarantees.md](guarantees.md)). The
+Telegram bot runs as a thread inside the watcher.
 
 ## Snapshot
 
 A snapshot is what `edr export` writes: the runs, the metrics and the
 collected files of one design, frozen in one directory with a manifest.
-A report, a notebook or a dashboard reads snapshots, never the live
-database.
+Any analysis reads a snapshot, never the live database.

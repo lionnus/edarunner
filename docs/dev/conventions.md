@@ -1,11 +1,11 @@
 # Conventions
 
-After this page you know the rules every change keeps, where a thing is
-documented, and how a release is cut. `CONTRIBUTING.md` at the repository
-root says how to report a bug, write a commit message and open a pull
+This page lists the rules every change follows, where each thing is
+documented, and how to cut a release. `CONTRIBUTING.md` at the repository
+root explains how to report a bug, write a commit message and open a pull
 request.
 
-## Rules every change keeps
+## Rules for every change
 
 - Every `rm -rf` and every `rsync --delete` calls `assert_safe_target`
   first, and every path built from a run id calls `assert_run_id`.
@@ -15,8 +15,8 @@ request.
   `tests/test_e2e_local.py::test_dry_run_flow_writes_nothing` proves it
   for the whole flow.
 - A read command creates nothing.
-- The watcher never deletes a tree. A budget stops or kills; the only
-  file the watcher removes is a stale seat lease.
+- The watcher never deletes a run tree. A budget stops or kills a run,
+  and the only files the watcher removes are expired seat leases.
 - A stop signals the pids the driver recorded, never a session name or
   a process pattern.
 - A loop that continues after a failure counts what it skipped and
@@ -48,19 +48,13 @@ page. Document a new command, flag, config key, state or bot command
 where you define it, then run `uv run tools/gen_docs.py` before the
 commit. CI refuses a stale page.
 
-A change in behaviour updates the page under `docs/` that describes it.
-`docs/README.md` says which page holds what. The pages keep these rules:
+When a change alters behaviour, update the page under `docs/` that
+describes it; `docs/README.md` says which page holds what. For the pages:
 
-- A page opens with what the reader can do after it, in one or two
-  sentences, then the content.
-- No page repeats another. A page links to the one that holds the
-  detail. A page under 40 lines merges into its neighbour.
-- A page says what the tool guarantees and which code holds it. It tells
-  no story of a failure on one farm.
-- A result is a report, a notebook, a dashboard or a paper. No page
-  assumes one of them.
-- Short sentences, active voice, one instruction per sentence, no site
-  string, no em dash, no middle dot.
+- Write plain, natural English for an engineer who is new to the tool.
+- Say what the tool does and which code enforces it.
+- Link to the page that holds a detail instead of repeating it.
+- Keep host names, user names and other site details out of the pages.
 
 A diagram under `docs/diagrams/` is one hand-written SVG in Helvetica or
 Arial. The palette is green `#008000` for a running process, black
@@ -76,7 +70,7 @@ inkscape docs/diagrams/<name>.svg --export-type=png --export-filename=/tmp/<name
 
 A release is one commit, `:bookmark: Release X.Y.Z`, on `devel`:
 
-1. Rename the heading `## Unreleased` at the top of `CHANGELOG.md` to
+1. Rename the `Unreleased` heading at the top of `CHANGELOG.md` to
    `## X.Y.Z (YYYY-MM-DD)`.
 2. Set `version` in `pyproject.toml` and `__version__` in
    `src/edarunner/__init__.py` to the same value.

@@ -50,7 +50,7 @@
 <text class="m" x="54" y="256" xml:space="preserve">cmd  progress  steps  collect  collect_on_request  needs  budget</text>
 <rect class="box" x="40" y="280" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="302">Each metric</text>
-<text class="m" x="54" y="320" xml:space="preserve">file + regex | csv | json | python</text>
+<text class="m" x="54" y="320" xml:space="preserve">file + regex | csv | json | python | area_hier</text>
 <rect class="box" x="40" y="344" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="366">Shared environment</text>
 <text class="m" x="54" y="384">[env]</text>
@@ -66,8 +66,8 @@
 <text class="t" x="686" y="302">Hosts and scratch</text>
 <text class="m" x="686" y="320" xml:space="preserve">scratch  [hosts.&lt;name&gt;]</text>
 <rect class="box" x="672" y="344" width="248" height="52" rx="7"/>
-<text class="t" x="686" y="366">Env, Telegram, commands</text>
-<text class="m" x="686" y="384" xml:space="preserve">env  [telegram.*]</text>
+<text class="t" x="686" y="366">Env, alerts, commands</text>
+<text class="m" x="686" y="384" xml:space="preserve">env  [telegram]  [ntfy]  [mail]</text>
 
 <!-- Layers to core -->
 <path class="a" d="M210 176V128"/>
@@ -84,14 +84,14 @@
 <text class="t" x="220" y="494">Fusion Compiler and PrimePower</text>
 <text class="t" x="580" y="494">Yosys and OpenROAD</text>
 <text class="s" x="220" y="512">a make target, a licence seat</text>
-<text class="s" x="580" y="512">a container command, no licence</text>
+<text class="s" x="580" y="512">a make target, no licence</text>
 <text class="m key" x="40" y="536">cmd</text>
 <text class="m" x="220" y="536">make … pnr</text>
-<text class="m" x="580" y="536">oseda ./run_synthesis.sh</text>
+<text class="m" x="580" y="536">make … synth</text>
 <text class="m key" x="40" y="554">needs.tools</text>
 <text class="m" x="220" y="554">["pnr"]</text>
 <text class="s" x="580" y="554">none</text>
 <text class="m key" x="40" y="572">metric file</text>
 <text class="m" x="220" y="572">area_hier.rpt</text>
-<text class="m" x="580" y="572">synth_stat.rpt</text>
+<text class="m" x="580" y="572">synth_stat.txt</text>
 </svg>

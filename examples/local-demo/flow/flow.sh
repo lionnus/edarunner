@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The fake flow: flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [NETLIST_STAGE=n] [KEY=VALUE ...]
+# The stand-in flow: flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [NETLIST_STAGE=n] [KEY=VALUE ...]
 # Each step sleeps one second and writes reports/<n>/area.rpt and qor.rpt.
 # The config "fail_licence" fails once at step 2 with a licence line in the
 # log, then succeeds on the retry (a marker file remembers the first try).
