@@ -47,6 +47,9 @@ def world(tmp_path):
     (results / RUN_A / "reports" / "3" / "area.rpt").write_text("i_top 1000.0\n")
     (results / RUN_A / "sim" / "power" / "reports").mkdir(parents=True)
     (results / RUN_A / "sim" / "power" / "reports" / "power.csv").write_text(POWER_HIER)
+    (results / RUN_A / "log").mkdir()
+    (results / RUN_A / "log" / "synth.log").write_text("a long log\n")
+    (results / RUN_A / "reports" / "3" / "run.log").write_text("another log\n")
     (results / RUN_B / "reports" / "0").mkdir(parents=True)
     (results / RUN_B / "reports" / "0" / "power.csv").write_text(POWER_FLAT)
     (results / RUN_C / "reports").mkdir(parents=True)
@@ -88,10 +91,10 @@ def test_export_one_design(world, tmp_path):
     assert (power["task"], power["step"], power["unit"]) == ("k_small", "", "W")
 
     assert (out / "a" / "reports" / "3" / "area.rpt").read_text() == "i_top 1000.0\n"
-    assert (out / "a" / "sim" / "power" / "reports" / "power.csv").read_text() == (
-        "phase,instance,total_w\nWHOLE,i_top,1.0\nWHOLE,i_top/i_core,0.8\n")
+    assert (out / "a" / "sim" / "power" / "reports" / "power.csv").read_text() == POWER_HIER
     assert (out / "b_nodw" / "reports" / "0" / "power.csv").read_text() == POWER_FLAT
     assert not (out / "a" / "reports" / "area.rpt").exists()
+    assert not (out / "a" / "log").exists() and not (out / "a" / "reports" / "3" / "run.log").exists()
 
     on_disk = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()} - {"manifest.json"}
     assert {f["path"] for f in manifest["files"]} == on_disk
@@ -130,12 +133,12 @@ def test_dry_run_writes_nothing(world, tmp_path, capsys):
     assert [(f["path"], f["sha256"]) for f in manifest["files"]] == [(f["path"], f["sha256"]) for f in real["files"]]
 
 
-def test_reduce_power_csv(tmp_path):
-    hier = tmp_path / "power.csv"
-    hier.write_text(POWER_HIER)
-    assert [r["instance"] for r in export.reduce_power_csv(hier)] == ["i_top", "i_top/i_core"]
-    assert [r["instance"] for r in export.reduce_power_csv(hier, depth=0)] == ["i_top"]
-    assert len(export.reduce_power_csv(hier, depth=9)) == 3
-    flat = tmp_path / "flat.csv"
-    flat.write_text(POWER_FLAT)
-    assert export.reduce_power_csv(flat) == [{"phase": "PHASE_A", "total_w": "0.100"}, {"phase": "WHOLE", "total_w": "0.250"}]
+def test_with_logs_copies_the_logs(world, tmp_path):
+    project, led = world
+    out = tmp_path / "with_logs"
+    manifest = export.export(project, led, "aaa", out, labels=["a"], with_logs=True)
+    assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
+    assert (out / "a" / "reports" / "3" / "run.log").is_file()
+    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "a/log/synth.log",
+                                                       "a/reports/3/area.rpt", "a/reports/3/run.log",
+                                                       "a/sim/power/reports/power.csv"]
