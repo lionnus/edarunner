@@ -142,6 +142,18 @@ def test_plan_reports_problems(env) -> None:
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
 
 
+def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
+    project, batch, ssh, ledger = env
+    a, b = batch.jobs
+    assert launch.build_tag(project, a) == "demo" and launch.build_tag(project, b) == "demo_DW0"
+    b.overrides = {"N": "8", "DW": "0"}
+    assert launch.build_tag(project, b) == "demo_N8_DW0"
+    hook = tmp_path / "build_tag.py"
+    hook.write_text("def build_tag(config, overrides):\n    return f'{config}-x{len(overrides)}'\n")
+    project.source.build_tag = f"python:{hook}:build_tag"
+    assert launch.build_tag(project, b) == "demo-x2"
+
+
 def test_netlist_stage_is_a_plain_job_field(env) -> None:
     project, batch, ssh, ledger = env
     synth_only(batch)
