@@ -24,14 +24,15 @@ def runs(capsys) -> list[dict]:
 
 
 def wait_terminal(capsys, n: int, timeout: float = 90) -> list[dict]:
-    """watch --once until `n` runs exist and none is live."""
+    """watch --once until `n` runs exist and none is live; the last cycle sees the terminal heartbeats."""
     end = time.time() + timeout
     while time.time() < end:
+        rows = runs(capsys)
+        terminal = len(rows) >= n and not any(board.is_live(r) for r in rows)
         assert cli.main(["watch", "--once"]) == 0
         capsys.readouterr()
-        rows = runs(capsys)
-        if len(rows) >= n and not any(board.is_live(r) for r in rows):
-            return rows
+        if terminal:
+            return runs(capsys)
         time.sleep(1)
     raise AssertionError(f"runs still live after {timeout} s: {[(r['label'], r['phase']) for r in runs(capsys)]}")
 
