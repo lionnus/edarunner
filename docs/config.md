@@ -1,16 +1,18 @@
 # Configuration files
 
-`config.py` reads four TOML files with `tomllib`. An unknown key, a
-missing required key, or a broken reference raises `ConfigError` with the
-file and the key path. Required keys have no default in the tables below.
+`config.py` reads the four TOML files with `tomllib`. An unknown key, a
+missing required key or a broken reference raises `ConfigError`, which
+names the file and the key path. A key that the tables below list without
+a default is required.
 
-Rules that apply to every file:
+These rules apply to every file:
 
-- A path is absolute, or relative to the file that names it. `~` expands.
+- A path is absolute or relative to the file that names it, and `~`
+  expands.
 - A string may hold `{placeholders}` (section 5). `${VAR}` belongs to the
   shell and stays as it is.
-- Table order is file order. The stages run in the order of `edr.toml`.
-- A hook is `python:<file>:<function>`; `<file>` is relative to the
+- Table order is file order, so the stages run in the order of `edr.toml`.
+- A hook is `python:<file>:<function>`, where `<file>` is relative to the
   project directory. `load_hook` also accepts `<file>:<function>`.
 
 ## 1. edr.toml
@@ -37,10 +39,11 @@ Rules that apply to every file:
 
 ### [env]
 
-Variables the flow needs in every command of every stage, on top of the
-site `env`. Values take the run placeholders (`{root}`, `{build_tag}`) and
-`$VAR` expands on the host. Example: `PATH = "{root}/.venv/bin:$PATH"` for a
-flow that calls `python` from the venv of the tree.
+The variables the flow needs in every command of every stage, on top of
+the site `env`. A value takes the run placeholders (`{root}`,
+`{build_tag}`), and `$VAR` expands on the host. For example,
+`PATH = "{root}/.venv/bin:$PATH"` serves a flow that calls `python` from
+the venv of its tree.
 
 ### [sync]
 
@@ -119,7 +122,8 @@ flow that calls `python` from the venv of the tree.
 | `unit` | unit text | `""` |
 | `canonical` | name shared across projects | `""` |
 
-A metric holds exactly one of `regex`, `csv`, `json`, `python`, `expr`.
+A metric holds exactly one of `regex`, `csv`, `json`, `python` and
+`expr`.
 
 ## 2. site.toml
 
@@ -140,7 +144,7 @@ A metric holds exactly one of `regex`, `csv`, `json`, `python`, `expr`.
 | `ram_gb` | RAM | required |
 | `scratch` | host-specific scratch roots | site `scratch` |
 
-The host `local` is the head node without ssh.
+The host `local` is the head node itself, reached without ssh.
 
 ### [licences.<name>]
 
@@ -173,9 +177,11 @@ The host `local` is the head node without ssh.
 | `cwd` | working directory of `run` | `""` |
 | `dry_run` | log the command, do not run it | `false` |
 
+`docs/telegram.md` explains what each key does in practice.
+
 ## 3. tasks.toml
 
-Optional. `load_project` reads it when it exists.
+This file is optional; `load_project` reads it when it exists.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -185,7 +191,7 @@ Optional. `load_project` reads it when it exists.
 | `pattern.resolver` | hook `id -> table` for ids the file does not list | `""` |
 
 `resolve_task(project, id)` looks in the table first, then calls the
-resolver. A resolver that returns nothing makes `ConfigError`.
+resolver. A resolver that returns nothing raises `ConfigError`.
 
 ## 4. jobs/<batch>.toml
 
@@ -207,8 +213,8 @@ resolver. A resolver that returns nothing makes `ConfigError`.
 | `netlist_stage` | stage number of the netlist to collect | none |
 | `reuse` | `{ run_id }`, or `{ label, latest = true }`; a glob label is an error | none |
 
-`load_batch(project, "demo")` reads `jobs/demo.toml`; a path that ends
-in `.toml` is read as given, relative to the project directory.
+`load_batch(project, "demo")` reads `jobs/demo.toml`. A path that ends in
+`.toml` is read as given, relative to the project directory.
 
 ## 5. Placeholders
 
@@ -218,9 +224,10 @@ dotted keys, so `task=task.fields` gives `{task.kernel}`. The dict
 `overrides` renders as `KEY=VALUE` tokens separated by spaces.
 
 `render(template, values)` fills `{name}` and `{a.b}`. A name that
-`values` does not hold raises `ConfigError` that names the placeholder.
+`values` does not hold raises a `ConfigError` that names the placeholder.
 `load_project` renders `site`, `state`, `data`, `source.repo` and
 `source.worktrees` at load time with `project`, `project_root`, `user`
 and `site_dir`. Every other string keeps its placeholders for `plan`.
 
-`{tree_id}`: the run id of the tree the flow writes in (the reused run's id under `reuse`, else `{run_id}`).
+`{tree_id}` is the run id of the tree the flow writes in: the reused
+run's id under `reuse`, and `{run_id}` otherwise.

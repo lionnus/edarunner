@@ -1,8 +1,8 @@
 # Safety
 
-Every rule here comes from one failure on a real farm. The failure is named
-so the rule keeps its reason. The code that holds the rule is named so you
-can read it.
+Every rule here comes from one failure on a real farm. The table names the
+failure, so the rule keeps its reason, and the code that holds the rule,
+so you can read it.
 
 ## Rules and incidents
 
@@ -28,29 +28,30 @@ can read it.
 - a relative path
 - `/`, `/home`, `/usr`, `/tmp`, `/scratch`, `/scratch2`, `/var`, `/opt`
 - the home directory of the user
-- an empty marker, or a path without the marker (`safety.marker`, default `/edr/`)
+- an empty marker, or a path without the marker (`safety.marker`, default
+  `/edr/`)
 - a path with fewer than `safety.min_depth` components (default 4)
 
 `guards.assert_run_id(id)` refuses an id that does not start with
 `YYYYMMDD_HHMM_`.
 
 `Ssh.kill_pgid(host, pgid, sig)` refuses a group id of 1 or lower, and a
-signal name with characters other than capital letters and digits.
+signal name with characters other than capital letters and digits, because
 `kill -TERM -- -0` would signal every process of the user.
 
 `retire` refuses when the driver of the run is alive on the host. Stop it
 first.
 
-A guard raises `Refuse`. The verb prints `edr: <reason>` to stderr, exits 1,
-and runs nothing after the refusal. The events table gets no row, because
-nothing happened.
+A guard raises `Refuse`. The verb prints `edr: <reason>` to stderr, exits
+1, and runs nothing after the refusal. The events table gets no row,
+because nothing happened.
 
 ## Dry runs
 
-Every verb that writes takes `--dry-run`: `init`, `stage`, `plan`, `launch`,
-`run`, `keep`, `export`, `stop`, `retire`, `watch`. A dry run prints every
-path and every command with the mark `(dry)` or the prefix `dry:`, and
-writes nothing:
+Every verb that writes takes `--dry-run`: `init`, `stage`, `plan`,
+`launch`, `run`, `keep`, `import`, `export`, `stop`, `retire` and `watch`.
+A dry run prints every path and every command with the mark `(dry)` or the
+prefix `dry:`, and writes nothing:
 
 - no date pin in `<state>/<batch>/RUN_DATE`
 - no spec, no driver copy, no stop file, no keep file
@@ -73,29 +74,31 @@ Three tables in `edr.toml` limit a run. `docs/config.md` lists every key.
 | `budget` of a stage or task | `hours`, `disk_gb`, `kill`, `per` | the driver while the command runs |
 | `[limits]` | `stale_s`, `dead_s`, `hung_s`, `grace_s`, `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `kill_hung`, `kill_orphan` | the driver and the watcher |
 
-What happens at a limit:
+This is what happens at a limit:
 
-- `needs.disk_gb` short before the first stage: the driver exits 3. Short
-  before a task: the task is skipped and counted.
-- `needs.licence` below `floor` for `gate_max_s`: the driver exits 4. A probe
-  that fails counts as unknown, and the stage runs.
-- `budget.hours` passed with `kill = false`: the command runs to its end, the
-  phase becomes `OVER_BUDGET:<stage>`, and the driver exits 9 after it. With
-  `kill = true` the group gets `SIGTERM`. With `per = "task"` only that task
-  is killed.
-- `budget.disk_gb` passed by `tree_gb`: the same as `hours`.
-- `streak` equal failure signatures in a row: the group claims nothing more.
-- free space below `host_free_min_gb`: the driver starts nothing new and
-  sets `host_full`; the watcher stops the newest task on the host after
-  `grace_s`.
+- When `needs.disk_gb` is short before the first stage, the driver exits
+  3. When it is short before a task, the task is skipped and counted.
+- When `needs.licence` stays below `floor` for `gate_max_s`, the driver
+  exits 4. A probe that fails counts as unknown, and the stage runs.
+- When `budget.hours` passes with `kill = false`, the command runs to its
+  end, the phase becomes `OVER_BUDGET:<stage>`, and the driver exits 9
+  after it. With `kill = true` the group gets `SIGTERM`, and with
+  `per = "task"` only that task is killed.
+- When `tree_gb` passes `budget.disk_gb`, the same rule applies as for
+  `hours`.
+- After `streak` equal failure signatures in a row, the group claims
+  nothing more.
+- When the free space falls below `host_free_min_gb`, the driver starts
+  nothing new and sets `host_full`. The watcher stops the newest task on
+  the host after `grace_s`.
 
-`edr keep <handle> --hours N` adds `N` hours to the running stage or task.
-`--ack` cancels a pending kill of the watcher. The driver reads the keep
-file at every heartbeat.
+`edr keep <handle> --hours N` adds `N` hours to the running stage or task,
+and `--ack` cancels a pending kill of the watcher. The driver reads the
+keep file at every heartbeat.
 
 The watcher kills only when the config says so. `kill_hung` and
-`kill_orphan` are `false` by default. Without them a `hung` or `orphan`
-state is an event and a notification.
+`kill_orphan` are `false` by default, and without them a `hung` or
+`orphan` state is only an event and a notification.
 
 ## States
 
@@ -115,8 +118,8 @@ The watcher classifies every live run each cycle. Section 7 of
 | `superseded` | a newer batch runs the same label at another `src` | notify; `stop --after-task`, unless the run has a keep file |
 
 A finished run takes its state from the phase: `done`, `incomplete`,
-`failed`, `over_budget`, `stopped`, `killed`. A job without a host is
-`queued`; the watcher launches it when a host fits.
+`failed`, `over_budget`, `stopped` or `killed`. A job without a host is
+`queued`, and the watcher launches it when a host fits.
 
 `edr status --triage` lists every run that is not `running`, with one
 proposed command per state.

@@ -1,8 +1,8 @@
 # Declaring a flow
 
-Two flows ran through `edr` on real hosts. They differ in shape, and the
-config shows both patterns. Names and paths are examples; the site names
-live in the private site file.
+Two flows have run through `edr` on real hosts. They differ in shape, and
+the two configs below show both patterns. The names and paths are
+examples; the site names live in the private site file.
 
 ## One tool session, many steps inside
 
@@ -66,22 +66,22 @@ unit = "nJ"
 canonical = "energy"
 ```
 
-Three lessons from the first run:
+The first run taught three lessons:
 
 - `{tree_id}` names the tree the flow writes in. A run that reuses a tree
-  (more kernels on an existing netlist) has its own `{run_id}`, and the
-  flow's run directory must keep the tree's.
-- The flow needs its own `PATH`; the project `[env]` table carries it and
+  (to run more kernels on an existing netlist) has its own `{run_id}`, but
+  the flow's run directory must keep the tree's id.
+- The flow needs its own `PATH`. The project `[env]` table carries it, and
   `$PATH` expands on the host.
-- A whole-window power row may carry no duration. Energy comes from the
-  window that the phase file records, through an `expr` metric.
+- A whole-window power row may carry no duration. The energy then comes
+  from the window that the phase file records, through an `expr` metric.
 
 ## One command per step
 
 An open flow with a script per step and a checkpoint between steps maps
 one stage to one step. Here the flow runs inside a tool container, and
 the container version is part of the command, because the flow scripts
-fit the tool version they were written for.
+match the tool version they were written for.
 
 ```toml
 [env]
@@ -125,12 +125,13 @@ canonical = "timing.wns"
 
 The source of this flow keeps its PDK in a directory that git ignores, so
 `edr stage --dirty <tree>` snapshots the working tree instead of adding a
-worktree; the run id then carries `-dirty-<hash of the diff>`.
+worktree. The run id then carries `-dirty-<hash of the diff>`.
 
 ## Which shape to choose
 
 Cut a stage where the tool session ends, or where you want a budget, a
-retry rule or a stop of your own. Everything inside a stage is a step:
-tracked through `progress`, extracted per step, resumed through
-`{checkpoint}`. A stage with `foreach = "tasks"` fans out into tasks that
-run in parallel on the host and share one queue across shards.
+retry rule or a stop of your own. Everything inside a stage is a step,
+which `edr` tracks through `progress`, extracts metrics from per step, and
+resumes through `{checkpoint}`. A stage with `foreach = "tasks"` fans out
+into tasks that run in parallel on the host and share one queue across
+shards.

@@ -1,8 +1,8 @@
 # The local demo
 
-A project that runs on the head node alone, with a fake flow. Every
-command of `edr` works here without an EDA tool, a licence or a second
-host. The tests build on it, and it is the shortest way to see the tool.
+This project runs on the head node alone, with a fake flow. Every `edr`
+command works here without an EDA tool, a licence or a second host. The
+tests build on it, and it is the shortest way to see the tool at work.
 
 ## What the flow fakes
 
@@ -12,17 +12,17 @@ host. The tests build on it, and it is the shortest way to see the tool.
 | `flow/kernel.sh <kernel> <test> [KEY=VALUE ...]` | a gate-level power simulation | sleeps `DEMO_SLEEP` seconds (default 2); writes a 1 MiB `wave.vcd`, `power/reports/power.csv` and `power/phases.json` |
 | `flow/lmstat.sh` | the FlexLM probe | prints one `Users of demo:` line; 10 seats, `DEMO_LIC_USED` in use (default 2) |
 
-The steps are `setup`, `analyze`, `elaborate`, `synth` (stage `synth`),
-`cts`, `route` (stage `pnr`) and `export`. `FIRST_STAGE` makes a resume,
-`LAST_STAGE` an early end. The numbers are made up: area
-`1000 + 10.5 * step` um2, slack `-0.0<step>` ns, power 0.250 W, window
-3400 ns, so energy is 850 nJ.
+The steps are `setup`, `analyze`, `elaborate` and `synth` (stage `synth`),
+then `cts` and `route` (stage `pnr`), then `export`. `FIRST_STAGE` makes a
+resume, and `LAST_STAGE` an early end. The numbers are made up: an area of
+`1000 + 10.5 * step` um2, a slack of `-0.0<step>` ns, a power of 0.250 W
+and a window of 3400 ns, so the energy is 850 nJ.
 
 Two switches make failures:
 
-- config `fail_licence`: step 2 fails once with `license checkout failed`
-  in the log, then passes on the retry.
-- kernel `bad`, task `k_bad`: fails with `boom`.
+- The config `fail_licence` makes step 2 fail once with `license checkout
+  failed` in the log; the retry then passes.
+- The kernel `bad`, task `k_bad`, fails with `boom`.
 
 ## The files
 
@@ -34,7 +34,7 @@ Two switches make failures:
 | `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
 | `setup.sh` | makes `repo/`, a git repository with `flow/`; the source the batch stages |
 
-`repo/`, `wt/` and `data/` are made by the run, and git ignores them.
+The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 
 ## The five-minute run
 
@@ -58,8 +58,8 @@ edr export --design <src> --out data/exports/<src>
 edr retire --batch demo --why "demo done"
 ```
 
-`<src>` is the short hash `edr stage` printed. `edr metrics` needs it,
-because one table holds one design.
+`<src>` is the short hash that `edr stage` printed. `edr metrics` needs
+it, because one table holds one design.
 
 Where things land:
 
@@ -81,8 +81,8 @@ DEMO_LIC_USED=9 edr launch gate      # one free seat, floor 2: the gate blocks
 edr status --triage                  # after 30 s: failed, FAILED:synth, exit 4
 ```
 
-Add `"k_bad"` to the `tasks` of job `a` in a copy, launch it, and the run
-ends `INCOMPLETE:1f0s` with exit 8. `edr status a@<batch>` shows the
+Add `"k_bad"` to the `tasks` of job `a` in a copy and launch it. The run
+ends `INCOMPLETE:1f0s` with exit 8, and `edr status a@<batch>` shows the
 signature `boom: kernel bad failed`.
 
 ## Clean up
