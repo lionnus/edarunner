@@ -14,6 +14,7 @@ published at <https://lionnus.github.io/edarunner/>.
 | [guides/project.md](guides/project.md) | describe your flow: where the configuration lives, stages, metrics, tasks, the environment and the runtime step |
 | [guides/site.md](guides/site.md) | describe your machines: hosts, tools and licence seats, a scheduler, and what a host needs |
 | [guides/run.md](guides/run.md) | write a batch, launch it, read the board, keep a watcher behind it and act on one run |
+| [guides/projects.md](guides/projects.md) | run several projects on the same machines under one supervisor, and share them with a second user |
 | [guides/debug.md](guides/debug.md) | find out why a run failed, died or waits |
 | [guides/results.md](guides/results.md) | get the numbers out: metrics, compare, runtime, export and MLflow |
 | [guides/alerts.md](guides/alerts.md) | get alerts on Telegram, ntfy or mail, and use the bot from the phone |

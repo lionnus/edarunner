@@ -412,7 +412,8 @@ The same command without a reply answers
 ### One bot for every project
 
 One bot in one chat serves every registered project, and the bold first
-line of every message names the project. Telegram lets one consumer poll
+line of every message names the project; [projects.md](projects.md)
+shows what else the projects share. Telegram lets one consumer poll
 a bot token, so only the holder of `~/.edr/serve.lock` polls: `edr serve`,
 or without it the first watcher that takes the lock. Every other watcher
 sends its alerts and polls nothing.

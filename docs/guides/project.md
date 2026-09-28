@@ -288,18 +288,7 @@ the first launch as `FAILED:runtime`, with the reason in `log/setup.log`.
 
 ## A second project
 
-A second flow gets its own directory with its own `edr.toml`. It has its
-own database and results under `data/`, its own state directory
-`~/.edr/<project>`, its own run trees and its own watcher. The site file
-is shared. Nothing of one project appears in the tables of another.
-
-The machines are shared too, so some things count over every registered
-project. `max_per_host` counts your runs on a host, whatever project they
-belong to; the seat leases of all projects share one directory; and one
-watcher, the one that holds `~/.edr/serve.lock`, checks the orphans,
-stops the newest run of a full host and sweeps the leases for all of
-them. `edr hosts` shows your runs on each host by project,
-`edr status --all` the board of every project, and `edr projects` the
-projects with their watchers. One Telegram bot serves both;
-[alerts.md](alerts.md#one-bot-for-every-project) shows how a command
-names its project.
+A second flow gets its own directory with its own `edr.toml`, database,
+state directory, run trees and watcher, and it shares the site file, the
+machines and the bot with the first. [projects.md](projects.md) shows
+what the projects share and how one supervisor watches all of them.

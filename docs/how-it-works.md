@@ -368,6 +368,8 @@ writes `~/.edr/serve.json`, its own heartbeat that `edr serve --check`
 reads. Under systemd it sends `READY=1` once it holds the lock and
 `WATCHDOG=1` every cycle, so a supervisor that hangs is restarted. A
 watcher that hangs is the supervisor's job.
+[guides/projects.md](guides/projects.md) shows the supervisor from the
+side of the user.
 
 The Telegram bot is a thread of the supervisor, or of the watcher that
 holds `serve.lock` when no supervisor runs; every other watcher only

@@ -155,6 +155,7 @@ A cron line tells you when the supervisor stopped. It reads
 is missing or older than three cycles. `edr serve --dry-run` lists the
 registered projects and what the supervisor would do for each, and
 `edr projects` shows who watches each project now.
+[projects.md](projects.md) shows the supervisor with several projects.
 
 One watcher runs per project: a second one, `edr watch` or
 `edr watch --once`, finds `<state_dir>/watch.lock` taken, names the pid
