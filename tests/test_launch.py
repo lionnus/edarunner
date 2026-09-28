@@ -15,13 +15,14 @@ from pathlib import Path
 import pytest
 
 import edarunner
-from edarunner import config, launch, sync
+from edarunner import board, config, launch, sync
 from edarunner.backend import Handle, Request, SshBackend
 from edarunner.config import ConfigError
 from edarunner.db import Database
 from edarunner.guards import Refuse, assert_safe_target
 from edarunner.hosts import HostProbe, Ssh
 from edarunner.model import Needs, Runtime
+from helpers_backend import FakeBackend
 from helpers_driver import DEMO, wait_for
 
 DATE = "20260926_1200"
@@ -327,6 +328,17 @@ def test_spec_text_shows_the_env_commands_and_collect_paths(env) -> None:
     assert "    resume: " in text and "    collect: reports/\n" in text
     assert "  stage power, a task group, 2 at a time, in " in text
     assert f"    task {a.spec['stages'][3]['tasks'][0]['id']} in {a.root}/simulation/" in text and text.endswith("    collect: {task_dir}/power/")
+
+
+def test_submit_records_the_cores_the_run_reserves(env, tmp_path: Path) -> None:
+    project, _, _, db = env
+    project.stages["synth"].needs = Needs(cores=16, disk_gb=0.1)
+    spec = tmp_path / "r1.spec.json"
+    spec.write_text(json.dumps({"stages": [{"name": "synth"}, {"name": "power"}]}))
+    db.upsert_run({"run_id": "r1", "phase": "stage:power", "started": 1000})
+    launch.submit(FakeBackend(), db, project, "r1", "local", spec, tmp_path / "driver.py")
+    # The run keeps the 16 cores of synth also while power runs its two tasks of one core each.
+    assert db.run("r1")["cores"] == 16 and board.cost(db.run("r1"), now=1000 + 7200) == 32.0
 
 
 def test_launch_says_when_it_waits_for_the_stagger(env, tmp_path: Path, monkeypatch, capsys) -> None:

@@ -928,7 +928,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": source, "run_date": date})
     c.db.upsert_run({"run_id": run_id, "batch": a.batch, "label": a.label, "config": a.label, "build_tag": "track",
                      "source": source, "dirty": int("-dirty" in source), "host": host, "root": str(root), "created": now,
-                     "phase": "setup", "state": "running", "started": now, "tree_id": run_id,
+                     "phase": "setup", "state": "running", "started": now, "tree_id": run_id, "cores": stage.needs.cores,
                      "handle": str(Handle("track", f"{host}:{os.getpid()}", host))})
     c.db.add_event("user", run_id, "track", shlex.join(argv))
     print(f"{run_id}: {a.stage} on {host} {root}", file=sys.stderr)
@@ -1556,7 +1556,8 @@ def _parser() -> argparse.ArgumentParser:
         Without a handle, status prints the board: one line per run of every
         batch that is not retired, live runs first and dead ones on top. The columns are the row
         number, label, host, state, phase, stage/step, heartbeat age, failed and
-        done task counts, and the core hours so far. A live stage with steps
+        done task counts, and core-h: the hours so far times the cores the run
+        reserved, the most that any of its stages needs. A live stage with steps
         shows <stage>, starting until its first step. The state of a live run
         follows the heartbeat age (running, stale, dead) or the watcher's last
         verdict (hung, host_full, ...). A finished run shows its phase class:

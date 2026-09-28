@@ -73,9 +73,9 @@ board says `done`, `edr watch --once` collects the reports and
 `edr metrics` prints the area and the setup slack of each stage:
 
 ```text
-#   label  host   state  phase  stage/step  age  fail/done  cost
-────────────────────────────────────────────────────────────────
-#1  gcd    local  done   done   place        0m      0f/0d   0.0
+#   label  host   state  phase  stage/step  age  fail/done  core-h
+──────────────────────────────────────────────────────────────────
+#1  gcd    local  done   done   place        0m      0f/0d     0.0
 
 label  source   stage      step  task  metric                  value  unit
 ──────────────────────────────────────────────────────────────────────────
@@ -97,11 +97,11 @@ from RTL to GDS, see
 `edr status` draws the board, one line per run.
 
 ```text
-#   label  host   state    phase        stage/step  age  fail/done  cost
-────────────────────────────────────────────────────────────────────────
-#1  wide   hostB  stale    group:power  power/4     12m      1f/3d   9.6
-#2  base   hostA  running  stage:pnr    pnr/4        1m      0f/0d   6.4
-#3  small  hostA  done     done         export      35m      0f/4d   0.0
+#   label  host   state    phase        stage/step  age  fail/done  core-h
+──────────────────────────────────────────────────────────────────────────
+#1  wide   hostB  stale    group:power  power/4     12m      1f/3d     9.6
+#2  base   hostA  running  stage:pnr    pnr/4        1m      0f/0d     6.4
+#3  small  hostA  done     done         export      35m      0f/4d     0.0
 ```
 
 `edr hosts` shows the free room of each host next to your live runs

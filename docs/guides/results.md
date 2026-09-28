@@ -12,7 +12,7 @@ batch, every number and every action.
 | Table | One row per | Holds |
 |---|---|---|
 | `batches` | batch | the project, the source tag, the pinned date, when it was retired |
-| `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id` |
+| `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id`, the cores the run reserved |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
 | `parameters` | key of a run | `config`, `build_tag`, `source` and each override, as text |
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |

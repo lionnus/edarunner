@@ -112,7 +112,12 @@ def order(rows: list[Row]) -> list[Row]:
 
 
 def cost(row: Row, now: float | None = None) -> float:
-    """Core hours: elapsed hours times `row['cores']`, or times 1 when the row has no cores."""
+    """The core hours the run has reserved: its elapsed hours times `row['cores']`.
+
+    `cores` is what the run asked for when it started: the most cores that any of its stages needs,
+    where a task group counts its `parallel` tasks. A scheduler holds that many for the whole job, so a
+    stage that needs fewer still counts them all. A row without cores counts one, the default of
+    `needs.cores`."""
     started = row.get("started")
     if not started:
         return 0.0
@@ -256,8 +261,8 @@ def wide(rows: list[Row], now: float | None = None, totals: dict[str, int] | Non
             for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"
-    return table([first, "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body,
-                 styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "cost"))
+    return table([first, "label", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"], body,
+                 styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "core-h"))
 
 
 def samples_table(samples: list[Row]) -> Table | None:
@@ -395,7 +400,7 @@ def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plo
     `areas` maps a run id to its last area report, {stage, step, source_file, rows: [[instance, depth, area]]};
     `step_names` maps a step number to its name.
     """
-    enriched = [{**r, "state": state_of(r), "cost": round(cost(r), 2)} for r in order(runs)]
+    enriched = [{**r, "state": state_of(r), "core-h": round(cost(r), 2)} for r in order(runs)]
     script = f'<script src="{_h(plotly_src)}"></script>' if plotly_src else ""
     return _COMPARE.substitute(plotly=script, runs=_json_block(enriched), parameters=_json_block(parameters),
                                metrics=_json_block(metrics), areas=_json_block(areas or {}),
@@ -479,7 +484,7 @@ const LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', 
   margin: { t: 30, r: 10, b: 40, l: 50 }, height: 320 };
 const tr = (cells, tag = 'td') => '<tr>' + cells.map(c => '<' + tag + '>' + c + '</' + tag + '>').join('') + '</tr>';
 
-const COLS = ['label', 'source', 'batch', 'host', 'state', 'phase', 'cost', ...PKEYS];
+const COLS = ['label', 'source', 'batch', 'host', 'state', 'phase', 'core-h', ...PKEYS];
 const cell = (r, c) => PKEYS.includes(c) && !(c in r) ? PAR[r.run_id]?.[c] : r[c];
 const TICK = new Set(RUNS.slice(0, 2).map(r => r.run_id));
 const FILTER = {};

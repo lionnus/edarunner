@@ -45,7 +45,7 @@ def test_narrow_width_and_order(width):
 def test_wide_all_states():
     text = board.plain(board.wide(board_rows(), now=NOW))
     lines = text.splitlines()
-    assert lines[0].split() == ["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"]
+    assert lines[0].split() == ["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"]
     assert len(lines) == 8 and "\x1b" not in text
     assert lines[2].startswith("#1  a") and " dead " in lines[2]
     assert lines[6].startswith("#5  b_nodw") and " incomplete " in lines[6] and " 1f/1d " in lines[6]
@@ -151,7 +151,7 @@ def test_compare_html_without_plotly():
     blocks = _json_blocks(page)
     assert set(blocks) == {"edr-runs", "edr-parameters", "edr-metrics", "edr-areas", "edr-steps"}
     assert [r["run_id"] for r in blocks["edr-runs"]] == [RUN["run1"], RUN["fail"], RUN["done"]]
-    assert blocks["edr-runs"][1]["state"] == "incomplete" and "cost" in blocks["edr-runs"][0]
+    assert blocks["edr-runs"][1]["state"] == "incomplete" and "core-h" in blocks["edr-runs"][0]
     assert blocks["edr-parameters"] == parameters and blocks["edr-metrics"] == metrics
     assert "</script>b" not in page.split("<h3>")[0].split("edr-parameters")[1]
     with_plotly = board.compare_html(rows, parameters, metrics, "plotly-2.35.2.min.js")

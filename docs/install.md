@@ -67,9 +67,9 @@ Synthesis, floorplan and placement take about half a minute. `edr
 status` draws the board, one line per run, and the run reaches `done`:
 
 ```text
-#   label  host   state  phase  stage/step  age  fail/done  cost
-────────────────────────────────────────────────────────────────
-#1  gcd    local  done   done   place        0m      0f/0d   0.0
+#   label  host   state  phase  stage/step  age  fail/done  core-h
+──────────────────────────────────────────────────────────────────
+#1  gcd    local  done   done   place        0m      0f/0d     0.0
 ```
 
 `edr watch --once` runs one cycle of the watcher. It copies the reports

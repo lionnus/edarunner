@@ -1084,7 +1084,7 @@ def test_track_execs_the_driver_and_the_watcher_collects(demo: Path) -> None:
         hb = json.loads((project.state_dir / "track" / f"{row['run_id']}.json").read_text())
         host = socket.gethostname()
         assert (hb["phase"], hb["host"], hb["stage"]) == ("done", host, "synth")
-        assert row["handle"] == f"track:{host}:{hb['driver_pid']}" and row["root"] == str(demo)
+        assert row["handle"] == f"track:{host}:{hb['driver_pid']}" and row["root"] == str(demo) and row["cores"] == 1
         watch.cycle(project, Ssh(project.site), db, [])
         assert db.run(row["run_id"])["state"] == "done"
         assert (project.data / "results" / row["run_id"] / "reports" / "3" / "area.rpt").is_file()

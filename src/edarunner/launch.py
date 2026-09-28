@@ -410,8 +410,10 @@ def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: b
 
 def submit(backend: Backend, db: Database, project: Project, run_id: str, host: str | None, spec_path: Path,
            driver: Path) -> Handle:
-    """Start the driver of a written spec through the backend and record the handle in `runs`."""
-    handle = backend.submit(request(project, run_id, host, spec_path, driver))
+    """Record in `runs` the cores the run asks for, start its driver through the backend, and record the handle."""
+    req = request(project, run_id, host, spec_path, driver)
+    db.upsert_run({"run_id": run_id, "cores": req.cores})
+    handle = backend.submit(req)
     db.upsert_run({"run_id": run_id, "handle": str(handle)})
     return handle
 
