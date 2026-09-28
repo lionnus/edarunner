@@ -67,8 +67,9 @@ def test_two_projects_share_the_hosts_and_the_seats_under_one_supervisor(tmp_pat
             ids = {r["run_id"] for r in db.runs()}
             assert {m["run_id"] for m in db.metrics()} <= ids and len(ids) == 2
         assert {p.name for p in (root / "data" / "results").iterdir()} == ids
-    # A stray sleep of this machine belongs to no project; no process of a run of alpha or beta is an orphan.
-    assert not [a.about for a in rec.alerts.values() if a.kind == "orphan" and "no edarunner run owns it" not in a.about]
+    # No process in the trees of this test is an orphan. A parallel copy of this test has trees of the same project
+    # names and can have the same run ids, so the check can flag its sleeps as orphans of alpha or beta.
+    assert not [a.about for a in rec.alerts.values() if a.kind == "orphan" and dict(a.facts)["directory"].startswith(f"{tmp_path}/")]
     assert "<b>alpha</b> <i>nothing live" in rec.boards[-1] and "<b>beta</b> <i>nothing live" in rec.boards[-1]
     state = json.loads((home.root() / "serve.json").read_text())
     assert set(state["projects"]) == {"alpha", "beta"} and state["cycle"] >= 2
