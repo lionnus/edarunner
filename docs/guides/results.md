@@ -283,16 +283,19 @@ anything else, also with `--dry-run`.
 edr metrics --source 3f9a2c1
 edr metrics --source 3f9a2c1 --stage pnr --step 12
 edr metrics --source 3f9a2c1 --csv > metrics.csv
+edr metrics --label base --task k_small
 ```
 
 `--source` is the source tag exactly as `edr checkout` printed it, so a
 run on `3f9a2c1-dirty-7b21c0d9` needs that full tag. Give `--source`
-more than once to read several tags in one table. The text form shows
-label, source, stage, step, task, metric, value and unit; `--csv` writes
-the columns of `metrics.csv` below. Every row carries its source tag and
-its source file, so you can check where a number came from before you
-put it in a table. A value that breaks the `pass` rule of its metric
-shows FAIL next to it; see
+more than once to read several tags in one table. `--label` and
+`--task` choose runs without a source tag;
+[Tables that answer questions](#tables-that-answer-questions) shows
+them. The text form shows label, source, stage, step, task, metric,
+value, unit, the file the value came from, and the snapshots that hold
+the run; `--csv` writes the columns of `metrics.csv` below. Check where a
+number came from before you put it in a table. A value that breaks the
+`pass` rule of its metric shows FAIL next to it; see
 [Reports with several blocks](#reports-with-several-blocks).
 
 ## Extract again
@@ -764,9 +767,11 @@ percent of each run to the first. Each run is at its
 run has for a metric without `record`. `--step N` puts every run at
 step N. A percent across a sign change, such as a slack from +1 ps to
 -1 ps, is left out. A value that breaks the `pass` rule of its metric
-shows FAIL next to it. `--metric` (repeatable) and `--stage` narrow the
-rows; `--json` keeps the source file and the verdict of every value and
-lists the missing runs.
+shows FAIL next to it. `--metric` (repeatable), `--stage` and `--task`
+narrow the rows; `--json` keeps the source file and the verdict of every
+value and lists the missing runs. For many runs and few metrics, print
+the runs as rows with `--ref` and `--base`; see
+[Tables that answer questions](#tables-that-answer-questions).
 
 ```
 $ edr compare base@g8 lanes16@g7 --metric wns_ns --metric cells
@@ -807,6 +812,117 @@ vars.netlist_stage  11            15
 metric     task     base@3f9a2c1  base@7c0d9e2  Δ base@7c0d9e2    Δ %
 energy_nj  k_small         412.7         446.1            33.4  +8.1%
 ```
+
+## Tables that answer questions
+
+A report asks the same questions of the database again and again: how
+one metric looks over every build and task, where a quoted number came
+from, and how a sweep of builds ranks against a reference. Each of them
+is one command.
+
+### One metric over builds and tasks
+
+`edr metrics --pivot` prints one metric as a table with a row per label
+and source and a column per task. A metric without tasks, such as an
+area, gets a column per stage and step instead. The rows come in natural
+label order, so `lanes4` comes before `lanes16`, and each row holds the
+run that `label@source` names, by the rule of
+[Which run a command takes](#which-run-a-command-takes). Name the metric
+with `--metric`; a pivot over two metrics is refused.
+
+```
+$ edr metrics --source 3f9a2c1 --source 7c0d9e2 --stage power --metric energy_nj --pivot
+energy_nj in nJ
+label         source        k_big     k_small      k_wide
+─────────────────────────────────────────────────────────
+lanes4        3f9a2c1      1310.2       412.7  not in job
+lanes8        3f9a2c1      1288.4       405.3       980.1
+lanes8        7c0d9e2      1291.7       409.6      failed
+lanes8.power  7c0d9e2  not in job  not in job       979.4
+lanes16       3f9a2c1      failed       398.9       951.7
+lanes16       7c0d9e2     STOPPED       401.2     STOPPED
+lanes32       3f9a2c1    no value       402.8       944.9
+nolanes       3f9a2c1      1402.9         433  not in job
+```
+
+An empty cell gives the first reason of this table that fits:
+
+| Cell | The run |
+|---|---|
+| `failed` | ran the task, and the task failed or its file did not parse; `edr metrics` shows the error of a file |
+| `not in job` | has no such task in its spec |
+| its phase | did not end `done`, such as `STOPPED` |
+| `no value` | ended `done` and has no value there |
+
+A column of steps never shows `not in job`, because the spec of an
+import lists its task groups only. Neither does a run without a spec,
+such as an import from before edarunner wrote one. `--csv` writes the
+pivot with the stored values, and `--json` gives the columns and, for
+each row, the run id, the phase, the cells and the verdict of each
+value.
+
+### Where a number comes from
+
+A number in a draft needs its run, its file and its snapshot. `--label`
+takes the runs of a label at every source, and `--task` keeps one task,
+so no source tag is needed:
+
+```
+$ edr metrics --label lanes8 --task k_wide --metric energy_nj
+label         source   stage  step  task    metric     value  unit  file                                             snapshots
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+lanes8        3f9a2c1  power     -  k_wide  energy_nj  980.1  nJ    simulation/tests/cfg_a/k_wide/power/phases.json  ../paper/data/3f9a2c1
+lanes8.power  7c0d9e2  power     -  k_wide  energy_nj  979.4  nJ    simulation/tests/cfg_a/k_wide/power/phases.json  exports/7c0d9e2
+```
+
+`--label` matches the runs with that label, the runs whose config has
+that name, and the runs that `edr continue` made from a run of that
+label, whose label is `<label>.<stage>`. The file is a path under
+`data/results/<run_id>/`, with the line of a regex metric. The snapshots
+column lists every export that holds the run: the directory comes from
+the export event, and it counts when the `manifest.json` there lists the
+run. A snapshot that was moved or deleted drops out, and a relative path
+in an event counts from the project directory. The table prints each
+directory relative to the project, and `--json` gives the full path.
+
+### Runs as rows against a reference
+
+With `--ref` or `--base`, `edr compare` prints a row per handle, in the
+order given. For each metric a row shows the value with its stage and
+step, the change from the row before, the percent against the reference
+run, the percent against the base run, and the rank, 1 for the lowest
+value. The reference defaults to the first handle. A run that you name
+only with `--ref` or `--base` gives its percent and gets no row, so a
+baseline outside the sweep stays out of the ranking:
+
+```
+$ edr compare lanes4@3f9a2c1 lanes8@3f9a2c1 lanes16@3f9a2c1 lanes32@3f9a2c1 --metric area_cell_um2 --ref lanes4@3f9a2c1 --base nolanes@3f9a2c1
+run        area_cell_um2       Δ  % lanes4  % nolanes  rank
+───────────────────────────────────────────────────────────
+lanes4   51230.4 (pnr 5)       -     +0.0%     +20.1%     1
+lanes8   52418.9 (pnr 5)  1188.5     +2.3%     +22.9%     2
+lanes16  53766.1 (pnr 5)  1347.2     +4.9%     +26.1%     3
+lanes32  56402.7 (pnr 5)  2636.6    +10.1%     +32.2%     4
+```
+
+The rows need one value per metric for each run. A task metric has a
+value per task, so name one task with `--task`; compare refuses a table
+that would need two. With two or more metrics, the last column says
+`differ` when the metrics rank a run differently. Power and energy do so
+when the builds need different windows for the same work:
+
+```
+$ edr compare lanes4@3f9a2c1 lanes8@3f9a2c1 lanes16@3f9a2c1 lanes32@3f9a2c1 --task k_small --base nolanes@3f9a2c1
+run      energy_nj[k_small]     Δ  % lanes4  % nolanes  rank  power_w[k_small]        Δ  % lanes4  % nolanes  rank   ranks
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+lanes4                412.7     -     +0.0%      -4.7%     4            0.0412        -     +0.0%      +4.0%     1  differ
+lanes8                405.3  -7.4     -1.8%      -6.4%     3            0.0451   0.0039     +9.5%     +13.9%     3
+lanes16               398.9  -6.4     -3.3%      -7.9%     1            0.0437  -0.0014     +6.1%     +10.4%     2  differ
+lanes32               402.8   3.9     -2.4%      -7.0%     2            0.0498   0.0061    +20.9%     +25.8%     4  differ
+```
+
+`--json` adds `prev`, `pct_ref`, `pct_base` and `rank` to each row, by
+run id, and names `ref`, `base` and `ranks_differ`.
 
 ## An overview of runs
 
@@ -1215,7 +1331,8 @@ A build tag matches every run of one build: the backend runs, the runs
 that continue them, and the bench runs of the RTL recorded with the same
 tag, a suite imported with `edr import --build-tag` or a bench tracked
 with `edr track --build-tag`. One demand list by build tag then covers
-the RTL cycle counts and the energies of each test. A label
-matches that label only. A run that `edr continue` starts on a tree has
-the label `<label>.<stage>`, so a demand by label misses it and a demand
-by build tag finds it.
+the RTL cycle counts and the energies of each test. A label matches as
+`edr metrics --label` does: the runs with that label, the runs whose
+config has that name, and the runs that `edr continue` made from a run
+of that label, whose label is `<label>.<stage>`. A demand by label thus
+finds a task that a continued run holds.
