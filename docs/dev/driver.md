@@ -109,7 +109,10 @@ The driver writes `<run_id>.json` by a temporary file and a rename every
 `heartbeat_s` seconds and at every phase change, so a reader never sees
 a torn file. A heartbeat keeps its last phase after the driver dies;
 the watcher marks such a run `dead` after `dead_s`. The hung check of
-the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
+the watcher compares `cpu_s` and `log_bytes` from cycle to cycle. A
+heartbeat that the readers cannot use, such as one that an older driver
+wrote, shows its run as `unreadable` and leaves the other runs alone
+(`watch.ingest`, `watch.cycle`).
 
 | Field | Meaning |
 |---|---|

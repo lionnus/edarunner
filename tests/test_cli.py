@@ -205,6 +205,30 @@ def test_the_triage_continues_a_stopped_run_with_work_left_and_retires_one_witho
     assert "<code>edr " not in acts.status_text("k@demo")
 
 
+def test_a_heartbeat_that_cannot_be_read_shows_its_run_unreadable_and_the_others_as_usual(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    x = seed(demo, "x", "done")
+    beat(demo, x, tasks={"k_small": {"stage": "power", "phase": "done"}})  # the flat map of an older driver
+    error = "AttributeError: 'str' object has no attribute 'get'"
+    code, out, _ = edr(capsys, "--json", "status")
+    states = {r["run_id"]: (board.state_of(r), r.get("error")) for r in json.loads(out)["data"]["runs"]}
+    assert code == 0 and states == {a: ("done", None), x: ("unreadable", error)}
+    assert "    edr status x@demo\n" in edr(capsys, "status", "--triage")[1]
+    code, out, _ = edr(capsys, "status", "x@demo")
+    assert code == 0 and f"unreadable: {error}" in out
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert ("x@demo", "edr status x@demo") in [(d["handle"], d["command"]) for d in decisions]
+    assert f"such as a heartbeat that an older driver wrote ({error})" in edr(capsys, "brief", "--run", "x@demo")[1]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert "🔴 <code>x@demo</code> unreadable" in acts.status_text(everything=True)
+    assert f"unreadable: {error}" in acts.status_text("x@demo")
+    with Database(demo / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": x, "state": "unreadable"})  # as the watcher leaves it
+    beat(demo, x, tasks={})  # once the heartbeat reads again, so does the run
+    run = json.loads(edr(capsys, "--json", "status", "x@demo")[1])["data"]["run"]
+    assert board.state_of(run) == "done" and "error" not in run
+
+
 def test_events_filters(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "events")
     assert code == 2 and out == "no events\n"

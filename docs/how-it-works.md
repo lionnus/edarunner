@@ -318,6 +318,12 @@ never reads a retired batch. The read commands such as `edr status`
 ingest the heartbeats too, so the board follows the driver even between
 two cycles.
 
+A heartbeat or a spec that a reader cannot use, such as a heartbeat that
+an older driver wrote, stops only its own run. The watcher marks that run
+`unreadable`, sends one alert per error text and skips the run, and every
+other run goes through the cycle as usual. `edr status`, `edr brief` and
+the bot show the run as `unreadable` with the error.
+
 ### The work of the user
 
 Some work belongs to the user and not to one project: a host, a tool

@@ -114,6 +114,7 @@ class Ctx:
         self.data: Any = None
         self._project: Project | None = None
         self._db: Database | None = None
+        self.unreadable: dict[str, str] = {}  # run id -> the error, of the heartbeats the last refresh could not use
 
     @property
     def project(self) -> Project:
@@ -212,19 +213,24 @@ class Ctx:
     def refresh(self, batch: str | None = None) -> None:
         """Ingest the heartbeat files of the shown batches, so the board follows the driver, not the last watcher cycle.
 
-        This is the watcher's own first step and idempotent, so a read command may run it.
+        This is the watcher's own first step and idempotent, so a read command may run it. A heartbeat that it cannot
+        use goes into `unreadable` with its error, and every other one goes in.
         """
         heartbeats = watch.read_heartbeats(self.project, {batch} if batch else None)
-        if heartbeats:
-            watch.ingest(self.db, heartbeats)
+        self.unreadable = watch.ingest(self.db, heartbeats) if heartbeats else {}
 
     def rows(self, batch: str | None = None) -> list[Row]:
-        """The runs of the batches that are not retired, with the state a heartbeat age gives."""
+        """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
+        the refresh could not use is `unreadable` and carries the error."""
         self.refresh(batch)
         retired = {b["batch"] for b in self.db.batches() if b.get("retired")}
         rows = [r for r in self.db.runs(batch=batch) if r["batch"] not in retired]
         now, lim = time.time(), self.project.limits
         for r in rows:
+            if r["run_id"] in self.unreadable:
+                r["state"], r["error"] = "unreadable", self.unreadable[r["run_id"]]
+            elif r.get("state") == "unreadable":
+                r["state"] = None  # the refresh read it, and the watcher classifies it again
             # The watcher's own classes (hung, host_full, ...) stay; only the age classes follow the heartbeat.
             if board.is_live(r) and r.get("updated") is not None and r.get("state") in (None, "running", "stale", "dead"):
                 age = now - r["updated"]
@@ -458,8 +464,7 @@ class Actions:
             return tgfmt.board(rows, totals=metrics.step_totals(self.c.project),
                                names=analysis.step_names(self.c.project), everything=everything)
         row = self.c.resolve(handle)
-        self.c.refresh(str(row["batch"]))
-        row = self.c.db.run(row["run_id"]) or row
+        row = next((r for r in self.c.rows(str(row["batch"])) if r["run_id"] == row["run_id"]), row)
         return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs(), self.c.left(row, board.state_of(row)))
 
     def events_text(self, n: int) -> str:
@@ -545,8 +550,7 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     if a.handle:
         row = c.resolve(a.handle)
-        c.refresh(str(row["batch"]))
-        row = c.db.run(row["run_id"]) or row
+        row = next((r for r in c.rows(str(row["batch"])) if r["run_id"] == row["run_id"]), row)
         hb, run_id = c.heartbeat(row), row["run_id"]
         stages = sorted(c.db.stage_runs(run_id), key=lambda r: (r["stage"] != "setup", r["stage"], r["task"], r["attempt"]))
         mets = c.db.metrics(run_ids=[run_id])

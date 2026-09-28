@@ -80,6 +80,25 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert env.ssh.killed == [] and not list(env.project.state_dir.glob("*/*.stop"))
 
 
+def test_a_heartbeat_that_cannot_be_read_stops_only_its_own_run(env: Env) -> None:
+    good = env.heartbeat("g", phase="done", exit=0, stage="power", tasks={"power": {"k_a": {"phase": "done"}}})
+    env.heartbeat("x", phase="done", exit=0, stage="power", tasks={"k_a": {"stage": "power", "phase": "done"}})  # flat
+    env.heartbeat("c", counts=[0])  # ingest takes it, and the hung check of the running stage cannot
+    error = "AttributeError: 'str' object has no attribute 'get'"
+    assert env.cycle() == {rid("g"): "done", rid("x"): "unreadable", rid("c"): "unreadable"}
+    assert "AttributeError: 'list' object has no attribute 'get'" in env.notifier.alerts[rid("c")].about
+    assert env.db.run(rid("x"))["state"] == "unreadable" and (rid("x"), "unreadable") in env.events()
+    a = env.notifier.alerts[rid("x")]
+    assert (a.kind, a.title, a.todo) == ("unreadable", "cannot read", [("See the run and the error:", "edr status x@demo")])
+    assert error in a.about
+    # The good run went on as usual: its task row, its collection and the board.
+    assert [tuple(r) for r in env.db.conn.execute("SELECT stage, task FROM stage_runs WHERE run_id=? AND task!=''",
+                                                   (good["run_id"],))] == [("power", "k_a")]
+    assert (rid("g"), "collect") in env.events() and len(env.notifier.boards) == 1
+    env.cycle(NOW + 60)  # the same error sends no second alert
+    assert env.notifier.sent.count(("unreadable", rid("x"))) == 1
+
+
 def test_a_run_that_ended_at_the_end_of_a_stage_offers_the_stages_left(env: Env) -> None:
     done = {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}
     o = env.heartbeat("o", phase="OVER_BUDGET:pnr", exit=9, stage="pnr",

@@ -163,7 +163,7 @@ def run_data(c: Any, row: Row, file_host: str) -> Row:
         "step_name": hb.get("step_name"), "age_s": state["age_s"], "started": row.get("started"),
         "exit": row.get("exit"), "runtime": analysis.runtime(c.project, c.db, row), "events": events,
         "log": log, "log_tail": tail, "log_note": note, "metrics": list(last.values()), "flags": c.db.flags([row["run_id"]]),
-        "command": state["command"], "reason": st.test if st else "",
+        "command": state["command"], "reason": (st.test + (f" ({row['error']})" if row.get("error") else "")) if st else "",
     }
 
 

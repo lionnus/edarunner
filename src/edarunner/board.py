@@ -33,13 +33,14 @@ PLOTLY_FILE = "plotly.min.js"
 PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED", "ABANDONED")
 # Sort rank on a board; the live rows go before the finished ones.
-RANK = {"dead": 0, "failed": 0, "hung": 1, "incomplete": 1, "looping": 2, "over_budget": 3,
+RANK = {"dead": 0, "failed": 0, "unreadable": 0, "hung": 1, "incomplete": 1, "looping": 2, "over_budget": 3,
          "host_full": 4, "killed": 4, "superseded": 5, "stopped": 5, "stale": 6, "running": 8, "done": 9}
 _SHORT = {"running": "RUN", "dead": "DEAD", "hung": "HUNG", "looping": "LOOP", "over_budget": "OVER",
           "host_full": "FULL", "superseded": "SUPER", "incomplete": "INC", "failed": "FAIL", "stopped": "STOP",
-          "killed": "KILL"}
+          "killed": "KILL", "unreadable": "UNRD"}
 STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "yellow", "superseded": "yellow",
          "dead": "red", "hung": "red", "looping": "red", "over_budget": "red", "orphan": "red", "failed": "red",
+         "unreadable": "red",
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
          "imported": "dim", "abandoned": "dim", "resumed": "cyan", "pending": "cyan", "held": "magenta",
          "suspended": "yellow"}
@@ -103,8 +104,9 @@ def is_live(row: Row) -> bool:
 
 
 def state_of(row: Row) -> str:
-    """The watcher's `state` for a live run; the phase class, lower case, for a finished one."""
-    if is_live(row):
+    """The watcher's `state` for a live run, and `unreadable` for any run whose files a reader could not use; the
+    phase class, lower case, for a finished one."""
+    if is_live(row) or row.get("state") == "unreadable":
         return str(row.get("state") or "running")
     return str(row["phase"]).split(":", 1)[0].lower()
 
@@ -289,6 +291,8 @@ def triage_cmd(row: Row, state: str, hb: dict, runs: list[Row] | None = None, le
         return f"edr launch {row['batch']} --only {row['label']}"
     if state in ("stale", "pending", "suspended"):
         return f"edr status {h} --live"
+    if state == "unreadable":
+        return f"edr status {h}"
     if state == "dead":
         return f"edr continue {h} --stage {hb.get('stage') or row.get('stage')}" + (
             f" --from {hb['step_name']}" if hb.get("step_name") else "")
@@ -359,6 +363,8 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
         parts.insert(-1, Text("tasks " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-")))
     if row.get("killed_by"):
         parts.append(Text(f"killed by {row['killed_by']}", style="red"))
+    if row.get("error"):
+        parts.append(Text(f"unreadable: {row['error']}", style="red"))
     if flags:
         parts += [Text(""), Text("flags", style="bold red"),
                   table(["check", "task", "text"], [[f["check"], f["task"], f["text"]] for f in flags])]
@@ -507,7 +513,7 @@ body{font:15px system-ui,sans-serif;margin:12px;background:#fff;color:#111}
 table{border-collapse:collapse;width:100%;margin-bottom:16px}
 td,th{padding:6px 4px;border-bottom:1px solid #ddd;text-align:left;font-size:14px;vertical-align:top}
 small{color:#777;overflow-wrap:anywhere}h3{margin:16px 0 6px}
-.st{font-weight:600}.s-running .st{color:#2a7}.s-stale .st{color:#e90}.s-dead .st,.s-failed .st,.s-hung .st{color:#d33}
+.st{font-weight:600}.s-running .st{color:#2a7}.s-stale .st{color:#e90}.s-dead .st,.s-failed .st,.s-hung .st,.s-unreadable .st{color:#d33}
 .s-done .st{color:#888}.s-incomplete .st,.s-over_budget .st,.s-looping .st{color:#a3c}.s-stopped .st,.s-killed .st{color:#bbb}
 select{font:inherit;margin:0 8px 8px 0}.hc{margin:0 0 10px}.hc svg{max-width:100%;height:auto}.worse{color:#d33}.better{color:#2a7}
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}td,th{border-color:#333}small{color:#999}}

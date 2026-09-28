@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import sqlite3
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -33,6 +34,8 @@ _RUN_KEYS = ("run_id", "label", "config", "host", "root", "phase", "stage", "ste
              "started", "updated", "disk_free_gb", "tree_gb", "counts")
 _TASK_KEYS = ("started", "ended", "exit", "signature", "log")
 _BUSY = ("stage:", "group:", "retry:")
+# What a reader raises on a heartbeat of another shape, such as one that an older driver wrote.
+_UNREADABLE = (ArithmeticError, AttributeError, LookupError, TypeError, ValueError, sqlite3.ProgrammingError)
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,8 @@ STATES = {
                     "unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and "
                     "no safety marker of a registered project in its cwd or command line",
                     "`SIGTERM`, only with `kill_orphan` of the project the process belongs to", alert=True),
+    "unreadable": State("a reader cannot use the heartbeat or the spec of the run, such as a heartbeat that an older "
+                        "driver wrote", "none; the watcher skips the run until its files read again", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),
     "pending": State("the scheduler has the job in its queue and the driver has not started", "none"),
@@ -118,7 +123,7 @@ def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[t
         for f in sorted(bdir.glob("*.json")):
             if not f.name.endswith((".spec.json", ".keep.json")):
                 hb = config.load_json(f)
-                if hb.get("run_id"):
+                if isinstance(hb, dict) and hb.get("run_id"):
                     out.append((bdir.name, hb))
     return out
 
@@ -136,21 +141,27 @@ def _stages(hb: dict) -> dict[str, dict]:
     return out
 
 
-def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
-    """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify."""
+def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> dict[str, str]:
+    """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify. A heartbeat that this cannot
+    use stops only its own run: the result maps its run id to the error, and every other heartbeat goes in."""
+    bad = {}
     for batch, hb in heartbeats:
-        db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
-        for name, s in _stages(hb).items():
-            db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
+        try:
+            db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
+            for name, s in _stages(hb).items():
+                db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
                                      "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
                                      "exit": s.get("exit"), "log": s.get("log")})
-        if hb.get("step_times"):
-            db.set_step_times(hb["run_id"], hb["step_times"])
-        db.add_run_sample(hb)
-        for stage, tasks in (hb.get("tasks") or {}).items():
-            for tid, t in tasks.items():
-                db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
-                                     **{k: t.get(k) for k in _TASK_KEYS}})
+            if hb.get("step_times"):
+                db.set_step_times(hb["run_id"], hb["step_times"])
+            db.add_run_sample(hb)
+            for stage, tasks in (hb.get("tasks") or {}).items():
+                for tid, t in tasks.items():
+                    db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
+                                         **{k: t.get(k) for k in _TASK_KEYS}})
+        except _UNREADABLE as e:
+            bad[hb["run_id"]] = f"{type(e).__name__}: {e}"
+    return bad
 
 
 # classify
@@ -245,7 +256,8 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
             left, held, why = launch.stages_left(project, db, run) if ended else ([], [], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs(), held=held)
+            hb = {} if state == "unreadable" else _hb(project, run)
+            alert = alerts.run_alert(project, run, state, reasons, hb, now, [] if why else left, db.runs(), held=held)
             ids = [n.send(alert) for n in wanted(notifiers, state)]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
@@ -540,8 +552,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     backend = backend or make_backend(project.site, ssh)
     progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
     heartbeats = read_heartbeats(project)
-    if not dry_run:
-        ingest(db, heartbeats)
+    bad = {} if dry_run else ingest(db, heartbeats)
     handles = {}
     for batch, hb in heartbeats:
         if board.is_live(hb) and (h := run_handle(backend.name, db.run(hb["run_id"]) or {}, hb)):
@@ -564,20 +575,30 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         if run.get("state") in ("retired", "abandoned"):
             states[hb["run_id"]] = run["state"]
             continue
-        state, reasons = classify(project, ssh, db, run, hb, now, progress, live)
+        error = bad.get(hb["run_id"])
+        if error is None:
+            try:
+                state, reasons = classify(project, ssh, db, run, hb, now, progress, live)
+                if not dry_run:
+                    db.upsert_run({"run_id": hb["run_id"], "state": state})
+                    actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
+                    added = _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
+                    if added and (want := wanted(notifiers, "metrics")):
+                        alert = alerts.metrics_alert(run, added, db.runs())
+                        for n in want:
+                            n.send(alert)
+                    if state == "dead" and start:
+                        _resume(project, ssh, backend, db, run, hb, progress, now)
+            except _UNREADABLE as e:  # a run whose files a reader cannot use leaves every other run watched
+                error = f"{type(e).__name__}: {e}"
+        if error is not None:
+            state, reasons = "unreadable", [error]
+            if not dry_run:
+                db.upsert_run({"run_id": hb["run_id"], "state": state})
+                actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
         states[hb["run_id"]] = state
         if dry_run:
             print(f"{hb['run_id']}: {state} {'; '.join(reasons)}".rstrip())
-            continue
-        db.upsert_run({"run_id": hb["run_id"], "state": state})
-        actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
-        added = _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
-        if added and (want := wanted(notifiers, "metrics")):
-            alert = alerts.metrics_alert(run, added, db.runs())
-            for n in want:
-                n.send(alert)
-        if state == "dead" and start:
-            _resume(project, ssh, backend, db, run, hb, progress, now)
     if dry_run:
         return states
     if start:

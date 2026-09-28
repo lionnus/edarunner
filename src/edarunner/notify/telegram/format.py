@@ -23,6 +23,7 @@ LIMIT = 4000  # the message limit is 4096 characters after parsing
 # One mark per state for a bot message.
 MARK = {"running": "🟢", "queued": "🔵", "resumed": "🔵", "stale": "🟡", "host_full": "🟡", "superseded": "🟡",
         "dead": "🔴", "hung": "🔴", "looping": "🔴", "over_budget": "🔴", "orphan": "🔴", "failed": "🔴", "killed": "🔴",
+        "unreadable": "🔴",
         "incomplete": "🟠", "pending": "🔵", "held": "🟠", "suspended": "🟡", "done": "⚪", "retired": "⚫", "stopped": "⚫", "imported": "⚫", "abandoned": "⚫",
         "metrics": "⚪"}
 
@@ -81,6 +82,7 @@ WORDS = {"stale": "stale (no heartbeat for a while)", "dead": "dead (driver gone
          "looping": "looping (the same failure again)", "over_budget": "over budget", "host_full": "host disk full",
          "superseded": "replaced by a newer run", "pending": "waiting in the scheduler", "held": "held by the scheduler",
          "suspended": "suspended by the scheduler", "incomplete": "incomplete (some tasks failed)",
+         "unreadable": "unreadable (edarunner cannot read its heartbeat)",
          "stopped": "stopped by hand", "abandoned": "retired while live"}
 DAY_S = 86400
 
@@ -151,9 +153,9 @@ def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | No
 
 
 def run_detail(row: Row, hb: dict, now: float, everyone: list[Row] | None = None, left: list[str] | None = None) -> str:
-    """The state, stage, step, host, age, next command and the last log lines of one run; `everyone`, the runs of
-    the project, makes its handle name this run alone, and `left` holds the stages that `edr continue` runs on the
-    tree of a run that ended."""
+    """The state, stage, step, host, age, the error of an unreadable run, the next command and the last log lines of
+    one run; `everyone`, the runs of the project, makes its handle name this run alone, and `left` holds the stages
+    that `edr continue` runs on the tree of a run that ended."""
     from edarunner.notify.alerts import log_lines
 
     state = runs.state_of(row)
@@ -162,6 +164,7 @@ def run_detail(row: Row, hb: dict, now: float, everyone: list[Row] | None = None
     cmd = runs.triage_cmd(row, state, hb, everyone, left)
     lines = [f"{mark(state)} <code>{esc(runs.handle(row, everyone))}</code> {esc(state)}",
              esc(f"stage {row.get('stage') or '-'}, step {step or '-'}"), esc(f"on {row.get('host') or '-'}, {age}")]
+    lines += [esc(f"unreadable: {row['error']}")] if row.get("error") else []
     lines += [f"<code>{esc(cmd)}</code>"] if cmd else []
     return "\n".join(lines + [pre("\n".join(log_lines(hb)) or "-")])
 

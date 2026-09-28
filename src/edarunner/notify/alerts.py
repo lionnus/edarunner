@@ -189,6 +189,11 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.about = (f"A newer run of the same label runs at another source{f' ({newer})' if newer else ''}. edarunner "
                    f"stops this run after its running task, {_after(project)}, unless it has a keep.")
         a.todo = [("To keep it running:", f"edr keep {h} --hours 12")]
+    elif state == "unreadable":
+        a.title = "cannot read"
+        a.about = (f"edarunner cannot read the heartbeat or the spec of the run: {why}. The watcher skips this run "
+                   "until its files read again, and watches every other run as usual.")
+        a.todo = [("See the run and the error:", cmd)]
     elif state == "held":
         a.title = "scheduler holds"
         a.about = "The scheduler holds the job, and it starts only after someone releases it."
