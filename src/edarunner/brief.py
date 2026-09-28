@@ -136,7 +136,7 @@ def run_data(c: Any, row: Row, file_host: str) -> Row:
     events = [{**e, "run": names.get(e["run_id"], e["run_id"])} for e in c.db.events(run_id=row["run_id"], n=1000)]
     last: dict[tuple, Row] = {}
     for m in c.db.metrics(run_ids=[row["run_id"]]):
-        key = (m["stage"], m.get("task") or "", m.get("canonical") or m["name"])
+        key = (m["stage"], m.get("task") or "", m["name"])
         if key not in last or _step(m) >= _step(last[key]):
             last[key] = m
     log, tail, note = hb.get("log"), str(hb.get("last_log") or ""), ""
@@ -338,10 +338,9 @@ def run_text(d: Row) -> str:
             where = f"`{m['stage']}`" + (f" step {m['step']}" if m.get("step") is not None else "") + (
                 f" task `{m['task']}`" if m.get("task") else "")
             if m["value"] is None:
-                out.append(f"- `{m.get('canonical') or m['name']}` failed at {where}: {m.get('source_file')}")
+                out.append(f"- `{m['name']}` failed at {where}: {m.get('source_file')}")
                 continue
-            value = f"{m['value']:g}" if isinstance(m["value"], (int, float)) else str(m["value"])
-            out.append(f"- `{m.get('canonical') or m['name']}` is {value}{' ' + m['unit'] if m.get('unit') else ''}"
+            out.append(f"- `{m['name']}` is {board.num(m['value'])}{' ' + m['unit'] if m.get('unit') else ''}"
                        f" at {where}.")
         out.append("")
     out += ["## Next", ""]

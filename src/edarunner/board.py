@@ -15,6 +15,7 @@ import shlex
 import sys
 import time
 from collections import Counter
+from decimal import Decimal
 from string import Template
 from typing import Any
 
@@ -154,6 +155,17 @@ def hm(seconds: float | None) -> str:
         return "-"
     s = int(seconds)
     return f"{s // 60}m" if s < 3600 else f"{s // 3600}h" if s < 172800 else f"{s // 86400}d"
+
+
+def num(value: float | None) -> str | None:
+    """A number as every view prints it: six significant digits, every digit before the point, and no exponent, so
+    907.8570000000001 prints as 907.857 and 10716000000.0 as 10716000000. None stays None."""
+    if value is None:
+        return None
+    text = f"{value + 0.0:.6g}"  # + 0.0 prints -0.0 as 0
+    if "e" in text:
+        text = f"{value:.0f}" if abs(value) >= 1 else f"{Decimal(text):f}"
+    return text
 
 
 def _ts(t: float | None) -> str:
@@ -341,8 +353,8 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
     if metrics:
         parts += [Text(""), Text("metrics", style="bold"), table(
             ["stage", "step", "task", "name", "value", "unit"],
-            [[m.get("stage"), m.get("step"), m.get("task"), m.get("canonical") or m.get("name"),
-              f"failed: {m.get('source_file')}" if m.get("value") is None else m["value"], m.get("unit")]
+            [[m.get("stage"), m.get("step"), m.get("task"), m.get("name"),
+              f"failed: {m.get('source_file')}" if m.get("value") is None else num(m["value"]), m.get("unit")]
              for m in metrics], right=("step", "value"))]
     if tail:
         parts += [Text(""), Text("log tail", style="bold"), Text(tail.rstrip())]
@@ -492,12 +504,13 @@ const AREAS = get('edr-areas'), STEPS = get('edr-steps');
 const PAR = {}, PKEYS = [];
 for (const p of PARAMETERS) { (PAR[p.run_id] ??= {})[p.key] = p.value; if (!PKEYS.includes(p.key)) PKEYS.push(p.key); }
 PKEYS.sort();
-const mkey = m => (m.canonical || m.name) + (m.task ? '[' + m.task + ']' : '');
+const mkey = m => m.name + (m.task ? '[' + m.task + ']' : '');
 // A metric with `record` shows its row of record, and `missing` without one; any other metric its last step.
-const FIN = {}, MKEYS = [];
+const FIN = {}, MKEYS = [], CANON = {};
 for (const m of METRICS) {
   const k = mkey(m), s = m.step ?? 1e9, cur = (FIN[m.run_id] ??= {}), rank = m.record === 1 ? 2 : m.record === 0 ? 0 : 1;
   if (!MKEYS.includes(k)) MKEYS.push(k);
+  CANON[k] = m.canonical;
   if (!(k in cur) || rank > cur[k].rank || (rank === cur[k].rank && s >= cur[k].step))
     cur[k] = { v: rank ? m.value : null, step: s, rank, at: !rank ? 'missing' : m.step == null ? '' : m.stage + ' ' + m.step };
 }
@@ -506,8 +519,10 @@ const num = v => { const n = Number(v); return v === null || v === undefined || 
 const val = (r, d) => d in (FIN[r.run_id] || {}) ? FIN[r.run_id][d].v
   : d in (PAR[r.run_id] || {}) ? (num(PAR[r.run_id][d]) ?? PAR[r.run_id][d]) : r[d] ?? null;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmt = v => v == null ? '' : typeof v === 'number' && !Number.isInteger(v)
-  ? (Math.abs(v) >= 1000 ? v.toFixed(1) : v.toPrecision(4)) : String(v);
+// The format of board.num: six significant digits, every digit before the point, and no exponent.
+const fmt = v => typeof v !== 'number' ? String(v ?? '') : Math.abs(v) >= 999999.5 ? v.toFixed(0)
+  : Math.abs(v) >= 1e-6 || !v ? String(+v.toPrecision(6))
+  : v.toFixed(Math.min(100, 5 - Math.floor(Math.log10(Math.abs(v))))).replace(/0+$$/, '');
 const pct = (v, b) => v == null || b == null || b === 0 || v * b < 0 ? '' : (v > b ? '+' : '') + ((v - b) / Math.abs(b) * 100).toFixed(1) + '%';
 const HAVE_PLOTLY = typeof Plotly !== 'undefined';
 const DARK = matchMedia('(prefers-color-scheme: dark)').matches;
@@ -600,13 +615,13 @@ function plots(sel) {
   Plotly.react('scatp', Object.entries(groups).map(([g, rs]) => ({ x: rs.map(r => val(r, sx)), y: rs.map(r => val(r, sy)),
     text: rs.map(r => r.label), name: sc + '=' + g, mode: 'markers', marker: { size: 10 } })),
     { ...LAYOUT, xaxis: { title: sx }, yaxis: { title: sy } });
-  const pk = MKEYS.filter(k => k.startsWith('power__') && !k.startsWith('power__total'));
+  const pk = MKEYS.filter(k => /^power__(?!total)/.test(CANON[k] || ''));
   q('#phases').hidden = !pk.length;
   if (pk.length) {
     const tasks = [...new Set(pk.map(k => k.includes('[') ? k.slice(k.indexOf('[')) : ''))];
-    const phases = [...new Set(pk.map(k => k.slice(7).split('[')[0]))];
+    const phases = [...new Set(pk.map(k => k.split('[')[0]))];
     Plotly.react('phasep', phases.map(p => ({ type: 'bar', name: p, x: sel.flatMap(r => tasks.map(t => r.label + t)),
-      y: sel.flatMap(r => tasks.map(t => FIN[r.run_id]?.['power__' + p + t]?.v ?? 0)) })), { ...LAYOUT, barmode: 'stack' });
+      y: sel.flatMap(r => tasks.map(t => FIN[r.run_id]?.[p + t]?.v ?? 0)) })), { ...LAYOUT, barmode: 'stack' });
   }
   parcoords(shown());
 }

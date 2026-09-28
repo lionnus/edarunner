@@ -215,14 +215,14 @@ def _extract_one(
         instances = None
         try:
             if metric.area_hier:
-                instances = parse_area_hier(path.read_text(errors="replace"))
+                instances = [{**i, "area": i["area"] * metric.scale, "local_area": i["local_area"] * metric.scale}
+                             for i in parse_area_hier(path.read_text(errors="replace")) if i["depth"] <= metric.area_hier]
                 value, source = instances[0]["area"], rel
-                instances = [i for i in instances if i["depth"] <= metric.area_hier]
             else:
                 got = parse_file(metric, path, project.root, values if step is None else {**values, "step": step})
                 if got is None:
                     continue
-                value, line = got
+                value, line = got[0] * metric.scale, got[1]
                 source = rel if line is None else f"{rel}:{line}"
         except Exception as e:  # a parse error is a row, never a crash
             value, source = None, f"{rel}: {e}"

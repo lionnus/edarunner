@@ -257,6 +257,26 @@ def test_brief_proposes_nothing_for_a_retired_run(demo: Path, capsys) -> None:
     data = json.loads(out)["data"]
     assert code == 0 and data["decisions"] == [] and data["batches"][0]["states"] == {"retired": 2}
 
+def test_every_view_prints_a_value_the_same_way_under_the_project_name(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    add_metric(demo, a, "area_cell_um2", 907.8570000000001, step=5, stage="pnr")
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234")
+    assert code == 0 and ["a", "abc1234", "pnr", "5", "area_cell_um2", "907.857", "u"] in [ln.split() for ln in out.splitlines()]
+    brief = edr(capsys, "brief", "--run", "a@demo")[1]
+    assert "- `area_cell_um2` is 907.857 u at `pnr` step 5." in brief
+    detail = edr(capsys, "status", "a@demo")[1]
+    assert ["pnr", "5", "area_cell_um2", "907.857", "u"] in [ln.split() for ln in detail.splitlines()]
+    board_text = edr(capsys, "status", "--metric", "design__instance__area")[1]
+    assert board_text.splitlines()[0].endswith(" area_cell_um2") and board_text.splitlines()[2].endswith(" 907.857 (pnr 5)")
+    bot = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False))).metric_text("area_cell_um2", None)
+    assert bot.splitlines()[1].endswith(" 907.857 u")
+    assert all("design__instance__area" not in text for text in (out, brief, detail, board_text, bot))
+    # --json and CSV keep the stored value and the canonical name.
+    m = json.loads(edr(capsys, "--json", "metrics", "--source", "abc1234")[1])["data"][0]
+    assert (m["name"], m["canonical"], m["value"]) == ("area_cell_um2", "design__instance__area", 907.8570000000001)
+    assert ",area_cell_um2,design__instance__area,907.8570000000001,u," in edr(capsys, "metrics", "--source", "abc1234", "--csv")[1]
+
+
 def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> None:
     b = seed(demo, "b", "FAILED:synth", exit=5, stage="synth", step=2)
     log = Path(json.loads((bdir(demo) / f"{b}.json").read_text())["root"]) / "log" / "synth.log"
@@ -276,7 +296,7 @@ def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> No
     assert "- The runtime setup started " in out and " and ran for 5s, ending done with exit 0.\n- Stage `synth`" in out
     assert "  - Step 2 (elaborate) started" in out and "watch recorded `failed` on `b@demo`: synth ended FAILED" in out
     assert "Error: no licence" in out and "line 11\n" in out and "line 10\n" not in out
-    assert "`design__instance__area` is 12.5 u at `synth` step 3." in out
+    assert "`area_cell_um2` is 12.5 u at `synth` step 3." in out
     assert "The triage proposes `edr retire b@demo --why FAILED:synth`." in out and "the run ended `FAILED`" in out
     code, out, _ = edr(capsys, "status", "b@demo")
     rows = [ln.split()[0] for ln in out.splitlines() if ln.split()[:1] in (["setup"], ["synth"])]

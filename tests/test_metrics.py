@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from helpers_results import POWER, POWER_NO_BLK, QOR, SUITE, demo_qor
+from helpers_results import POWER, POWER_NO_BLK, QOR, SUITE, area_hier, demo_qor
 
 from edarunner.metrics import extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
@@ -100,7 +100,7 @@ def test_demo_metrics(tmp_path):
     energy = by_name(rows, "energy_nj")
     assert {r["task"]: r["value"] for r in energy} == {"k_small": 850.0, "k_big": 850.0}
     assert energy[0]["stage"] == "power" and energy[0]["step"] is None
-    assert energy[0]["unit"] == "nJ" and energy[0]["canonical"] == "energy"
+    assert energy[0]["unit"] == "nJ" and energy[0]["canonical"] == ""
     assert len(rows) == 6 * 3 + 2 + 2 + 2
 
 
@@ -120,6 +120,25 @@ def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
     assert [r["task"] for r in by_name(rows, "window_ns")] == ["k_small"]
     (energy,) = by_name(rows, "energy_nj")
     assert energy["task"] == "k_small" and energy["value"] is None and "no WHOLE row" in energy["source_file"]
+
+
+def test_scale_multiplies_each_value_at_extraction(tmp_path):
+    run = results_tree(tmp_path / "results")
+    for test in ("GEMM_M64_N64", "SOFTMAX_R197"):
+        (run / "simulation/tests/demo" / test / "power/phases.json").write_text(json.dumps({"window_dur": 10716000000}))
+    (run / "reports" / "3" / "area_hier.rpt").write_text(area_hier(1234.5))
+    project = demo_project(tmp_path)
+    project.metrics = {
+        "window_ns": Metric(name="window_ns", stage=["power"], file="{task_dir}/power/phases.json", json="window_dur",
+                            unit="ns", scale=1e-6),
+        "area_mm2": Metric(name="area_mm2", stage=["synth"], step="3", file="reports/{step}/area_hier.rpt", area_hier=1,
+                           unit="mm2", scale=1e-6),
+    }
+    rows = extract(project, RUN, tmp_path / "results", demo_tasks())
+    assert {r["task"]: r["value"] for r in by_name(rows, "window_ns")} == {"k_small": 10716.0, "k_big": 10716.0}
+    (area,) = by_name(rows, "area_mm2")
+    assert area["value"] == pytest.approx(1234.5e-6)
+    assert [(i["instance"], round(i["area"] * 1e6, 3)) for i in area["instances"]] == [("<top>", 1234.5), ("i_top", 1222.155)]
 
 
 def test_python_parser_and_fixed_step(tmp_path):

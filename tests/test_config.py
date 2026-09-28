@@ -282,6 +282,18 @@ def test_metric_reduce_and_pass_rule(tmp_path):
             config.load_project(root)
 
 
+def test_metric_scale(tmp_path):
+    root = demo_copy(tmp_path)
+    toml = root / "edr.toml"
+    text, window = toml.read_text(), 'json = "window_ns"'
+    toml.write_text(text.replace(window, window + "\nscale = 1e-3"))
+    p = config.load_project(root)
+    assert (p.metrics["window_ns"].scale, p.metrics["power_w"].scale) == (1e-3, 1.0)
+    toml.write_text(text.replace(window, window + "\nscale = 0"))
+    with pytest.raises(ConfigError, match="window_ns.scale is a factor other than 0"):
+        config.load_project(root)
+
+
 def test_metric_record(tmp_path):
     root = demo_copy(tmp_path)
     p = config.load_project(root)
