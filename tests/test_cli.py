@@ -62,8 +62,7 @@ def test_init_writes_edr_toml_once(tmp_path: Path, monkeypatch, capsys) -> None:
     assert code == 0 and "edr.toml" in out
     text = (fresh / "edr.toml").read_text()
     assert f'site = "{DEMO / "site.toml"}"' in text and 'project = "fresh"' in text and "$project" not in text
-    unit = (fresh / "edr-watch.service").read_text()
-    assert f"WorkingDirectory={fresh}" in unit and "Restart=always" in unit and " watch\n" in unit
+    assert sorted(p.name for p in fresh.iterdir()) == ["edr.toml"]
     project = config.load_project(fresh)
     assert project.project == "fresh" and project.site.path == DEMO / "site.toml" and "synth" in project.stages
     code, _, err = edr(capsys, "init", "--site", str(DEMO))

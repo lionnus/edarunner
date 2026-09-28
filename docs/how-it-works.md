@@ -11,7 +11,8 @@ to read the code.
 ![Where each part runs: the head node, the shared filesystem, the compute hosts and the phone](diagrams/where-it-runs.svg)
 
 The **head node** is the machine you work on. It runs `edr`, the command
-you type, and `edr watch`, the one long-running process per project. The
+you type, and `edr serve`, the one long-running process per user, which
+keeps one watcher process, `edr watch --served`, per project. The
 project directory is where you run `edr`. It holds the project database,
 a single SQLite file `data/edr.db` that records every run, as well as the
 checked-out copies of your source and the results collected from the
@@ -285,7 +286,8 @@ does this, in order:
 7. A queued job starts when a host now fits it, one per batch per cycle.
 8. It writes `data/board/`, edits the pinned Telegram board, sends the
    daily digest when it is due, and writes `<state_dir>/watch.json`,
-   the watcher's own heartbeat that `edr watch --check` reads. The host
+   the watcher's own heartbeat that the supervisor and `edr watch --check`
+   read. The host
    probes of the boards come from the census when it is younger than two
    cycles, and from a probe of its own otherwise.
 
@@ -298,9 +300,10 @@ two cycles.
 
 Some work belongs to the user and not to one project: a host, a tool
 process and a seat lease are one each, whatever project they serve. The
-first watcher that takes `~/.edr/serve.lock` keeps it for its life and
-does this work after each of its cycles, for every registered project
-(`census.work`):
+supervisor `edr serve` holds `~/.edr/serve.lock` and does this work once
+a minute for every registered project (`census.work`). Without a
+supervisor, the first watcher that takes the lock keeps it for its life
+and does the work after each of its cycles:
 
 1. It takes the census: one ssh call per host of the site of every
    registered project, all at once, for the probe, the clock of the host
@@ -334,7 +337,33 @@ does this work after each of its cycles, for every registered project
    heartbeat or are older than 30 minutes.
 
 A watcher that does not hold the lock runs its own cycle only and tries
-again at the next cycle, so the role moves on when its holder stops.
+again at the next cycle, so the role moves on when its holder stops. A
+watcher that the supervisor started never tries.
+
+### The supervisor
+
+`edr serve` runs a cycle every minute (`serve.Supervisor`). It loads
+every registered project, and keeps one `edr watch --served` per project
+in the project directory. A served watcher takes its host probes from
+the census, leaves the work of the user and the pinned board to the
+supervisor, and writes `watch.json` also before each collect and each
+launch, so a long copy counts as progress.
+
+- A watcher that exits starts again after 1, 2, 4, 8, 16 and at most 30
+  minutes; the first exit of a series sends an alert.
+- A watcher whose `watch.json` stood still for three heartbeats and at
+  least 15 minutes while its config loads is killed, started again, and
+  alerted.
+- A project whose files do not load and that has no watcher gets one
+  alert per error text and no watcher until the files load. A watcher
+  that runs goes on with its last good config, as above.
+
+After the watchers it does the work of the user, edits one pinned board
+with the live runs of every project and the hosts that hold them, and
+writes `~/.edr/serve.json`, its own heartbeat that `edr serve --check`
+reads. Under systemd it sends `READY=1` once it holds the lock and
+`WATCHDOG=1` every cycle, so a supervisor that hangs is restarted. A
+watcher that hangs is the supervisor's job.
 
 The Telegram bot is a thread of the watcher. It obeys one chat and,
 when set, one user, and it never runs a shell string or free text: a

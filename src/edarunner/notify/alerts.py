@@ -209,14 +209,31 @@ def clock_alert(host: str, skew: float) -> Alert:
         todo=[("Ask the admins to sync the host with NTP. edr hosts names every host whose clock is off.", None)])
 
 
-def config_alert(project: Project, error: str) -> Alert:
-    """The alert of an edr.toml, tasks.toml or site file that stopped loading; the watcher keeps the last good one."""
+def config_alert(project: Project, error: str, watched: bool = True) -> Alert:
+    """The alert of an edr.toml, tasks.toml or site file that stopped loading; `watched` when a watcher goes on
+    with the last config that loaded, else no watcher runs until the file loads."""
+    about = ("The watcher goes on with the last config that loaded. It reads the heartbeats, sends the alerts and "
+             "collects the results, but it resumes and launches nothing until the file loads again." if watched else
+             "No watcher runs for the project until the file loads, so its runs get no alert, no collect and no resume.")
+    return Alert("config", project.project, "config does not load", "", about, [("project", str(project.root))],
+                 cut(error), [("See every problem of the project files:", "edr check")])
+
+
+def served_alert(project: Project, title: str, what: str) -> Alert:
+    """The alert of the supervisor about the watcher of `project`: `what` happened to it."""
+    return Alert("watch", project.project, title, project.project, f"The watcher of {project.project} {what}.",
+                 [("project", str(project.root))],
+                 todo=[("Its log is in the journal of the supervisor:", "journalctl --user -u edr-serve")])
+
+
+def serve_alert(age: float | None, pid: object) -> Alert:
+    """The alert of a supervisor that has not finished a cycle for `age` seconds; None for no serve.json."""
     return Alert(
-        "config", project.project, "config does not load", "",
-        "The watcher goes on with the last config that loaded. It reads the heartbeats, sends the alerts and "
-        "collects the results, but it resumes and launches nothing until the file loads again.",
-        [("project", str(project.root))], cut(error),
-        [("See every problem of the project files:", "edr check")])
+        "watch", "serve", "supervisor stopped", "",
+        ("The supervisor has never finished a cycle." if age is None else
+         f"The supervisor has not finished a cycle for {board.hm(age)}.") + " No project is watched until it runs again.",
+        [("pid", str(pid or "-"))],
+        todo=[("See why it stopped:", "systemctl --user status edr-serve"), ("Start it again:", "systemctl --user restart edr-serve")])
 
 
 def watch_alert(project: Project, age: float | None, pid: object) -> Alert:

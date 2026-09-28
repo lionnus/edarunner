@@ -18,6 +18,7 @@ import posixpath
 import shlex
 import shutil
 import socket
+import subprocess
 import sys
 import textwrap
 import time
@@ -31,12 +32,12 @@ from rich.console import Console, Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, runid, sync, watch
+from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, runid, serve, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, network_fs
 from .guards import Refuse, assert_run_id, assert_safe_target
-from .hosts import HostError, HostProbe, Ssh, probe_all
+from .hosts import HostError, HostProbe, Ssh, floor, probe_all
 from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
 from .notify import make_notifiers, untag
 from .notify.digest import Digest
@@ -238,7 +239,7 @@ def _host_rows(c: Ctx) -> list[Row]:
     else:
         site, pl = config.load_site(config.DEFAULT_SITE), Placement()
     probes = probe_all(Ssh(site), site.hosts)
-    return census.host_view(probes, census.live_runs(found.values(), time.time()), site, pl)
+    return census.host_view(probes, census.live_runs(found.values(), time.time()), {h: floor(site, h) for h in probes}, pl)
 
 
 def _yours(r: Row) -> str:
@@ -712,25 +713,17 @@ def cmd_runtime(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_init(c: Ctx, a: argparse.Namespace) -> int:
-    """Write edr.toml and the watch unit into the current directory."""
-    cwd = Path(os.getcwd())
-    if (cwd / "edr.toml").exists():
-        raise Refuse(f"{cwd / 'edr.toml'} exists; edit it or remove it first")
+    """Write edr.toml into the current directory."""
+    path = Path(os.getcwd()) / "edr.toml"
+    if path.exists():
+        raise Refuse(f"{path} exists; edit it or remove it first")
     site = Path(a.site).expanduser()
     if site.suffix != ".toml":
         site = site / "site.toml"
-    values = {"project": cwd.name, "site": str(site), "project_root": str(cwd),
-              "edr": shutil.which("edr") or f"{sys.executable} -m edarunner.cli"}
-    written = []
-    for name in ("edr.toml", "edr-watch.service"):
-        if (cwd / name).exists():
-            continue
-        text = Template((TEMPLATES / name).read_text()).substitute(values)
-        if not a.dry_run:
-            (cwd / name).write_text(text)
-        written.append(str(cwd / name))
-    c.emit("\n".join(f"write {w}" + (" (dry)" if a.dry_run else "") for w in written),
-           {"written": written, "site": str(site)})
+    text = Template((TEMPLATES / "edr.toml").read_text()).substitute(project=path.parent.name, site=str(site))
+    if not a.dry_run:
+        path.write_text(text)
+    c.emit(f"write {path}" + (" (dry)" if a.dry_run else ""), {"written": [str(path)], "site": str(site)})
     return Exit.DONE
 
 
@@ -1195,9 +1188,50 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
         print(f"edr watch: pid {home.holder(path)} watches {project.project} already")
         return Exit.NOTHING
     try:
-        return watch.run_forever(project, c.ssh, c.db, _notifiers(c), once=a.once)
+        return watch.run_forever(project, c.ssh, c.db, _notifiers(c), once=a.once, served=a.served)
     finally:
         os.close(fd)
+
+
+def cmd_serve(c: Ctx, a: argparse.Namespace) -> int:
+    """The supervisor: one watcher per registered project, and the work of the user."""
+    if a.unit:
+        cmd, exe, what = serve.pinned()
+        if cmd:
+            print(("dry: " if a.dry_run else "") + shlex.join(cmd), file=sys.stderr)
+            if not a.dry_run and subprocess.run(cmd, stdout=sys.stderr).returncode != 0:
+                raise Refuse(f"{shlex.join(cmd)} failed")
+        c.emit(serve.unit(exe, what), {"install": cmd, "edr": exe})
+        return Exit.DONE
+    if a.dry_run:
+        return _serve_plan(c)
+    notifiers = serve.notifiers()
+    if a.check:
+        return serve.check(notifiers)
+    return serve.run(notifiers, once=a.once)
+
+
+def _serve_plan(c: Ctx) -> int:
+    """What edr serve would watch: every registered project, whether it loads, and who watches it now."""
+    rows, now = [], time.time()
+    for name, path in sorted((p.name, home.owner(p.name)) for p in (home.root() / "projects").glob("*")):
+        if path is None:
+            continue
+        try:
+            project = config.load_project(path)
+        except ConfigError as e:
+            rows.append({"project": name, "root": str(path), "action": f"no watcher until it loads: {e}"})
+            continue
+        w = config.load_json(project.state_dir / "watch.json")
+        fresh = w and now - float(w.get("ts") or 0) <= 3 * project.limits.heartbeat_s
+        rows.append({"project": name, "root": str(path),
+                     "action": f"none, pid {w.get('pid')} watches it" if fresh else "start edr watch --served"})
+    s = config.load_json(home.root() / "serve.json")
+    head = f"pid {s.get('pid')} serves now. " if s and now - float(s.get("ts") or 0) <= 3 * serve.CYCLE_S else ""
+    body = [[r["project"], r["root"], r["action"]] for r in rows]
+    c.emit(Group(Text(head + "A supervisor would do this (dry):"), board.table(["project", "directory", "watcher"], body))
+           if rows else head + "No project is registered (dry).", rows)
+    return Exit.DONE if rows else Exit.NOTHING
 
 
 def cmd_register(c: Ctx, a: argparse.Namespace) -> int:
@@ -1537,11 +1571,11 @@ def _parser() -> argparse.ArgumentParser:
         """, exits={Exit.NOTHING: "no stage or step time"})
     s.add_argument("handles", nargs="*", metavar="HANDLE", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")
-    command("init", "write edr.toml and the watch unit here", """
-        Writes edr.toml and edr-watch.service into the current directory, the
-        project directory where you run edr. --site names the site directory
-        or the site file itself; init does not write that file. It refuses
-        when edr.toml already exists.
+    command("init", "write edr.toml here", """
+        Writes edr.toml into the current directory, the project directory
+        where you run edr. --site names the site directory or the site file
+        itself; init does not write that file. It refuses when edr.toml
+        already exists. edr serve watches the project once it is registered.
         """, write=True).add_argument("--site", required=True, metavar="DIR", help="the site directory, or a site.toml path")
     command("check", "load everything, probe the hosts, check the hooks", """
         Loads the project, the site and every batch under jobs/, imports every
@@ -1781,6 +1815,40 @@ def _parser() -> argparse.ArgumentParser:
                                 Exit.NOTHING: "another process watches the project"})
     s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")
     s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")
+    s.add_argument("--served", action="store_true", help="started by edr serve: no census, no pinned board")
+    s = command("serve", "the supervisor: one watcher per registered project", """
+        Runs the supervisor of the user: a cycle every minute that keeps one
+        edr watch --served per registered project in the project directory,
+        does the work that belongs to the user once for every project, and
+        edits one pinned global board. A watcher that exits starts again after
+        1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
+        watch.json stood still for three heartbeats and at least 15 minutes
+        while its config loads is killed and started again, with an alert. A
+        project whose files do not load has no watcher until they load, and
+        gets one alert per error text. The supervisor holds
+        ~/.edr/serve.lock, so a second one exits 2, and it writes
+        ~/.edr/serve.json at the end of every cycle. Under systemd it sends
+        READY=1 and, every cycle, WATCHDOG=1.
+
+        --once runs one cycle: one edr watch --once --served per project, then
+        the work of the user, and exits. --dry-run lists the registered
+        projects and what the supervisor would do for each, and writes
+        nothing. --check reads serve.json and nothing of any project; when
+        the file is missing or older than three cycles, it alerts and exits
+        1, so a cron line can run it.
+
+        --unit prints the systemd user unit. When this edr runs from a
+        checkout, an editable install, it first installs a copy of the
+        checkout's HEAD commit with uv tool install, and the unit runs that
+        copy, so a later edit or git pull in the checkout never changes the
+        running supervisor. docs/guides/run.md shows the install.
+        """, write=True, exits={Exit.REFUSED: "with --check, serve.json is older than three cycles; with --unit, "
+                                              "the install failed",
+                                Exit.NOTHING: "another supervisor runs; with --dry-run, no project is registered"})
+    s.add_argument("--once", action="store_true", help="one cycle, then exit")
+    s.add_argument("--check", action="store_true", help="exit 1 with an alert when serve.json is older than three cycles")
+    s.add_argument("--unit", action="store_true", help="install a pinned copy when edr runs from a checkout, and print "
+                                                         "the systemd user unit that runs it")
     return p
 
 

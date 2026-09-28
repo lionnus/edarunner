@@ -268,6 +268,7 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     if rec.get("collected") == key or not (finished or tasks or running):
         return
     rec["collected"] = key
+    _pulse(project)
     res = collect.collect_run(project, ssh, db, run, hb, host=host)
     if res.failures:
         db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
@@ -356,6 +357,7 @@ def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
     for r in db.runs(state="queued"):
         queued.setdefault(str(r["batch"]), []).append(r)
     for name, rows in queued.items():
+        _pulse(project)
         try:
             batch = config.load_batch(project, name)
             # The batch file may name a ref; the queued run keeps the source tag, and so its run id.
@@ -367,7 +369,14 @@ def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
 
 # boards and the cycle
 
-def _boards(project: Project, backend: Backend, db: Database, notifiers: list[Notifier], now: float) -> None:
+def _pulse(project: Project) -> None:
+    """Show the supervisor that this watcher lives, before a collect or a launch that may take long."""
+    path = project.state_dir / "watch.json"
+    config.save_json(path, {**config.load_json(path), "ts": time.time(), "pid": os.getpid()})
+
+
+def _boards(project: Project, backend: Backend, db: Database, notifiers: list[Notifier], now: float,
+            pin: bool = True) -> None:
     # The census of the last two cycles saves an ssh call per host.
     probes = census.probes(project, 2 * project.limits.heartbeat_s)
     if probes is None:
@@ -385,7 +394,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly, areas,
                                                                 analysis.step_names(project)))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
-    for n in notifiers:
+    for n in notifiers if pin else []:
         n.board(text)
 
 
@@ -414,11 +423,11 @@ def _unstarted(db: Database, run_id: str, live: Live, why: str, dry_run: bool) -
 
 
 def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
-          dry_run: bool = False, backend: Backend | None = None, start: bool = True) -> dict[str, str]:
+          dry_run: bool = False, backend: Backend | None = None, start: bool = True, served: bool = False) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing.
 
     The backend answers once per cycle for the drivers of every live run. Without `start` the cycle
-    resumes and launches nothing."""
+    resumes and launches nothing. A `served` cycle leaves the pinned board to the supervisor."""
     now = time.time() if now is None else now
     backend = backend or make_backend(project.site, ssh)
     progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
@@ -461,7 +470,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         return states
     if start:
         _launch_queued(project, ssh, db)
-    _boards(project, backend, db, notifiers, now)
+    _boards(project, backend, db, notifiers, now, pin=not served)
     digest = Digest(project, db)
     if digest.due(now):
         text = digest.text(now)
@@ -475,12 +484,14 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     return states
 
 
-def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], once: bool = False) -> int:
+def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], once: bool = False,
+                served: bool = False) -> int:
     """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed.
 
     A config that stops loading gets one alert per error text, and the cycles go on with the last one
-    that loaded and start nothing until the file loads again. The first watcher that takes
-    `serve.lock` keeps it and does the work of the user after each cycle."""
+    that loaded and start nothing until the file loads again. Unless the supervisor started it
+    (`served`), the first watcher that takes `serve.lock` keeps it and does the work of the user
+    after each cycle."""
     for n in notifiers:
         n.start()
     failed, broken, serve = False, "", None
@@ -502,11 +513,11 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
                 for n in notifiers:
                     if hasattr(n, "project"):
                         n.project = project
-                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken)
+                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken, served=served)
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
                 failed = True
-            serve = serve if serve is not None else home.lock(home.root() / "serve.lock")
+            serve = serve if serve is not None or served else home.lock(home.root() / "serve.lock")
             if serve is not None:
                 try:
                     census.work(notifiers, own=project)

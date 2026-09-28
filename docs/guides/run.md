@@ -123,30 +123,44 @@ changed, the row says `skipped`.
 
 The watcher collects the results, extracts the metrics, starts queued
 jobs and sends the alerts, so it should run as long as the project
-does. To run it as a systemd user service, install the unit that
-`edr init` wrote:
+does. One supervisor per user, `edr serve`, keeps one watcher per
+registered project; `launch` registered the project already. Run the
+supervisor as a systemd user service:
 
 ```sh
-cp edr-watch.service ~/.config/systemd/user/edr-myflow.service
+edr serve --unit > ~/.config/systemd/user/edr-serve.service
 systemctl --user daemon-reload
-systemctl --user enable --now edr-myflow
+systemctl --user enable --now edr-serve
 loginctl enable-linger "$USER"     # the service survives a logout and a reboot
 ```
 
-Without systemd, `tmux new -d -s edr-myflow 'edr watch'` does the same
-job. One watcher runs per project: a second one, the loop or
+The supervisor must not run from a checkout that you edit: a `git pull`
+there would change the code under the running watchers.
+`edr serve --unit` prints a unit that runs the `edr` of a tool install,
+such as the one from `uv tool install git+https://github.com/lionnus/edarunner`.
+When it runs from a checkout, an editable install, it first installs a
+copy of the checkout's HEAD commit with `uv tool install` and prints a
+unit that runs that copy. After an upgrade, run it again and restart
+the service.
+
+A cron line tells you when the supervisor stopped. It reads
+`~/.edr/serve.json` and no project file, so it works while every
+`edr.toml` is broken. cron has a short `PATH`, so name `edr` in full:
+
+```
+*/10 * * * * timeout 120 $HOME/.local/bin/edr serve --check
+```
+
+`edr serve --check` prints why, sends an alert and exits 1 when the file
+is missing or older than three cycles. `edr serve --dry-run` lists the
+registered projects and what the supervisor would do for each, and
+`edr projects` shows who watches each project now.
+
+One watcher runs per project: a second one, `edr watch` or
 `edr watch --once`, finds `<state_dir>/watch.lock` taken, names the pid
-of the first and exits 2. Either way, a cron line tells you when the
-watcher stopped:
-
-```
-*/10 * * * * cd ~/myflow && edr watch --check
-```
-
-`edr watch --check` reads `<state_dir>/watch.json`, the watcher's own
-heartbeat. When the file is missing or older than three cycles, it
-prints why, sends an alert and exits 1. `edr watch --once` runs a single
-cycle and exits 1 when the cycle failed.
+of the first and exits 2. Without systemd, `tmux new -d -s edr 'edr serve'`
+does the same job. `edr watch --once` runs a single cycle of one project
+and exits 1 when the cycle failed.
 [how-it-works.md](../how-it-works.md#the-watchers-cycle) lists what one
 cycle does, and [alerts.md](alerts.md) sets up the channels.
 
