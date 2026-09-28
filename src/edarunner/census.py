@@ -103,7 +103,7 @@ def running_per_host(project: Project, now: float) -> Counter:
 
 # the census
 
-def _sites(projects: dict[str, Project]) -> dict[str, Site]:
+def host_sites(projects: dict[str, Project]) -> dict[str, Site]:
     """The site of each host that a registered project reaches over ssh; the first project that names a host wins."""
     out: dict[str, Site] = {}
     for p in projects.values():
@@ -115,7 +115,7 @@ def _sites(projects: dict[str, Project]) -> dict[str, Site]:
 
 def take(projects: dict[str, Project], now: float) -> Row:
     """Probe every ssh host of the sites of `projects` at once, with its clock and our processes, and add the live runs."""
-    sites = _sites(projects)
+    sites = host_sites(projects)
 
     def one(host: str) -> tuple[dict, list[Proc]]:
         try:
@@ -175,7 +175,7 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
     for p in projects.values():
         for batch, hb in watch.read_heartbeats(p):
             runs.setdefault(hb["run_id"], []).append((p, {**hb, "batch": batch}))
-    sites = _sites(projects)
+    sites = host_sites(projects)
     out = []
     for host, procs in (census.get("procs") or {}).items():
         site = sites.get(host)
@@ -325,9 +325,10 @@ def work(notifiers: list[Notifier], now: float | None = None, own: Project | Non
 
 # the view of the hosts
 
-def host_view(probes: dict[str, HostProbe | str], live: list[Row], site: Site, pl: Placement) -> list[Row]:
+def host_view(probes: dict[str, HostProbe | str], live: list[Row], floors: dict[str, float], pl: Placement) -> list[Row]:
     """One row per host: its free room, the live runs of yours on it by project with the cores, RAM and scratch
-    they use, whether a run can start there under `pl` and why not, and a note when your runs fill it.
+    they use, whether a run can start there under `pl` and above its floor, and why not, and a note when your
+    runs fill it.
 
     The hosts where a run can start come first, the most free cores first, then the full ones, then
     those that did not answer."""
@@ -341,7 +342,7 @@ def host_view(probes: dict[str, HostProbe | str], live: list[Row], site: Site, p
         if isinstance(p, str):
             out.append({**row, "error": p, "start": None, "why": "no answer", "note": ""})
             continue
-        keep = hosts.floor(site, host)
+        keep = floors[host]
         why = hosts.why_not(pl, p, len(mine), Needs(), keep)
         note = []
         if p.free_gb < keep <= p.free_gb + row["our_gb"]:

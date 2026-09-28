@@ -32,8 +32,8 @@ directory and the run trees: a command that would register the second
 one refuses and names the first, and `edr check` reports it.
 
 Whether the directory goes into git is your choice. To version it,
-commit `edr.toml`, `tasks.toml`, `jobs/`, `hooks/` and
-`edr-watch.service`, and keep `data/` and the checked-out clones out.
+commit `edr.toml`, `tasks.toml`, `jobs/` and `hooks/`, and keep `data/`
+and the checked-out clones out.
 The site file names your machines and is shared by every project of the
 lab, so it lives apart from the project; [site.md](site.md) says where.
 
@@ -44,10 +44,9 @@ mkdir -p mypaper/edr && cd mypaper/edr
 edr init --site ~/.config/edarunner
 ```
 
-`edr init` writes `edr.toml`, a template with one stage and one metric,
-and `edr-watch.service`, the systemd unit for the watcher. `--site` is
-the site file or the directory that holds it. `edr init` does not write
-the site file itself.
+`edr init` writes `edr.toml`, a template with one stage and one metric.
+`--site` is the site file or the directory that holds it. `edr init`
+does not write the site file itself.
 
 Then edit `edr.toml`. Name the repository under `[source]`, add one
 `[stages.<name>]` table for each command of the flow, and add a

@@ -55,3 +55,20 @@ def env(tmp_path: Path, monkeypatch):
     e = Env(tmp_path)
     yield e
     e.db.close()
+
+
+@pytest.fixture
+def two(tmp_path: Path, monkeypatch) -> dict:
+    """alpha and beta: two registered copies of the demo, their state under HOME and the user root."""
+    from edarunner import config, home
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    out = {}
+    for name in ("alpha", "beta"):
+        root = tmp_path / "edr" / name
+        shutil.copytree(Path(__file__).resolve().parents[1] / "examples" / "local-demo", root,
+                        ignore=shutil.ignore_patterns("repo", "wt", "data"))
+        (root / "edr.toml").write_text((root / "edr.toml").read_text().replace('project = "demo"', f'project = "{name}"'))
+        home.register(name, root)
+        out[name] = config.load_project(root)
+    return out

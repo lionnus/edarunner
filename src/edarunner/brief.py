@@ -11,7 +11,7 @@ from collections import Counter
 from typing import Any
 
 from . import analysis, board, census, watch
-from .hosts import HostProbe
+from .hosts import HostProbe, floor
 from .model import SCHEDULERS, Project
 
 Row = dict[str, Any]
@@ -76,7 +76,8 @@ def _hosts(project: Project) -> Row:
               if h in project.site.hosts}
     if not probes:
         return {"probed": None, "hosts": [], "names": list(project.site.hosts)}
-    return {"probed": c["ts"], "hosts": census.host_view(probes, c.get("runs") or [], project.site, project.placement),
+    floors = {h: floor(project.site, h) for h in probes}
+    return {"probed": c["ts"], "hosts": census.host_view(probes, c.get("runs") or [], floors, project.placement),
             "names": list(project.site.hosts)}
 
 

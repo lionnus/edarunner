@@ -147,10 +147,11 @@ directory, a session-start hook and a skill.
 
 `edr.toml` declares the flow as stages that run in order. `edr launch`
 copies a one-file driver to the host and starts it. The driver runs the
-stages and writes a heartbeat file every minute. `edr watch` on the head
-node reads the heartbeats, collects the reports, extracts the metrics
-and sends the alerts. The watcher never deletes a run tree; the only files
-it removes are expired licence-seat leases.
+stages and writes a heartbeat file every minute. `edr serve` on the head
+node keeps one watcher per project, which reads the heartbeats, collects
+the reports, extracts the metrics and sends the alerts. The watcher never
+deletes a run tree; the only files it removes are expired licence-seat
+leases.
 [docs/how-it-works.md](docs/how-it-works.md) follows one run through
 every step.
 

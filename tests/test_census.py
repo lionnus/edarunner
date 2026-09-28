@@ -20,20 +20,6 @@ NOW = 1_800_000_000.0
 DATE = "20260926_1200"
 
 
-@pytest.fixture
-def two(tmp_path: Path, monkeypatch) -> dict:
-    """alpha and beta: two registered copies of the demo, their state under HOME, one census probe per host."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    out = {}
-    for name in ("alpha", "beta"):
-        root = tmp_path / "edr" / name
-        shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
-        (root / "edr.toml").write_text((root / "edr.toml").read_text().replace('project = "demo"', f'project = "{name}"'))
-        home.register(name, root)
-        out[name] = config.load_project(root)
-    return out
-
-
 def heartbeat(project, label: str, batch: str = "demo", age: float = 5, now: float = NOW, **extra) -> dict:
     run_id = f"{DATE}_{label}_demo_gabc1234"
     hb = {"run_id": run_id, "label": label, "batch": batch, "host": "local", "phase": "stage:synth", "stage": "synth",
@@ -201,16 +187,15 @@ def test_the_sweep_removes_the_stale_leases_of_every_project(two, fake, user_roo
 
 
 def test_the_host_view_puts_the_hosts_where_a_run_can_start_first(two) -> None:
-    site = two["alpha"].site
     probes = {"full": HostProbe("full", 30.0, 100.0, "/s", 40.0, cores=64, load=34.0, total_ram_gb=256.0, total_gb=1000.0),
               "busy": HostProbe("busy", 2.0, 100.0, "/s", 900.0, cores=64, load=62.0, total_ram_gb=256.0, total_gb=1000.0),
               "free": HostProbe("free", 60.0, 200.0, "/s", 900.0, cores=64, load=4.0, total_ram_gb=256.0, total_gb=1000.0),
               "silent": "silent: rc 255: timeout"}
-    site.host_free_min_gb = 100
     live = [{"project": "alpha", "host": "full", "cpu_pct": 400.0, "rss_gb": 8.0, "tree_gb": 700.0},
             {"project": "beta", "host": "busy", "cpu_pct": 4000.0, "rss_gb": 20.0, "tree_gb": 5.0},
             {"project": "beta", "host": "busy", "cpu_pct": 2000.0, "rss_gb": 20.0, "tree_gb": 5.0}]
-    rows = census.host_view(probes, live, site, Placement(max_per_host=3, min_free_cores=8, min_free_ram_gb=16))
+    rows = census.host_view(probes, live, dict.fromkeys(probes, 100), Placement(max_per_host=3, min_free_cores=8,
+                                                                                    min_free_ram_gb=16))
     assert [(r["host"], r["start"]) for r in rows] == [("free", True), ("full", False), ("busy", False), ("silent", None)]
     full, busy = rows[1], rows[2]
     assert full["why"] == "40 GB scratch free, under the floor of 100 GB" and full["runs"] == {"alpha": 1}

@@ -13,8 +13,10 @@ one run through the code from `plan` to `export`.
   directory. It runs one run and never imports the package. The source is
   in `src/edarunner/driver/`, and [driver.md](driver.md) describes the
   protocol.
-- `edr watch` is the controller running as a long-lived process on the
-  head node, with the Telegram bot as a thread inside it.
+- `edr serve` is the supervisor, one long-lived process per user on the
+  head node. It keeps one `edr watch --served` process per registered
+  project, the controller that watches that project, and does the work
+  that belongs to the user once for all projects.
 
 No module knows an EDA tool. The project config names the commands, the
 report files and the numbers in them.
@@ -36,6 +38,7 @@ report files and the numbers in them.
 | `schedulers.py` | the HTCondor, Slurm and LSF backends: the submit file, the state query, the stop |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle of one project: classify, act, collect, resume, launch queued, boards, `watch.json`; the watcher that holds `serve.lock` then calls `census.work` |
+| `serve.py` | `edr serve`: the watcher process of each project with its restarts and the kill of a stuck one, the global board, `serve.json`, `--check`, the systemd notify and watchdog, the unit with its pinned install |
 | `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the work of the user: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the five parsers with the hierarchical area report, extraction |

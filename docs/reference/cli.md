@@ -82,7 +82,7 @@ A command below says where it refines a code.
 | [extract](#extract) | extract the metrics of runs again from their collected files |
 | [compare](#compare) | two or more runs side by side |
 | [runtime](#runtime) | stage, step and task times |
-| [init](#init) | write edr.toml and the watch unit here |
+| [init](#init) | write edr.toml here |
 | [check](#check) | load everything, probe the hosts, check the hooks |
 | [register](#register) | link the project into the registry |
 | [unregister](#unregister) | remove the link of the project from the registry |
@@ -98,6 +98,7 @@ A command below says where it refines a code.
 | [retire](#retire) | remove the run tree, or its prune targets |
 | [notify](#notify) | send one message, the board or the digest through every notifier |
 | [watch](#watch) | the watcher |
+| [serve](#serve) | the supervisor: one watcher per registered project |
 
 ## brief
 
@@ -415,10 +416,10 @@ time of each stage, with the attempts summed, and the total.
 edr init [--dry-run] [--json] --site DIR
 ```
 
-Writes edr.toml and edr-watch.service into the current directory, the
-project directory where you run edr. --site names the site directory
-or the site file itself; init does not write that file. It refuses
-when edr.toml already exists.
+Writes edr.toml into the current directory, the project directory
+where you run edr. --site names the site directory or the site file
+itself; init does not write that file. It refuses when edr.toml
+already exists. edr serve watches the project once it is registered.
 
 | Flag | Meaning |
 |---|---|
@@ -837,7 +838,7 @@ line can mail either.
 ## watch
 
 ```
-edr watch [--dry-run] [--json] [--once] [--check]
+edr watch [--dry-run] [--json] [--once] [--check] [--served]
 ```
 
 Runs the watcher loop: one cycle every heartbeat_s seconds, with the
@@ -859,8 +860,54 @@ until the file loads again.
 | `--json` | the same as edr --json watch |
 | `--once` | one cycle; exit 1 when it failed |
 | `--check` | exit 1 when watch.json is older than three cycles |
+| `--served` | started by edr serve: no census, no pinned board |
 
 | Exit | Meaning |
 |---|---|
 | 1 | with --once, the cycle failed or the config did not load; with --check, watch.json is older than three cycles |
 | 2 | another process watches the project |
+
+## serve
+
+```
+edr serve [--dry-run] [--json] [--once] [--check] [--unit]
+```
+
+Runs the supervisor of the user: a cycle every minute that keeps one
+edr watch --served per registered project in the project directory,
+does the work that belongs to the user once for every project, and
+edits one pinned global board. A watcher that exits starts again after
+1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
+watch.json stood still for three heartbeats and at least 15 minutes
+while its config loads is killed and started again, with an alert. A
+project whose files do not load has no watcher until they load, and
+gets one alert per error text. The supervisor holds
+~/.edr/serve.lock, so a second one exits 2, and it writes
+~/.edr/serve.json at the end of every cycle. Under systemd it sends
+READY=1 and, every cycle, WATCHDOG=1.
+
+--once runs one cycle: one edr watch --once --served per project, then
+the work of the user, and exits. --dry-run lists the registered
+projects and what the supervisor would do for each, and writes
+nothing. --check reads serve.json and nothing of any project; when
+the file is missing or older than three cycles, it alerts and exits
+1, so a cron line can run it.
+
+--unit prints the systemd user unit. When this edr runs from a
+checkout, an editable install, it first installs a copy of the
+checkout's HEAD commit with uv tool install, and the unit runs that
+copy, so a later edit or git pull in the checkout never changes the
+running supervisor. docs/guides/run.md shows the install.
+
+| Flag | Meaning |
+|---|---|
+| `--dry-run` | print what would happen and write nothing |
+| `--json` | the same as edr --json serve |
+| `--once` | one cycle, then exit |
+| `--check` | exit 1 with an alert when serve.json is older than three cycles |
+| `--unit` | install a pinned copy when edr runs from a checkout, and print the systemd user unit that runs it |
+
+| Exit | Meaning |
+|---|---|
+| 1 | with --check, serve.json is older than three cycles; with --unit, the install failed |
+| 2 | another supervisor runs; with --dry-run, no project is registered |

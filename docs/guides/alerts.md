@@ -33,7 +33,7 @@ other message is `<project>: <kind>`.
 | alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; `hung`, `looping`, `over_budget`, `host_full` and `superseded` also get the keep, ack and stop buttons | one push per change, with the next command, and the button commands with three copy buttons | one mail per change, with the next command and the button commands |
 | alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
-| alert: `watch` | `edr watch --check` | one message | one urgent push | one mail |
+| alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
 | `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |
 | `board` | the watcher every cycle | one pinned message, edited in place | none | none |
@@ -643,7 +643,33 @@ skew: +75 s
 Ask the admins to sync the host with NTP. edr hosts names every host whose clock is off.
 ```
 
-`watch`: `edr watch --check` found no watcher cycle for three heartbeats.
+`watch`: the supervisor saw a watcher exit or stand still, or a check
+found no cycle for three heartbeats. The first line names the project
+`edr` for a message of the supervisor.
+
+```
+🔴 edr: watcher exited for demo
+The watcher of demo exited with code 1. The supervisor starts it again in a minute, and then after 2, 4, 8, 16 and at most 30 minutes while it keeps exiting.
+
+project: /home/me/myflow
+
+Its log is in the journal of the supervisor:
+journalctl --user -u edr-serve
+```
+
+```
+🔴 edr: supervisor stopped
+The supervisor has not finished a cycle for 14m. No project is watched until it runs again.
+
+pid: 3141
+
+See why it stopped:
+systemctl --user status edr-serve
+Start it again:
+systemctl --user restart edr-serve
+```
+
+`edr watch --check` found no cycle of a lone watcher for three heartbeats:
 
 ```
 🔴 demo: watcher stopped

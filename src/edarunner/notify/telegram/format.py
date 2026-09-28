@@ -192,6 +192,36 @@ def hosts(rows: Iterable[Row]) -> str:
     return fit("\n".join(lines + ["", "<i>🟢 a run can start, 🔴 no run can start, ⚫ no answer</i>"])) if lines else "<i>no hosts</i>"
 
 
+def global_board(projects: dict[str, list[Row]], labels: dict[str, tuple[dict, dict]], hosts: list[Row], now: float,
+                 most: int = 10) -> str:
+    """The board of every project: the live runs of each, at most `most`, and one line for a project with none;
+    the hosts that hold your runs, with their free room and what your runs fill; and the count of live runs.
+
+    `labels` holds the step totals and the step names of each project."""
+    lines: list[str] = []
+    states: Counter = Counter()
+    for name, rows in sorted(projects.items()):
+        live = [r for r in runs.order(rows) if runs.is_live(r)]
+        states.update(runs.state_of(r) for r in live)
+        if not live:
+            ended = sum(1 for r in rows if not runs.is_live(r) and now - (r.get("updated") or 0) < DAY_S)
+            lines.append(f"<b>{esc(name)}</b> <i>nothing live" + (f", {ended} ended in 24 h" if ended else "") + "</i>")
+            continue
+        totals, names = labels.get(name, ({}, {}))
+        lines += [f"<b>{esc(name)}</b>", *(run_line(r, now, totals, names) for r in live[:most])]
+        if len(live) > most:
+            lines.append(f"<i>… and {len(live) - most} more: /status {esc(name)}</i>")
+    if hosts:
+        lines += ["", "<b>Machines</b>"]
+        for h in hosts:
+            lines.append(f"<b>{esc(h['host'])}</b> {esc(room(h))}; {esc(yours(h))}")
+            lines += [f"    <i>{esc(h['note'])}</i>"] if h["note"] else []
+    count = ", ".join(f"{n} {s}" for s, n in sorted(states.items(), key=lambda kv: runs.RANK.get(kv[0], 7)))
+    lines += ["", "<i>" + esc(f"{sum(states.values())} live" + (f": {count}" if count else "")
+                              + ". /status <project> shows one project.") + "</i>"]
+    return fit("\n".join(lines))
+
+
 def tools(rows: Iterable[Row]) -> str:
     """`tool used/total seats used, host, host` per tool; a failed probe shows its note."""
     lines = []

@@ -173,14 +173,16 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     assert len(fake.requests) == 1
 
 
-def test_queued_runs_are_relaunched(env: Env, monkeypatch) -> None:
-    env.db.upsert_run({"run_id": rid("a"), "batch": "demo", "label": "a", "state": "queued"})
+def test_queued_runs_are_relaunched_at_their_source(env: Env, monkeypatch) -> None:
+    env.db.upsert_run({"run_id": rid("a"), "batch": "demo", "label": "a", "state": "queued", "source": "gabc1234"})
     calls: list[tuple] = []
-    monkeypatch.setattr(launch, "launch", lambda project, batch, ssh, db, **kw: calls.append((batch.batch, kw)) or [])
+    monkeypatch.setattr(launch, "launch", lambda project, batch, ssh, db, **kw: calls.append((batch.batch, batch.source, kw))
+                        or [])
     env.cycle()
     env.db.upsert_run({"run_id": rid("b"), "batch": "demo", "label": "b_nodw", "state": "queued"})
     env.cycle(NOW + 1)
-    assert calls == [("demo", {"only": ["a"], "stagger_s": 0, "allow_dirty": True})] * 2  # one job per cycle
+    # One job per cycle, at the source tag of the queued row and not at the ref the batch file names.
+    assert calls == [("demo", "gabc1234", {"only": ["a"], "stagger_s": 0, "allow_dirty": True})] * 2
 
 
 def test_dry_run_writes_nothing(env: Env, capsys) -> None:

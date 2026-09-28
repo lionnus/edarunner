@@ -15,7 +15,10 @@ uv tool install git+https://github.com/lionnus/edarunner
 
 `pipx install git+https://github.com/lionnus/edarunner` does the same. In
 a checkout of the repository, `uv venv --python 3.11 .venv && uv pip
-install -e '.[dev]'` gives you `.venv/bin/edr`.
+install -e '.[dev]'` gives you `.venv/bin/edr` for development. The
+supervisor `edr serve` runs from a tool install, never from such a
+checkout; [guides/run.md](guides/run.md#keep-a-watcher-behind-the-batch)
+shows how.
 
 The head node also needs Linux with GNU coreutils and procps-ng 3.3.10 or
 newer, `rsync`, `git` and `python3` on `PATH`, and ssh keys that work
