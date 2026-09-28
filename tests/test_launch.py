@@ -134,7 +134,7 @@ def test_plan_reports_problems(env) -> None:
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
     db.upsert_run({"run_id": f"{DATE}_b_nodw_demo_gOLD", "batch": "old", "label": "b_nodw", "host": "local",
                    "root": "/x/edr/old", "source": "OLD"})
-    batch.jobs[1].reuse = {"label": "b_nodw", "latest": True}
+    batch.source, batch.jobs[1].reuse = "OLD", {"label": "b_nodw", "latest": True}
     _, b = launch.plan(project, batch, ssh, db, date=DATE)
     assert b.problems == []  # the earlier stages of the reused tree took the overrides
 
@@ -209,10 +209,16 @@ def test_a_job_without_config(env, tmp_path: Path) -> None:
     assert launch.render_run_id("{build_tag}_{label}-{config}", {"build_tag": "", "label": "a", "config": ""}) == "a"
 
 
-def test_plan_reuses_a_database_run(env) -> None:
+def test_plan_reuses_the_pick_of_the_label_at_the_batch_source(env) -> None:
     project, batch, ssh, db = env
+    batch.source = "OLD"
     db.upsert_run({"run_id": f"{DATE}_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
-                       "root": "/x/edr/old", "source": "OLD"})
+                       "root": "/x/edr/old", "source": "OLD", "phase": "done", "started": 200})
+    # A higher run id that started earlier and failed, and a newer run at another source: neither is the pick.
+    db.upsert_run({"run_id": f"{DATE}_a_demo_gOLE", "batch": "old", "label": "a", "host": "local",
+                   "root": "/x/edr/ole", "source": "OLD", "phase": "FAILED:pnr", "started": 100})
+    db.upsert_run({"run_id": f"{DATE}_a_demo_gNEW", "batch": "new", "label": "a", "host": "local",
+                   "root": "/x/edr/new", "source": "NEW", "phase": "done", "started": 300})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
     a = launch.plan(project, batch, ssh, db, date=DATE)[0]
@@ -221,7 +227,11 @@ def test_plan_reuses_a_database_run(env) -> None:
     assert a.spec["start_at"]["stage"] == "pnr" and a.spec["stages"][0]["cwd"] == "/x/edr/old"
     batch.jobs[0].reuse = {"label": "nope", "latest": True}
     a = launch.plan(project, batch, ssh, db, date=DATE)[0]
-    assert a.problems == ["reuse label=nope latest=True: no run with a host and a root in the database"]
+    assert a.problems == ["reuse label=nope latest=True: no run of that label at source OLD"]
+    db.upsert_run({"run_id": f"{DATE}_a_demo_gOLD", "root": None})  # the tree of the pick is gone: no other tree
+    batch.jobs[0].reuse = {"label": "a", "latest": True}
+    a = launch.plan(project, batch, ssh, db, date=DATE)[0]
+    assert a.problems == [f"reuse label=a latest=True: {DATE}_a_demo_gOLD has no host and root"]
 
 
 # launch and stop
@@ -440,7 +450,7 @@ def test_reuse_renders_tree_id_of_the_old_run(env) -> None:
     project, batch, ssh, db = env
     db.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
                        "root": "/x/edr/old", "source": "OLD"})
-    batch.jobs[0].reuse = {"label": "a", "latest": True}
+    batch.source, batch.jobs[0].reuse = "OLD", {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
     plans = launch.plan(project, batch, ssh, db, date=DATE)
     a = next(p for p in plans if p.label == "a")
@@ -522,7 +532,7 @@ def test_tree_id_survives_a_chain_of_reuse(env) -> None:
                        "root": "/x/edr/old", "source": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
     db.upsert_run({"run_id": "20260102_0000_a_demo_gOLD", "batch": "mid", "label": "a", "host": "local",
                        "root": "/x/edr/old", "source": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
-    batch.jobs[0].reuse = {"label": "a", "latest": True}
+    batch.source, batch.jobs[0].reuse = "OLD", {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
     a = next(p for p in launch.plan(project, batch, ssh, db, date=DATE) if p.label == "a")
     assert a.reuse == "20260102_0000_a_demo_gOLD" and a.values["tree_id"] == "20260101_0000_a_demo_gOLD"

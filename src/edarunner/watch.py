@@ -44,6 +44,9 @@ class State:
     Every change of state writes an event. A state that alerts sends one alert per run and reason,
     and a new reason edits that alert in place. A keep of N hours holds off the kill of `hung` and
     the stop of `superseded` for N hours; the full-host stop never waits for a keep.
+    The triage proposes no retire for a run without a tree, such as one imported with `--results`,
+    since a retire would only mark its row. When another run has the same label and batch, the
+    command names the run by the shortest unique prefix of its run id instead of `<label>@<batch>`.
     """
 
     test: str
@@ -231,7 +234,7 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
             left, why = launch.stages_left(project, db, run) if ended else ([], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left)
+            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs())
             ids = [n.send(alert) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:

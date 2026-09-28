@@ -7,6 +7,7 @@ keeps the source of its number: a file under data/results, or the table it came 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 from rich.console import Group, RenderableType
@@ -22,10 +23,12 @@ Row = dict[str, Any]
 
 
 def names(runs: list[Row]) -> dict[str, str]:
-    """A column name per run: the label, or label@source when two runs share a label."""
-    labels = [r.get("label") for r in runs]
-    return {r["run_id"]: str(r.get("label")) if labels.count(r.get("label")) == 1 else f"{r.get('label')}@{r.get('source')}"
-            for r in runs}
+    """A name per run: the label, or label@source when the runs come from more than one source; a prefix of the run
+    id follows when two runs share that name."""
+    mixed = len({r.get("source") for r in runs}) > 1
+    base = {r["run_id"]: f"{r.get('label')}@{r.get('source')}" if mixed else str(r.get("label")) for r in runs}
+    twins = Counter(base.values())
+    return {i: n if twins[n] == 1 else f"{n} {board.prefix(i, list(base))}" for i, n in base.items()}
 
 
 def _num(v: float | None, digits: int = 1) -> str | None:

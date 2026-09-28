@@ -395,7 +395,7 @@ plan problem.
 | `tasks` | the task ids of the task groups | `[]` |
 | `overrides` | `KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens | `{}` |
 | `vars` | `{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; `{vars.<name>}` in the stage strings, `[env]` and `collect` | `{}` |
-| `reuse` | `{ run_id = "..." }` or `{ label = "...", latest = true }`: start on the tree of that run. With `restore = "<name>"`, start on a fresh tree with the `collect_on_request.<name>` files of that run copied back from `data/results/` | unset |
+| `reuse` | `{ run_id = "..." }` with a run id or another handle, or `{ label = "...", latest = true }` for the newest run by start time of that label at the batch's source that ended done, else its newest run. The job starts on the tree of that run; with `restore = "<name>"`, it starts on a fresh tree with the `collect_on_request.<name>` files of that run copied back from `data/results/` | unset |
 
 ## Placeholders
 
@@ -429,5 +429,5 @@ to the shell and stays as it is.
 | `{task_dir}` | the task directory | the strings of a task group, `collect`, metric files |
 | `{task.<key>}` | a key of the task table | the strings of a task group, `collect`, metric files |
 | `{step}` | the step number | a metric `file` with `step = "*"` |
-| `{handle}` | the handle of the run, `label@batch` | a bot command sent as a reply to an alert |
+| `{handle}` | the handle of the run, `label@batch`, or the shortest unique prefix of its run id when another run has the same label and batch | a bot command sent as a reply to an alert |
 | `{run_root}` | the run tree | a bot command sent as a reply to an alert |

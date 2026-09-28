@@ -117,9 +117,10 @@ def _after(project: Project) -> str:
 
 
 def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: dict, now: float,
-              left: list[str] | None = None) -> Alert:
-    """The alert of a run in `state`; `reasons` are what `watch.classify` found, and `left` the stages that
-    `edr continue` runs next on the tree of a run that ended.
+              left: list[str] | None = None, runs: list[Row] | None = None) -> Alert:
+    """The alert of a run in `state`; `reasons` are what `watch.classify` found, `left` the stages that
+    `edr continue` runs next on the tree of a run that ended, and `runs` the runs of the project, so the handle
+    in the alert names this run alone.
 
     A live run that is `hung`, `looping`, `over_budget` or `superseded` gets Stop, +6h, +12h and +24h.
     A live run on a full host gets Stop, and Free space when the project declares prune targets; a
@@ -127,10 +128,10 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
     host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages left on its
     tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show each
     button as a command line."""
-    h, lim = board.handle(run), project.limits
+    h, lim = board.handle(run, runs), project.limits
     host = str(hb.get("host") or run.get("host") or "-")
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
-    cmd = board.triage_cmd(run, state, hb)
+    cmd = board.triage_cmd(run, state, hb, runs)
     counts = hb.get("counts") or {}
     a = Alert(state, str(run.get("key") or run["run_id"]), state, h, why,
               [("stage", _stage(run, hb)), ("host", host)], log=log_lines(hb))

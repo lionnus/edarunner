@@ -167,6 +167,25 @@ def test_compare_side_by_side_per_step(demo: Path, capsys) -> None:
     assert edr(capsys, "compare", a, b, "--metric", "nothing")[0] == 2
 
 
+def test_compare_names_the_sources_when_they_differ(demo: Path, capsys) -> None:
+    dirty_tag = "abc1234-dirty-0badc0de"
+    a, dirty = seed(demo, "a", "done"), seed(demo, "a", "done", source=dirty_tag)
+    for run, wns in ((a, -0.2), (dirty, -0.1)):
+        _metric(demo, run, "wns_ns", 3, wns)
+    code, out, _ = edr(capsys, "compare", "a@abc1234", f"a@{dirty_tag}")
+    lines = out.splitlines()
+    assert code == 0 and lines[0] == f"mixed sources: abc1234, {dirty_tag}"
+    assert lines[1].split()[5:7] == ["a@abc1234", f"a@{dirty_tag}"]
+    assert json.loads(edr(capsys, "--json", "compare", a, dirty)[1])["data"]["mixed_sources"] is True
+    assert json.loads(edr(capsys, "--json", "compare", a, a)[1])["data"]["mixed_sources"] is False
+    code, _, err = edr(capsys, "compare", "a@demo", a)
+    assert code == 1 and "2 runs have label 'a' in batch 'demo'" in err
+    twins = [{"run_id": "20261001_0900_a_demo_gaaa111", "label": "a", "source": "aaa111"},
+             {"run_id": "20261002_0900_a_demo_gaaa111", "label": "a", "source": "aaa111"},
+             {"run_id": "20261002_0900_b_demo_gaaa111", "label": "b", "source": "aaa111"}]
+    assert list(analysis.names(twins).values()) == ["a 20261001", "a 20261002_0900_a", "b"]
+
+
 def test_metrics_over_the_steps_of_one_run(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     _metric(demo, a, "wns_ns", 1, -0.3)

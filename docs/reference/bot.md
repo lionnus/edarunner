@@ -17,7 +17,7 @@ project acts on that project.
 
 ## Built-in commands
 
-A handle is `label@batch`, a run id prefix, or `#n` from the last board; `project/label@batch` also names the project. Without `[project]`, `/status` and `/events` answer for every project, and the other commands take the project of the alert they reply to, or the only one.
+A handle is `label@batch`, `label@source`, a run id prefix, or `#n` from the last board; `project/label@batch` also names the project. Without `[project]`, `/status` and `/events` answer for every project, and the other commands take the project of the alert they reply to, or the only one.
 
 ### Look
 

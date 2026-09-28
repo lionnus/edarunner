@@ -107,7 +107,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "export", "--source", source, "--out", str(exp))
     manifest = json.loads((exp / "manifest.json").read_text())
     assert code == 0 and {r["label"] for r in manifest["runs"]} == {"a", "b_nodw"} and manifest["incomplete"] == []
-    assert (exp / "a" / "reports" / "6" / "area.rpt").is_file() and (exp / "runs.csv").is_file() and manifest["source"] == source
+    assert (exp / "a" / "reports" / "6" / "area.rpt").is_file() and (exp / "runs.csv").is_file() and manifest["sources"] == [source]
     code, out, _ = edr(capsys, "stop", "a@demo", "--after-task", "--why", "test")
     assert code == 2 and "already done" in out
 

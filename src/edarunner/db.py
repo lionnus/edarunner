@@ -82,6 +82,21 @@ class NotFound(KeyError):
         return str(self.args[0])
 
 
+def _within(where: list[str], args: list, *columns: tuple[str, list[str] | None]) -> None:
+    """Add `column IN (...)` for each (column, values) whose values are not None; an empty list matches no row."""
+    for col, values in columns:
+        if values is not None:
+            where.append(f"{col} IN ({', '.join('?' * len(values))})" if values else "0")
+            args += list(values)
+
+
+def pick(runs: list[Row]) -> Row | None:
+    """The run of record among `runs`, the runs of one label at one source: the newest run by start time that ended
+    done, else the newest run; the run id breaks a tie. Every command that takes one run of a label uses it."""
+    done = [r for r in runs if r.get("phase") == "done"]
+    return max(done or runs, key=lambda r: (r.get("started") or 0, r["run_id"]), default=None)
+
+
 class Database:
     """One SQLite database, head node only. Use as a context manager.
 
@@ -294,18 +309,31 @@ class Database:
         return self._run_row(rows[0]) if rows else None
 
     def resolve(self, handle: str, last_board: list[str] | None = None) -> str:
-        """Turn `label@batch`, a unique run id prefix or `#n` (1-based, from the last board) into a run id."""
+        """Turn `label@batch`, `label@source`, a unique run id prefix or `#n` (1-based, from the last board) into a
+        run id.
+
+        `label@batch` is the one run of that label in that batch; a batch with several is refused, and the error
+        lists them. `label@source` is the `pick` of that label at that source tag. A name after the `@` that is both
+        a batch and a source is refused."""
         if handle.startswith("#"):
             n = int(handle[1:]) if handle[1:].isdigit() else 0
             if not last_board or not 1 <= n <= len(last_board):
                 raise NotFound(f"{handle}: the last board has {len(last_board or [])} rows")
             return last_board[n - 1]
         if "@" in handle:
-            label, batch = handle.split("@", 1)
-            rows = self._rows("SELECT run_id FROM runs WHERE label=? AND batch=? ORDER BY run_id DESC", (label, batch))
-            if not rows:
-                raise NotFound(f"{handle}: no run has label '{label}' in batch '{batch}'")
-            return rows[0]["run_id"]
+            label, at = handle.split("@", 1)
+            rows = self._rows("SELECT * FROM runs WHERE batch=? OR source=? ORDER BY run_id", (at, at))
+            is_batch, is_source = any(r["batch"] == at for r in rows), any(r["source"] == at for r in rows)
+            if is_batch and is_source:
+                raise NotFound(f"{handle}: '{at}' is both a batch and a source; name the run by its run id")
+            mine = [r for r in rows if r["label"] == label]
+            if not mine:
+                raise NotFound(f"{handle}: no run has label '{label}' in a batch or at a source '{at}'")
+            if len(mine) > 1 and is_batch:
+                raise NotFound(f"{handle}: {len(mine)} runs have label '{label}' in batch '{at}'; name one by its run id "
+                               "or as label@source: " + ", ".join(f"{r['run_id']} ({r['source']}, {r['phase']})"
+                                                                  for r in mine))
+            return pick(mine)["run_id"]
         ids = [r["run_id"] for r in self._rows("SELECT run_id FROM runs WHERE substr(run_id, 1, ?)=?", (len(handle), handle))]
         if handle in ids:
             return handle
@@ -329,7 +357,7 @@ class Database:
 
     def metrics(
         self,
-        source: str | None = None,
+        sources: list[str] | None = None,
         stage: str | None = None,
         step: int | None = None,
         name: str | None = None,
@@ -337,39 +365,35 @@ class Database:
     ) -> list[Row]:
         """Metric rows joined with the run's label, config and source. `name` matches name or canonical."""
         where, args = ["1"], []
-        for cond, val in (("r.source=?", source), ("m.stage=?", stage), ("m.step=?", step)):
+        for cond, val in (("m.stage=?", stage), ("m.step=?", step)):
             if val is not None:
                 where.append(cond)
                 args.append(val)
         if name is not None:
             where.append("(m.name=? OR m.canonical=?)")
             args += [name, name]
-        if run_ids is not None:
-            where.append(f"m.run_id IN ({', '.join('?' * len(run_ids))})" if run_ids else "0")
-            args += list(run_ids)
+        _within(where, args, ("r.source", sources), ("m.run_id", run_ids))
         return self._rows(
             "SELECT m.*, r.label, r.config, r.source FROM metrics m JOIN runs r ON r.run_id=m.run_id "
             f"WHERE {' AND '.join(where)} ORDER BY m.run_id, m.stage, m.step, m.task, m.name",
             args,
         )
 
-    def area(self, run_ids: list[str] | None = None, source: str | None = None, stage: str | None = None,
+    def area(self, run_ids: list[str] | None = None, sources: list[str] | None = None, stage: str | None = None,
              step: int | None = None, instance: str | None = None, depth: int | None = None) -> list[Row]:
         """Area rows with the run's label and source and the metric's source_file and unit.
 
         `instance` matches that instance and every one below it.
         """
         where, args = ["1"], []
-        for cond, val in (("r.source=?", source), ("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
+        for cond, val in (("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
             if val is not None:
                 where.append(cond)
                 args.append(val)
         if instance is not None:
             where.append("(a.instance=? OR substr(a.instance, 1, ?)=?)")
             args += [instance, len(instance) + 1, instance + "/"]
-        if run_ids is not None:
-            where.append(f"a.run_id IN ({', '.join('?' * len(run_ids))})" if run_ids else "0")
-            args += list(run_ids)
+        _within(where, args, ("r.source", sources), ("a.run_id", run_ids))
         return self._rows(
             "SELECT a.*, r.label, r.source, m.source_file, m.unit FROM area a JOIN runs r ON r.run_id=a.run_id "
             "LEFT JOIN metrics m ON m.run_id=a.run_id AND m.stage=a.stage AND m.step IS a.step AND m.task='' "

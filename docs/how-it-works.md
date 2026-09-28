@@ -461,9 +461,11 @@ check` warns when the database sits on such a filesystem (`db.Database`,
 `cli.cmd_check`). A local `data/` is still the better place, because the
 watcher and each `edr` call take a file lock there.
 
-`edr metrics --source` and `edr export` select one source tag at a time
-and match it exactly, so two versions of the design never end up in one
-table (`cli.cmd_metrics`, `export._select`). `edr export` writes a
-snapshot, a frozen directory with a manifest, and an analysis reads that
-snapshot instead of the live database.
+`edr metrics --source` and `edr export` match each source tag exactly,
+and read several tags only when each has its own `--source`, so two
+versions of the design end up in one table only on purpose
+(`cli.cmd_metrics`, `export._select`). `edr export` writes a snapshot, a
+frozen directory with a manifest, and an analysis reads that snapshot
+instead of the live database. `edr compare` names the sources when the
+runs it compares come from more than one.
 [guides/results.md](guides/results.md) shows the commands.

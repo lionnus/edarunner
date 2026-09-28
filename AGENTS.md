@@ -47,8 +47,12 @@ dead        a@demo                       stage:pnr
     edr continue a@demo --stage pnr --from cts
 ```
 
-`a@demo` is a handle. A handle names one run: `label@batch`, a run id
-prefix, or `#n` from the last board that `edr status` printed.
+`a@demo` is a handle. A handle names one run: `label@batch`,
+`label@source`, a run id prefix, or `#n` from the last board that
+`edr status` printed. A `label@batch` that names two runs is refused with
+the list of both; the triage then names each run by a prefix of its run
+id. `stop`, `retire` and `continue` print the run id and the phase of
+the run they act on to stderr first; read that line after a dry run.
 
 `docs/reference/states.md` gives the proposed command for each state.
 Before you run it, check the following:

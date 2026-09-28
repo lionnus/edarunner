@@ -81,24 +81,24 @@ def _step(m: Row) -> int:
     return -1 if m.get("step") is None else int(m["step"])
 
 
-def _state_row(r: Row, hb: dict, now: float) -> Row:
+def _state_row(r: Row, hb: dict, now: float, everyone: list[Row]) -> Row:
     state = r["state"] if r.get("state") in ("retired", "abandoned") else board.state_of(r)
-    return {"handle": board.handle(r), "run_id": r["run_id"], "batch": r["batch"], "state": state,
+    return {"handle": board.handle(r, everyone), "run_id": r["run_id"], "batch": r["batch"], "state": state,
             "phase": r.get("phase"), "stage": r.get("stage"), "step": r.get("step"), "step_name": hb.get("step_name"),
             "host": r.get("host"), "age_s": None if r.get("updated") is None else int(now - r["updated"]),
-            "command": board.triage_cmd(r, state, hb if state == "dead" else {})}
+            "command": board.triage_cmd(r, state, hb if state == "dead" else {}, everyone)}
 
 
 def project_data(c: Any, tools: list[Row]) -> Row:
     """Everything the project briefing says, as one dict; `c` is the command context of cli.py."""
     project, now = c.project, time.time()
     rows = board.order(c.rows())
-    batches = c.db.batches()
-    runs = [_state_row(r, c.heartbeat(r) if board.is_live(r) else {}, now) for r in rows]
+    batches, everyone = c.db.batches(), c.db.runs()
+    runs = [_state_row(r, c.heartbeat(r) if board.is_live(r) else {}, now, everyone) for r in rows]
     per_batch: dict[str, Counter] = {}
     for r in runs:
         per_batch.setdefault(r["batch"], Counter())[r["state"]] += 1
-    names = {r["run_id"]: board.handle(r) for r in c.db.runs()}
+    names = board.handles(everyone)
     events = [{**e, "run": names.get(e["run_id"], e["run_id"] or "")} for e in c.db.events(n=EVENTS)]
     read = [str(project.root / f) for f in ("CLAUDE.md", "AGENTS.md") if (project.root / f).is_file()]
     return {
@@ -116,9 +116,9 @@ def project_data(c: Any, tools: list[Row]) -> Row:
 
 def run_data(c: Any, row: Row, file_host: str) -> Row:
     """Everything the history of one run says, as one dict; `row` carries the state the board gives it."""
-    now, hb = time.time(), c.heartbeat(row)
-    state = _state_row(row, hb, now)
-    names = {r["run_id"]: board.handle(r) for r in c.db.runs()}
+    now, hb, everyone = time.time(), c.heartbeat(row), c.db.runs()
+    state = _state_row(row, hb, now, everyone)
+    names = board.handles(everyone)
     events = [{**e, "run": names.get(e["run_id"], e["run_id"])} for e in c.db.events(run_id=row["run_id"], n=1000)]
     last: dict[tuple, Row] = {}
     for m in c.db.metrics(run_ids=[row["run_id"]]):

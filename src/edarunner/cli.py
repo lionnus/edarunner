@@ -194,7 +194,7 @@ class Ctx:
         return rows
 
     def resolve(self, handle: str) -> Row:
-        """The database row of label@batch, a run id prefix, or #n from the last board."""
+        """The database row of label@batch, label@source, a run id prefix, or #n from the last board."""
         try:
             run_id = self.db.resolve(handle, self.db.get_store("last_board"))
         except KeyError as e:
@@ -202,6 +202,12 @@ class Ctx:
         row = self.db.run(run_id)
         if row is None:
             raise Refuse(f"{handle}: no run {run_id}")
+        return row
+
+    def target(self, handle: str) -> Row:
+        """The row of the run a command acts on, after a line on stderr with its run id and phase, dry run or not."""
+        row = self.resolve(handle)
+        print(f"{row['run_id']}: phase {row.get('phase') or '-'}", file=sys.stderr)
         return row
 
     def heartbeat(self, row: Row) -> dict:
@@ -217,7 +223,7 @@ class Ctx:
 # --- texts shared by the commands and the bot
 
 def _events_table(c: Ctx, events: list[Row]) -> Table | str:
-    names = {r["run_id"]: f"{r['label']}@{r['batch']}" for r in c.db.runs()}
+    names = board.handles(c.db.runs())
     body = [[time.strftime("%m-%d %H:%M", time.localtime(e["ts"])), e["actor"], names.get(e["run_id"], e["run_id"] or "-"),
              board.state_text(e["kind"]), e["text"]] for e in events]
     return board.table(["time", "actor", "run", "kind", "text"], body, styles={"time": "dim", "run": "bold"}) if body else "no events"
@@ -364,8 +370,8 @@ class Actions:
     def run_info(self, handle: str) -> dict[str, str]:
         """The handle, run id, run root and host of one run, for the placeholders of a custom command."""
         row = self.c.resolve(handle)
-        return {"handle": board.handle(row), "run_id": row["run_id"], "run_root": str(row.get("root") or ""),
-                "host": str(row.get("host") or "")}
+        return {"handle": board.handle(row, self.c.db.runs()), "run_id": row["run_id"],
+                "run_root": str(row.get("root") or ""), "host": str(row.get("host") or "")}
 
     def keep(self, handle: str, hours: int, actor: str) -> str:
         """`hours` more on the budget of the running stage or task, and no action of the watcher for that long."""
@@ -418,11 +424,11 @@ class Actions:
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.db.run(row["run_id"]) or row
-        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time())
+        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs())
 
     def events_text(self, n: int) -> str:
         """The last `n` events, newest first."""
-        return tgfmt.events(self.c.db.events(n=n), {r["run_id"]: board.handle(r) for r in self.c.db.runs()})
+        return tgfmt.events(self.c.db.events(n=n), board.handles(self.c.db.runs()))
 
     def hosts_text(self) -> str:
         """One line per host, the hosts where a run can start first."""
@@ -450,24 +456,24 @@ class Actions:
 
     def metrics_csv(self, source: str) -> bytes:
         """The CSV of `edr metrics --source <source> --csv`."""
-        return _metrics_csv(self.c.db.metrics(source=source)).encode()
+        return _metrics_csv(self.c.db.metrics(sources=[source])).encode()
 
     def compare_text(self, handles: list[str]) -> str:
-        """One block per metric: its name, then one `label value` line per run."""
+        """One block per metric: its name, then one `name value` line per run, the name of `analysis.names`."""
         rows = [self.c.resolve(h) for h in handles]
-        final = _final_metrics(self.c, rows)
+        final, col = _final_metrics(self.c, rows), analysis.names(rows)
         if not final:
             return "no metrics"
         out = []
         for key, cur in sorted(final.items()):
             out.append(key[:40])
-            out += board.cols(["", ""], [["  " + str(r["label"]), cur.get(r["run_id"], (0, None))[1]] for r in rows]
+            out += board.cols(["", ""], [["  " + col[r["run_id"]], cur.get(r["run_id"], (0, None))[1]] for r in rows]
                               ).splitlines()[1:]
         return "\n".join(out)
 
     def metric_text(self, name: str, source: str | None) -> str:
         """`label source step value` per metric row."""
-        rows = self.c.db.metrics(source=source, name=name)
+        rows = self.c.db.metrics(sources=[source] if source else None, name=name)
         body = [[str(m.get("label")) + (f"[{m['task']}]" if m.get("task") else ""), m.get("source"), m.get("step"),
                  f"{m['value']}{' ' + m['unit'] if m.get('unit') else ''}"] for m in rows]
         return board.cols(["label", "source", "step", "value"], body) if body else "no metrics"
@@ -559,14 +565,14 @@ def _mark_live(c: Ctx, rows: list[Row]) -> int:
 
 
 def _triage(c: Ctx, rows: list[Row]) -> Text | str:
-    lines = []
+    lines, everyone = [], c.db.runs()
     for r in board.order(rows):
         state = board.state_of(r)
-        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {})
+        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {}, everyone)
         if cmd is None:
             continue
-        lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ", (f"{board.handle(r):<28}", "bold"),
-                                   f" {r.get('phase') or '-'}\n    {cmd}"))
+        lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ",
+                                   (f"{board.handle(r, everyone):<28}", "bold"), f" {r.get('phase') or '-'}\n    {cmd}"))
     return Text("\n").join(lines) if lines else "nothing to triage"
 
 
@@ -638,10 +644,10 @@ def _area_table(rows: list[Row]) -> Table | str:
 
 
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
-    """The metrics of one source, as a table or CSV; with --instance or --depth, its area rows."""
+    """The metrics of the sources, as a table or CSV; with --instance or --depth, their area rows."""
     if a.instance is not None or a.depth is not None:
         run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
-        rows = c.db.area(run_ids=run_ids, source=a.source, stage=a.stage, step=a.step, instance=a.instance,
+        rows = c.db.area(run_ids=run_ids, sources=a.source, stage=a.stage, step=a.step, instance=a.instance,
                          depth=a.depth)
         c.emit(_area_table(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
@@ -654,7 +660,7 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
         rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
         c.emit(analysis.over_steps_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    rows = c.db.metrics(source=a.source, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
+    rows = c.db.metrics(sources=a.source, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
@@ -670,7 +676,7 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
     if a.handle:
         runs = [c.resolve(a.handle)]
     else:
-        runs = [r for r in c.db.runs(batch=a.batch) if not a.source or r["source"] == a.source]
+        runs = [r for r in c.db.runs(batch=a.batch) if not a.source or r["source"] in a.source]
     out, lines = [], []
     for run in runs:
         old = {(m["stage"], m["step"], m["task"], m["name"]): m for m in c.db.metrics(run_ids=[run["run_id"]])}
@@ -699,16 +705,23 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
-    """Two or more runs side by side."""
+    """Two or more runs side by side, under a line that names the sources when they differ."""
     runs = [c.resolve(h) for h in a.handles]
+    sources = sorted({str(r.get("source")) for r in runs})
+    mixed = len(sources) > 1
+
+    def shown(view: RenderableType) -> RenderableType:
+        return Group(Text(f"mixed sources: {', '.join(sources)}", style="yellow"), view) if mixed else view
+
     if not a.area:
         mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage, step=a.step)
                 if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
         rows = analysis.side_by_side(c.project, runs, mets)
-        c.emit(analysis.side_by_side_view(runs, rows), {"runs": runs, "rows": rows})
+        c.emit(shown(analysis.side_by_side_view(runs, rows)), {"runs": runs, "rows": rows, "mixed_sources": mixed})
         return Exit.DONE if rows else Exit.NOTHING
     picked, rows = analysis.area_delta(c.db, runs, a.depth, a.instance, a.stage, a.step)
-    c.emit(analysis.area_view(picked, rows, a.depth), {"runs": picked, "depth": a.depth, "rows": rows})
+    c.emit(shown(analysis.area_view(picked, rows, a.depth)),
+           {"runs": picked, "depth": a.depth, "rows": rows, "mixed_sources": mixed})
     return Exit.DONE if rows else Exit.NOTHING
 
 
@@ -847,8 +860,8 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
     """Run stages on the tree of an existing run, by default the stages its tree has left, or fetch a
     collect_on_request list."""
-    row = c.resolve(a.handle)
-    project, run_id, h = c.project, row["run_id"], board.handle(row)
+    row = c.target(a.handle)
+    project, run_id, h = c.project, row["run_id"], board.handle(row, c.db.runs())
     if a.collect:
         res = collect.collect_on_request(project, c.ssh, c.db, row, a.collect, a.dry_run)
         if not a.dry_run:
@@ -1026,16 +1039,16 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
-    """Write a frozen snapshot of one source, or the project database into an MLflow store."""
+    """Write a frozen snapshot of one or more sources, or the project database into an MLflow store."""
     if a.mlflow:
         if a.dry_run:
-            n = len([r for r in c.db.runs() if a.source is None or r.get("source") == a.source])
+            n = len([r for r in c.db.runs() if not a.source or r.get("source") in a.source])
             c.emit(f"{a.mlflow}: {n} runs (dry)", {"runs": n})
             return Exit.DONE
         from .mlflow_export import export_mlflow
 
         res = export_mlflow(c.project, c.db, Path(a.mlflow), a.source)
-        c.db.add_event("user", "", "export", f"mlflow {a.source or 'every source'} -> {a.mlflow}")
+        c.db.add_event("user", "", "export", f"mlflow {' '.join(a.source or ['every source'])} -> {a.mlflow}")
         c.emit(f"{res['tracking_uri']}: {len(res['written'])} runs written, {len(res['skipped'])} already there", res)
         return Exit.DONE
     if not a.source or not a.out:
@@ -1043,15 +1056,15 @@ def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     labels = a.labels.split(",") if a.labels else None
     manifest = export.export(c.project, c.db, a.source, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
-        c.db.add_event("user", "", "export", f"{a.source} -> {a.out}")
-    c.emit(f"{a.out}: {len(manifest['runs'])} runs, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""),
-           manifest)
+        c.db.add_event("user", "", "export", f"{' '.join(a.source)} -> {a.out}")
+    c.emit(f"{a.out}: {len(manifest['runs'])} runs ({len(manifest['incomplete'])} not done), {len(manifest['skipped'])} "
+           f"skipped, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""), manifest)
     return Exit.DONE
 
 
 def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
     """Stop one run through the driver, or the stop file with --after-task."""
-    row = c.resolve(a.handle)
+    row = c.target(a.handle)
     hb = c.heartbeat(row)
     if row.get("state") == "queued":
         # The watcher launches every row in state queued; a stopped row never starts.
@@ -1084,7 +1097,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         rows = [r for r in c.db.runs() if r.get("host") == a.host and r.get("root") and not board.is_live(r)
                 and r.get("state") != "retired"]
     else:
-        rows = c.db.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
+        rows = c.db.runs(batch=a.batch) if a.batch else [c.target(a.handle)]
     # The stages a tree has left need its files: --host skips such a run, and a named run is pruned all the same.
     left = {r["run_id"]: launch.stages_left(project, c.db, r)[0] for r in rows} if a.prune else {}
     for r in rows if a.host else []:
@@ -1387,7 +1400,7 @@ class Router:
         for name in self.names():
             with self.actions(name) as act:
                 try:
-                    found.append((name, board.handle(act.c.resolve(handle))))
+                    found.append((name, board.handle(act.c.resolve(handle), act.c.db.runs())))
                 except Refuse:
                     pass
         if len(found) != 1:
@@ -1425,12 +1438,12 @@ class Router:
         return tgfmt.projects(c.data or [])
 
     def events_text(self, n: int) -> str:
-        """The last `n` events of every project, newest first, each run as project/label@batch."""
+        """The last `n` events of every project, newest first, each run as project/handle."""
         rows, names = [], {}
         for name in self.names():
             with self.actions(name) as act:
                 rows += act.c.db.events(n=n)
-                names.update({r["run_id"]: f"{name}/{board.handle(r)}" for r in act.c.db.runs()})
+                names.update({i: f"{name}/{h}" for i, h in board.handles(act.c.db.runs()).items()})
         return tgfmt.events(sorted(rows, key=lambda e: e["ts"])[-n:], names)
 
     def hosts_text(self) -> str:
@@ -1475,7 +1488,7 @@ EXIT = {Exit.DONE: "done",
         Exit.HOSTS: "a host did not answer, or a host command failed",
         Exit.INTERRUPTED: "interrupted"}
 EXITS: dict[str, dict[Exit | int, str]] = {}  # command -> the codes it refines; `_parser` fills it
-HANDLE = "label@batch, a run id prefix, or #n from the last board"
+HANDLE = "label@batch, label@source, a run id prefix, or #n from the last board"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1531,10 +1544,16 @@ def _parser() -> argparse.ArgumentParser:
         failed, and dim when done or retired. A pipe or the NO_COLOR variable
         gets the same text with no escape code, and --json never carries any.
 
-        A handle names one run in one of three forms. label@batch is the newest
-        run with that label in that batch. A run id prefix is the one run whose
-        id starts with it; an ambiguous prefix is refused. The form #n is row n
-        of the last board that edr status printed.
+        A handle names one run in one of four forms. label@batch is the one run
+        with that label in that batch; when the batch holds several, the handle
+        is refused and the error lists them. label@source is the run of record
+        of that label at that source tag: the newest run by start time that
+        ended done, else the newest run. A name after the @ that is both a batch
+        and a source is refused. A run id prefix is the one run whose id starts
+        with it; an ambiguous prefix is refused. The form #n is row n of the
+        last board that edr status printed. stop, retire and continue first
+        print the run id and the phase of the run they act on to stderr, also
+        with --dry-run.
 
         plan and launch take the batch as an argument, which defaults to
         EDR_BATCH and then to the newest batch directory in the state. status
@@ -1669,12 +1688,13 @@ def _parser() -> argparse.ArgumentParser:
         their versions. A tool without a probe shows - for the seats. --json
         gives tool, free, total, hosts (host to version) and note.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
-    s = command("metrics", "the metrics of one source or one run", """
-        Prints every metric of one source with its label, source, stage, step,
+    s = command("metrics", "the metrics of the sources or of one run", """
+        Prints every metric of the sources with its label, source, stage, step,
         task, name, value and unit. --source or --run is required. --source
         is the source tag exactly as edr checkout printed it, -dirty-...
-        included; --run takes one run instead. --csv writes the columns of
-        metrics.csv (docs/guides/results.md) to stdout.
+        included, and may be given more than once; --run takes one run
+        instead. --csv writes the columns of metrics.csv
+        (docs/guides/results.md) to stdout.
 
         --run with --over steps prints the metrics along the steps of that run:
         one row per step with its name, one column per metric. With --metric,
@@ -1686,7 +1706,8 @@ def _parser() -> argparse.ArgumentParser:
         children, local area without them, and the cell count when the report
         has one. --instance takes that instance and every instance below it.
         """, exits={Exit.NOTHING: "no metric row"})
-    s.add_argument("--source", metavar="SOURCE", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--source", action="append", metavar="SOURCE",
+                   help="the exact source tag of the runs, as in the run id; repeatable")
     s.add_argument("--run", metavar="HANDLE", help="one run: " + HANDLE)
     s.add_argument("--metric", metavar="NAME", help="one metric, by name or canonical name")
     s.add_argument("--over", choices=["steps"], help="with --run: the metrics along the steps")
@@ -1712,7 +1733,7 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True, exits={Exit.NOTHING: "no run matches"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")
-    s.add_argument("--source", metavar="SOURCE", help="every run of the exact source tag")
+    s.add_argument("--source", action="append", metavar="SOURCE", help="every run of the exact source tag; repeatable")
     s = command("compare", "two or more runs side by side", """
         Puts two or more runs side by side. Without --area, it prints one row
         per stage, step, task and metric: the step name, the value of each run, and the
@@ -1724,6 +1745,11 @@ def _parser() -> argparse.ArgumentParser:
         first. Each run is compared at its last step with an area report, or
         at --stage and --step. The source file of each run is printed under
         the table.
+
+        A column is named by the label, or by label@source when the runs come
+        from more than one source; then a line above the table names the
+        sources, and --json sets mixed_sources. Two runs with the same name
+        get a prefix of their run ids after it.
         """, exits={Exit.NOTHING: "no row to compare"})
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
     s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
@@ -1917,21 +1943,26 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--phase", default="done", help="the terminal phase; default done")
     s.add_argument("--build-tag", dest="build_tag", metavar="TAG", help="the build tag of the run")
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
-    s = command("export", "a frozen snapshot of one source", """
-        Writes a snapshot of one source to DIR: manifest.json, runs.csv,
-        metrics.csv and the collected files of the newest run per label.
-        --source matches the source tag exactly. log/ and *.log stay out unless
-        you pass --with-logs. It refuses a DIR that exists and is not empty.
-        docs/guides/results.md explains the layout.
+    s = command("export", "a frozen snapshot of one or more sources", """
+        Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
+        metrics.csv and the collected files of one run per label and source,
+        the newest run by start time that ended done, else the newest run.
+        --source matches the source tag exactly and may be given more than
+        once. The manifest lists the exported runs whose phase is not done
+        under incomplete, and the other runs of each label and source under
+        skipped. log/ and *.log stay out unless you pass --with-logs. It
+        refuses a DIR that exists and is not empty. docs/guides/results.md
+        explains the layout.
 
         --mlflow DIR writes the project database into a local MLflow tracking store
         in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
-        per run, of every source or of --source, with the parameters, the
+        per run, of every source or of each --source, with the parameters, the
         metrics at their step, the stage and step times, and the collected
         files up to 1 MiB. A run already in the store is skipped. It needs the
         mlflow extra: pip install 'edarunner[mlflow]'.
         """, write=True)
-    s.add_argument("--source", metavar="SOURCE", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--source", action="append", metavar="SOURCE",
+                   help="the exact source tag of the runs, as in the run id; repeatable")
     s.add_argument("--out", metavar="DIR", help="the directory to write; it must be absent or empty")
     s.add_argument("--mlflow", metavar="DIR", help="write an MLflow tracking store in DIR instead")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")

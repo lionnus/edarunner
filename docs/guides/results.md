@@ -53,6 +53,38 @@ A number the schema has no name for, such as an energy, keeps an empty
 canonical name or a name of the project. The metric name itself stays the
 project's own.
 
+## Which run a command takes
+
+A label can have several runs: a run that failed and its rerun, or the
+same label at a clean and at a dirty source tag. Wherever edarunner takes
+one run of a label, it takes it by one rule. Among the runs of that label
+at one source tag, it takes the newest run by start time that ended
+`done`; when none ended `done`, it takes the newest run. The run id
+breaks a tie. `db.pick` holds the rule, and three places use it:
+
+- the handle `label@source`, such as `base@3f9a2c1`;
+- `edr export`, which holds one run per label and source;
+- `reuse = { label = "base", latest = true }` in a batch file, which
+  looks only at the runs of the batch's source.
+
+The handle `label@batch` names the one run of that label in that batch.
+A batch can hold two runs of one label, for example after two imports or
+two `edr continue` runs of one stage. Such a handle is refused, and the
+error lists each run with its source and phase:
+
+```
+$ edr status base@sweep1
+edr: base@sweep1: 2 runs have label 'base' in batch 'sweep1'; name one by its run id or as label@source: 20260902_0221_base_demo_g3f9a2c1 (3f9a2c1, FAILED:pnr), 20260902_0221_base_demo_g3f9a2c1-dirty-7b21c0d9 (3f9a2c1-dirty-7b21c0d9, done)
+```
+
+A name after the `@` that is both a batch and a source is refused as
+well. Where two runs share a label and a batch, the triage, `edr brief`,
+the event lists and the alerts name each of them by the shortest prefix
+of its run id that no other run id starts with, so every command they
+propose acts on one run. `edr stop`, `edr retire` and `edr continue`
+print the run id and the phase of the run they act on to stderr before
+anything else, also with `--dry-run`.
+
 ## edr metrics
 
 ```sh
@@ -61,12 +93,13 @@ edr metrics --source 3f9a2c1 --stage pnr --step 12
 edr metrics --source 3f9a2c1 --csv > metrics.csv
 ```
 
-Each table holds one source. `--source` is the source tag exactly as
-`edr checkout` printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs
-that full tag. The text form shows label, source, stage, step, task,
-metric, value and unit; `--csv` writes the columns of `metrics.csv`
-below. Every row carries its source file, so you can check where a
-number came from before you put it in a table.
+`--source` is the source tag exactly as `edr checkout` printed it, so a
+run on `3f9a2c1-dirty-7b21c0d9` needs that full tag. Give `--source`
+more than once to read several tags in one table. The text form shows
+label, source, stage, step, task, metric, value and unit; `--csv` writes
+the columns of `metrics.csv` below. Every row carries its source tag and
+its source file, so you can check where a number came from before you
+put it in a table.
 
 ## Extract again
 
@@ -188,6 +221,18 @@ pnr      12  route-opt        cells   536547   489861     -46686   -8.7%
 pnr      12  route-opt        wns_ns   0.003   -0.001     -0.004       -
 ```
 
+When the runs come from more than one source tag, each column is
+`label@source`, a line above the table names the tags, and `--json` sets
+`mixed_sources`. Two runs with the same name get a prefix of their run
+ids after it. `--area` names its columns the same way.
+
+```
+$ edr compare base@3f9a2c1 base@3f9a2c1-dirty-7b21c0d9 --stage pnr --step 12 --metric cells
+mixed sources: 3f9a2c1, 3f9a2c1-dirty-7b21c0d9
+stage  step  name       task  metric  base@3f9a2c1  base@3f9a2c1-dirty-7b21c0d9  Δ base@3f9a2c1-dirty-7b21c0d9    Δ %
+pnr      12  route-opt        cells         536547                       536102                           -445  -0.1%
+```
+
 ## Runtime
 
 `edr runtime <handle>` prints where the time of a run went: a row per
@@ -269,8 +314,9 @@ the two pages as files, and `/csv <source>` sends `metrics.csv`;
 edr export --source 3f9a2c1 --out exports/3f9a2c1 [--labels base,base_dw0] [--with-logs]
 ```
 
-The export takes the newest run per label whose source tag equals
-`--source`, and writes:
+The export takes one run per label whose source tag equals `--source`,
+by the rule of [Which run a command takes](#which-run-a-command-takes),
+and writes:
 
 ```
 exports/3f9a2c1/
@@ -282,10 +328,23 @@ exports/3f9a2c1/
 
 | File | Holds |
 |---|---|
-| `manifest.json` | `producer`, `created`, `schema`, `project`, `source`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `files` with path, size and sha256, `incomplete` with the runs still live or with a failed task |
+| `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
 | `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended` |
 | `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file` |
-| `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs` |
+| `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; `<label>@<source>/` when the runs come from more than one tag |
+
+`--source` may be given more than once, for a table that needs a done
+run at a dirty tag next to the runs of the clean tag, for example. The
+export then holds one run per label and source. When its runs come from
+more than one tag, the files of a run go under `<label>@<source>/`:
+
+```
+$ edr export --source 3f9a2c1 --source 3f9a2c1-dirty-7b21c0d9 --out exports/3f9a2c1-both
+exports/3f9a2c1-both: 3 runs (1 not done), 1 skipped, 14 files
+```
+
+Read `incomplete` before you use a number of the export: a run listed
+there failed, stopped or has not ended.
 
 A run's `record` holds what made it, as far as edarunner knows it: the
 host, the start and end, the edarunner version and the sha256 of the

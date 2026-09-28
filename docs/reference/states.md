@@ -10,6 +10,9 @@ a finished run from its phase.
 Every change of state writes an event. A state that alerts sends one alert per run and reason,
 and a new reason edits that alert in place. A keep of N hours holds off the kill of `hung` and
 the stop of `superseded` for N hours; the full-host stop never waits for a keep.
+The triage proposes no retire for a run without a tree, such as one imported with `--results`,
+since a retire would only mark its row. When another run has the same label and batch, the
+command names the run by the shortest unique prefix of its run id instead of `<label>@<batch>`.
 
 | State | Mark | Test | Alert | Action | Proposed command |
 |---|---|---|---|---|---|
