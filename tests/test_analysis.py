@@ -207,10 +207,10 @@ def test_instances_side_by_side(demo: Path, capsys, tmp_path: Path) -> None:
                                                               "inst_w", "--task", "k_small", "--part", "IDLE")[2]
     code, rows = compare("--metric", "inst_w", "--task", "k_small", "--part", "IDLE", "--depth", "4")
     assert code == 0 and rows["chip/i_top/u_vec/u_bank/u_lanes"] == pytest.approx(0.00125)
-    # Two instance metrics need --metric, a task metric needs --task, and --task needs --instances.
+    # Two instance metrics need --metric, a task metric needs --task, and --part needs --instances.
     assert "name one instance metric with --metric: area_hier_um2, inst_w" in edr(capsys, "compare", alpha, beta, "--instances")[2]
     assert "name one with --task: k_small" in edr(capsys, "compare", alpha, beta, "--instances", "--metric", "inst_w")[2]
-    assert "need --instances" in edr(capsys, "compare", alpha, beta, "--task", "k_small")[2]
+    assert "need --instances" in edr(capsys, "compare", alpha, beta, "--part", "WHOLE")[2]
     out = edr(capsys, "compare", alpha, beta, "--instances", "--metric", "area_hier_um2", "--csv")[1]
     assert out.splitlines()[:2] == ["instance,alpha (pnr 5),beta (pnr 5)", "i_top,960.0,960.0"]
     out = edr(capsys, "--json", "metrics", "--source", "abc1234", "--metric", "area_hier_um2", "--instance", "*/u_add",
@@ -380,8 +380,8 @@ def test_a_pass_rule_marks_a_failing_value(demo: Path, capsys) -> None:
             _metric(demo, run, "wns_ns", step, -0.1 if n else 0.1)
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--metric", "setup_violations")
     lines = [ln.split() for ln in out.splitlines()]
-    assert code == 0 and ["a", "abc1234", "synth", "2", "setup_violations", "3", "FAIL", "ns"] in lines
-    assert ["a", "abc1234", "synth", "3", "setup_violations", "0", "ns"] in lines
+    assert code == 0 and ["a", "abc1234", "synth", "2", "setup_violations", "3", "FAIL", "ns", "reports/2/qor.rpt"] in lines
+    assert ["a", "abc1234", "synth", "3", "setup_violations", "0", "ns", "reports/3/qor.rpt"] in lines
     code, out, _ = edr(capsys, "--json", "metrics", "--source", "abc1234", "--step", "2")
     assert {(m["label"], m["name"], m["verdict"]) for m in json.loads(out)["data"]} == {
         ("a", "setup_violations", "FAIL"), ("b", "setup_violations", "pass"), ("a", "wns_ns", None), ("b", "wns_ns", None)}
@@ -684,3 +684,95 @@ def test_a_task_id_with_two_sets_of_fields_names_the_fields_that_differ_and_the_
     assert clash["task"] == "k_a" and [s["runs"] for s in clash["sets"]] == [[f"r{i}" for i in range(7)], ["r7"]]
     assert analysis.clash_text(clash, {"r7": "b@x"}) == (
         'task k_a ran with 2 sets of fields: args="N=8" limit unset in r0, r1, r2, r3, r4 and 2 more; args unset limit="-4.0" in b@x')
+
+
+def _sweep(root: Path) -> dict[str, str]:
+    """A power sweep of the lane builds l4 to l32 and nolanes at abc1234, and l8 and l16 again at def5678, by
+    label@source. l32, nolanes and l16.power, which continues l16, ran k_a only. The task k_b of l16 failed, the file of
+    k_a did not parse for l8@def5678, which has no k_b value, and l16@def5678 stopped."""
+    project, ids = config.load_project(root), {}
+    watts = {"l4": 0.10, "l8": 0.12, "l16": 0.11, "nolanes": 0.09}
+    for label, source, phase, tasks, energy in (
+            ("l4", "abc1234", "done", "k_a k_b", (400.0, 900.0)), ("l8", "abc1234", "done", "k_a k_b", (380.0, 850.0)),
+            ("l16", "abc1234", "done", "k_a k_b", (390.0,)), ("l32", "abc1234", "done", "k_a", (410.0,)),
+            ("nolanes", "abc1234", "done", "k_a", (500.0,)), ("l8", "def5678", "done", "k_a k_b", (None,)),
+            ("l16", "def5678", "STOPPED", "k_a k_b", (395.5,)), ("l16.power", "abc1234", "done", "k_a", (391.0,))):
+        run = ids[f"{label}@{source}"] = seed(root, label, phase, source=source, tree=False)
+        spec = project.state_dir / "demo" / f"{run}.spec.json"
+        spec.parent.mkdir(parents=True, exist_ok=True)
+        spec.write_text(json.dumps({"stages": [{"name": "power", "tasks": [{"id": t} for t in tasks.split()]}]}))
+        with Database(project.data / "edr.db") as db:
+            for task, value in zip(("k_a", "k_b"), energy):
+                db.add_metric({"run_id": run, "stage": "power", "task": task, "name": "energy_nj", "unit": "nJ",
+                               "value": value, "source_file": f"simulation/tests/{label}/{task}/power/phases.json"
+                               if value else "phases.json: no window_ns"})
+            if source == "abc1234" and label in watts:
+                db.add_metric({"run_id": run, "stage": "power", "task": "k_a", "name": "power_w", "unit": "W",
+                               "value": watts[label], "source_file": f"simulation/tests/{label}/k_a/power/power.csv"})
+    with Database(project.data / "edr.db") as db:
+        db.upsert_stage_run({"run_id": ids["l16@abc1234"], "stage": "power", "task": "k_b", "status": "failed"})
+    return ids
+
+
+def test_a_pivot_gives_a_reason_for_each_empty_cell(demo: Path, capsys) -> None:
+    ids = _sweep(demo)
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--source", "def5678", "--metric", "energy_nj", "--pivot")
+    lines = [ln.split(None, 2) for ln in out.splitlines()]
+    assert code == 0 and out.splitlines()[0] == "energy_nj in nJ" and out.splitlines()[1].split() == ["label", "source", "k_a", "k_b"]
+    assert [[w, s, " ".join(cells.split())] for w, s, cells in lines[3:]] == [
+        ["l4", "abc1234", "400 900"], ["l8", "abc1234", "380 850"], ["l8", "def5678", "failed no value"],
+        ["l16", "abc1234", "390 failed"], ["l16", "def5678", "395.5 STOPPED"], ["l16.power", "abc1234", "391 not in job"],
+        ["l32", "abc1234", "410 not in job"], ["nolanes", "abc1234", "500 not in job"]]
+    data = json.loads(edr(capsys, "--json", "metrics", "--label", "l8", "--metric", "energy_nj", "--pivot")[1])["data"]
+    assert data["columns"] == ["k_a", "k_b"] and [(r["run_id"], r["cells"]) for r in data["rows"]] == [
+        (ids["l8@abc1234"], {"k_a": 380.0, "k_b": 850.0}), (ids["l8@def5678"], {"k_a": "failed", "k_b": "no value"})]
+    out = edr(capsys, "metrics", "--source", "abc1234", "--metric", "energy_nj", "--pivot", "--csv")[1]
+    assert out.splitlines()[:2] == ["label,source,k_a,k_b", "l4,abc1234,400.0,900.0"]
+    code, _, err = edr(capsys, "metrics", "--source", "abc1234", "--pivot")
+    assert code == 1 and "--pivot takes one metric; name it with --metric: energy_nj, power_w" in err
+
+
+def test_where_is_a_number_across_every_source(demo: Path, capsys, tmp_path: Path) -> None:
+    ids = _sweep(demo)
+    assert edr(capsys, "export", "--source", "abc1234", "--out", str(tmp_path / "snap_abc"))[0] == 0
+    # An older event names its directory relative to the project; a directory without its manifest holds no run.
+    (tmp_path / "edr" / "old_def").mkdir()
+    (tmp_path / "edr" / "old_def" / "manifest.json").write_text(json.dumps({"runs": [{"run_id": ids["l16@def5678"]}]}))
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_event("user", "", "export", "def5678 -> ../old_def")
+        db.add_event("user", "", "export", f"def5678 -> {tmp_path / 'gone'}")
+    code, out, _ = edr(capsys, "metrics", "--label", "l16", "--task", "k_a", "--metric", "energy_nj")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and lines[0][-3:] == ["unit", "file", "snapshots"]
+    assert lines[2:] == [
+        ["l16.power", "abc1234", "power", "-", "k_a", "energy_nj", "391", "nJ", "simulation/tests/l16.power/k_a/power/phases.json",
+         "../../snap_abc"],
+        ["l16", "abc1234", "power", "-", "k_a", "energy_nj", "390", "nJ", "simulation/tests/l16/k_a/power/phases.json",
+         "../../snap_abc"],
+        ["l16", "def5678", "power", "-", "k_a", "energy_nj", "395.5", "nJ", "simulation/tests/l16/k_a/power/phases.json",
+         "../old_def"]]
+    rows = json.loads(edr(capsys, "--json", "metrics", "--task", "k_a", "--label", "l8")[1])["data"]
+    assert [(r["source"], r["name"], r["snapshots"]) for r in rows] == [
+        ("abc1234", "energy_nj", [str(tmp_path / "snap_abc")]), ("abc1234", "power_w", [str(tmp_path / "snap_abc")]),
+        ("def5678", "energy_nj", [])]
+    assert "failed: phases.json: no window_ns" in edr(capsys, "metrics", "--label", "l8", "--source", "def5678")[1]
+
+
+def test_compare_ranks_the_runs_as_rows_against_a_ref_and_a_base(demo: Path, capsys) -> None:
+    ids = _sweep(demo)
+    code, out, _ = edr(capsys, "compare", "l4@abc1234", "l8@abc1234", "l16@abc1234", "--task", "k_a",
+                       "--ref", "l4@abc1234", "--base", "nolanes@abc1234")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and lines[0] == ["run", "energy_nj[k_a]", "Δ", "%", "l4", "%", "nolanes", "rank",
+                                      "power_w[k_a]", "Δ", "%", "l4", "%", "nolanes", "rank", "ranks"]
+    assert lines[2:] == [["l4", "400", "-", "+0.0%", "-20.0%", "3", "0.1", "-", "+0.0%", "+11.1%", "1", "differ"],
+                         ["l8", "380", "-20", "-5.0%", "-24.0%", "1", "0.12", "0.02", "+20.0%", "+33.3%", "3", "differ"],
+                         ["l16", "390", "10", "-2.5%", "-22.0%", "2", "0.11", "-0.01", "+10.0%", "+22.2%", "2"]]
+    data = json.loads(edr(capsys, "--json", "compare", "l8@abc1234", "l4@abc1234", "--task", "k_a", "--metric",
+                          "energy_nj", "--base", "nolanes@abc1234")[1])["data"]
+    (row,) = data["rows"]
+    l4, l8 = ids["l4@abc1234"], ids["l8@abc1234"]
+    assert (data["ref"], data["base"], data["ranks_differ"]) == (l8, ids["nolanes@abc1234"], [])
+    assert (row["prev"], row["rank"], row["pct_base"]) == ({l8: None, l4: 20.0}, {l8: 1, l4: 2}, {l8: -24.0, l4: -20.0})
+    code, _, err = edr(capsys, "compare", "l4@abc1234", "l8@abc1234", "--ref", "l4@abc1234")
+    assert code == 1 and "--ref and --base need one value per metric of each run" in err

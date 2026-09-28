@@ -39,7 +39,7 @@ from rich.text import Text
 from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, runid, serve, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
-from .db import Database, network_fs, pick
+from .db import Database, has_label, network_fs, pick
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh, floor, probe_all
 from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
@@ -367,11 +367,15 @@ def _tools_table(rows: list[Row]) -> Table | str:
                        right=("free", "total")) if rows else "no tools"
 
 
-def _metrics_table(rows: list[Row]) -> Table | str:
+def _metrics_table(rows: list[Row], root: Path) -> Table | str:
+    """The metric rows with the file of each value and the snapshots of its run, those relative to `root`."""
     body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m.get("task") or "", m["name"],
-             analysis.mark(m["value"], m.get("verdict"), m.get("source_file")), m.get("unit")] for m in rows]
-    return board.table(["label", "source", "stage", "step", "task", "metric", "value", "unit"], body,
-                       styles={"label": "bold", "source": "dim"}, right=("step", "value")) if rows else "no metrics"
+             analysis.mark(m["value"], m.get("verdict"), m.get("source_file")), m.get("unit"),
+             "" if m["value"] is None else m.get("source_file"), ", ".join(os.path.relpath(s, root) for s in m["snapshots"])]
+            for m in rows]
+    return board.table(["label", "source", "stage", "step", "task", "metric", "value", "unit", "file", "snapshots"], body,
+                       styles={"label": "bold", "source": "dim", "file": "dim", "snapshots": "dim"},
+                       right=("step", "value")) if rows else "no metrics"
 
 
 def _keep(c: Ctx, row: Row, hours: int, actor: str) -> str:
@@ -736,7 +740,8 @@ def _instances_table(rows: list[Row]) -> Table | str:
 
 
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
-    """The metrics of the sources, as a table or CSV; with --instance or --depth, their instance rows."""
+    """The metrics of the chosen runs, as a table, CSV or a pivot of one metric; with --instance or --depth, their
+    instance rows."""
     if a.instance is not None or a.depth is not None:
         run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
         rows = c.db.instances(run_ids=run_ids, sources=a.source, stage=a.stage, step=a.step, name=a.metric,
@@ -744,8 +749,8 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
         analysis.to_ge(c.project, a.unit, rows, ("value", "local"))
         c.emit(_instances_table(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    if not a.source and not a.run:
-        raise Refuse("metrics needs --source or --run")
+    if not (a.source or a.run or a.label or a.task):
+        raise Refuse("metrics needs --source, --run, --label or --task")
     run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
     if a.over:
         if not run_ids or a.unit:
@@ -753,15 +758,34 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
         rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
         c.emit(analysis.over_steps_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
+
+    def chosen(r: Row) -> bool:
+        return ((not a.source or r["source"] in a.source) and (run_ids is None or r["run_id"] in run_ids)
+                and (not a.label or has_label(r, a.label, c.project.stages)))
+
     # The step of record needs every step of a run, so --step filters after the mark.
-    rows = analysis.mark_record(c.project, c.db.metrics(sources=a.source, stage=a.stage, name=a.metric, run_ids=run_ids))
-    rows = [{**m, "verdict": analysis.verdict(c.project, m)} for m in rows if a.step is None or m.get("step") == a.step]
+    rows = c.db.metrics(sources=a.source, stage=a.stage, name=a.metric, run_ids=run_ids, task=a.task)
+    rows = [{**m, "verdict": analysis.verdict(c.project, m)} for m in analysis.mark_record(c.project, [m for m in rows if chosen(m)])
+            if a.step is None or m.get("step") == a.step]
     analysis.to_ge(c.project, a.unit, rows)
-    if a.csv and not a.json:
+    if a.pivot:
+        if len(have := sorted({m["name"] for m in rows})) > 1:
+            raise Refuse(f"--pivot takes one metric; name it with --metric: {', '.join(have)}")
+        p = analysis.pivot(c.project, c.db, [r for r in c.db.runs() if chosen(r)], rows)
+        if a.csv and not a.json:
+            sys.stdout.write(export.to_csv(["label", "source", *p["columns"]],
+                                           [[r["label"], r["source"], *r["cells"].values()] for r in p["rows"]]).decode())
+            c.data = p
+        else:
+            c.emit(analysis.pivot_view(p), p)
+    elif a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
-        c.emit(_metrics_table(rows), rows)
+        snaps = analysis.snapshots(c.project, c.db)
+        for m in rows:
+            m["snapshots"] = snaps.get(m["run_id"], [])
+        c.emit(_metrics_table(rows, c.project.root), rows)
     return Exit.DONE if rows else Exit.NOTHING
 
 
@@ -831,10 +855,17 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     """Two or more runs side by side, each at its step of record, under a line that names the sources when they
-    differ and a table of the parameters that differ; with --instances, the instances of one metric."""
-    if not a.instances and (a.csv or any(v is not None for v in (a.task, a.part, a.depth, a.instance))):
-        raise Refuse("--task, --part, --depth, --instance and --csv need --instances")
+    differ and a table of the parameters that differ; with --instances, the instances of one metric; with --ref or
+    --base, the runs as rows with their rank."""
+    if not a.instances and (a.csv or any(v is not None for v in (a.part, a.depth, a.instance))):
+        raise Refuse("--part, --depth, --instance and --csv need --instances")
     runs = [c.resolve(h) for h in a.handles]
+    ids = [r["run_id"] for r in runs]
+    marks = {k: c.resolve(h) for k, h in (("ref", a.ref), ("base", a.base)) if h}
+    if marks and a.instances:
+        raise Refuse("--ref and --base compare metrics, not --instances")
+    # A run of --ref or --base that is not a handle gives the percent and gets no row.
+    runs += {r["run_id"]: r for r in marks.values() if r["run_id"] not in ids}.values()
     sources = sorted({str(r.get("source")) for r in runs})
     mixed = len(sources) > 1
     params = analysis.parameters_differ(c.db, runs)
@@ -867,12 +898,21 @@ def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
         else:
             c.emit(shown(analysis.instances_view(view)), {**view, "mixed_sources": mixed, "parameters": params})
     else:
-        mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage)
+        mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage, task=a.task)
                 if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
         rows, missing = analysis.side_by_side(c.project, runs, mets, a.stage, a.step)
         analysis.to_ge(c.project, a.unit, rows, ("value", "delta"))
-        c.emit(shown(analysis.side_by_side_view(runs, rows, missing)),
-               {"runs": runs, "rows": rows, "missing": missing, "mixed_sources": mixed, "parameters": params})
+        data = {"runs": runs, "rows": rows, "missing": missing, "mixed_sources": mixed, "parameters": params}
+        if not marks:
+            c.emit(shown(analysis.side_by_side_view(runs, rows, missing)), data)
+        elif len({r["metric"] for r in rows}) < len(rows):
+            raise Refuse("--ref and --base need one value per metric of each run; narrow the rows with --task, --metric "
+                         "or --stage")
+        else:
+            ref, base = marks.get("ref", runs[0])["run_id"], marks["base"]["run_id"] if "base" in marks else None
+            differ = analysis.ranked(rows, ids, ref, base)
+            c.emit(shown(analysis.ranked_view(runs, ids, rows, ref, base, differ, missing)),
+                   {**data, "ref": ref, "base": base, "ranks_differ": differ})
     return Exit.DONE if rows and not missing else Exit.NOTHING
 
 
@@ -1263,7 +1303,7 @@ def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     labels = a.labels.split(",") if a.labels else None
     manifest = export.export(c.project, c.db, a.source, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
-        c.db.add_event("user", "", "export", f"{' '.join(a.source)} -> {a.out}")
+        c.db.add_event("user", "", "export", f"{' '.join(a.source)} -> {os.path.abspath(a.out)}")
     c.emit(f"{a.out}: {len(manifest['runs'])} runs ({len(manifest['incomplete'])} not done), {len(manifest['skipped'])} "
            f"skipped, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""), manifest)
     return Exit.DONE
@@ -1294,7 +1334,8 @@ def cmd_coverage(c: Ctx, a: argparse.Namespace) -> int:
     out = []
     for d in demand:
         task, source = d["task"] or "", d.get("source") or ""
-        mine = [p for p in picks if all(p.get(k) == d[k] for k in keys if d[k])]
+        mine = [p for p in picks if all(has_label(p, d[k], c.project.stages) if k == "label" else p.get(k) == d[k]
+                                        for k in keys if d[k])]
         here = [p for p in mine if p["source"] == source or not source]
         has = [p for p in mine if (p["run_id"], d["stage"], task) in held]
         status, runs = next(((s, rs) for s, rs in (
@@ -1967,16 +2008,30 @@ def _parser() -> argparse.ArgumentParser:
         their versions. A tool without a probe shows - for the seats. --json
         gives tool, free, total, hosts (host to version) and note.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
-    s = command("metrics", "the metrics of the sources or of one run", """
-        Prints every metric of the sources with its label, source, stage, step,
-        task, name, value and unit. --source or --run is required. --source
-        is the source tag exactly as edr checkout printed it, -dirty-...
-        included, and may be given more than once; --run takes one run
-        instead. --csv writes the columns of metrics.csv
+    s = command("metrics", "the metrics of chosen runs, as a table or a pivot", """
+        Prints every metric of the chosen runs with its label, source, stage,
+        step, task, name, value and unit, the file the value came from, and
+        the snapshots that hold the run. Choose the runs with --source, --run,
+        --label or --task; one of them is required, and they combine.
+        --source is the source tag exactly as edr checkout printed it,
+        -dirty-... included, and may be given more than once; --run takes one
+        run instead. --label takes the runs whose label or config has that
+        name, and the runs that edr continue made from a run of that label,
+        whose label is <label>.<stage>. --task keeps the rows of one task. A
+        snapshot is the directory that an edr export event names, when the
+        manifest there lists the run. --csv writes the columns of metrics.csv
         (docs/guides/results.md) to stdout. A value that breaks the pass
         rule of its metric shows FAIL next to it, and --json gives each row
-        a verdict: pass, FAIL or null. A row whose file did not parse shows
-        failed: and the error in place of the value.
+        a verdict (pass, FAIL or null) and its snapshots. A row whose file
+        did not parse shows failed: and the error in place of the value.
+
+        --pivot prints one metric as a table: a row per label and source, in
+        natural label order, so l4 comes before l16, and a column per task, or
+        per stage and step for a metric without tasks. A row holds the run
+        that label@source names. A cell without a value says why: failed when
+        the task failed or its file did not parse, not in job when the run's
+        spec has no such task, the run's phase when the run did not end done,
+        and no value otherwise. --csv writes the pivot as CSV.
 
         --run with --over steps prints the metrics along the steps of that run:
         one row per step with its name, one column per metric, and a verdict
@@ -1996,8 +2051,12 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--source", action="append", metavar="SOURCE",
                    help="the exact source tag of the runs, as in the run id; repeatable")
     s.add_argument("--run", metavar="HANDLE", help="one run: " + HANDLE)
+    s.add_argument("--label", metavar="NAME", help="the runs of this label or config, and the runs that continue them")
+    s.add_argument("--task", metavar="TASK", help="the rows of one task")
     s.add_argument("--metric", metavar="NAME", help="one metric, by name or canonical name")
-    s.add_argument("--over", choices=["steps"], help="with --run: the metrics along the steps")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--over", choices=["steps"], help="with --run: the metrics along the steps")
+    g.add_argument("--pivot", action="store_true", help="one metric as a table: labels and sources by task or step")
     s.add_argument("--stage", metavar="S", help="the metrics of one stage")
     s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
@@ -2055,9 +2114,20 @@ def _parser() -> argparse.ArgumentParser:
         run at the deepest step that every run has. With --step, every run
         is at that step. A run that lacks its step of record or the --step is
         named missing, and the command exits 2. A value that breaks the pass
-        rule of its metric shows FAIL next to it. --metric (repeatable) and
-        --stage narrow the rows; --json keeps the source file and the
-        verdict of every value and lists the missing runs.
+        rule of its metric shows FAIL next to it. --metric (repeatable),
+        --stage and --task narrow the rows; --json keeps the source file and
+        the verdict of every value and lists the missing runs.
+
+        --ref H or --base H prints the runs as rows instead, which needs one
+        value per metric for each run, as one task gives. For each metric a
+        row shows the value with its stage and step, the change from the row
+        before, the percent against the run of --ref (default: the first
+        handle) and against the run of --base, and the rank, 1 for the lowest
+        value. A run of --ref or --base that is not a handle gives its
+        percent and gets no row. With two or more metrics, the last column
+        says differ when the metrics rank a run differently. --json adds
+        prev, pct_ref, pct_base and rank to each row, and ref, base and
+        ranks_differ.
 
         --instances puts the instances of one area_hier or table metric side
         by side: one row per instance at --depth (default 1; the top is 0),
@@ -2092,7 +2162,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
     s.add_argument("--instances", action="store_true", help="the instances of one metric side by side")
     s.add_argument("--metric", action="append", metavar="NAME", help="this metric, by name or canonical name; repeatable")
-    s.add_argument("--task", metavar="TASK", help="with --instances: the task of a task metric")
+    s.add_argument("--task", metavar="TASK", help="the rows of one task; with --instances, the task of a task metric")
     s.add_argument("--part", metavar="PART", help="with --instances: the part, such as a phase; default: the part of top")
     s.add_argument("--depth", type=int, metavar="N", help="with --instances: the instance depth; default 1")
     s.add_argument("--instance", metavar="GLOB", help="with --instances: the instances whose path matches the glob")
@@ -2101,6 +2171,8 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--stage", metavar="S", help="this stage only; another stage than the record stage takes the "
                                                   "deepest step the runs share")
     s.add_argument("--step", type=int, metavar="N", help="every run at this step number")
+    s.add_argument("--ref", metavar="H", help="the runs as rows, with the percent against this run: " + HANDLE)
+    s.add_argument("--base", metavar="H", help="the runs as rows, with the percent against this run: " + HANDLE)
     s = command("runtime", "stage, step and task times", """
         With one handle, runtime prints the times of one run: a row per stage
         attempt from the stage_runs table, a row per step under it, and one
@@ -2369,8 +2441,10 @@ def _parser() -> argparse.ArgumentParser:
         each row whether a run holds it. The header names the columns label or
         build_tag, stage and task, and optionally source; other columns are
         ignored. A row matches the runs with its label, its build tag, or both.
-        An empty task means the numbers of the stage itself, and an empty
-        source means any source.
+        A label matches as edr metrics --label does: the runs whose label or
+        config has that name, and the runs that edr continue made from a run
+        of that label. An empty task means the numbers of the stage itself,
+        and an empty source means any source.
 
         For each label and source, coverage takes one run, the one that
         label@source names: the newest run by start time that ended done, else

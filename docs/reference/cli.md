@@ -84,7 +84,7 @@ A command below says where it refines a code.
 | [hosts](#hosts) | probe every host: its free room, and your runs on it |
 | [projects](#projects) | every registered project, its watcher and its live runs |
 | [tools](#tools) | every site tool: free seats and hosts |
-| [metrics](#metrics) | the metrics of the sources or of one run |
+| [metrics](#metrics) | the metrics of chosen runs, as a table or a pivot |
 | [extract](#extract) | extract the metrics of runs again from their collected files |
 | [compare](#compare) | two or more runs side by side |
 | [runtime](#runtime) | stage, step and task times |
@@ -319,18 +319,32 @@ gives tool, free, total, hosts (host to version) and note.
 ## metrics
 
 ```
-edr metrics [--json] [--source SOURCE] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance GLOB] [--depth N] [--unit {kGE,MGE}]
+edr metrics [--json] [--source SOURCE] [--run HANDLE] [--label NAME] [--task TASK] [--metric NAME] [--over {steps} | --pivot] [--stage S] [--step N] [--csv] [--instance GLOB] [--depth N] [--unit {kGE,MGE}]
 ```
 
-Prints every metric of the sources with its label, source, stage, step,
-task, name, value and unit. --source or --run is required. --source
-is the source tag exactly as edr checkout printed it, -dirty-...
-included, and may be given more than once; --run takes one run
-instead. --csv writes the columns of metrics.csv
+Prints every metric of the chosen runs with its label, source, stage,
+step, task, name, value and unit, the file the value came from, and
+the snapshots that hold the run. Choose the runs with --source, --run,
+--label or --task; one of them is required, and they combine.
+--source is the source tag exactly as edr checkout printed it,
+-dirty-... included, and may be given more than once; --run takes one
+run instead. --label takes the runs whose label or config has that
+name, and the runs that edr continue made from a run of that label,
+whose label is &lt;label&gt;.&lt;stage&gt;. --task keeps the rows of one task. A
+snapshot is the directory that an edr export event names, when the
+manifest there lists the run. --csv writes the columns of metrics.csv
 (docs/guides/results.md) to stdout. A value that breaks the pass
 rule of its metric shows FAIL next to it, and --json gives each row
-a verdict: pass, FAIL or null. A row whose file did not parse shows
-failed: and the error in place of the value.
+a verdict (pass, FAIL or null) and its snapshots. A row whose file
+did not parse shows failed: and the error in place of the value.
+
+--pivot prints one metric as a table: a row per label and source, in
+natural label order, so l4 comes before l16, and a column per task, or
+per stage and step for a metric without tasks. A row holds the run
+that label@source names. A cell without a value says why: failed when
+the task failed or its file did not parse, not in job when the run's
+spec has no such task, the run's phase when the run did not end done,
+and no value otherwise. --csv writes the pivot as CSV.
 
 --run with --over steps prints the metrics along the steps of that run:
 one row per step with its name, one column per metric, and a verdict
@@ -352,8 +366,11 @@ ge_um2 key of edr.toml.
 | `--json` | the same as edr --json metrics |
 | `--source SOURCE` | the exact source tag of the runs, as in the run id; repeatable |
 | `--run HANDLE` | one run: label@batch, label@source, a run id prefix, or #n from the last board |
+| `--label NAME` | the runs of this label or config, and the runs that continue them |
+| `--task TASK` | the rows of one task |
 | `--metric NAME` | one metric, by name or canonical name |
 | `--over {steps}` | with --run: the metrics along the steps |
+| `--pivot` | one metric as a table: labels and sources by task or step |
 | `--stage S` | the metrics of one stage |
 | `--step N` | the metrics of one step number |
 | `--csv` | CSV on stdout |
@@ -424,7 +441,7 @@ line with the fields that differ and up to five runs of each set.
 ## compare
 
 ```
-edr compare [--json] [--instances] [--metric NAME] [--task TASK] [--part PART] [--depth N] [--instance GLOB] [--csv] [--unit {kGE,MGE}] [--stage S] [--step N] HANDLE [HANDLE ...]
+edr compare [--json] [--instances] [--metric NAME] [--task TASK] [--part PART] [--depth N] [--instance GLOB] [--csv] [--unit {kGE,MGE}] [--stage S] [--step N] [--ref H] [--base H] HANDLE [HANDLE ...]
 ```
 
 Puts two or more runs side by side. Without --instances, it prints one row
@@ -435,9 +452,20 @@ of the record stage at or after `from`. Any other metric shows each
 run at the deepest step that every run has. With --step, every run
 is at that step. A run that lacks its step of record or the --step is
 named missing, and the command exits 2. A value that breaks the pass
-rule of its metric shows FAIL next to it. --metric (repeatable) and
---stage narrow the rows; --json keeps the source file and the
-verdict of every value and lists the missing runs.
+rule of its metric shows FAIL next to it. --metric (repeatable),
+--stage and --task narrow the rows; --json keeps the source file and
+the verdict of every value and lists the missing runs.
+
+--ref H or --base H prints the runs as rows instead, which needs one
+value per metric for each run, as one task gives. For each metric a
+row shows the value with its stage and step, the change from the row
+before, the percent against the run of --ref (default: the first
+handle) and against the run of --base, and the rank, 1 for the lowest
+value. A run of --ref or --base that is not a handle gives its
+percent and gets no row. With two or more metrics, the last column
+says differ when the metrics rank a run differently. --json adds
+prev, pct_ref, pct_base and rank to each row, and ref, base and
+ranks_differ.
 
 --instances puts the instances of one area_hier or table metric side
 by side: one row per instance at --depth (default 1; the top is 0),
@@ -475,7 +503,7 @@ recorded it. --json lists them under parameters.
 | `--json` | the same as edr --json compare |
 | `--instances` | the instances of one metric side by side |
 | `--metric NAME` | this metric, by name or canonical name; repeatable |
-| `--task TASK` | with --instances: the task of a task metric |
+| `--task TASK` | the rows of one task; with --instances, the task of a task metric |
 | `--part PART` | with --instances: the part, such as a phase; default: the part of top |
 | `--depth N` | with --instances: the instance depth; default 1 |
 | `--instance GLOB` | with --instances: the instances whose path matches the glob |
@@ -483,6 +511,8 @@ recorded it. --json lists them under parameters.
 | `--unit {kGE,MGE}` | an area in um2 in kGE or MGE, by ge_um2 |
 | `--stage S` | this stage only; another stage than the record stage takes the deepest step the runs share |
 | `--step N` | every run at this step number |
+| `--ref H` | the runs as rows, with the percent against this run: label@batch, label@source, a run id prefix, or #n from the last board |
+| `--base H` | the runs as rows, with the percent against this run: label@batch, label@source, a run id prefix, or #n from the last board |
 
 | Exit | Meaning |
 |---|---|
@@ -923,8 +953,10 @@ Reads DEMAND.csv, the list of tests an analysis needs, and says for
 each row whether a run holds it. The header names the columns label or
 build_tag, stage and task, and optionally source; other columns are
 ignored. A row matches the runs with its label, its build tag, or both.
-An empty task means the numbers of the stage itself, and an empty
-source means any source.
+A label matches as edr metrics --label does: the runs whose label or
+config has that name, and the runs that edr continue made from a run
+of that label. An empty task means the numbers of the stage itself,
+and an empty source means any source.
 
 For each label and source, coverage takes one run, the one that
 label@source names: the newest run by start time that ended done, else

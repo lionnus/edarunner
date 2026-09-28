@@ -1,4 +1,4 @@
-"""Views over the project database: instances side by side, metrics per step, runtimes, host and run samples.
+"""Views over the project database: instances side by side, metrics per step, pivots, runtimes, host and run samples.
 
 Each view returns plain rows for --json and a rich renderable for a person. A row
 keeps the source of its number: a file under data/results, or the table it came from.
@@ -7,18 +7,20 @@ keeps the source of its number: a file under data/results, or the table it came 
 from __future__ import annotations
 
 import bisect
+import os
 import re
 import time
 from collections import Counter
 from fnmatch import fnmatchcase
+from pathlib import Path
 from typing import Any
 
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from . import board, config
+from . import board, collect, config
 from .config import ConfigError
-from .db import Database
+from .db import Database, pick
 from .guards import Refuse
 from .metrics import find_files, owned_steps, parse_instances, source_path
 from .model import Project
@@ -35,9 +37,32 @@ def names(runs: list[Row]) -> dict[str, str]:
     return {i: n if twins[n] == 1 else f"{n} {board.prefix(i, list(base))}" for i, n in base.items()}
 
 
-def _pct(v: float | None, base: float | None) -> str | None:
+def natural(text: str) -> list:
+    """A sort key that compares the numbers in a text by value, so l4 comes before l16."""
+    return [int(t) if i % 2 else t for i, t in enumerate(re.split(r"(\d+)", text))]
+
+
+def _percent(v: float | None, base: float | None) -> float | None:
     # A percent across a sign change, such as a slack from +1 ps to -1 ps, says nothing.
-    return None if v is None or not base or v * base < 0 else f"{(v - base) / abs(base) * 100:+.1f}%"
+    return None if v is None or not base or v * base < 0 else (v - base) / abs(base) * 100
+
+
+def _pct(v: float | None, base: float | None) -> str | None:
+    p = _percent(v, base)
+    return None if p is None else f"{p:+.1f}%"
+
+
+def snapshots(project: Project, db: Database) -> dict[str, list[str]]:
+    """The directories of the snapshots that hold each run, by run id: an `edr export` event names the directory, and
+    the manifest there lists the runs. A directory without its manifest holds none. A relative directory, which an
+    older event can name, counts from the project directory."""
+    out: dict[str, list[str]] = {}
+    for e in db.events(kind="export", n=-1):
+        d = os.path.normpath(os.path.join(project.root, e["text"].rpartition(" -> ")[2]))
+        for r in config.load_json(Path(d) / "manifest.json").get("runs") or []:
+            if d not in out.setdefault(r["run_id"], []):
+                out[r["run_id"]].append(d)
+    return out
 
 
 # the step of record
@@ -352,6 +377,102 @@ def side_by_side_view(runs: list[Row], rows: list[Row], missing: list[Row]) -> R
             line += [board.num(r["delta"][i]), _pct(r["value"].get(i), r["value"].get(ids[0]))]
         body.append(line)
     return _with_missing(board.table(head, body, styles={"metric": "bold"}, right=tuple(head[2:])), missing)
+
+
+def ranked(rows: list[Row], ids: list[str], ref: str, base: str | None) -> list[str]:
+    """Add to each side-by-side row, over the runs `ids` in table order: `prev`, the change from the run before;
+    `pct_ref` and `pct_base`, the percent against the run `ref` and the run `base`; and `rank`, 1 for the lowest
+    value. Returns the runs that two metrics rank differently."""
+    for r in rows:
+        v = r["value"]
+        have = sorted(v[i] for i in ids if v.get(i) is not None)
+        r["prev"] = {i: None if v.get(i) is None or v.get(p) is None else round(v[i] - v[p], 9)
+                     for p, i in zip([None, *ids], ids)}
+        r["pct_ref"] = {i: _percent(v.get(i), v.get(ref)) for i in ids}
+        r["pct_base"] = {i: _percent(v.get(i), v.get(base)) for i in ids} if base else {}
+        r["rank"] = {i: None if v.get(i) is None else 1 + bisect.bisect_left(have, v[i]) for i in ids}
+    return [i for i in ids if len({r["rank"][i] for r in rows} - {None}) > 1]
+
+
+def ranked_view(runs: list[Row], ids: list[str], rows: list[Row], ref: str, base: str | None, differ: list[str],
+                missing: list[Row]) -> RenderableType:
+    """A row per run of `ids`, and for each metric the value with its stage and step, the change from the row before,
+    the percent against ref and against base, and the rank; the column ranks says differ when two metrics rank the
+    run differently."""
+    if not rows:
+        return _with_missing("no metrics", missing)
+    col = names(runs)
+    head = ["run"]
+    for r in rows:
+        head += [r["metric"] + (f"[{r['task']}]" if r["task"] else ""), "Δ", f"% {col[ref]}",
+                 *([f"% {col[base]}"] if base else []), "rank"]
+    body = []
+    for i in ids:
+        line = [col[i]]
+        for r in rows:
+            v = r["value"]
+            line += [cell(r, i), board.num(r["prev"][i]), _pct(v.get(i), v.get(ref)),
+                     *([_pct(v.get(i), v.get(base))] if base else []), r["rank"][i]]
+        body.append(line + (["differ" if i in differ else ""] if len(rows) > 1 else []))
+    head += ["ranks"] if len(rows) > 1 else []
+    return _with_missing(board.table(head, body, styles={"run": "bold"}, right=tuple(head[1:])), missing)
+
+
+# a pivot
+
+def pivot(project: Project, db: Database, runs: list[Row], rows: list[Row]) -> Row:
+    """One metric of `rows`, each with its verdict, as a table: a row per label and source, the `pick` of its runs, in
+    natural label order, and a column per task, or per stage and step for a metric without tasks. A cell holds the
+    value, else why it has none: `failed` for a failed row or task, `not in job` when the run's spec lacks the task,
+    the run's phase while the run is not done, else `no value`."""
+    groups: dict[tuple[str, str], list[Row]] = {}
+    for r in runs:
+        groups.setdefault((str(r.get("label")), str(r.get("source"))), []).append(r)
+    picks = [pick(groups[k]) for k in sorted(groups, key=lambda k: (natural(k[0]), k[1]))]
+    ids = {p["run_id"] for p in picks}
+    rows = [m for m in rows if m["run_id"] in ids]
+    order = list(project.stages)
+    keys = sorted({(m["stage"], m.get("step"), m.get("task") or "") for m in rows}, key=lambda k: (
+        order.index(k[0]) if k[0] in order else len(order), -1 if k[1] is None else k[1], natural(k[2])))
+    heads = [t or (s if n is None else f"{s} {n}") for s, n, t in keys]
+    at = {(m["run_id"], m["stage"], m.get("step"), m.get("task") or ""): m for m in rows}
+    out = []
+    for p in picks:
+        spec = collect.load_spec(project, p)
+        failed = {s["task"] for s in db.stage_runs(p["run_id"]) if s["task"] and s.get("status") == "failed"}
+        cells, marks = {}, {}
+        for k, h in zip(keys, heads):
+            m = at.get((p["run_id"], *k))
+            if m is not None and m.get("value") is not None:
+                cells[h], marks[h] = m["value"], m.get("verdict")
+            else:
+                cells[h] = _why(p, spec, failed, k, m)
+        out.append({**{f: p.get(f) for f in ("run_id", "label", "source", "phase")}, "cells": cells, "verdict": marks})
+    return {"metric": rows[0]["name"] if rows else None, "unit": rows[0].get("unit") if rows else None,
+            "columns": heads, "rows": out}
+
+
+def _why(run: Row, spec: dict, failed: set[str], key: tuple, row: Row | None) -> str:
+    """Why the pivot cell of `run` at (stage, step, task) has no value; `row` is its failed row, if any."""
+    stage, _, task = key
+    if row is not None or task in failed:
+        return "failed"
+    # The spec of an import lists its task groups only, so a stage missing from a spec says nothing.
+    if spec and task and not any(t.get("id") == task for s in spec.get("stages") or [] if s.get("name") == stage
+                                 for t in s.get("tasks") or []):
+        return "not in job"
+    return "no value" if run.get("phase") == "done" else str(run.get("phase") or run.get("state"))[:40]
+
+
+def pivot_view(p: Row) -> RenderableType:
+    """The pivot under a line with the metric and its unit."""
+    if not p["rows"] or not p["columns"]:
+        return "no metrics"
+    body = [[r["label"], r["source"], *[v if isinstance(v, str) else mark(v, r["verdict"].get(h))
+                                        for h, v in r["cells"].items()]] for r in p["rows"]]
+    return Group(Text(p["metric"] + (f" in {p['unit']}" if p["unit"] else ""), style="bold"),
+                 board.table(["label", "source", *p["columns"]], body, styles={"label": "bold", "source": "dim"},
+                             right=tuple(p["columns"])))
 
 
 def over_steps(project: Project | None, rows: list[Row]) -> list[Row]:
