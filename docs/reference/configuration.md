@@ -213,6 +213,11 @@ A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python`
 the flow does not print, such as an energy from a power and a window, comes from a `python`
 hook that reads the input files itself.
 
+A regex runs with `re.MULTILINE` over the whole file, group 1 of each match is a value, and
+`reduce` picks one of them, the first by default. In a report with one block per scenario and path
+group, such as a `report_qor`, start the regex at the header of its block, or the first match may
+come from another block. The row's `source_file` is then `path:line` of the value.
+
 A metric row comes from a task that ended `done` or from a stage that exited 0 (done, or over
 budget without a kill). Any other stage gives the rows of the numbered steps that the run has
 passed: `step_runs` holds the step and a later step of the run. There, a report of a step that
@@ -225,13 +230,15 @@ parse gives a row with an empty value and the error in `source_file`; the extrac
 | `stage` | a stage name or a list: the stages whose files hold the number | required |
 | `step` | `"*"` for one row per step, a number, or absent | unset |
 | `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required |
-| `regex` | a regex; group 1 is the value | one of the five |
+| `regex` | a regex; group 1 of each match is a value | one of the five |
+| `reduce` | how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum names the line of its first value | `"first"` |
 | `csv` | `{ where = { column = value }, column }`; the first row that matches `where` | one of the five |
 | `json` | a dotted path into a JSON file; a number indexes a list | one of the five |
 | `python` | a hook that gets the file path and returns a number | one of the five |
 | `area_hier` | the deepest instance depth to keep from a hierarchical area report, of Synopsys `report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is the top area, and each instance down to this depth becomes a row of the `area` table | one of the five |
 | `unit` | the unit, as text | `""` |
 | `canonical` | the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: `design__instance__area`, `design__instance__count`, `design__instance__utilization`, `timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; empty when the schema has no name | `""` |
+| `pass` | a rule the value must meet: `==`, `!=`, `<`, `<=`, `>` or `>=` and a number, such as `"== 0"`; `edr metrics`, `edr compare` and `--over steps` print FAIL next to a value that breaks it | unset |
 
 ## site.toml
 

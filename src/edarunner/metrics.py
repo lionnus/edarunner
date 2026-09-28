@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import json
 import re
 import time
@@ -71,31 +72,46 @@ def _area_openroad(text: str) -> list[dict]:
     return rows
 
 
-def parse_file(metric: Metric, path: Path, project_root: Path) -> float:
-    """Parse one value from `path` with the parser of `metric`."""
+def parse_file(metric: Metric, path: Path, project_root: Path) -> tuple[float, int | None]:
+    """Parse one value from `path` with the parser of `metric`; the line is that of a regex value, else None."""
     if metric.regex:
-        m = re.search(metric.regex, path.read_text(), re.MULTILINE)
-        if not m:
-            raise ValueError(f"no match for {metric.regex!r}")
-        return float(m.group(1))
+        return _regex(metric, path.read_text())
     if metric.csv:
         where = metric.csv.get("where") or {}
         with path.open(newline="") as fh:
             for rec in csv.DictReader(fh):
                 if all(rec.get(k) == str(v) for k, v in where.items()):
-                    return float(rec[str(metric.csv["column"])])
+                    return float(rec[str(metric.csv["column"])]), None
         raise ValueError(f"no row matches {where}")
     if metric.json:
         obj = json.loads(path.read_text())
         for key in metric.json.split("."):
             obj = obj[int(key)] if isinstance(obj, list) else obj[key]
-        return float(obj)
+        return float(obj), None
     if metric.python:
         fn, _ = load_hook(project_root, metric.python)
-        return float(fn(path))
+        return float(fn(path)), None
     if metric.area_hier:
-        return parse_area_hier(path.read_text(errors="replace"))[0]["area"]
+        return parse_area_hier(path.read_text(errors="replace"))[0]["area"], None
     raise ValueError(f"metric {metric.name} has no parser")
+
+
+def _regex(metric: Metric, text: str) -> tuple[float, int]:
+    """Group 1 of every match, reduced to one value, with the line that value is on."""
+    found: list[tuple[float, int]] = []
+    line, pos = 1, 0
+    matches = re.finditer(metric.regex, text, re.MULTILINE)
+    for m in itertools.islice(matches, 1) if metric.reduce == "first" else matches:
+        value = float(m.group(1))
+        line, pos = line + text.count("\n", pos, m.start(1)), m.start(1)
+        found.append((value, line))
+    if not found:
+        raise ValueError(f"no match for {metric.regex!r}")
+    if metric.reduce == "sum":
+        return sum(v for v, _ in found), found[0][1]
+    if metric.reduce in ("min", "max"):
+        return (min if metric.reduce == "min" else max)(found, key=lambda f: f[0])
+    return found[-1]  # `first` stops after one match
 
 
 def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Task],
@@ -160,7 +176,8 @@ def _extract_one(
                 value, source = instances[0]["area"], rel
                 instances = [i for i in instances if i["depth"] <= metric.area_hier]
             else:
-                value, source = parse_file(metric, path, project.root), rel
+                value, line = parse_file(metric, path, project.root)
+                source = rel if line is None else f"{rel}:{line}"
         except Exception as e:  # a parse error is a row, never a crash
             value, source = None, f"{rel}: {e}"
         row = _row(run_id, stage_name, step, task_id, metric, value, source, now)

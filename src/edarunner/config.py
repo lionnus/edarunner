@@ -60,6 +60,7 @@ from .model import (
     Telegram,
     Tool,
     User,
+    pass_rule,
 )
 
 T = TypeVar("T")
@@ -76,6 +77,7 @@ _PROJECT_KEYS = {
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "host_free_min_gb", "hosts", "tools", "nfs_export",
               "telegram", "scheduler"}
 _EXTRACTORS = ("regex", "csv", "json", "python", "area_hier")
+_REDUCE = ("first", "last", "min", "max", "sum")
 
 
 class ConfigError(Exception):
@@ -493,7 +495,15 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         raise ConfigError(f"{file}: {at}.area_hier is the deepest depth to keep, a number from 1")
     if not (raw.get("file") and raw["stage"]):
         raise ConfigError(f"{file}: {at} needs file and stage")
-    return _build(Metric, raw, file, at, name=name)
+    if "reduce" in raw and ("regex" not in raw or raw["reduce"] not in _REDUCE):
+        raise ConfigError(f"{file}: {at}.reduce needs regex and is one of {', '.join(_REDUCE)}")
+    rule = raw.pop("pass", "")
+    try:
+        if rule != "":
+            pass_rule(rule)
+    except (AttributeError, ValueError):
+        raise ConfigError(f'{file}: {at}.pass is an operator and a number, such as "== 0"') from None
+    return _build(Metric, raw, file, at, name=name, pass_=rule)
 
 
 def _load_tasks(file: Path, site: Site) -> tuple[dict[str, Task], str]:

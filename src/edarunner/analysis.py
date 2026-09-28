@@ -139,6 +139,17 @@ def _fmt(v: float | None) -> str | None:
     return None if v is None else f"{v:.6g}"
 
 
+def verdict(project: Project | None, m: Row) -> str | None:
+    """`FAIL` or `pass` for a metric row under the `pass` rule of its metric; None without a rule or a value."""
+    metric = project.metrics.get(m["name"]) if project else None
+    return metric.verdict(m.get("value")) if metric else None
+
+
+def mark(cell: object, verdict: str | None) -> object:
+    """A value cell, with FAIL next to a value that breaks its pass rule."""
+    return f"{cell} FAIL" if verdict == "FAIL" else cell
+
+
 def side_by_side(project: Project | None, runs: list[Row], rows: list[Row]) -> list[Row]:
     """One row per stage, step, task and metric, with the value of each run and the delta of each to the first."""
     # The driver records `[runtime] setup` as the stage `setup`, before every stage of the flow.
@@ -150,9 +161,10 @@ def side_by_side(project: Project | None, runs: list[Row], rows: list[Row]) -> l
         row = out.setdefault(key, {"stage": m["stage"], "step": m.get("step"),
                                    "step_name": step_name(project, m["stage"], m.get("step")),
                                    "task": m.get("task") or "", "metric": m["name"], "unit": m.get("unit"),
-                                   "value": {}, "source_file": {}})
+                                   "value": {}, "source_file": {}, "verdict": {}})
         row["value"][m["run_id"]] = m["value"]
         row["source_file"][m["run_id"]] = m.get("source_file")
+        row["verdict"][m["run_id"]] = verdict(project, m)
     for row in out.values():
         base = row["value"].get(ids[0])
         row["delta"] = {i: None if row["value"].get(i) is None or base is None else round(row["value"][i] - base, 9)
@@ -172,7 +184,8 @@ def side_by_side_view(runs: list[Row], rows: list[Row]) -> RenderableType:
         head += [f"Δ {col[i]}", "Δ %"]
     body = []
     for r in rows:
-        line = [r["stage"], r["step"], r["step_name"], r["task"], r["metric"], *[_fmt(r["value"].get(i)) for i in ids]]
+        line = [r["stage"], r["step"], r["step_name"], r["task"], r["metric"],
+                *[mark(_fmt(r["value"].get(i)), r["verdict"].get(i)) for i in ids]]
         for i in ids[1:]:
             line += [_fmt(r["delta"][i]), _pct(r["value"].get(i), r["value"].get(ids[0]))]
         body.append(line)
@@ -188,19 +201,27 @@ def over_steps(project: Project | None, rows: list[Row]) -> list[Row]:
             continue
         row = out.setdefault((m["step"], m["stage"]), {"stage": m["stage"], "step": m["step"],
                                                        "step_name": step_name(project, m["stage"], m["step"]),
-                                                       "value": {}, "source_file": {}})
+                                                       "value": {}, "source_file": {}, "verdict": {}})
         row["value"][m["name"]] = m["value"]
         row["source_file"][m["name"]] = m.get("source_file")
+        row["verdict"][m["name"]] = verdict(project, m)
     return [out[k] for k in sorted(out)]
 
 
 def over_steps_view(rows: list[Row]) -> RenderableType:
-    """A column per metric; with one metric, its change from the step before and its source file."""
+    """A column per metric, and a verdict when a metric has a pass rule; with one metric, its change from the
+    step before and its source file."""
     if not rows:
         return "no metric with a step"
     keys = sorted({k for r in rows for k in r["value"]})
     head = ["stage", "step", "name", *keys]
-    body = [[r["stage"], r["step"], r["step_name"], *[_fmt(r["value"].get(k)) for k in keys]] for r in rows]
+    body = [[r["stage"], r["step"], r["step_name"], *[mark(_fmt(r["value"].get(k)), r["verdict"].get(k)) for k in keys]]
+            for r in rows]
+    if any(v for r in rows for v in r["verdict"].values()):
+        head.append("verdict")
+        for line, r in zip(body, rows):
+            got = {v for v in r["verdict"].values() if v}
+            line.append("FAIL" if "FAIL" in got else "pass" if got else None)
     if len(keys) == 1:
         head += ["Δ", "source"]
         prev = None
