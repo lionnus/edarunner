@@ -37,9 +37,9 @@ event, not even an empty database.
 --why &lt;text&gt; is required on stop and retire, and optional on import. The
 text goes into the events table together with the actor.
 
-These commands never create data/edr.db: brief, check, compare, events,
-hosts, metrics, notify, plan, projects, runtime, status, tools. Without the
-file they read an empty database in memory.
+These commands never create data/edr.db: brief, check, compare, coverage,
+events, hosts, metrics, notify, plan, projects, runtime, status, tools.
+Without the file they read an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
 queued, yellow when stale, red when dead, hung, over budget, an orphan or
@@ -100,6 +100,7 @@ A command below says where it refines a code.
 | [keep](#keep) | more hours for a run, and no hung kill or superseded stop for that long |
 | [import](#import) | record a run tree that edr did not make, or its collected results |
 | [export](#export) | a frozen snapshot of one or more sources |
+| [coverage](#coverage) | whether a run holds each test of a demand list |
 | [stop](#stop) | stop one run |
 | [retire](#retire) | remove the run tree, or its prune targets |
 | [notify](#notify) | send one message, the board or the digest through every notifier |
@@ -777,6 +778,41 @@ mlflow extra: pip install 'edarunner[mlflow]'.
 | `--mlflow DIR` | write an MLflow tracking store in DIR instead |
 | `--labels a,b` | these labels only, comma separated |
 | `--with-logs` | also copy log/ directories and *.log files |
+
+## coverage
+
+```
+edr coverage [--json] DEMAND.csv
+```
+
+Reads DEMAND.csv, the list of tests an analysis needs, and says for
+each row whether a run holds it. The header names the columns label or
+build_tag, stage and task, and optionally source; other columns are
+ignored. A row matches the runs with its label, its build tag, or both.
+An empty task means the numbers of the stage itself, and an empty
+source means any source.
+
+For each label and source, coverage takes one run, the one that
+label@source names: the newest run by start time that ended done, else
+the newest run. A row is held when that run at the row's source has a
+value at the row's stage and task. Otherwise the status is the first of
+these that fits: running when that run has not ended, failed when it
+ended in a phase other than done, elsewhere when a run at another source
+holds the row, and else missing. The runs column names the runs behind
+the status as label@source, with the phase when it is not done.
+
+A build tag matches every run of one build: the backend runs, the runs
+that continue them, and a bench suite imported with the same build tag.
+--json gives each row with its status and runs.
+
+| Flag | Meaning |
+|---|---|
+| `DEMAND.csv` | the demand list: label or build_tag, stage, task, and an optional source |
+| `--json` | the same as edr --json coverage |
+
+| Exit | Meaning |
+|---|---|
+| 1 | a row is not held, or DEMAND.csv is unreadable or incomplete |
 
 ## stop
 

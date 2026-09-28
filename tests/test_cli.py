@@ -1168,6 +1168,48 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()
 
 
+def test_coverage_says_where_each_row_of_a_demand_is(demo: Path, capsys, tmp_path: Path) -> None:
+    demand = tmp_path / "demand.csv"
+    demand.write_text("label,build_tag,stage,task,source,note\n"
+                      "alpha,,power,k_a,abc1234,held\n"
+                      "alpha,,power,k_b,abc1234,only at def5678\n"
+                      "alpha,,power,k_c,abc1234,no run\n"
+                      "beta,,power,k_a,abc1234,\n"
+                      "gamma,,power,k_a,abc1234,\n"
+                      ",bt_a,bench,k_a,abc1234,the bench run of the build\n"
+                      "alpha,,power,k_b,,any source\n")
+    assert edr(capsys, "coverage", str(demand))[0] == 1 and not (demo / "data").exists()
+    done = seed(demo, "alpha", "done", tree=False, build_tag="bt_a")
+    other = seed(demo, "alpha", "done", source="def5678", tree=False, build_tag="bt_a")
+    # A newer rerun at the same source failed; the pick stays on the done run.
+    seed(demo, "alpha", "FAILED:power", date="20260926_1300", tree=False, build_tag="bt_a", started=int(time.time()))
+    bench = seed(demo, "alpha_rtl", "done", tree=False, build_tag="bt_a")
+    seed(demo, "beta", "FAILED:pnr", tree=False)
+    seed(demo, "gamma", "power:k_a", tree=False)
+    with Database(demo / "data" / "edr.db") as db:
+        for run, stage, task in ((done, "power", "k_a"), (other, "power", "k_a"), (other, "power", "k_b"), (bench, "bench", "k_a")):
+            db.add_metric({"run_id": run, "stage": stage, "task": task, "name": "energy_nj", "value": 1.0})
+    code, out, _ = edr(capsys, "coverage", str(demand))
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 1 and lines[0] == ["label", "build_tag", "stage", "task", "source", "status", "runs"]
+    assert lines[2:] == [["alpha", "power", "k_a", "abc1234", "held", "alpha@abc1234"],
+                         ["alpha", "power", "k_b", "abc1234", "elsewhere", "alpha@def5678"],
+                         ["alpha", "power", "k_c", "abc1234", "missing"],
+                         ["beta", "power", "k_a", "abc1234", "failed", "beta@abc1234", "FAILED:pnr"],
+                         ["gamma", "power", "k_a", "abc1234", "running", "gamma@abc1234", "power:k_a"],
+                         ["bt_a", "bench", "k_a", "abc1234", "held", "alpha_rtl@abc1234"],
+                         ["alpha", "power", "k_b", "held", "alpha@def5678"],
+                         ["3", "of", "7", "rows", "held"]]
+    rows = json.loads(edr(capsys, "--json", "coverage", str(demand))[1])["data"]
+    assert rows[1]["runs"] == [{"run_id": other, "label": "alpha", "source": "def5678", "phase": "done"}]
+    demand.write_text("label,stage,task\nalpha,power,k_a\n")
+    assert edr(capsys, "coverage", str(demand))[1].splitlines()[-1] == "1 of 1 rows held"
+    for text, err in (("label,stage\nalpha,power\n", "the header needs"), ("label,stage,task\nalpha,,k_a\n", "line 2 needs")):
+        demand.write_text(text)
+        code, _, msg = edr(capsys, "coverage", str(demand))
+        assert code == 1 and msg.startswith(f"edr: {demand}: {err}")
+
+
 def test_notify_sends_one_message_through_every_notifier(demo: Path, capsys, monkeypatch) -> None:
     code, out, _ = edr(capsys, "notify", "--dry-run", "session x: <done>")
     assert code == 0 and out == "<b>demo: note</b>\nsession x: &lt;done&gt;\n(dry)\n"
