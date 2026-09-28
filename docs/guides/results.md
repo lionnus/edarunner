@@ -14,7 +14,7 @@ batch, every number and every action.
 | `batches` | batch | the project, the source tag, the pinned date, when it was retired |
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id`, the cores the run reserved |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
-| `parameters` | key of a run | `config`, `build_tag`, `source` and each override, as text |
+| `parameters` | key and origin of a run | the parameters of the run as text, each with its origin; [Run identity](#run-identity) lists them |
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
@@ -52,6 +52,43 @@ JSON, without the stage prefix, because the stage is its own column:
 A number the schema has no name for, such as an energy, keeps an empty
 canonical name or a name of the project. The metric name itself stays the
 project's own.
+
+## Run identity
+
+The identity of a number is the source tag of its run, the diff of a
+dirty tag, the commit of each nested repository, and the parameters of
+the run. Give the tag next to every number you publish.
+
+The source tag is the short hash of the commit that `edr checkout`
+pinned. A tree with changes gets `<hash>-dirty-<8 hex>`, where the hex
+digits start the sha256 of its diff. The diff holds the changes to
+tracked files, every untracked file that git does not ignore, and the
+same for each repository that `source.nested` names, so an edit in a
+nested flow repository gives a new tag as well. `edr checkout --dirty`
+writes the diff to `source.diff` and its base to `source.json`, in the
+clone and in `data/sources/<tag>/`. `edr retire --batch` removes the
+clone, but `data/sources/<tag>/` stays. `source.json` names the base
+commit and the commit of each nested repository. `git apply source.diff`
+in a clone of the base, with each nested repository at its commit, gives
+back every file of the tree that git does not ignore.
+
+The `parameters` table holds one row per run, key and origin:
+
+| Origin | Keys | Written by |
+|---|---|---|
+| `spec` | `config`, `build_tag`, each override under its own name, and `vars.<name>` for each var of the job | the watcher at the first collect of the run |
+| `checkout` | `source`, and `nested.<name>` with the commit of each nested repository | the watcher at the first collect of the run |
+| `import` | `config`, `build_tag` and `source` | `edr import` |
+
+The watcher reads the overrides, the vars and the nested commits from the
+run's spec, which `launch` wrote, and never from the batch file. An edit
+of the batch file after the launch therefore changes no record. The
+spec also holds the command of each stage and task as it was rendered,
+and an export carries these commands in the `record` of each run, so a
+netlist path or a clock period that the command line sets stays visible.
+`edr compare` prints the parameters that differ between the runs it
+compares; [Compare runs side by side](#compare-runs-side-by-side) shows
+the block.
 
 ## Which run a command takes
 
@@ -395,6 +432,23 @@ metric  task     base@3f9a2c1  base@3f9a2c1-dirty-7b21c0d9  Δ base@3f9a2c1-dirt
 cells         536547 (pnr 12)              536102 (pnr 12)                           -445  -0.1%
 ```
 
+Above the table, compare prints one line per parameter whose value
+differs between the runs, with the value of each run, or `-` for a run
+that lacks the key. The source is not repeated there, because the column
+names carry it. A difference in method, such as the netlist that a power
+run read, shows there as a line of its own. `--json` lists these
+parameters under `parameters`.
+
+```
+$ edr compare base@3f9a2c1 base@7c0d9e2 --metric energy_nj
+mixed sources: 3f9a2c1, 7c0d9e2
+parameter           base@3f9a2c1  base@7c0d9e2
+vars.netlist_stage  11            15
+
+metric     task     base@3f9a2c1  base@7c0d9e2  Δ base@7c0d9e2    Δ %
+energy_nj  k_small         412.7         446.1            33.4  +8.1%
+```
+
 ## Runtime
 
 `edr runtime <handle>` prints where the time of a run went: a row per
@@ -486,13 +540,17 @@ exports/3f9a2c1/
   manifest.json
   runs.csv
   metrics.csv
-  <label>/...           the collected files of that run
+  parameters.csv
+  sources/<tag>/source.diff   the diff of each dirty source
+  <label>/...                 the collected files of that run
 ```
 
 | File | Holds |
 |---|---|
-| `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
-| `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended` |
+| `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
+| `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended,batch,dirty,tree_id,retired`; `retired` is 1 for a run that was retired, or whose batch was |
+| `parameters.csv` | `run_id,label,source,key,value,origin`, the rows of the `parameters` table for each exported run |
+| `sources/<tag>/source.diff` | the copy of `data/sources/<tag>/source.diff` for each dirty source |
 | `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file,record`; `record` marks the [step of record](#stage-of-record) |
 | `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; `<label>@<source>/` when the runs come from more than one tag |
 
@@ -512,7 +570,13 @@ there failed, stopped or has not ended.
 A run's `record` holds what made it, as far as edarunner knows it: the
 host, the start and end, the edarunner version and the sha256 of the
 driver from the spec, the version of each tool that the site file gives
-for the host, and the start, end and status of each stage.
+for the host, the start, end and status of each stage, and under
+`commands` the command of each stage and task as the spec rendered it.
+
+A dirty source backs a published number only when the export carries
+its diff. Its entry in `dirty_sources` has a `diff_sha256` of `null`
+when edarunner never kept the diff, as for a dirty tag that `edr import`
+recorded.
 
 The directory is written under a temporary name and renamed at the end,
 so a reader never sees a half snapshot. A `--out` that exists and is not
@@ -557,7 +621,8 @@ An analysis should never read the live database, because the database
 changes with every watcher cycle and a number you quote must stay the
 number you read. Instead, the analysis keeps one snapshot per
 source under its own `data/`, pinned by the source tag. Every table and
-figure comes from `runs.csv` and `metrics.csv` of that snapshot:
+figure comes from `runs.csv`, `metrics.csv` and `parameters.csv` of
+that snapshot:
 
 ```
 report/

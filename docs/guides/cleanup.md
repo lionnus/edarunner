@@ -84,7 +84,9 @@ edr retire --batch sweep1 --why "sweep done"
 `--batch` retires every run of the batch and writes the `RETIRED` file,
 so the watcher and the board leave the batch alone. It then removes the
 checked-out source of the batch under `source.worktrees`, unless a batch
-that is not retired uses the same source. When that tree does not pass
+that is not retired uses the same source. The `source.diff` and
+`source.json` of a dirty source stay in `data/sources/<tag>/`, so an
+export can still carry the diff. When that tree does not pass
 the guard, for example because `source.worktrees` lies outside the
 marker path, `retire` keeps it, prints a `worktree kept` line and still
 removes the run trees; you can remove the checked-out tree by hand.
