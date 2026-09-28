@@ -173,7 +173,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     (demo / "wt" / "def5678").mkdir(parents=True)
     with Database(demo / "data" / "edr.db") as db:
         db.add_event("user", a, "launch", "local /x")
-        db.add_host_samples(int(time.time()) - 60, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
+        db.add_host_samples(int(time.time()) - 600, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
                                                               "free_ram_gb": 6, "total_gb": 100, "free_gb": 90}})
     (demo / "AGENTS.md").write_text("notes\n")
     code, out, _ = edr(capsys, "brief")
@@ -181,7 +181,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert code == 0 and heads == ["## The flow", "## The site", "## The state", "## Read more"]
     assert "- `synth` runs one command through 4 steps, collects `reports/` and needs the tool `demo`." in out
     assert "- `power` is a task group that runs 2 tasks at a time" in out
-    assert "`local` at the probe 60 seconds ago: cores 🔴, ram 🟢, scratch 🟢." in out
+    assert "`local` at the probe 10 minutes ago: cores 🔴, ram 🟢, scratch 🟢." in out
     assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
     assert "2 sources are checked out under" in out
     assert "\n- `abc1234`, used by batch `demo`\n- `def5678`, used by no batch\n" in out
