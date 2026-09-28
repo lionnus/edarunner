@@ -223,6 +223,70 @@ pnr       11  route             -0.071  -0.047  flow/runs/<run>/reports/11/qor.r
 pnr       12  route-opt         -0.035   0.036  flow/runs/<run>/reports/12/qor.rpt:64
 ```
 
+## Stage of record
+
+A metric with `step = "*"` has one value per step, but a table that
+shows one number per run needs one step per run. The deepest step is
+often the wrong one, for two reasons:
+
+- The runs of one sweep can end at different steps. Say the small builds
+  of a sweep finish route-opt at step 12, while the large builds stop
+  after route at step 11 because route-opt does not fit their budget.
+  The deepest step that all of them have is 11, so a table of both
+  would show the small builds before route-opt.
+- A later stage can own later steps. An export stage that runs eco-route
+  and fillers after route-opt writes its own area reports at steps 13 to
+  15. Eco-route adds cells, so the area of an export step is not the
+  routed area, and the deepest step of any stage reads high.
+
+`record` names the step of record of a metric:
+
+```toml
+[metrics.area_um2]
+stage = ["pnr", "export"]
+step = "*"
+file = "flow/runs/{tree_id}/reports/{step}/area_hier.rpt"
+area_hier = 3
+unit = "um2"
+record = { stage = "pnr", from = 11 }
+```
+
+The step of record of a run is its deepest step of `stage` with a value,
+at or after step `from`. Only a step that the stage owns counts, so an
+export step never stands in for a pnr step. Here a small build is at
+step 12 and a large build at step 11. `from` keeps out a run that
+stopped before route: its deepest pnr step holds a placed design, and a
+table that compared it with routed designs would mislead. Such a run has
+no step of record and is named missing.
+
+Every view that shows one value per run takes the step of record and
+names the stage and step next to the value:
+
+```
+$ edr compare small@g8 large@g8 early@g8 --metric area_um2
+metric    task             small            large  early  Δ large      Δ %  Δ early  Δ %
+area_um2        51230.4 (pnr 12)  164808 (pnr 11)      -   113578  +221.7%        -    -
+missing: early has pnr steps 8 to 9
+```
+
+- `edr compare` shows each run at its step of record. A run without one
+  is named missing, and the command exits 2. `--step N` puts every run
+  at step N, and a run without step N is named missing the same way.
+- compare.html shows each run at its step of record, and `missing` for
+  a run without one.
+- The MLflow export logs the value at the step of record again as
+  `record/<metric>`.
+- `metrics.csv` has a `record` column: 1 on the row at the step of
+  record, 0 on the other rows of a metric with `record`, and empty for a
+  metric without it. Keep the rows with `record` equal to 1 and you have
+  one row per run and metric; a run with none has no step of record.
+
+For a metric without `record`, `edr compare` shows each run at the
+deepest step that every run has, and compare.html shows the last step of
+each run. Both name the step. Give `record` to every metric that a paper
+or a report quotes, the timing metrics included, so the verdict of a
+build comes from the step its area comes from.
+
 ## A number the flow does not print
 
 A metric has one of five parsers: `regex`, `csv`, `json`, `python` or
@@ -275,39 +339,46 @@ canonical = "design__instance__area"
 
 `edr metrics --source <source> --instance i_top/i_streamer --depth 3` prints
 the area rows of that subtree. `edr compare A B --area --depth 2` puts the
-blocks of two or more runs side by side, at the last step with an area
-report that every run has:
+blocks of two or more runs side by side, each at its
+[step of record](#stage-of-record), or at the deepest step that every run
+has when the area metric has no `record`. The header names the stage and
+step of each run:
 
 ```
 $ edr compare base@g8 lanes16@g7 lanes4@g7 --area --depth 2 --instance i_top
 area um2 at depth 2
-instance            base  lanes16   lanes4  Δ lanes16     Δ %  Δ lanes4     Δ %
-i_top/i_engine   96580.1  96092.1  95942.9     -488.1   -0.5%    -637.3   -0.7%
-i_top/i_accum    36583.7  36169.4  36001.1     -414.3   -1.1%    -582.6   -1.6%
-i_top/i_lanes    32453.8  19234.8   9372.4   -13219.0  -40.7%  -23081.4  -71.1%
-i_top/i_stream   14592.5  14738.5  14395.8      146.0   +1.0%    -196.7   -1.3%
-<top>           208030.0 193918.6 182995.8   -14111.4   -6.8%  -25034.2  -12.0%
-base: pnr step 12, flow/runs/<run>/reports/12/area_hier.rpt
+instance        base (pnr 12)  lanes16 (pnr 12)  lanes4 (pnr 12)  Δ lanes16     Δ %  Δ lanes4     Δ %
+i_top/i_engine        96580.1           96092.1          95942.9     -488.1   -0.5%    -637.3   -0.7%
+i_top/i_accum         36583.7           36169.4          36001.1     -414.3   -1.1%    -582.6   -1.6%
+i_top/i_lanes         32453.8           19234.8           9372.4   -13219.0  -40.7%  -23081.4  -71.1%
+i_top/i_stream        14592.5           14738.5          14395.8      146.0   +1.0%    -196.7   -1.3%
+<top>                208030.0          193918.6         182995.8   -14111.4   -6.8%  -25034.2  -12.0%
+base: flow/runs/<run>/reports/12/area_hier.rpt
 ...
 ```
 
-## Compare runs per step
+## Compare runs side by side
 
-`edr compare A B` without `--area` prints one row per stage, step, task
-and metric, the value of each run, and the delta and the percent of each
-run to the first. A percent across a sign change, such as a slack from
-+1 ps to -1 ps, is left out. A value that breaks the `pass` rule of its
-metric shows FAIL next to it. `--metric` (repeatable), `--stage` and
-`--step` narrow the rows; `--json` keeps the source file and the verdict
-of every value.
+`edr compare A B` without `--area` prints one row per task and metric:
+the value of each run with its stage and step, and the delta and the
+percent of each run to the first. Each run is at its
+[step of record](#stage-of-record), or at the deepest step that every
+run has for a metric without `record`. `--step N` puts every run at
+step N. A percent across a sign change, such as a slack from +1 ps to
+-1 ps, is left out. A value that breaks the `pass` rule of its metric
+shows FAIL next to it. `--metric` (repeatable) and `--stage` narrow the
+rows; `--json` keeps the source file and the verdict of every value and
+lists the missing runs.
 
 ```
-$ edr compare base@g8 lanes16@g7 --stage pnr --metric wns_ns --metric cells
-stage  step  name       task  metric    base  lanes16  Δ lanes16     Δ %
-pnr      11  route            cells   535811   489276     -46535   -8.7%
-pnr      11  route            wns_ns  -0.056   -0.038      0.018  +32.1%
-pnr      12  route-opt        cells   536547   489861     -46686   -8.7%
-pnr      12  route-opt        wns_ns   0.003   -0.001     -0.004       -
+$ edr compare base@g8 lanes16@g7 --metric wns_ns --metric cells
+metric  task             base          lanes16  Δ lanes16    Δ %
+cells         536547 (pnr 12)  489861 (pnr 12)     -46686  -8.7%
+wns_ns         0.003 (pnr 12)  -0.001 (pnr 12)     -0.004      -
+$ edr compare base@g8 lanes16@g7 --metric wns_ns --metric cells --step 11
+metric  task             base          lanes16  Δ lanes16     Δ %
+cells         535811 (pnr 11)  489276 (pnr 11)     -46535   -8.7%
+wns_ns        -0.056 (pnr 11)  -0.038 (pnr 11)      0.018  +32.1%
 ```
 
 When the runs come from more than one source tag, each column is
@@ -318,8 +389,8 @@ ids after it. `--area` names its columns the same way.
 ```
 $ edr compare base@3f9a2c1 base@3f9a2c1-dirty-7b21c0d9 --stage pnr --step 12 --metric cells
 mixed sources: 3f9a2c1, 3f9a2c1-dirty-7b21c0d9
-stage  step  name       task  metric  base@3f9a2c1  base@3f9a2c1-dirty-7b21c0d9  Δ base@3f9a2c1-dirty-7b21c0d9    Δ %
-pnr      12  route-opt        cells         536547                       536102                           -445  -0.1%
+metric  task     base@3f9a2c1  base@3f9a2c1-dirty-7b21c0d9  Δ base@3f9a2c1-dirty-7b21c0d9    Δ %
+cells         536547 (pnr 12)              536102 (pnr 12)                           -445  -0.1%
 ```
 
 ## Runtime
@@ -373,12 +444,12 @@ Every watcher cycle writes `data/board/`:
 |---|---|
 | `board.json` | the runs of the live batches, the last 50 events and the host probes, for a script |
 | `status.html` | a phone-width page: every run in board order, the last 50 events, the hosts, and a chart of the cores and RAM in use per host over the last day |
-| `compare.html` | the runs with their parameters as columns and a filter per column, a compare table of the final metrics with the difference to the first ticked run, the area delta of two runs, and four plots |
+| `compare.html` | the runs with their parameters as columns and a filter per column, a compare table of each metric at its step of record, else at its last step, with the stage and step of each value and the difference to the first ticked run, the area delta of two runs, and four plots |
 
 `compare.html` is one self-contained page over the database's runs,
-parameters, metrics and the last area report of each run down to depth 3. A
-filter keeps the rows whose cell holds its text; `>n` and `<n` compare
-numbers. The tables need nothing else, but the plots need Plotly. They show
+parameters, metrics and the area report of each run at its step of
+record, else at its last step, down to depth 3. A filter keeps the rows
+whose cell holds its text; `>n` and `<n` compare numbers. The tables need nothing else, but the plots need Plotly. They show
 a metric over the steps with the step names, a scatter of any two columns,
 the power parts (`power__*` without `power__total`), and parallel
 coordinates over every shown run, with an axis per parameter that differs
@@ -393,8 +464,9 @@ cd data/board && python -m http.server --bind 127.0.0.1 8000
 ```
 
 On the phone, `/compare <handle>...` puts the metrics of several runs
-side by side, `/metric <name>` shows one metric per run, `/board` sends
-the two pages as files, and `/csv <source>` sends `metrics.csv`;
+side by side as `edr compare` does, `/metric <name>` shows one metric
+per run, `/board` sends the two pages as files, and `/csv <source>`
+sends `metrics.csv`;
 [alerts.md](alerts.md#files) has the bot.
 
 ## edr export
@@ -419,7 +491,7 @@ exports/3f9a2c1/
 |---|---|
 | `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
 | `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended` |
-| `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file` |
+| `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file,record`; `record` marks the [step of record](#stage-of-record) |
 | `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; `<label>@<source>/` when the runs come from more than one tag |
 
 `--source` may be given more than once, for a table that needs a done
@@ -461,7 +533,8 @@ Each run becomes one MLflow run in one experiment per project, named by
 its label and tagged with `edr.run_id`, `edr.project`, `edr.source`,
 `edr.batch`, `edr.host` and `edr.phase`. The parameters are the
 `parameters` table. A metric is logged at its step, and a task metric
-under `<name>/<task>`. The stage and step times are the metrics
+under `<name>/<task>`. The value at the step of record is logged again
+as `record/<name>`, at that step. The stage and step times are the metrics
 `runtime_s/<stage>`, `runtime_s/step` at the step number and
 `runtime_s/total`. The collected files up to 1 MiB are the artifacts. A
 run already in the store is skipped, so the export can run again after

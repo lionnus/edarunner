@@ -1,15 +1,17 @@
-"""analysis.py and the commands over it: area, metrics per step, runtime, host and run samples."""
+"""analysis.py and the commands over it: area, the step of record, metrics per step, runtime, host and run samples."""
 
 from __future__ import annotations
 
+import csv
 import json
 import sys
 from pathlib import Path
 
 import pytest
 from helpers_cli import edr, seed
+from helpers_results import area_hier
 
-from edarunner import analysis, board, config, metrics
+from edarunner import analysis, board, config, export, metrics
 from edarunner.db import Database
 
 SYNOPSYS = """\
@@ -111,13 +113,14 @@ def test_area_rows_filter_and_compare(demo: Path, capsys) -> None:
     engine = next(ln for ln in lines if ln.startswith("i_top/i_engine"))
     assert engine.split() == ["i_top/i_engine", "700.0", "630.0", "-70.0", "-10.0%"]
     assert next(ln for ln in lines if ln.startswith("<top>")).split()[-1] == "-7.0%"
-    assert "a: synth step 2, reports/2/area_hier.rpt" in out
+    assert lines[1].split()[:7] == ["instance", "a", "(synth", "2)", "b", "(synth", "2)"]
+    assert "a: reports/2/area_hier.rpt" in out
     code, out, _ = edr(capsys, "--json", "compare", a, b, "--area", "--depth", "1")
     data = json.loads(out)["data"]
     assert [r["instance"] for r in data["rows"]] == ["i_top"] and data["rows"][0]["delta"] == {b: 0.0}
     assert edr(capsys, "compare", a, b, "--area", "--depth", "5")[0] == 2
     with Database(demo / "data" / "edr.db") as db:
-        last = analysis.last_areas(db, [a, b, "nothing"], max_depth=1)
+        last = analysis.last_areas(config.load_project(demo), db, [a, b, "nothing"], max_depth=1)
     assert set(last) == {a, b} and (last[a]["step"], last[b]["step"]) == (3, 2)
     assert last[a]["rows"] == [["<top>", 0, 1000.0], ["i_top", 1, 990.0]]
 
@@ -148,22 +151,92 @@ def _metric(root: Path, run_id: str, name: str, step: int, value: float, stage: 
                        "source_file": f"reports/{step}/qor.rpt"})
 
 
-def test_compare_side_by_side_per_step(demo: Path, capsys) -> None:
+def _steps(n: int) -> str:
+    return "[" + ", ".join(f'"s{i}"' for i in range(n)) + "]"
+
+
+def _record_project(root: Path) -> None:
+    """pnr owns the steps 4 to 12 and export 13 to 15; the area metric records the deepest pnr step from 11 on."""
+    toml = root / "edr.toml"
+    text = toml.read_text().replace('steps = ["setup", "analyze", "elaborate", "synth", "cts", "route"]', f"steps = {_steps(13)}")
+    toml.write_text(text.replace("[stages.export]\n", f"[stages.export]\nsteps = {_steps(16)}\n") + """
+[metrics.area_hier_um2]
+stage = ["pnr", "export"]
+step = "*"
+file = "reports/{step}/area_hier.rpt"
+area_hier = 2
+unit = "um2"
+record = { stage = "pnr", from = 11 }
+""")
+
+
+def test_each_run_at_its_step_of_record(demo: Path, capsys, tmp_path: Path) -> None:
+    # alpha ends route-opt at step 12 and exports at 15; beta ends at step 11 and leaves step 12 empty; gamma ends at 9.
+    _record_project(demo)
+    alpha, beta, gamma = seed(demo, "alpha", "done"), seed(demo, "beta", "done"), seed(demo, "gamma", "FAILED:pnr")
+    _extract(demo, alpha, {9: area_hier(1000.0), 11: area_hier(1100.0), 12: area_hier(1200.0), 15: area_hier(1250.0)})
+    _extract(demo, beta, {9: area_hier(3000.0), 11: area_hier(3300.0)})
+    (demo / "data" / "results" / beta / "reports" / "12").mkdir()
+    _extract(demo, gamma, {8: area_hier(900.0), 9: area_hier(950.0)})
+    for run, steps in ((alpha, (9, 11, 12)), (beta, (9, 11))):
+        for step in steps:
+            _metric(demo, run, "wns_ns", step, -0.01 * step, stage="pnr")
+
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--depth", "1")
+    lines = out.splitlines()
+    assert code == 0 and lines[1].split()[:7] == ["instance", "alpha", "(pnr", "12)", "beta", "(pnr", "11)"]
+    assert next(ln for ln in lines if ln.startswith("<top>")).split() == ["<top>", "1200.0", "3300.0", "2100.0", "+175.0%"]
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--depth", "0")
+    assert code == 0 and [ln.split()[0] for ln in out.splitlines()].count("<top>") == 1
+    # The area is at the step of record of each run; wns_ns has no `record`, so both runs are at step 11, which both have.
+    code, out, _ = edr(capsys, "compare", alpha, beta, gamma)
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 2 and lines[2] == ["area_hier_um2", "1200", "(pnr", "12)", "3300", "(pnr", "11)", "-", "2100", "+175.0%",
+                                      "-", "-"]
+    assert lines[3][:7] == ["wns_ns", "-0.11", "(pnr", "11)", "-0.11", "(pnr", "11)"]
+    assert out.splitlines()[-1] == "missing: gamma has pnr steps 8 to 9"
+    code, out, _ = edr(capsys, "--json", "compare", alpha, gamma, "--area")
+    data = json.loads(out)["data"]
+    assert code == 2 and [r["run_id"] for r in data["runs"]] == [alpha]
+    assert data["missing"] == [{"run_id": gamma, "label": "gamma", "metric": "area_hier_um2", "task": "", "stage": "pnr",
+                                "steps": [8, 9]}]
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--step", "12")
+    assert code == 2 and out.splitlines()[-1] == "missing: beta has pnr steps 9, 11"
+    # Another stage than the record stage takes the deepest step the runs share there.
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--stage", "export")
+    assert code == 0 and out.splitlines()[2].split() == ["area_hier_um2", "1250", "(export", "15)", "-", "-", "-"]
+
+    project = config.load_project(demo)
+    with Database(demo / "data" / "edr.db") as db:
+        areas = analysis.last_areas(project, db, [alpha, beta, gamma])
+        export.export(project, db, ["abc1234"], tmp_path / "exp")
+    assert {rid: (a["stage"], a["step"]) for rid, a in areas.items()} == {alpha: ("pnr", 12), beta: ("pnr", 11)}
+    with open(tmp_path / "exp" / "metrics.csv", newline="") as fh:
+        marks = {(r["label"], r["stage"], int(r["step"])): r["record"] for r in csv.DictReader(fh) if r["metric"] == "area_hier_um2"}
+    assert {k for k, v in marks.items() if v == "1"} == {("alpha", "pnr", 12), ("beta", "pnr", 11)}
+    assert len(marks) == 8 and set(marks.values()) == {"0", "1"}
+
+
+def test_compare_side_by_side_at_the_deepest_common_step(demo: Path, capsys) -> None:
     a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
     for run, wns in ((a, (-0.2, 0.1)), (b, (-0.1, -0.05))):
         _metric(demo, run, "wns_ns", 2, wns[0])
         _metric(demo, run, "wns_ns", 3, wns[1])
         _metric(demo, run, "cells", 3, 1000 if run == a else 1100)
+    _metric(demo, a, "cells", 4, 1200, stage="pnr")
+    # Without `record`, both runs are at the deepest step they share, 3; a percent across a sign change is left out.
     code, out, _ = edr(capsys, "compare", a, b)
     lines = [ln.split() for ln in out.splitlines()]
-    assert code == 0 and lines[0][:5] == ["stage", "step", "name", "task", "metric"]
-    # Step names come from the stage's steps list; a percent across a sign change is left out.
-    assert ["synth", "2", "elaborate", "wns_ns", "-0.2", "-0.1", "0.1", "+50.0%"] in lines
-    assert ["synth", "3", "synth", "wns_ns", "0.1", "-0.05", "-0.15", "-"] in lines
-    assert ["synth", "3", "synth", "cells", "1000", "1100", "100", "+10.0%"] in lines
+    assert code == 0 and lines[0] == ["metric", "task", "a", "b", "Δ", "b", "Δ", "%"]
+    assert lines[2:] == [["cells", "1000", "(synth", "3)", "1100", "(synth", "3)", "100", "+10.0%"],
+                         ["wns_ns", "0.1", "(synth", "3)", "-0.05", "(synth", "3)", "-0.15", "-"]]
+    code, out, _ = edr(capsys, "compare", a, b, "--step", "2")
+    assert code == 0 and out.splitlines()[2].split() == ["wns_ns", "-0.2", "(synth", "2)", "-0.1", "(synth", "2)", "0.1",
+                                                         "+50.0%"]
     code, out, _ = edr(capsys, "--json", "compare", a, b, "--metric", "cells")
     rows = json.loads(out)["data"]["rows"]
     assert code == 0 and len(rows) == 1 and rows[0]["source_file"] == {a: "reports/3/qor.rpt", b: "reports/3/qor.rpt"}
+    assert (rows[0]["stage"], rows[0]["step"]) == ({a: "synth", b: "synth"}, {a: 3, b: 3})
     assert edr(capsys, "compare", a, b, "--metric", "nothing")[0] == 2
 
 
@@ -175,7 +248,7 @@ def test_compare_names_the_sources_when_they_differ(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "compare", "a@abc1234", f"a@{dirty_tag}")
     lines = out.splitlines()
     assert code == 0 and lines[0] == f"mixed sources: abc1234, {dirty_tag}"
-    assert lines[1].split()[5:7] == ["a@abc1234", f"a@{dirty_tag}"]
+    assert lines[1].split()[2:4] == ["a@abc1234", f"a@{dirty_tag}"]
     assert json.loads(edr(capsys, "--json", "compare", a, dirty)[1])["data"]["mixed_sources"] is True
     assert json.loads(edr(capsys, "--json", "compare", a, a)[1])["data"]["mixed_sources"] is False
     code, _, err = edr(capsys, "compare", "a@demo", a)
@@ -219,10 +292,11 @@ def test_a_pass_rule_marks_a_failing_value(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "--json", "metrics", "--source", "abc1234", "--step", "2")
     assert {(m["label"], m["name"], m["verdict"]) for m in json.loads(out)["data"]} == {
         ("a", "setup_violations", "FAIL"), ("b", "setup_violations", "pass"), ("a", "wns_ns", None), ("b", "wns_ns", None)}
-    code, out, _ = edr(capsys, "compare", a, b, "--metric", "setup_violations")
+    code, out, _ = edr(capsys, "compare", a, b, "--metric", "setup_violations", "--step", "2")
     lines = [ln.split() for ln in out.splitlines()]
-    assert code == 0 and ["synth", "2", "elaborate", "setup_violations", "3", "FAIL", "0", "-3", "-100.0%"] in lines
-    assert ["synth", "3", "synth", "setup_violations", "0", "0", "0", "-"] in lines
+    assert code == 0 and ["setup_violations", "3", "FAIL", "(synth", "2)", "0", "(synth", "2)", "-3", "-100.0%"] in lines
+    code, out, _ = edr(capsys, "compare", a, b, "--metric", "setup_violations")
+    assert ["setup_violations", "0", "(synth", "3)", "0", "(synth", "3)", "0", "-"] in [ln.split() for ln in out.splitlines()]
     code, out, _ = edr(capsys, "metrics", "--run", a, "--over", "steps")
     lines = [ln.split() for ln in out.splitlines()]
     assert code == 0 and lines[0] == ["stage", "step", "name", "setup_violations", "wns_ns", "verdict"]
@@ -346,6 +420,8 @@ def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path
     a, b = seed(demo, "a", "done"), seed(demo, "b", "STOPPED")
     _metric(demo, a, "wns_ns", 2, -0.1)
     _metric(demo, a, "wns_ns", 3, 0.2)
+    for step in (4, 5):  # the demo's area records the deepest pnr step from 5 on
+        _metric(demo, a, "area_cell_um2", step, 1000.0 + step, stage="pnr")
     res = demo / "data" / "results" / a / "reports" / "3"
     res.mkdir(parents=True)
     (res / "qor.rpt").write_text("slack 0.2\n")
@@ -359,6 +435,8 @@ def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path
     run = client.get_run(data["written"][0]["mlflow_run"])
     assert run.data.tags["edr.source"] == "abc1234" and run.data.params["config"] == "demo"
     assert [(m.step, m.value) for m in client.get_metric_history(run.info.run_id, "wns_ns")] == [(2, -0.1), (3, 0.2)]
+    assert [(m.step, m.value) for m in client.get_metric_history(run.info.run_id, "record/area_cell_um2")] == [(5, 1005.0)]
+    assert client.get_metric_history(run.info.run_id, "record/wns_ns") == []
     assert client.get_run(data["written"][1]["mlflow_run"]).info.status == "KILLED"
     code, out, _ = edr(capsys, "--json", "export", "--mlflow", str(tmp_path / "ml"))
     assert json.loads(out)["data"]["skipped"] == [a, b]

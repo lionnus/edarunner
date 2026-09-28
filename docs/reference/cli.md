@@ -371,17 +371,22 @@ edr compare [--json] [--area] [--metric NAME] [--depth N] [--instance PATH] [--s
 ```
 
 Puts two or more runs side by side. Without --area, it prints one row
-per stage, step, task and metric: the step name, the value of each run, and the
-percent of each run to the first. A value that breaks the pass rule of
-its metric shows FAIL next to it. --metric (repeatable), --stage and
---step narrow the rows; --json keeps the source file and the verdict
-of every value.
+per task and metric: the value of each run with its stage and step,
+and the delta and the percent of each run to the first. A metric
+with `record` shows each run at its step of record, the deepest step
+of the record stage at or after `from`. Any other metric shows each
+run at the deepest step that every run has. With --step, every run
+is at that step. A run that lacks its step of record or the --step is
+named missing, and the command exits 2. A value that breaks the pass
+rule of its metric shows FAIL next to it. --metric (repeatable) and
+--stage narrow the rows; --json keeps the source file and the
+verdict of every value and lists the missing runs.
 
 --area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
-column per run, and the delta and the percent of each run to the
-first. Each run is compared at its last step with an area report, or
-at --stage and --step. The source file of each run is printed under
-the table.
+column per run with its stage and step in the header, and the delta
+and the percent of each run to the first. Each run is at the step
+the rules above give for the area metric. The source file of each
+run is printed under the table.
 
 A column is named by the label, or by label@source when the runs come
 from more than one source; then a line above the table names the
@@ -396,12 +401,12 @@ get a prefix of their run ids after it.
 | `--metric NAME` | this metric, by name or canonical name; repeatable |
 | `--depth N` | the instance depth; default 1 |
 | `--instance PATH` | only this instance and the instances below it |
-| `--stage S` | this stage only; with --area, compare at this stage |
-| `--step N` | this step only; with --area, compare at this step number |
+| `--stage S` | this stage only; another stage than the record stage takes the deepest step the runs share |
+| `--step N` | every run at this step number |
 
 | Exit | Meaning |
 |---|---|
-| 2 | no row to compare |
+| 2 | no row to compare, or a run lacks its step of record or the --step |
 
 ## runtime
 

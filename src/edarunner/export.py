@@ -21,7 +21,8 @@ from .model import Project
 Row = dict[str, Any]
 
 RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "phase", "started", "ended"]
-METRIC_COLUMNS = ["run_id", "label", "config", "source", "stage", "step", "task", "metric", "canonical", "value", "unit", "source_file"]
+METRIC_COLUMNS = ["run_id", "label", "config", "source", "stage", "step", "task", "metric", "canonical", "value", "unit", "source_file",
+                  "record"]
 
 
 def export(
@@ -49,7 +50,7 @@ def export(
     if not runs:
         raise Refuse(f"no run has the source {' or '.join(map(repr, sources))}" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
-    metrics = db.metrics(run_ids=ids)
+    metrics = analysis.mark_record(project, db.metrics(run_ids=ids))
     names = analysis.names(runs)
 
     plan: list[tuple[str, Path | bytes]] = [
@@ -131,9 +132,10 @@ def _run_row(r: Row) -> list[Any]:
 
 
 def metric_row(m: Row) -> list[Any]:
-    """One metrics.csv row in the order of METRIC_COLUMNS."""
+    """One metrics.csv row in the order of METRIC_COLUMNS; `record` is 1 at the step of record, 0 at the other steps of
+    a metric with `record`, and empty for a metric without it."""
     return [m["run_id"], m.get("label"), m.get("config"), m.get("source"), m.get("stage"), m.get("step"), m.get("task"),
-            m.get("name"), m.get("canonical"), m.get("value"), m.get("unit"), m.get("source_file")]
+            m.get("name"), m.get("canonical"), m.get("value"), m.get("unit"), m.get("source_file"), m.get("record")]
 
 
 def to_csv(head: list[str], rows: list[list[Any]]) -> bytes:

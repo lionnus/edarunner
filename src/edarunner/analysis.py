@@ -40,30 +40,111 @@ def _pct(v: float | None, base: float | None) -> str | None:
     return None if v is None or not base or v * base < 0 else f"{(v - base) / abs(base) * 100:+.1f}%"
 
 
+# the step of record
+
+def mark_record(project: Project | None, rows: list[Row]) -> list[Row]:
+    """Set `record` on each metric row: 1 at the step of record of its run, task and metric, 0 on the other rows of a
+    metric with `record`, None for a metric without it.
+
+    The step of record is the deepest step of the record stage with a value, at or after `from`. Only a step that
+    the stage owns counts, so an export step never stands in for a pnr step.
+    """
+    owned = owned_steps(project) if project else {}
+    best: dict[tuple, Row] = {}
+    for m in rows:
+        metric = project.metrics.get(m["name"]) if project else None
+        rec = metric.record if metric else None
+        m["record"] = None if rec is None else 0
+        if (rec and m["stage"] == rec["stage"] and m.get("value") is not None
+                and m.get("step") in owned.get(m["stage"], ()) and m["step"] >= rec.get("from", 0)):
+            key = (m["run_id"], m.get("task") or "", m["name"])
+            if key not in best or m["step"] > best[key]["step"]:
+                best[key] = m
+    for m in best.values():
+        m["record"] = 1
+    return rows
+
+
+def _depth(project: Project | None, m: Row) -> tuple:
+    # A row without a step number sorts first; for those, a later stage counts as deeper.
+    order = list(project.stages) if project else []
+    return -1 if m.get("step") is None else m["step"], order.index(m["stage"]) if m["stage"] in order else len(order)
+
+
+def pick_step(project: Project | None, runs: list[Row], rows: list[Row], stage: str | None = None,
+              step: int | None = None) -> tuple[dict[str, Row], list[Row]]:
+    """The row each run shows for one metric and task, by run id, and the runs that lack it.
+
+    With `step`, each run is at that step. For a metric with `record`, unless `stage` names another stage, each run
+    is at its step of record. Else each run is at the deepest step that every run with a value has, or at its own
+    deepest step when they share none. A run without the step of record or without `step` is missing, with its
+    steps of that stage.
+    """
+    have: dict[str, list[Row]] = {}
+    for m in rows:
+        if m.get("value") is not None:
+            have.setdefault(m["run_id"], []).append(m)
+    if not have:
+        return {}, []
+    metric = project.metrics.get(rows[0]["name"]) if project else None
+    rec = metric.record if metric and metric.record and stage in (None, metric.record["stage"]) else None
+    if step is None and rec is None:
+        common = set.intersection(*({_depth(project, m) for m in ms} for ms in have.values()))
+        at = max(common) if common else None
+        return {rid: max((m for m in ms if at is None or _depth(project, m) == at), key=lambda m: _depth(project, m))
+                for rid, ms in have.items()}, []
+    if step is not None:
+        chosen = {m["run_id"]: m for ms in have.values() for m in ms if m.get("step") == step}
+        if not chosen:
+            return {}, []
+        where = next(iter(chosen.values()))["stage"]
+    else:
+        chosen = {m["run_id"]: m for m in mark_record(project, rows) if m["record"] == 1}
+        where = rec["stage"]
+    col = names(runs)
+    return chosen, [{"run_id": r["run_id"], "label": col[r["run_id"]], "metric": rows[0]["name"],
+                     "task": rows[0].get("task") or "", "stage": where,
+                     "steps": sorted({m["step"] for m in have.get(r["run_id"], [])
+                                      if m["stage"] == where and m.get("step") is not None})}
+                    for r in runs if r["run_id"] not in chosen]
+
+
+def _at(stage: str, step: int | None) -> str:
+    return "" if step is None else f" ({stage} {step})"
+
+
+def missing_lines(missing: list[Row]) -> list[str]:
+    """One line per run and stage that lacks the step of record or the step asked for, with the steps it has."""
+    def steps(stage: str, have: list[int]) -> str:
+        if len(have) < 2:
+            return f"{stage} step {have[0]}" if have else f"no {stage} step"
+        span = have == list(range(have[0], have[-1] + 1))
+        return f"{stage} steps " + (f"{have[0]} to {have[-1]}" if span else ", ".join(map(str, have)))
+    return list(dict.fromkeys(f"missing: {m['label']} has {steps(m['stage'], m['steps'])}" for m in missing))
+
+
+def _with_missing(view: RenderableType, missing: list[Row]) -> RenderableType:
+    lines = missing_lines(missing)
+    return Group(view, Text("\n".join(lines), style="bold")) if lines else view
+
+
 # hierarchical area
 
-def _step_key(r: Row) -> tuple:
-    return (-1 if r["step"] is None else r["step"], r["stage"], r["name"])
+def _tops(project: Project | None, area: list[Row]) -> list[Row]:
+    """The top rows of one area metric as metric rows; a metric of the project comes before a name it no longer has."""
+    name = min({t["name"] for t in area}, key=lambda n: (project is None or n not in project.metrics, n), default=None)
+    return [{**t, "value": t["area"]} for t in area if t["name"] == name]
 
 
-def area_delta(db: Database, runs: list[Row], depth: int, instance: str | None = None,
-               stage: str | None = None, step: int | None = None) -> tuple[list[Row], list[Row]]:
-    """(the report of each run, one row per instance at `depth`) with the area of each run and the delta to the first.
-
-    Each run is compared at the last step with an area report that every run has, else at its own last one.
-    """
-    tops = {r["run_id"]: {_step_key(a): a for a in db.area(run_ids=[r["run_id"]], stage=stage, step=step, depth=0)}
-            for r in runs}
-    common = set.intersection(*(set(t) for t in tops.values())) if tops else set()
-    picked = []
-    for r in runs:
-        have = tops[r["run_id"]]
-        if not have:
-            continue
-        top = have[max(common) if common else max(have)]
-        picked.append({"run_id": r["run_id"], "label": r.get("label"), "source": r.get("source"), "stage": top["stage"],
-                       "step": top["step"], "name": top["name"], "area": top["area"], "unit": top.get("unit"),
-                       "source_file": top.get("source_file")})
+def area_delta(project: Project | None, db: Database, runs: list[Row], depth: int, instance: str | None = None,
+               stage: str | None = None, step: int | None = None) -> tuple[list[Row], list[Row], list[Row]]:
+    """(the report of each run, one row per instance at `depth` with the area of each run and the delta to the first,
+    the runs that lack the step). Each run is at the step that `pick_step` takes for the area metric."""
+    tops = _tops(project, db.area(run_ids=[r["run_id"] for r in runs], stage=stage, depth=0))
+    chosen, missing = pick_step(project, runs, tops, stage, step)
+    picked = [{"run_id": r["run_id"], "label": r.get("label"), "source": r.get("source"),
+               **{k: chosen[r["run_id"]].get(k) for k in ("stage", "step", "name", "area", "unit", "source_file")}}
+              for r in runs if r["run_id"] in chosen]
     table: dict[str, Row] = {}
     for p in picked:
         for a in db.area(run_ids=[p["run_id"]], stage=p["stage"], step=p["step"], instance=instance, depth=depth):
@@ -75,20 +156,20 @@ def area_delta(db: Database, runs: list[Row], depth: int, instance: str | None =
         base = t["area"].get(first)
         t["delta"] = {rid: None if v is None or base is None else round(v - base, 6)
                       for rid, v in ((p["run_id"], t["area"].get(p["run_id"])) for p in picked[1:])}
-    return picked, rows
+    return picked, rows, missing
 
 
-def last_areas(db: Database, run_ids: list[str], max_depth: int = 3) -> dict[str, Row]:
-    """The last area report of each run for compare.html: {run id: {stage, step, source_file, rows}}.
+def last_areas(project: Project | None, db: Database, run_ids: list[str], max_depth: int = 3) -> dict[str, Row]:
+    """The area report of each run for compare.html, at its step of record, else at its last step:
+    {run id: {stage, step, source_file, rows}}. A run that lacks its step of record has none.
 
     A row is [instance, depth, area], down to `max_depth`, so the page stays small.
     """
     out = {}
     for rid in run_ids:
-        tops = db.area(run_ids=[rid], depth=0)
-        if not tops:
+        top = pick_step(project, [{"run_id": rid}], _tops(project, db.area(run_ids=[rid], depth=0)))[0].get(rid)
+        if top is None:
             continue
-        top = max(tops, key=_step_key)
         rows = [[a["instance"], a["depth"], a["area"]]
                 for a in db.area(run_ids=[rid], stage=top["stage"], step=top["step"])
                 if a["name"] == top["name"] and a["depth"] <= max_depth]
@@ -102,18 +183,20 @@ def step_names(project: Project) -> dict[int, str]:
             if n < len(project.stages[stage].steps)}
 
 
-def area_view(picked: list[Row], rows: list[Row], depth: int) -> RenderableType:
-    """Instance, one area column per run, and the delta of each run to the first; the sources below."""
+def area_view(picked: list[Row], rows: list[Row], depth: int, missing: list[Row]) -> RenderableType:
+    """Instance, one area column per run with its stage and step, and the delta of each run to the first; the sources
+    and the runs that lack the step below."""
     if not picked or not rows:
-        return "no area rows"
+        return _with_missing("no area rows", missing)
     col = names(picked)
     ids = [p["run_id"] for p in picked]
-    head = ["instance", *[col[i] for i in ids]]
+    head = ["instance", *[col[p["run_id"]] + _at(p["stage"], p["step"]) for p in picked]]
     for i in ids[1:]:
         head += [f"Δ {col[i]}", "Δ %"]
     total = {p["run_id"]: p["area"] for p in picked}
     body = []
-    for t in [*rows, {"instance": "<top>", "area": total}]:
+    # At depth 0 the rows are the top itself.
+    for t in [*rows, *([{"instance": "<top>", "area": total}] if depth else [])]:
         a = t["area"]
         line = [t["instance"], *[_num(a.get(i)) for i in ids]]
         for i in ids[1:]:
@@ -121,10 +204,10 @@ def area_view(picked: list[Row], rows: list[Row], depth: int) -> RenderableType:
             line += [_num(d), _pct(a.get(i), a.get(ids[0]))]
         body.append(line)
     right = tuple(h for h in head if h != "instance")
-    src = Text("\n".join(f"{col[p['run_id']]}: {p['stage']} step {'-' if p['step'] is None else p['step']}, "
-                         f"{p['source_file']}" for p in picked), style="dim")
+    src = Text("\n".join(f"{col[p['run_id']]}: {p['source_file']}" for p in picked), style="dim")
     unit = next((p["unit"] for p in picked if p.get("unit")), "")
-    return Group(Text(f"area {unit} at depth {depth}".replace("  ", " "), style="bold"), board.table(head, body, right=right), src)
+    return _with_missing(Group(Text(f"area {unit} at depth {depth}".replace("  ", " "), style="bold"),
+                               board.table(head, body, right=right), src), missing)
 
 
 # metrics per step
@@ -150,47 +233,57 @@ def mark(cell: object, verdict: str | None) -> object:
     return f"{cell} FAIL" if verdict == "FAIL" else cell
 
 
-def side_by_side(project: Project | None, runs: list[Row], rows: list[Row]) -> list[Row]:
-    """One row per stage, step, task and metric, with the value of each run and the delta of each to the first."""
-    # The driver records `[runtime] setup` as the stage `setup`, before every stage of the flow.
-    order = {"setup": -1, **{n: i for i, n in enumerate(project.stages)}} if project else {}
+def side_by_side(project: Project | None, runs: list[Row], rows: list[Row], stage: str | None = None,
+                 step: int | None = None) -> tuple[list[Row], list[Row]]:
+    """One row per task and metric, with the value of each run at the step that `pick_step` takes and the delta of each
+    to the first; and the runs that lack the step."""
     ids = [r["run_id"] for r in runs]
-    out: dict[tuple, Row] = {}
+    groups: dict[tuple, list[Row]] = {}
     for m in rows:
-        key = (m["stage"], m.get("step"), m.get("task") or "", m["name"])
-        row = out.setdefault(key, {"stage": m["stage"], "step": m.get("step"),
-                                   "step_name": step_name(project, m["stage"], m.get("step")),
-                                   "task": m.get("task") or "", "metric": m["name"], "unit": m.get("unit"),
-                                   "value": {}, "source_file": {}, "verdict": {}})
-        row["value"][m["run_id"]] = m["value"]
-        row["source_file"][m["run_id"]] = m.get("source_file")
-        row["verdict"][m["run_id"]] = verdict(project, m)
-    for row in out.values():
+        groups.setdefault((m.get("task") or "", m["name"]), []).append(m)
+    out, missing = [], []
+    for (task, name), ms in sorted(groups.items()):
+        chosen, lack = pick_step(project, runs, ms, stage, step)
+        missing += lack
+        if not chosen:
+            continue
+        row: Row = {"task": task, "metric": name, "unit": ms[0].get("unit"), **{k: {} for k in (
+            "value", "stage", "step", "step_name", "source_file", "verdict")}}
+        for rid, m in chosen.items():
+            for k in ("value", "stage", "step", "source_file"):
+                row[k][rid] = m.get(k)
+            row["step_name"][rid] = step_name(project, m["stage"], m.get("step"))
+            row["verdict"][rid] = verdict(project, m)
         base = row["value"].get(ids[0])
         row["delta"] = {i: None if row["value"].get(i) is None or base is None else round(row["value"][i] - base, 9)
                         for i in ids[1:]}
-    return sorted(out.values(), key=lambda r: (order.get(r["stage"], len(order)), -1 if r["step"] is None else r["step"],
-                                               r["task"], r["metric"]))
+        out.append(row)
+    return out, missing
 
 
-def side_by_side_view(runs: list[Row], rows: list[Row]) -> RenderableType:
-    """stage, step, name, task, metric, one column per run, and the percent of each run to the first."""
+def cell(row: Row, run_id: str) -> str | None:
+    """The value of one run in a side-by-side row, with FAIL and its stage and step."""
+    v = row["value"].get(run_id)
+    return None if v is None else f"{mark(_fmt(v), row['verdict'][run_id])}{_at(row['stage'][run_id], row['step'][run_id])}"
+
+
+def side_by_side_view(runs: list[Row], rows: list[Row], missing: list[Row]) -> RenderableType:
+    """metric, task, the value of each run with its stage and step, and the percent of each run to the first; the runs
+    that lack the step below."""
     if not rows:
-        return "no metrics"
+        return _with_missing("no metrics", missing)
     col = names(runs)
     ids = [r["run_id"] for r in runs]
-    head = ["stage", "step", "name", "task", "metric", *[col[i] for i in ids]]
+    head = ["metric", "task", *[col[i] for i in ids]]
     for i in ids[1:]:
         head += [f"Δ {col[i]}", "Δ %"]
     body = []
     for r in rows:
-        line = [r["stage"], r["step"], r["step_name"], r["task"], r["metric"],
-                *[mark(_fmt(r["value"].get(i)), r["verdict"].get(i)) for i in ids]]
+        line = [r["metric"], r["task"], *[cell(r, i) for i in ids]]
         for i in ids[1:]:
             line += [_fmt(r["delta"][i]), _pct(r["value"].get(i), r["value"].get(ids[0]))]
         body.append(line)
-    right = ("step", *head[5:])
-    return board.table(head, body, styles={"metric": "bold"}, right=right)
+    return _with_missing(board.table(head, body, styles={"metric": "bold"}, right=tuple(head[2:])), missing)
 
 
 def over_steps(project: Project | None, rows: list[Row]) -> list[Row]:
