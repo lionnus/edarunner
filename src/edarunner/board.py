@@ -159,7 +159,7 @@ def hm(seconds: float | None) -> str:
 
 def num(value: float | None) -> str | None:
     """A number as every view prints it: six significant digits, every digit before the point, and no exponent, so
-    907.8570000000001 prints as 907.857 and 10716000000.0 as 10716000000. None stays None."""
+    123.4560000000001 prints as 123.456 and 48213000000.0 as 48213000000. None stays None."""
     if value is None:
         return None
     text = f"{value + 0.0:.6g}"  # + 0.0 prints -0.0 as 0

@@ -61,15 +61,15 @@ project's own.
 
 A view for people prints every number the same way: six significant
 digits, every digit before the decimal point, and no exponent. So
-`907.8570000000001` prints as `907.857`, `0.30000000000000004` as `0.3`
-and `10716000000.0` as `10716000000`. `board.num` holds the rule.
+`123.4560000000001` prints as `123.456`, `0.30000000000000004` as `0.3`
+and `48213000000.0` as `48213000000`. `board.num` holds the rule.
 `edr metrics`, `edr compare`, `--over steps`, `edr status`, `edr brief`,
 the bot's `/compare` and `/metric`, and compare.html print through it.
 `--json`, `--csv`, the export and MLflow keep the value as it is stored.
 
 The format cannot choose the unit. A flow that writes a window in
-femtoseconds gives `10716000000 fs` in every view. The `scale` key stores
-that window as `10716 ns` instead:
+femtoseconds gives `48213000000 fs` in every view. The `scale` key stores
+that window as `48213 ns` instead:
 
 ```toml
 [metrics.window_ns]

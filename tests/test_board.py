@@ -88,8 +88,8 @@ def test_cost():
 
 
 def test_a_number_prints_six_significant_digits_without_an_exponent() -> None:
-    assert [board.num(v) for v in (907.8570000000001, 10716000000.0, 0.30000000000000004, -0.043, 655484.7, 1273904.4)] == [
-        "907.857", "10716000000", "0.3", "-0.043", "655485", "1273904"]
+    assert [board.num(v) for v in (123.4560000000001, 48213000000.0, 0.30000000000000004, -0.061, 452817.3, 2345678.9)] == [
+        "123.456", "48213000000", "0.3", "-0.061", "452817", "2345679"]
     assert [board.num(v) for v in (1.5e-7, 1e-5, -0.0, 0, 3)] == ["0.00000015", "0.00001", "0", "0", "3"]
     assert board.num(None) is None
 
@@ -151,7 +151,7 @@ def _compare_input():
         metrics += [{"run_id": r["run_id"], "stage": "power", "step": None, "task": "k_small", "name": f"power_{ph}",
                      "canonical": f"power__{ph}", "value": 0.1 * (i + 1), "unit": "W"} for ph in ("A", "B", "total")]
         metrics += [{"run_id": r["run_id"], "stage": "power", "step": None, "task": "k_small", "name": "window_fs",
-                     "canonical": "", "value": 10716000000.0 + i, "unit": "fs"}]
+                     "canonical": "", "value": 48213000000.0 + i, "unit": "fs"}]
         # A metric with `record`: the step of record is 2, not the last step, and the third run has none.
         metrics += [{"run_id": r["run_id"], "stage": "synth", "step": s, "task": "", "name": "wns_ns", "canonical": "",
                      "value": 0.05 + 0.01 * i if s == 2 else 0.04, "unit": "ns", "record": int(s == 2 and i != 2)}
@@ -209,7 +209,7 @@ def test_compare_script_runs_without_plotly(tmp_path):
     assert ('<td>area_cell_um2</td><td>1031 <small>synth 3</small></td>'
             '<td>1032 <small>synth 3</small> <small class="up">+0.1%</small></td>') in got["cmp"]
     assert "<td>power_A[k_small]</td><td>0.2</td><td>0.3 <small class=\"up\">+50.0%</small>" in got["cmp"]
-    assert "<td>window_fs[k_small]</td><td>10716000001</td><td>10716000002 <small class=\"up\">+0.0%</small>" in got["cmp"]
+    assert "<td>window_fs[k_small]</td><td>48213000001</td><td>48213000002 <small class=\"up\">+0.0%</small>" in got["cmp"]
     assert "<tr><td>wns_ns</td><td>0.06 <small>synth 2</small></td><td> <small>missing</small></td></tr>" in got["cmp"]
     assert "design__instance__area" not in got["cmp"]
     assert got["traj"] == '<option value="area_cell_um2">area_cell_um2</option><option value="wns_ns">wns_ns</option>'

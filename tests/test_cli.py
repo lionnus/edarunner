@@ -259,22 +259,22 @@ def test_brief_proposes_nothing_for_a_retired_run(demo: Path, capsys) -> None:
 
 def test_every_view_prints_a_value_the_same_way_under_the_project_name(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
-    add_metric(demo, a, "area_cell_um2", 907.8570000000001, step=5, stage="pnr")
+    add_metric(demo, a, "area_cell_um2", 123.4560000000001, step=5, stage="pnr")
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234")
-    assert code == 0 and ["a", "abc1234", "pnr", "5", "area_cell_um2", "907.857", "u"] in [ln.split() for ln in out.splitlines()]
+    assert code == 0 and ["a", "abc1234", "pnr", "5", "area_cell_um2", "123.456", "u"] in [ln.split() for ln in out.splitlines()]
     brief = edr(capsys, "brief", "--run", "a@demo")[1]
-    assert "- `area_cell_um2` is 907.857 u at `pnr` step 5." in brief
+    assert "- `area_cell_um2` is 123.456 u at `pnr` step 5." in brief
     detail = edr(capsys, "status", "a@demo")[1]
-    assert ["pnr", "5", "area_cell_um2", "907.857", "u"] in [ln.split() for ln in detail.splitlines()]
+    assert ["pnr", "5", "area_cell_um2", "123.456", "u"] in [ln.split() for ln in detail.splitlines()]
     board_text = edr(capsys, "status", "--metric", "design__instance__area")[1]
-    assert board_text.splitlines()[0].endswith(" area_cell_um2") and board_text.splitlines()[2].endswith(" 907.857 (pnr 5)")
+    assert board_text.splitlines()[0].endswith(" area_cell_um2") and board_text.splitlines()[2].endswith(" 123.456 (pnr 5)")
     bot = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False))).metric_text("area_cell_um2", None)
-    assert bot.splitlines()[1].endswith(" 907.857 u")
+    assert bot.splitlines()[1].endswith(" 123.456 u")
     assert all("design__instance__area" not in text for text in (out, brief, detail, board_text, bot))
     # --json and CSV keep the stored value and the canonical name.
     m = json.loads(edr(capsys, "--json", "metrics", "--source", "abc1234")[1])["data"][0]
-    assert (m["name"], m["canonical"], m["value"]) == ("area_cell_um2", "design__instance__area", 907.8570000000001)
-    assert ",area_cell_um2,design__instance__area,907.8570000000001,u," in edr(capsys, "metrics", "--source", "abc1234", "--csv")[1]
+    assert (m["name"], m["canonical"], m["value"]) == ("area_cell_um2", "design__instance__area", 123.4560000000001)
+    assert ",area_cell_um2,design__instance__area,123.4560000000001,u," in edr(capsys, "metrics", "--source", "abc1234", "--csv")[1]
 
 
 def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> None:
