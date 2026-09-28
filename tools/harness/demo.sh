@@ -22,6 +22,8 @@ EOF
     cat > "$p/site.toml" <<EOF
 schema = 1
 scratch = []
+# The runner disk may hold less than the default floor of 100 GB.
+host_free_min_gb = 1
 
 [scheduler]
 backend = "$BACKEND"
