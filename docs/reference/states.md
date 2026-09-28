@@ -21,7 +21,7 @@ and the stop of `host_full`; any keep file holds off the stop of `superseded`.
 | `over_budget` | 🔴 | the driver set `over_budget`, or the run ended `OVER_BUDGET` | yes | none | `edr stop <label>@<batch> --why over-budget` |
 | `host_full` | 🟡 | the driver set `host_full`: free space below `host_free_min_gb` | yes | `stop --now` on the newest run of that host, unless that run has `ack` | `edr stop <label>@<batch> --now --why host-full` |
 | `superseded` | 🟡 | a newer batch runs the same label at another source | yes | `stop --after-task`, unless the run has a keep file | `edr stop <label>@<batch> --after-task --why superseded` |
-| `orphan` | 🔴 | a process of the current user that matches `tool_procs`, without `EDR_RUN_ID` in its environment and without the safety marker in its cwd or command line | yes | `SIGTERM`, only with `kill_orphan` |  |
+| `orphan` | 🔴 | a process of the current user that matches `tool_procs` and that no live run owns: its `EDR_RUN_ID` names a dead or ended run of this project, or a run the database does not know whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and no safety marker in its cwd or command line | yes | `SIGTERM`, only with `kill_orphan` |  |
 | `queued` | 🔵 | no host fits the job, or the scheduler holds `max_jobs` runs of the project |  | a launch when a host fits or a job ends, one per batch per cycle | `edr launch <batch> --only <label>` |
 | `pending` | 🔵 | the scheduler has the job in its queue and the driver has not started |  | none | `edr status <label>@<batch> --live` |
 | `held` | 🟠 | the scheduler holds the job and runs it only after a person releases it | yes | none | `edr stop <label>@<batch> --why held` |

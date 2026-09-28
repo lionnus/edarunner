@@ -171,12 +171,20 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
 
 
 def orphan_alert(project: Project, o: Row) -> Alert:
-    """The alert of a tool process that no edarunner run owns."""
-    host, pid = o["host"], int(o["pid"])
+    """The alert of a tool process that no live run owns; `owner` is the run of its `EDR_RUN_ID`, when it has one."""
+    host, pid, owner, state = o["host"], int(o["pid"]), o.get("owner"), o.get("owner_state")
     ssh = "" if host == "local" else f"ssh {host} "
+    you = f"Your process {o['label']} runs on {host}"
+    if not owner:
+        title, about = "tool process with no run on", f"{you}, and no edarunner run owns it."
+    elif state == "unknown":
+        title, about = "tool process of an unknown run on", f"{you} in the tree of the run {owner}, but this project has no record of that run."
+    else:
+        ended = {"dead": "whose driver is gone", "retired": "which was retired", "abandoned": "which was retired",
+                 "stopped": "which was stopped"}.get(state, f"which has ended ({str(state).replace('_', ' ')})")
+        title, about = "tool process of an ended run on", f"{you} for the run {o['owner_handle']}, {ended}."
     return Alert(
-        "orphan", o["key"], "tool process with no run on", host,
-        f"Your process {o['label']} runs on {host}, and no edarunner run owns it. It may hold a licence seat.",
+        "orphan", o["key"], title, host, about + " It may hold a licence seat.",
         [("process", f"{o['label']}, pid {pid}"), ("running for", board.hm(o.get("etimes"))),
          ("directory", o.get("cwd") or "-")],
         cut(o["phase"]),

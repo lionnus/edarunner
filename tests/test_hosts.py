@@ -215,14 +215,17 @@ def test_tool_processes_local(ssh: Ssh) -> None:
     assert isinstance(mine[0][1], int) and isinstance(mine[0][2], float)
 
 
-def test_tool_processes_reads_env_and_cwd_in_one_call(ssh: Ssh, monkeypatch) -> None:
-    out = ("501 60 99.0 fc_shell fc_shell -f main.tcl\n502 70 0.0 fc_shell fc_shell\n503 5 0.0 bash bash\n"
-           "@@\n/proc/501/environ\n/proc/503/environ\n@@\n/proc/501 /scratch/x/edr/p/r1\n/proc/502 /home/me\n")
-    calls = fake_run(monkeypatch, {"EDR_RUN_ID": (0, out, "")})
+def test_tool_processes_reads_the_run_id_and_the_cwd_in_one_call(ssh: Ssh, monkeypatch) -> None:
+    listing = "501 60 99.0 fc_shell fc_shell -f main.tcl\n502 70 0.0 fc_shell fc_shell\n503 5 0.0 bash bash\n@@\n"
+    cwds = "@@\n/proc/501 /scratch/x/edr/p/r1\n/proc/502 /home/me\n"
+    calls = fake_run(monkeypatch, {"EDR_RUN_ID": (0, listing + "/proc/501/environ:EDR_RUN_ID=r1\n/proc/503/environ:EDR_RUN_ID=r3\n"
+                                                  + cwds, "")})
     assert ssh.tool_processes("hostA", "^fc_shell$") == [
-        Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/p/r1", True),
-        Proc(502, 70, 0.0, "fc_shell", "fc_shell", "/home/me", False)]
+        Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/p/r1", "r1"),
+        Proc(502, 70, 0.0, "fc_shell", "fc_shell", "/home/me", "")]
     assert len(calls) == 1
+    fake_run(monkeypatch, {"EDR_RUN_ID": (0, listing + cwds, "")})  # no process has EDR_RUN_ID
+    assert [p.cwd for p in ssh.tool_processes("hostA", "^fc_shell$")] == ["/scratch/x/edr/p/r1", "/home/me"]
 
 
 def test_check_local_finds_every_tool_here(ssh: Ssh) -> None:

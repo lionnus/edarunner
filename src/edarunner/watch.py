@@ -69,8 +69,10 @@ STATES = {
                        "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, unless the run has a keep file", alert=True),
-    "orphan": State("a process of the current user that matches `tool_procs`, without `EDR_RUN_ID` in its environment "
-                    "and without the safety marker in its cwd or command line",
+    "orphan": State("a process of the current user that matches `tool_procs` and that no live run owns: its "
+                    "`EDR_RUN_ID` names a dead or ended run of this project, or a run the database does not know "
+                    "whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and no safety "
+                    "marker in its cwd or command line",
                     "`SIGTERM`, only with `kill_orphan`", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),
@@ -258,14 +260,23 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         rec["acted"] = True
 
 
-def orphans(project: Project, ssh: Ssh) -> list[Row]:
-    """Our tool processes on every site host that no edarunner run owns.
+def _ended(run: Row) -> str:
+    """The state of a run that no longer runs its tools: dead, retired, stopped or ended; "" for a live run."""
+    state = run["state"] if run.get("state") in ("retired", "abandoned") else board.state_of(run)
+    return state if not board.is_live(run) or state in ("dead", "stopped", "retired", "abandoned") else ""
 
-    A process is owned when its environment holds `EDR_RUN_ID`, the mark the driver gives every stage
-    command of any project, or when its cwd or command line holds the safety marker of run trees."""
+
+def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
+    """Our tool processes on every site host that no live run owns.
+
+    A process with `EDR_RUN_ID` belongs to that run. A live run of this project owns it; a run of this
+    project that is dead or ended leaves it an orphan. A run id this database does not know belongs to
+    another project, whose watcher judges it, unless the process's cwd or command line holds
+    `/<project>/<run_id>` under the safety marker. A process without `EDR_RUN_ID` is owned when its cwd
+    or command line holds the safety marker."""
     if not project.site.tool_procs:
         return []
-    marker = project.safety.marker
+    marker, runs = project.safety.marker, {r["run_id"]: r for r in db.runs()}
     out = []
     for host in project.site.hosts:
         try:
@@ -274,9 +285,19 @@ def orphans(project: Project, ssh: Ssh) -> list[Row]:
             log.warning("%s: %s", host, e)
             continue
         for p in procs:
-            if not (p.edr or marker in p.cwd or marker in p.args):
-                out.append({"key": f"orphan:{host}:{p.pid}", "run_id": "", "label": p.comm, "batch": host, "host": host,
-                            "pid": p.pid, "phase": p.args, "etimes": p.etimes, "cwd": p.cwd})
+            run, texts = runs.get(p.run_id), (p.cwd, p.args)
+            if run is not None:
+                ended = _ended(run)
+                owned = not ended
+            elif p.run_id:
+                ended = "unknown"
+                owned = not any(marker in t and f"/{project.project}/{p.run_id}" in t for t in texts)
+            else:
+                ended, owned = "", any(marker in t for t in texts)
+            if not owned:
+                out.append({"key": f"orphan:{host}:{p.pid}", "run_id": run["run_id"] if run else "", "label": p.comm,
+                            "batch": host, "host": host, "pid": p.pid, "phase": p.args, "etimes": p.etimes, "cwd": p.cwd,
+                            "owner": p.run_id, "owner_handle": board.handle(run) if run else "", "owner_state": ended})
     return out
 
 
@@ -528,7 +549,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
         if state == "dead":
             _resume(project, ssh, backend, db, run, hb, progress, now)
-    for o in [] if backend.name in SCHEDULERS else orphans(project, ssh):
+    for o in [] if backend.name in SCHEDULERS else orphans(project, ssh, db):
         states[o["key"]] = "orphan"
         if dry_run:
             print(f"{o['key']}: orphan {o['phase']} ({o['etimes']} s)")

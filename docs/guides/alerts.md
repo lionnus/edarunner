@@ -578,7 +578,21 @@ See the last stage and the log tail:
 edr status b_nodw@demo
 ```
 
-`orphan`: a tool process of yours that no edarunner run owns. A process belongs to a run when its environment holds `EDR_RUN_ID`, or when its working directory or command line holds the safety marker; so the tool of another project is no orphan.
+`orphan`: a tool process of yours that no live run owns. The watcher
+reads `EDR_RUN_ID` from the environment of the process; the driver sets
+it for every stage command of every project.
+
+- A live run of this project owns the process.
+- A run of this project that is dead or has ended leaves it an orphan,
+  and the alert names that run.
+- A run id that the database does not know belongs to another project,
+  whose watcher judges it. The process is an orphan only when its
+  working directory or command line holds `/<project>/<run_id>` under
+  the safety marker.
+- A process without `EDR_RUN_ID` is owned when its working directory or
+  command line holds the safety marker.
+
+A tool process that no run owns:
 
 ```
 🔴 demo: tool process with no run on hostA
@@ -588,6 +602,24 @@ process: fc_shell, pid 5120
 running for: 3h
 directory: /home/me/work
 fc_shell -f /home/me/work/run.tcl
+
+Check it:
+ssh hostA ps -o pid,etime,args -p 5120
+If it is yours and stale, end it:
+ssh hostA kill 5120
+edarunner never kills it, since kill_orphan is off.
+```
+
+A tool that a dead run left behind:
+
+```
+🔴 demo: tool process of an ended run on hostA
+Your process fc_shell runs on hostA for the run b_nodw@demo, whose driver is gone. It may hold a licence seat.
+
+process: fc_shell, pid 5120
+running for: 2d
+directory: /scratch/me/edr/demo/20260926_1200_b_nodw_demo_gabc1234/pnr
+fc_shell -f /scratch/me/edr/demo/20260926_1200_b_nodw_demo_gabc1234/pnr/run.tcl
 
 Check it:
 ssh hostA ps -o pid,etime,args -p 5120

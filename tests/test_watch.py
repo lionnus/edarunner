@@ -216,12 +216,26 @@ def test_orphans_are_reported_and_killed_only_when_asked(env: Env) -> None:
     assert env.ssh.killed == [("cmd", "kill -TERM 99997")] and ("", "kill") in env.events()
 
 
-def test_a_process_of_any_edarunner_run_is_no_orphan(env: Env) -> None:
-    env.ssh.procs = [Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/other/run", edr=True),
-                     Proc(502, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/other/r1/pnr"),
-                     Proc(503, 60, 99.0, "fc_shell", "fc_shell -f /scratch/x/edr/other/r1/main.tcl", "/home/me"),
-                     Proc(504, 60, 99.0, "fc_shell", "fc_shell", "/home/me")]
-    assert [k for k, s in env.cycle().items() if s == "orphan"] == ["orphan:local:504"]
+def test_the_run_id_in_the_environment_decides_who_owns_a_tool(env: Env) -> None:
+    live, dead, done = env.heartbeat("a")["run_id"], env.heartbeat("d", age=200)["run_id"], env.heartbeat(
+        "g", phase="done", exit=0)["run_id"]
+    env.ssh.procs = [Proc(501, 60, 99.0, "fc_shell", "fc_shell", "/home/me", live),
+                     Proc(502, 60, 99.0, "fc_shell", "fc_shell", "/home/me", dead),
+                     Proc(503, 60, 99.0, "fc_shell", "fc_shell", "/home/me", done),
+                     Proc(504, 60, 99.0, "fc_shell", "fc_shell", "/scratch/x/edr/other/r9/pnr", "r9"),
+                     Proc(505, 60, 99.0, "fc_shell", "fc_shell", "/scratch/x/edr/demo/r8/pnr", "r8"),
+                     Proc(506, 60, 99.0, "fc_shell", "fc_shell -f /scratch/x/edr/other/r1/main.tcl", "/home/me"),
+                     Proc(507, 60, 99.0, "fc_shell", "fc_shell", "/home/me")]
+    states = env.cycle()
+    assert sorted(k for k, s in states.items() if s == "orphan") == [f"orphan:local:{p}" for p in (502, 503, 505, 507)]
+    you = "Your process fc_shell runs on local"
+    assert {k.rsplit(":", 1)[1]: a.about.removesuffix(" It may hold a licence seat.")
+            for k, a in env.notifier.alerts.items() if a.kind == "orphan"} == {
+        "502": f"{you} for the run d@demo, whose driver is gone.",
+        "503": f"{you} for the run g@demo, which has ended (done).",
+        "505": f"{you} in the tree of the run r8, but this project has no record of that run.",
+        "507": f"{you}, and no edarunner run owns it."}
+    assert {e for e in env.events() if e[1] == "orphan"} == {(dead, "orphan"), (done, "orphan"), ("", "orphan")}
 
 
 def test_dry_run_writes_nothing(env: Env, capsys) -> None:

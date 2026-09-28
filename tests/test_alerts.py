@@ -28,6 +28,8 @@ ORPHAN = {"key": "orphan:hostA:4711", "host": "hostA", "pid": 4711, "label": "fc
           "cwd": "/home/me/work", "phase": "fc_shell -f /home/me/work/run.tcl -x " + "y" * 120}
 ALERTS = {
     "orphan": alerts.orphan_alert(PROJECT, ORPHAN),
+    "orphan of a dead run": alerts.orphan_alert(PROJECT, {**ORPHAN, "owner": RUN["run_id"], "owner_handle": "b@demo",
+                                                          "owner_state": "dead"}),
     "dead": alerts.run_alert(PROJECT, RUN, "dead", ["heartbeat older than 2700 s, driver 4711 gone on hostA"], HB, NOW),
     "hung": alerts.run_alert(PROJECT, RUN, "hung", ["hung: no progress since 14.01 03:00"], HB, NOW),
     "over_budget": alerts.run_alert(PROJECT, RUN, "over_budget", ["over_budget: stage synth"], HB, NOW),
@@ -76,6 +78,34 @@ EXPECTED = {
         'edarunner never kills it, since kill_orphan is off.',
         '🔴 demo: tool process with no run on hostA\n'
         'Your process fc_shell runs on hostA, and no edarunner run owns it. It may hold a licence seat.\n'
+        '\n'
+        'process: fc_shell, pid 4711\n'
+        'running for: 3h\n'
+        'directory: /home/me/work\n'
+        '    fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…\n'
+        '\n'
+        'Check it:\n'
+        '    ssh hostA ps -o pid,etime,args -p 4711\n'
+        'If it is yours and stale, end it:\n'
+        '    ssh hostA kill 4711\n'
+        'edarunner never kills it, since kill_orphan is off.\n',
+    ),
+    'orphan of a dead run': (
+        '🔴 <b>demo: tool process of an ended run on</b> <code>hostA</code>\n'
+        'Your process fc_shell runs on hostA for the run b@demo, whose driver is gone. It may hold a licence seat.\n'
+        '\n'
+        'process: fc_shell, pid 4711\n'
+        'running for: 3h\n'
+        'directory: /home/me/work\n'
+        '<code>fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…</code>\n'
+        '\n'
+        'Check it:\n'
+        '<code>ssh hostA ps -o pid,etime,args -p 4711</code>\n'
+        'If it is yours and stale, end it:\n'
+        '<code>ssh hostA kill 4711</code>\n'
+        'edarunner never kills it, since kill_orphan is off.',
+        '🔴 demo: tool process of an ended run on hostA\n'
+        'Your process fc_shell runs on hostA for the run b@demo, whose driver is gone. It may hold a licence seat.\n'
         '\n'
         'process: fc_shell, pid 4711\n'
         'running for: 3h\n'
