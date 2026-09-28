@@ -68,12 +68,8 @@ inkscape docs/diagrams/<name>.svg --export-type=png --export-filename=/tmp/<name
 
 ## Releases
 
-A release is one commit, `:bookmark: Release X.Y.Z`, on `devel`:
-
-1. Rename the `Unreleased` heading at the top of `CHANGELOG.md` to
-   `## X.Y.Z (YYYY-MM-DD)`.
-2. Set `version` in `pyproject.toml` and `__version__` in
-   `src/edarunner/__init__.py` to the same value.
+A release is one commit, `:bookmark: Release X.Y.Z`, on `devel` that sets `version` in
+`pyproject.toml` and `__version__` in `src/edarunner/__init__.py` to the same value.
 
 Merge `devel` into `main` once CI is green, tag `main` as `vX.Y.Z`, and
 push the tag. The site deploys from `main`.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edarunner"
-version = "0.4.0"
+version = "0.1.0"
 description = "Run EDA flows on a pool of hosts, keep all runs in one database, watch them, and export the results."
 readme = "README.md"
 license = "Apache-2.0"
@@ -36,7 +36,6 @@ edr = "edarunner.cli:main"
 Repository = "https://github.com/lionnus/edarunner"
 Documentation = "https://lionnus.github.io/edarunner/"
 Issues = "https://github.com/lionnus/edarunner/issues"
-Changelog = "https://github.com/lionnus/edarunner/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edarunner"]
