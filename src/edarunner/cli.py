@@ -253,6 +253,14 @@ class Ctx:
         """The heartbeat of a run, or {} when the driver wrote none."""
         return config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.json")
 
+    def left(self, row: Row, state: str) -> list[str]:
+        """The stages that `edr continue` runs on the tree of a run that ended over its budget, for the triage; none
+        for another run, or when continue refuses."""
+        if state != "over_budget" or board.is_live(row):
+            return []
+        left, _, why = launch.stages_left(self.project, self.db, row)
+        return [] if why else left
+
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""
         if rows:
@@ -453,7 +461,7 @@ class Actions:
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.db.run(row["run_id"]) or row
-        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs())
+        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs(), self.c.left(row, board.state_of(row)))
 
     def events_text(self, n: int) -> str:
         """The last `n` events, newest first."""
@@ -659,7 +667,7 @@ def _triage(c: Ctx, rows: list[Row]) -> Text | str:
     lines, everyone = [], c.db.runs()
     for r in board.order(rows):
         state = board.state_of(r)
-        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {}, everyone)
+        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {}, everyone, c.left(r, state))
         if cmd is None:
             continue
         lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ",

@@ -223,8 +223,19 @@ def states_page() -> str:
     row = {"label": "<label>", "batch": "<batch>", "source": "<source>", "stage": "<stage>", "phase": "<phase>",
            "root": "<root>"}
     hb = {"stage": "<stage>", "step_name": "<step>"}
-    rows = [[code(s), tgfmt.MARK.get(s, ""), st.test, "yes" if st.alert else "", st.action,
-             code(board.triage_cmd(row, s, hb))] for s, st in watch.STATES.items()]
+
+    def proposed(s: str) -> str:
+        """The command the triage proposes; `over_budget` names a live run and one that ended, with and without stages
+        left."""
+        live = code(board.triage_cmd(row, s, hb))
+        if s != "over_budget":
+            return live
+        ended = {**row, "phase": "OVER_BUDGET:<stage>"}
+        return (f"{live} while the run lives; once it ended, {code(board.triage_cmd(ended, s, hb, left=['<next>']))} "
+                f"with stages left, and {code(board.triage_cmd(ended, s, hb, left=[])) or 'none'} without")
+
+    rows = [[code(s), tgfmt.MARK.get(s, ""), st.test, "yes" if st.alert else "", st.action, proposed(s)]
+            for s, st in watch.STATES.items()]
     return "".join([head("Run states"), "Each run has one of the states below. The table shows how the watcher finds "
                     "the state, whether it sends an alert, what it does after `grace_s` and the command the triage proposes.\n\n",
                     rest(watch.State) + "\n\n",

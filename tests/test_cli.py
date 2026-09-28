@@ -162,6 +162,24 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     assert code == 1
 
 
+def test_the_triage_stops_a_live_run_over_its_budget_and_continues_one_that_ended(demo: Path, capsys) -> None:
+    seed(demo, "b_nodw", "stage:pnr", state="over_budget")
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    z = seed(demo, "z", "OVER_BUDGET:power")
+    ran(demo, z, "OVER_BUDGET:power", {n: ("done", 0) for n in DEMO_STAGES})  # power is the last stage
+    code, out, _ = edr(capsys, "status", "--triage")
+    assert code == 0 and "    edr stop b_nodw@demo --why over-budget\n" in out and "    edr continue a@demo\n" in out
+    assert "z@demo" not in out  # no stage left, so nothing to propose
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert [(d["handle"], d["command"]) for d in decisions] == [
+        ("b_nodw@demo", "edr stop b_nodw@demo --why over-budget"), ("a@demo", "edr continue a@demo")]
+    assert "The triage proposes `edr continue a@demo`." in edr(capsys, "brief", "--run", "a@demo")[1]
+    assert "The triage proposes nothing for it." in edr(capsys, "brief", "--run", "z@demo")[1]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo") and "<code>edr " not in acts.status_text("z@demo")
+
+
 def test_events_filters(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "events")
     assert code == 2 and out == "no events\n"
