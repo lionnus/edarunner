@@ -708,7 +708,7 @@ def test_extract_takes_every_step_of_a_stage_over_budget_with_exit_0(demo: Path,
 
 def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
-    beat(demo, a, tasks={"k_small": {"phase": "done"}, "k_big": {"phase": "done"}})
+    beat(demo, a, tasks={"power": {"k_small": {"phase": "done"}, "k_big": {"phase": "done"}}})
     results = demo / "data" / "results" / a
     for n in (2, 3, 4):
         (results / "reports" / str(n)).mkdir(parents=True)
@@ -784,7 +784,7 @@ def test_extract_reads_parameters_from_the_files_and_flags_runs_that_contradict_
         "            if m['name'] == 'window_ns' and m['value'] == 4096]\n")
     a, b, c = (seed(demo, label, "done") for label in ("a", "b", "c"))
     d = seed(demo, "a.power", "done", tree_id=a)  # it continues a on the tree of a
-    beat(demo, c, tasks={"k_small": {"phase": "done"}, "k_big": {"phase": "done"}})
+    beat(demo, c, tasks={"power": {"k_small": {"phase": "done"}, "k_big": {"phase": "done"}}})
     for run, lanes, design in ((a, 8, "abc1234"), (b, 8, "abc1234"), (c, 4, "abc1234-dirty"), (d, 8, "abc1234")):
         results = demo / "data" / "results" / run
         (results / "log").mkdir(parents=True)
@@ -1039,8 +1039,8 @@ def test_continue_runs_exactly_the_tasks_a_group_held_back(demo: Path, capsys) -
 
     def group(done: tuple[str, ...], held: tuple[str, ...]) -> dict:
         """The task entries of a power group as the driver writes them after a stop."""
-        return {**{t: {"stage": "power", "phase": "done", "started": 110, "ended": 120, "exit": 0} for t in done},
-                **{t: {"stage": "power", "phase": "held"} for t in held}}
+        return {"power": {**{t: {"phase": "done", "started": 110, "ended": 120, "exit": 0} for t in done},
+                          **{t: {"phase": "held"} for t in held}}}
 
     def tasks_of(out: str) -> list[tuple[str, list[str]]]:
         return [(s["name"], [t["id"] for t in s["tasks"]]) for s in json.loads(out)["data"]["spec"]["stages"]]
@@ -1069,7 +1069,7 @@ def test_continue_runs_exactly_the_tasks_a_group_held_back(demo: Path, capsys) -
 def test_only_a_task_group_holds_tasks(demo: Path, capsys) -> None:
     b = seed(demo, "b_nodw", "OVER_BUDGET:synth")
     ran(demo, b, "OVER_BUDGET:synth", {"synth": ("over_budget", 0)}, names=("synth", "pnr"))
-    beat(demo, b, tasks={"k_small": {"phase": "skipped"}})  # an entry without a stage lands under synth
+    beat(demo, b, tasks={"synth": {"k_small": {"phase": "skipped"}}})  # synth is no task group
     edr(capsys, "status")
     code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
     assert code == 0 and stages_of(out)[1] == ["pnr"]

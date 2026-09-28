@@ -450,7 +450,7 @@ def pivot(project: Project, db: Database, runs: list[Row], rows: list[Row]) -> R
     out = []
     for p in picks:
         spec = collect.load_spec(project, p)
-        failed = {s["task"] for s in db.stage_runs(p["run_id"]) if s["task"] and s.get("status") == "failed"}
+        failed = {(s["stage"], s["task"]) for s in db.stage_runs(p["run_id"]) if s["task"] and s.get("status") == "failed"}
         cells, marks = {}, {}
         for k, h in zip(keys, heads):
             m = at.get((p["run_id"], *k))
@@ -463,10 +463,11 @@ def pivot(project: Project, db: Database, runs: list[Row], rows: list[Row]) -> R
             "columns": heads, "rows": out}
 
 
-def _why(run: Row, spec: dict, failed: set[str], key: tuple, row: Row | None) -> str:
-    """Why the pivot cell of `run` at (stage, step, task) has no value; `row` is its failed row, if any."""
+def _why(run: Row, spec: dict, failed: set[tuple[str, str]], key: tuple, row: Row | None) -> str:
+    """Why the pivot cell of `run` at (stage, step, task) has no value; `row` is its failed row, if any, and `failed`
+    holds the (stage, task) of each task that failed."""
     stage, _, task = key
-    if row is not None or task in failed:
+    if row is not None or (stage, task) in failed:
         return "failed"
     # The spec of an import lists its task groups only, so a stage missing from a spec says nothing.
     if spec and task and not any(t.get("id") == task for s in spec.get("stages") or [] if s.get("name") == stage

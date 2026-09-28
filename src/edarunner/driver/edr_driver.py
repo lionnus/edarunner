@@ -244,7 +244,7 @@ class Driver(object):
             if hb["log"]:
                 hb["last_log"] = last_lines(hb["log"], LOG_LINES, LOG_WIDTH)
             hb["keep_hours"] = self.read_keep()[1]
-            hb["counts"]["running"] = sum(1 for t in hb["tasks"].values() if t["phase"] == "running")
+            hb["counts"]["running"] = sum(1 for g in hb["tasks"].values() for t in g.values() if t["phase"] == "running")
             data = json.dumps(hb, sort_keys=True)
             # Two threads share the tmp name; the lock keeps the newest snapshot last.
             tmp = "%s.%d.tmp" % (self.state_file, os.getpid())
@@ -299,9 +299,10 @@ class Driver(object):
             e.update(fields)
         self.beat()
 
-    def record_task(self, tid, phase, beat=True, **fields):
+    def record_task(self, stage, tid, phase, beat=True, **fields):
+        # A task id is unique within its group only, so the entries go under the group.
         with self.lock:
-            e = self.hb["tasks"].setdefault(tid, {
+            e = self.hb["tasks"].setdefault(stage, {}).setdefault(tid, {
                 "phase": phase, "pid": None, "pgid": None, "started": None,
                 "ended": None, "exit": None, "signature": None, "log": None})
             e["phase"] = phase
@@ -697,7 +698,7 @@ class Driver(object):
                 self.sigs.append(sig)
                 if streak and len(self.sigs) >= streak and len(set(self.sigs[-streak:])) == 1:
                     self.hb["looping"] = True
-        self.record_task(tid, "done" if rc == 0 else "failed", ended=int(time.time()), exit=rc, signature=sig)
+        self.record_task(st["name"], tid, "done" if rc == 0 else "failed", ended=int(time.time()), exit=rc, signature=sig)
 
     def run_group(self, st):
         name = st["name"]
@@ -739,8 +740,8 @@ class Driver(object):
                 p, task, t0, log = running[tid]
                 if p.poll() is None:
                     tb = task.get("budget") or (budget if per_task else {})
-                    if not self.hb["tasks"][tid].get("over_budget") and self.budget_over(tb, t0) == "hours":
-                        self.record_task(tid, "running", over_budget=True)
+                    if not self.hb["tasks"][name][tid].get("over_budget") and self.budget_over(tb, t0) == "hours":
+                        self.record_task(name, tid, "running", over_budget=True)
                         self.killpg(p.pid, signal.SIGTERM)
                     continue
                 del running[tid]
@@ -755,7 +756,7 @@ class Driver(object):
                     self.hb["counts"]["queued"] = 0
                     self.hb["counts"]["held"] += len(pending)
                 for tid in pending:
-                    self.record_task(tid, "held", beat=False, stage=name)
+                    self.record_task(name, tid, "held", beat=False)
                 return
             with self.lock:
                 self.hb["counts"]["queued"] = len(pending)
@@ -770,7 +771,7 @@ class Driver(object):
                     skipped.add(tid)
                     with self.lock:
                         self.hb["counts"]["skipped"] += 1
-                    self.record_task(tid, "skipped", stage=name)
+                    self.record_task(name, tid, "skipped")
                     continue
                 key = "%s.%s.%s" % (self.key, name, tid)
                 why = self.take(task.get("tools") or tools, key, task.get("budget") or budget)
@@ -789,7 +790,7 @@ class Driver(object):
                 running[tid] = (p, task, int(time.time()), log)
                 with self.lock:
                     self.hb["log"] = log
-                self.record_task(tid, "running", stage=name, pid=p.pid, pgid=p.pid, started=running[tid][2], log=log)
+                self.record_task(name, tid, "running", pid=p.pid, pgid=p.pid, started=running[tid][2], log=log)
             time.sleep(TICK_S)
 
     # the run

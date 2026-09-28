@@ -157,7 +157,7 @@ def _extract_files(root: Path, run_id: str, files: dict[str, str]) -> None:
         path.write_text(text)
     project = config.load_project(root)
     with Database(project.data / "edr.db") as db:
-        for row in metrics.extract(project, db.run(run_id), project.data / "results", {"k_small": project.tasks["k_small"]}):
+        for row in metrics.extract(project, db.run(run_id), project.data / "results", {("power", "k_small"): project.tasks["k_small"]}):
             db.add_metric(row)
 
 

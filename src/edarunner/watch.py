@@ -144,9 +144,10 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
         if hb.get("step_times"):
             db.set_step_times(hb["run_id"], hb["step_times"])
         db.add_run_sample(hb)
-        for tid, t in (hb.get("tasks") or {}).items():
-            db.upsert_stage_run({"run_id": hb["run_id"], "stage": t.get("stage") or hb.get("stage") or "", "task": tid,
-                                 "status": t.get("phase"), **{k: t.get(k) for k in _TASK_KEYS}})
+        for stage, tasks in (hb.get("tasks") or {}).items():
+            for tid, t in tasks.items():
+                db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
+                                     **{k: t.get(k) for k in _TASK_KEYS}})
 
 
 # classify
@@ -273,8 +274,9 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
         return ""
     only = collect.spec_stages(spec)
     finished, running = collect.stage_state(project, hb, only)
-    tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items() if e.get("phase") in ("done", "failed")}
-    key = [finished, sorted(tasks), hb.get("step") if running else None, board.is_live(hb)]
+    tasks = {k: phase for k, phase in collect.task_phases(hb).items() if phase in ("done", "failed")}
+    # Lists, not tuples: the key goes through JSON between cycles.
+    key = [finished, sorted(map(list, tasks)), hb.get("step") if running else None, board.is_live(hb)]
     rec = progress.setdefault(run["run_id"], {})
     if rec.get("collected") == key or not (finished or tasks or running):
         return ""
@@ -314,37 +316,37 @@ def _added(rows: list[dict]) -> str:
 
 
 def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict | None = None,
-                tasks: dict[str, str] | None = None, actor: str | None = "watch") -> list[dict]:
+                tasks: dict[tuple[str, str], str] | None = None, actor: str | None = "watch") -> list[dict]:
     """The metric rows of a run from its collected files: the done tasks, the stages that exited 0, and
     the finished steps of every other stage.
 
     A step is finished when `step_runs` holds it and a later step of the run, whatever the status of
-    its stage. `tasks` maps a task id to its phase, by default from the heartbeat. A run without a
-    heartbeat, such as an imported one, takes every stage and every task of its spec. A task takes
-    its fields from the spec, else from tasks.toml. An unknown task is an event of `actor`; None
-    writes no event.
+    its stage. `tasks` maps (stage, task id) to the phase of the task, by default from the heartbeat,
+    and a task counts in its own group only. A run without a heartbeat, such as an imported one, takes
+    every stage and every task of its spec. A task takes its fields from the spec, else from
+    tasks.toml. An unknown task is an event of `actor`; None writes no event.
     """
     spec = collect.load_spec(project, run) if spec is None else spec
     only = collect.spec_stages(spec)
     task_dirs = collect.spec_task_dirs(spec, str(run.get("root") or hb.get("root") or ""))
     fields = collect.spec_task_fields(spec)
     if tasks is None:
-        tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items()}
+        tasks = collect.task_phases(hb)
     if not hb:
         tasks = dict.fromkeys(task_dirs, "done")
-    done: dict[str, Task] = {}
-    for t, p in tasks.items():
+    done: dict[tuple[str, str], Task] = {}
+    for (s, t), p in tasks.items():
         if p != "done":
             continue
         if t in fields:
-            done[t] = Task(id=t, fields=fields[t])
+            done[s, t] = Task(id=t, fields=fields[t])
             continue
         try:
-            done[t] = config.resolve_task(project, t)
+            done[s, t] = config.resolve_task(project, t)
         except config.ConfigError as e:
             # The spec names the task's directory even when the task table no longer has it.
-            if t in task_dirs:
-                done[t] = Task(id=t, fields={"id": t})
+            if (s, t) in task_dirs:
+                done[s, t] = Task(id=t, fields={"id": t})
             elif actor:
                 db.add_event(actor, run["run_id"], "extract", f"unknown task {t}: {e}")
     # A stage that exited 0 (done, or over budget without a kill) ran all its steps, and a task group

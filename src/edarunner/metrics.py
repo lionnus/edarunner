@@ -196,12 +196,13 @@ def failure_text(failed: dict[str, dict], sep: str = "; ") -> str:
     return sep.join(f"{name}: {f['count']} failed: {f['first']}" for name, f in failed.items())
 
 
-def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Task],
-            stages: set[str] | None = None, task_dirs: dict[str, str] | None = None) -> list[dict]:
+def extract(project: Project, run: dict, results_dir: Path, tasks: dict[tuple[str, str], Task],
+            stages: set[str] | None = None, task_dirs: dict[tuple[str, str], str] | None = None) -> list[dict]:
     """Extract every metric of `run` from its collected files under `results_dir`.
 
-    `stages` limits the work to the stages the run's spec lists, and `task_dirs`
-    (task id -> directory relative to the root) comes from that spec.
+    `tasks` holds the tasks by (stage, task id), and a task group reads its own. `stages` limits the work to the
+    stages the run's spec lists, and `task_dirs` ((stage, task id) -> directory relative to the root) comes from
+    that spec.
     """
     task_dirs = task_dirs or {}
     run_dir = Path(results_dir) / run["run_id"]
@@ -215,9 +216,9 @@ def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Tas
                 continue
             stage = project.stages.get(stage_name)
             group = stage is not None and stage.is_group
-            for task in list(tasks.values()) if group else [None]:
+            for task in [t for (s, _), t in tasks.items() if s == stage_name] if group else [None]:
                 rows += _extract_one(project, metric, stage_name, stage, task, base, run_dir, now,
-                                     owned.get(stage_name, range(0)), task_dirs.get(task.id) if task else None)
+                                     owned.get(stage_name, range(0)), task_dirs.get((stage_name, task.id)) if task else None)
     return rows
 
 

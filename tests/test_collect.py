@@ -49,7 +49,8 @@ def env(tmp_path: Path, monkeypatch):
 
 
 def heartbeat(run: dict, phase: str, stage: str, tasks: dict[str, str] | None = None) -> dict:
-    return {**run, "phase": phase, "stage": stage, "tasks": {t: {"phase": p} for t, p in (tasks or {}).items()}}
+    """A heartbeat in `stage` whose `tasks` (task id -> phase) ran in that stage."""
+    return {**run, "phase": phase, "stage": stage, "tasks": {stage: {t: {"phase": p} for t, p in tasks.items()}} if tasks else {}}
 
 
 def artifacts(db: Database) -> list[tuple[str, str, int]]:
@@ -179,5 +180,5 @@ def test_spec_tasks_and_stages_win_over_the_task_table(env) -> None:
     assert (results / "simulation" / "tests" / "demo" / "NEW_TEST" / "power" / "reports" / "power.csv").is_file()
     # The tree's synth reports belong to the run that made them, not to this power-only run.
     assert not (results / "reports").exists()
-    assert collect.spec_task_dirs({"stages": [{"name": "power", "tasks": [{"id": "k_new", "dir": str(new)}]}]},
-                                  str(root)) == {"k_new": "simulation/tests/demo/NEW_TEST"}
+    two = {"stages": [{"name": g, "tasks": [{"id": "k_new", "dir": str(root / d)}]} for g, d in (("power", "sim"), ("post", "post"))]}
+    assert collect.spec_task_dirs(two, str(root)) == {("power", "k_new"): "sim", ("post", "k_new"): "post"}

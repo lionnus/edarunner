@@ -53,10 +53,11 @@ def demo_project(root: Path) -> Project:
     )
 
 
-def demo_tasks() -> dict[str, Task]:
+def demo_tasks() -> dict[tuple[str, str], Task]:
+    """The tasks k_small and k_big of the power group, by (stage, task id) as `extract` takes them."""
     cfg = tomllib.loads((DEMO / "tasks.toml").read_text())
     tasks = {i: Task(id=i, fields={k: v for k, v in t.items() if isinstance(v, str)}) for i, t in cfg["tasks"].items()}
-    return {i: tasks[i] for i in ("k_small", "k_big")}
+    return {("power", i): tasks[i] for i in ("k_small", "k_big")}
 
 
 def results_tree(results: Path) -> Path:
