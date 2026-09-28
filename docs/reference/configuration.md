@@ -247,6 +247,54 @@ the number does not apply.
 | `record` | `{ stage, from }`: the step of record of a run is its deepest step of `stage` with a value, at or after step `from`. `edr compare`, compare.html, the MLflow export and the `record` column of metrics.csv take that step, and a run without one is named missing. The stage needs `steps`, and the metric needs `step` | unset |
 | `optional` | a file without the number gives no row instead of a failed one: no match of `regex`, no row of `csv` that matches `where`, no key of `json` | `false` |
 
+### [parameters.<name>]
+
+A parameter table reads parameters of a run from one of the run's own files: the knob line a stage writes at
+the head of its log, a JSON file of settings, or a report that names the commit the flow built. Each key goes
+into the `parameters` table with the origin `extract`, next to the values the run was declared with. A table holds
+exactly one of three parsers: `regex`, `json` or `python`.
+
+```toml
+[parameters.knobs]
+stage = "pnr"
+file = "log/pnr.log"
+regex = 'set (?P<key>\w+) (?P<value>[^;]+);'
+head_bytes = 65536
+```
+
+An extraction reads the file of every stage of the run's spec, or of every stage for a run without a heartbeat
+such as an import, whenever the file is there, also for a stage that failed or still runs, and replaces the
+values it wrote before. A file that does not parse gives the flag `parameters.<name>` with the error; a missing
+file gives nothing. When two tables give one key, the first wins.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `stage` | the stage whose files hold the values | required |
+| `file` | the file under the collected results | required |
+| `regex` | a regex over the file with `re.MULTILINE`: group 1 of the first match is the value of the key `<name>`; with the named groups `key` and `value`, every match gives a key and its value, and the first match of a key wins | one of the three |
+| `json` | a dotted path to a flat object in a JSON file, `""` for the whole file; every key of the object is a key of the run | one of the three |
+| `python` | a hook that gets the file path and returns a dict of keys and values | one of the three |
+| `head_bytes` | how many bytes from the start of the file `regex` reads, for the head of a large log; 0 reads the whole file | `0` |
+
+### [checks]
+
+`[checks]` sets the checks that flag a run whose files or results contradict its identity. Every extraction of
+a run rewrites its flags. Three checks are built in:
+
+- `declared_vs_observed`: a key read from the run's files has another value under another origin, such as a job
+  override or the source tag. Two numbers are equal when their values are, so `1` equals `1.0`.
+- `same_parameters`: two runs with different labels at one source have equal extracted parameters and do not share
+  a tree, so one of them is not the build its label names.
+- `same_results`: two tasks of one run have equal values in every metric that `same_results` lists, so the flow ran
+  one test under two names.
+
+`edr status <handle>`, `edr brief`, `edr extract` and `edr export` show the flags.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `same_results` | the metrics whose values, all equal, flag two tasks of one run | `[]` |
+| `python` | a hook for the project's own rules: it gets the run's row, its parameter rows and its metric rows, and returns a (task, check, text) for each flag, with the task `""` for the run | `""` |
+
 ## site.toml
 
 `site.toml` holds the hosts, the tools and the bot commands of a site; `site` in `edr.toml` names it,

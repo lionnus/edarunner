@@ -342,3 +342,45 @@ def test_metric_table_and_ge_um2(tmp_path):
         toml.write_text(text.replace(old, new))
         with pytest.raises(ConfigError, match=match):
             config.load_project(root)
+
+
+def test_parameter_tables_and_checks(tmp_path):
+    root = demo_copy(tmp_path)
+    toml = root / "edr.toml"
+    text = toml.read_text() + """
+[parameters.knobs]
+stage = "synth"
+file = "log/synth.log"
+regex = 'set (?P<key>\\w+) (?P<value>[^;]+);'
+head_bytes = 65536
+
+[parameters.settings]
+stage = "pnr"
+file = "reports/settings.json"
+json = ""
+
+[checks]
+same_results = ["window_ns", "power_w"]
+python = "hooks/checks.py:check"
+"""
+    toml.write_text(text)
+    p = config.load_project(root)
+    assert (p.parameters["knobs"].head_bytes, p.parameters["settings"].json, p.parameters["settings"].regex) == (65536, "", "")
+    assert (p.checks.same_results, p.checks.python) == (["window_ns", "power_w"], "hooks/checks.py:check")
+    assert config.load_project(DEMO).parameters == {} and config.load_project(DEMO).checks.same_results == []
+    for old, new, match in (('stage = "pnr"\nfile = "reports/settings.json"', 'stage = "gone"\nfile = "reports/settings.json"',
+                             "parameters.settings.stage names unknown stage 'gone'"),
+                            ('file = "log/synth.log"\n', "", "parameters.knobs needs stage and file"),
+                            ('json = ""', 'json = ""\npython = "hooks/p.py:read"', "settings needs exactly one of regex, json"),
+                            ('json = ""', 'python = ""', "settings needs exactly one of regex, json, python"),
+                            ("(?P<value>[^;]+)", "([^;]+)", "knobs.regex needs group 1, or the named groups key and value"),
+                            ("(?P<key>\\w+) (?P<value>[^;]+)", "\\w+", "knobs.regex needs group 1"),
+                            ("(?P<value>[^;]+)", "(?P<value>[^;]+", "knobs.regex: missing \\)"),
+                            ("head_bytes = 65536", "head_bytes = -1", "knobs.head_bytes is a count of bytes from 0"),
+                            ('json = ""', 'json = ""\nhead_bytes = 10', "settings.head_bytes is a count of bytes from 0, and needs regex"),
+                            ('"window_ns", "power_w"', '"window_ns", "gone"', "checks.same_results names unknown metric 'gone'"),
+                            ('python = "hooks/checks.py:check"', "bogus = 1", "unknown key 'checks.bogus'")):
+        assert old in text
+        toml.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)

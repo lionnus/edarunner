@@ -317,8 +317,9 @@ def samples_table(samples: list[Row]) -> Table | None:
 
 
 def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, now: float | None = None,
-               gate: str | None = None, samples: list[Row] | None = None) -> Group:
-    """One run: identity, state, what its tool gate waits for, counts, stage rows, samples, metrics and the log tail."""
+               gate: str | None = None, samples: list[Row] | None = None, flags: list[Row] | None = None) -> Group:
+    """One run: identity, state, what its tool gate waits for, counts, the flags of its checks, stage rows, samples,
+    metrics and the log tail."""
     now = now or time.time()
     ex = row.get("exit")
     parts: list[RenderableType] = [
@@ -338,6 +339,9 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
         parts.insert(-1, Text("tasks " + (" ".join(f"{k} {v}" for k, v in _counts(row).items()) or "-")))
     if row.get("killed_by"):
         parts.append(Text(f"killed by {row['killed_by']}", style="red"))
+    if flags:
+        parts += [Text(""), Text("flags", style="bold red"),
+                  table(["check", "task", "text"], [[f["check"], f["task"], f["text"]] for f in flags])]
     if stage_rows:
         parts += [Text(""), Text("stages", style="bold"), table(
             ["stage", "task", "attempt", "status", "command exit", "started", "ended", "took", "signature"],

@@ -11,6 +11,7 @@ has it.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from dataclasses import asdict, dataclass
@@ -283,14 +284,15 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     # No new file does not mean no new metric: a file can arrive before its step or stage counts as
     # finished. Extraction is idempotent, so run it.
     rows = extract_run(project, db, run, hb, spec, tasks)
-    with db.conn:  # one commit for the rows of the run
+    with db.conn:  # one commit for the rows, parameters and flags of the run
         new = [r for r in rows if db.add_metric(r)]
+        for origin, params in (_parameters(run, spec) if not rec.get("params") else {}).items():
+            db.set_parameters(run["run_id"], params, origin)
+        check_run(project, db, run, hb, spec)
     text = _added(new) if new else ""
     if text:
         db.add_event("watch", run["run_id"], "metrics", text)
     if not rec.get("params"):
-        for origin, params in _parameters(run, spec).items():
-            db.set_parameters(run["run_id"], params, origin)
         db.set_task_fields(run["run_id"], [(t, k, v, "spec") for t, f in collect.spec_task_fields(spec).items()
                                            for k, v in f.items()])
         rec["params"] = True
@@ -354,6 +356,71 @@ def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict |
     rows = metrics.extract(project, run, project.data / "results", done, stages=eligible if hb else None,
                            task_dirs=task_dirs)
     return [r for r in rows if not hb or r["stage"] in whole or r["step"] in finished]
+
+
+def check_run(project: Project, db: Database, run: Row, hb: dict, spec: dict | None = None) -> list[Row]:
+    """Write the parameters that the files of `run` give under the origin `extract`, in place of the earlier ones,
+    then rewrite the flags of `run` and the `same_parameters` flags of every run at its source; the caller commits.
+    Returns the flags of `run`. As in `extract_run`, a run without a heartbeat is read for every stage."""
+    spec = collect.load_spec(project, run) if spec is None else spec
+    observed, flags = metrics.extract_parameters(project, run, project.data / "results",
+                                                 collect.spec_stages(spec) if hb else None)
+    run_id = run["run_id"]
+    db.set_parameters(run_id, observed, "extract", replace=True)
+    params, rows = db.parameters(run_id), db.metrics(run_ids=[run_id])
+    flags += [("", "declared_vs_observed", f"{p['key']} is {observed[p['key']]} in the run's files and {p['value']} by "
+               f"{p['origin']}") for p in params if p["origin"] != "extract" and p["key"] in observed
+              and not _equal(observed[p["key"]], p["value"])]
+    flags += _same_results(project.checks.same_results, rows)
+    if project.checks.python:
+        try:
+            fn, _ = config.load_hook(project.root, project.checks.python)
+            flags += [(str(t or ""), str(c), str(x)) for t, c, x in fn(run, params, rows) or ()]
+        except Exception as e:  # a broken hook is a flag, never a crash
+            flags.append(("", "checks.python", f"{project.checks.python}: {e}"))
+    db.set_flags(run_id, flags)
+    _same_parameters(db, run)
+    return db.flags([run_id])
+
+
+def _equal(a: str, b: str) -> bool:
+    """Whether two parameter values are the same text or the same finite number, so `1` equals `1.0`."""
+    try:
+        return a == b or math.isfinite(float(a)) and float(a) == float(b)
+    except ValueError:
+        return False
+
+
+def _same_results(names: list[str], rows: list[Row]) -> list[tuple[str, str, str]]:
+    """A `same_results` flag for each task of a run whose values of every metric of `names` equal those of another
+    task of the same stage."""
+    values: dict[tuple[str, str], dict[str, float]] = {}
+    for m in rows:
+        if m["task"] and m["name"] in names and m["value"] is not None:
+            values.setdefault((m["stage"], m["task"]), {})[m["name"]] = m["value"]
+    twins: dict[tuple, list[str]] = {}
+    for (stage, task), v in values.items():
+        if len(v) == len(names):
+            twins.setdefault((stage, *(v[n] for n in names)), []).append(task)
+    return [(t, "same_results", f"{board.join(names)} equal those of {board.join([o for o in ts if o != t])}")
+            for ts in twins.values() if len(ts) > 1 for t in ts]
+
+
+def _same_parameters(db: Database, run: Row) -> None:
+    """Rewrite the `same_parameters` flags of every run at the source of `run`: a run whose extracted parameters equal
+    those of a run with another label and another tree."""
+    everyone, seen = db.runs(), {}
+    for p in db.parameters():
+        if p["origin"] == "extract":
+            seen.setdefault(p["run_id"], []).append((p["key"], p["value"]))
+    peers, names = [r for r in everyone if r.get("source") == run.get("source")], board.handles(everyone)
+    tree = {r["run_id"]: r.get("tree_id") or r["run_id"] for r in peers}
+    for r in peers:
+        mine = seen.get(r["run_id"])
+        twins = [names[o["run_id"]] for o in peers if mine and seen.get(o["run_id"]) == mine and o["label"] != r["label"]
+                 and tree[o["run_id"]] != tree[r["run_id"]]]
+        db.set_flags(r["run_id"], [("", "same_parameters", f"the same extracted parameters as {board.join(twins)}")]
+                     if twins else [], "same_parameters")
 
 
 def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict,

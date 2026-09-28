@@ -50,6 +50,8 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("#### budget", [model.Budget], ""),
     ("#### retry", [model.Retry], ""),
     ("### [metrics.<name>]", [model.Metric], ""),
+    ("### [parameters.<name>]", [model.Parameter], ""),
+    ("### [checks]", [model.Checks], ""),
     ("## site.toml", [(model.Site, ["scratch", "env", "ssh_options", "ssh_timeout_s", "tool_procs", "host_free_min_gb",
                                     "nfs_export"])], ""),
     ("### [scheduler]", [model.Scheduler], ""),

@@ -37,11 +37,11 @@ report files and the numbers in them.
 | `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`; `[scheduler] backend` picks one of these or a scheduler backend |
 | `schedulers.py` | the HTCondor, Slurm and LSF backends: the submit file, the state query, the stop |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
-| `watch.py` | the cycle of one project: classify, act, collect, resume, launch queued, boards, `watch.json`; the watcher that holds `serve.lock` then calls `census.work` |
+| `watch.py` | the cycle of one project: classify, act, collect, resume, launch queued, boards, `watch.json`; the watcher that holds `serve.lock` then calls `census.work`; the checks that rewrite the flags of a run after each extraction |
 | `serve.py` | `edr serve`: the watcher process of each project with its restarts and the kill of a stuck one, the global board, `serve.json`, `--check`, the systemd notify and watchdog, the unit with its pinned install |
 | `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the work of the user: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
-| `metrics.py` | the six parsers with the hierarchical area report and the per-instance table, extraction |
+| `metrics.py` | the six parsers with the hierarchical area report and the per-instance table, extraction, and the parameter tables |
 | `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |
 | `mlflow_export.py` | `edr export --mlflow`: the project database as a local MLflow tracking store; imports `mlflow` only when called |
 | `db.py` | the project database: the SQLite schema, upserts, queries, `board.json` |
@@ -85,7 +85,8 @@ A channel never imports `cli` or `watch`; it gets its commands through the
 5. `watch.cycle` ingests the heartbeats into `runs`, `stage_runs`,
    `step_runs` and `run_samples`, classifies, acts, collects into
    `data/results`, extracts metrics into `metrics` and `instances`, writes
-   `parameters` and `task_fields` from the spec, resumes, launches queued rows, keeps the host probes in
+   `parameters` and `task_fields` from the spec, `parameters` from the run's files,
+   rewrites the `flags` of the checks, resumes, launches queued rows, keeps the host probes in
    `host_samples`, and writes the boards.
 6. `export.export` takes one run per label and source tag by `db.pick`
    and copies its results with a manifest that lists the runs not done

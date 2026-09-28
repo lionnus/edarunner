@@ -15,6 +15,7 @@ from helpers_watch import NEW, NOW, Env, Rec, rid
 from edarunner import board, census, collect, config, launch, watch
 from edarunner.backend import Live
 from edarunner.hosts import HostProbe
+from edarunner.model import Parameter
 from helpers_backend import FakeBackend
 
 
@@ -152,6 +153,10 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
         (root / "reports" / str(n)).mkdir(parents=True)
         (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n * 10.5}\n")
         (root / "reports" / str(n) / "qor.rpt").write_text(demo_qor(n))
+    # The stage log says what the flow ran with, and it contradicts the override of the spec.
+    (root / "log" / "synth.log").write_text("step 1\nset DW 0;\n")
+    env.project.parameters["knobs"] = Parameter(name="knobs", stage="synth", file="log/synth.log",
+                                                regex=r"set (?P<key>\w+) (?P<value>[^;]+);")
     calls: list[str] = []
     real = collect.collect_run
     monkeypatch.setattr(collect, "collect_run", lambda *a, **k: calls.append(a[3]["run_id"]) or real(*a, **k))
@@ -164,8 +169,10 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
     assert len(by) == 12 and all(v is not None for v in by.values())
     assert [(p["key"], p["value"], p["origin"]) for p in env.db.parameters(run_id)] == [
-        ("DW", "1", "spec"), ("config", "demo", "spec"), ("nested.sub", "fed4321", "checkout"),
+        ("DW", "1", "spec"), ("DW", "0", "extract"), ("config", "demo", "spec"), ("nested.sub", "fed4321", "checkout"),
         ("source", "gabc1234", "checkout"), ("vars.netlist_stage", "15", "spec")]
+    assert [(f["check"], f["text"]) for f in env.db.flags([run_id])] == [
+        ("declared_vs_observed", "DW is 0 in the run's files and 1 by spec")]
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 12

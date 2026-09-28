@@ -467,9 +467,13 @@ run tree, and `data/edr.db` holds every run, stage, step, metric, file
 and event. The metric rows name their source file, so each number can
 be traced to the report it came from. The `parameters` table holds the
 vars, the overrides and the nested commits of each run as its spec
-recorded them, each row with its origin, and `data/sources/<tag>/` holds
-the diff of each dirty source (`watch._parameters`,
-`checkout._snapshot`). The `instances` table holds the per-instance rows
+recorded them, and the values that its `[parameters.<name>]` tables read
+from the run's own files, each row with its origin, and
+`data/sources/<tag>/` holds the diff of each dirty source
+(`watch._parameters`, `metrics.extract_parameters`,
+`checkout._snapshot`). The `flags` table holds what the checks found
+wrong with a run's identity; each extraction rewrites the flags of the
+run (`watch.check_run`). The `instances` table holds the per-instance rows
 of an area report or a per-instance CSV, down to the depth the metric
 keeps; `edr compare --instances` reads a deeper level from the collected
 file itself (`metrics.parse_instances`, `analysis.instance_delta`). The
