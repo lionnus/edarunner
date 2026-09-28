@@ -417,6 +417,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     source = _build(Source, {k: v for k, v in src.items() if k not in ("repo", "worktrees")}, file, "source",
                     repo=_path(_need(src, "repo", file, "source"), file, values),
                     worktrees=_path(_need(src, "worktrees", file, "source"), file, values))
+    # The tag and the refusal of an undeclared repository compare these names with the paths git lists.
+    source.nested = [os.path.normpath(n) for n in source.nested]
     stages = {n: _stage(n, t, file) for n, t in _table(raw.get("stages", {}), None, file, "stages").items()}
     for stage in stages.values():
         _check_stage(stage, stages, site, file)
