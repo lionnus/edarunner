@@ -469,7 +469,10 @@ be traced to the report it came from. The `parameters` table holds the
 vars, the overrides and the nested commits of each run as its spec
 recorded them, each row with its origin, and `data/sources/<tag>/` holds
 the diff of each dirty source (`watch._parameters`,
-`checkout._snapshot`).
+`checkout._snapshot`). The `instances` table holds the per-instance rows
+of an area report or a per-instance CSV, down to the depth the metric
+keeps; `edr compare --instances` reads a deeper level from the collected
+file itself (`metrics.parse_instances`, `analysis.instance_delta`).
 
 Only the head node opens the database. SQLite's WAL journal does not
 work on a network filesystem, so the database reads the type of the
