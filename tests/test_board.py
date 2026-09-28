@@ -143,6 +143,10 @@ def _compare_input():
                      "canonical": "design__instance__area", "value": 1000 + 10 * s + i, "unit": "um2"} for s in (1, 2, 3)]
         metrics += [{"run_id": r["run_id"], "stage": "power", "step": None, "task": "k_small", "name": f"power_{ph}",
                      "canonical": f"power.{ph}", "value": 0.1 * (i + 1), "unit": "W"} for ph in ("A", "B", "total")]
+        # A metric with `record`: the step of record is 2, not the last step, and the third run has none.
+        metrics += [{"run_id": r["run_id"], "stage": "synth", "step": s, "task": "", "name": "wns_ns", "canonical": "",
+                     "value": 0.05 + 0.01 * i if s == 2 else 0.04, "unit": "ns", "record": int(s == 2 and i != 2)}
+                    for s in (2, 3)]
     return rows, parameters, metrics
 
 
@@ -190,9 +194,12 @@ def test_compare_script_runs_without_plotly(tmp_path):
     # One filter box per column, and the first two runs ticked.
     assert got["runs"].count('<input class="f"') == 10 and got["runs"].count(" checked>") == 2
     assert got["cmp"].startswith("<tr><th>metric</th><th>c</th><th>b_nodw</th></tr>")
-    assert '<td>design__instance__area</td><td>1031</td><td>1032 <small class="up">+0.1%</small></td>' in got["cmp"]
+    assert ('<td>design__instance__area</td><td>1031 <small>synth 3</small></td>'
+            '<td>1032 <small>synth 3</small> <small class="up">+0.1%</small></td>') in got["cmp"]
     assert "<td>power.A[k_small]</td><td>0.2000</td><td>0.3000 <small class=\"up\">+50.0%</small>" in got["cmp"]
-    assert got["traj"] == '<option value="design__instance__area">design__instance__area</option>'
+    assert "<tr><td>wns_ns</td><td>0.06000 <small>synth 2</small></td><td> <small>missing</small></td></tr>" in got["cmp"]
+    assert got["traj"] == ('<option value="design__instance__area">design__instance__area</option>'
+                           '<option value="wns_ns">wns_ns</option>')
     assert got["sc"].startswith('<option value="label" selected>label</option>')
     assert got["pm"].startswith('<option value="design__instance__area" selected>')
     assert got["ad"] == '<option value="1" selected>1</option><option value="2">2</option>'

@@ -353,6 +353,11 @@ class Metric:
     pass_: str = doc("a rule the value must meet: `==`, `!=`, `<`, `<=`, `>` or `>=` and a number, such as "
                      "`\"== 0\"`; `edr metrics`, `edr compare` and `--over steps` print FAIL next to a value that "
                      "breaks it", "", key="pass", shown="unset")
+    record: dict[str, object] | None = doc(
+        "`{ stage, from }`: the step of record of a run is its deepest step of `stage` with a value, at or after step "
+        "`from`. `edr compare`, compare.html, the MLflow export and the `record` column of metrics.csv take that "
+        "step, and a run without one is named missing. The stage needs `steps`, and the metric needs `step`", None,
+        shown="unset")
 
     def verdict(self, value: float | None) -> str | None:
         """`FAIL` when `value` breaks the `pass` rule, `pass` when it meets it; None without a rule or a value."""

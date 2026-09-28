@@ -280,3 +280,24 @@ def test_metric_reduce_and_pass_rule(tmp_path):
         toml.write_text(text.replace(old, new))
         with pytest.raises(ConfigError, match=match):
             config.load_project(root)
+
+
+def test_metric_record(tmp_path):
+    root = demo_copy(tmp_path)
+    p = config.load_project(root)
+    assert (p.metrics["area_cell_um2"].record, p.metrics["wns_ns"].record) == ({"stage": "pnr", "from": 5}, None)
+    toml = root / "edr.toml"
+    text = toml.read_text()
+    rec, window = 'record = { stage = "pnr", from = 5 }', 'json = "window_ns"'
+    for old, new, match in ((rec, 'record = { stage = "power" }', "area_cell_um2.record is"),  # not a stage of the metric
+                            (window, window + '\nstep = "*"\nrecord = { stage = "power" }', "window_ns.record is"),  # no steps
+                            ('step = "*"\nfile = "reports/{step}/area.rpt"', 'file = "reports/5/area.rpt"',
+                             "the metric needs step"),
+                            (rec, 'record = { stage = "pnr", from = "5" }', "area_cell_um2.record is"),
+                            (rec, 'record = { stage = "pnr", upto = 5 }', "unknown key 'metrics.area_cell_um2.record.upto'"),
+                            (rec, 'record = "pnr"', "'metrics.area_cell_um2.record' must be a table")):
+        toml.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)
+    toml.write_text(text.replace(rec, 'record = { stage = "pnr" }'))
+    assert config.load_project(root).metrics["area_cell_um2"].record == {"stage": "pnr"}

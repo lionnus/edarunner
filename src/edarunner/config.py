@@ -503,6 +503,12 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
             pass_rule(rule)
     except (AttributeError, ValueError):
         raise ConfigError(f'{file}: {at}.pass is an operator and a number, such as "== 0"') from None
+    if "record" in raw:
+        rec = _table(raw["record"], {"stage", "from"}, file, f"{at}.record")
+        if not (rec.get("stage") in raw["stage"] and stages[rec["stage"]].steps and "step" in raw
+                and type(rec.get("from", 0)) is int):
+            raise ConfigError(f'{file}: {at}.record is {{ stage = "<a stage of the metric with steps>", '
+                              'from = <step number> }, and the metric needs step')
     return _build(Metric, raw, file, at, name=name, pass_=rule)
 
 

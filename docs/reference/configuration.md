@@ -239,6 +239,7 @@ parse gives a row with an empty value and the error in `source_file`; the extrac
 | `unit` | the unit, as text | `""` |
 | `canonical` | the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: `design__instance__area`, `design__instance__count`, `design__instance__utilization`, `timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; empty when the schema has no name | `""` |
 | `pass` | a rule the value must meet: `==`, `!=`, `<`, `<=`, `>` or `>=` and a number, such as `"== 0"`; `edr metrics`, `edr compare` and `--over steps` print FAIL next to a value that breaks it | unset |
+| `record` | `{ stage, from }`: the step of record of a run is its deepest step of `stage` with a value, at or after step `from`. `edr compare`, compare.html, the MLflow export and the `record` column of metrics.csv take that step, and a run without one is named missing. The stage needs `steps`, and the metric needs `step` | unset |
 
 ## site.toml
 

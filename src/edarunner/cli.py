@@ -328,20 +328,6 @@ def _tools_table(rows: list[Row]) -> Table | str:
                        right=("free", "total")) if rows else "no tools"
 
 
-def _metric_key(m: Row) -> str:
-    return (m.get("canonical") or m["name"]) + (f"[{m['task']}]" if m.get("task") else "")
-
-
-def _final_metrics(c: Ctx, rows: list[Row]) -> dict[str, dict[str, tuple[int, Any]]]:
-    """{metric key: {run id: (step, value)}} with the last step of each run."""
-    final: dict[str, dict[str, tuple[int, Any]]] = {}
-    for m in c.db.metrics(run_ids=[r["run_id"] for r in rows]):
-        cur, step = final.setdefault(_metric_key(m), {}), -1 if m.get("step") is None else int(m["step"])
-        if step >= cur.get(m["run_id"], (-2, None))[0]:
-            cur[m["run_id"]] = (step, m["value"])
-    return final
-
-
 def _metrics_table(rows: list[Row]) -> Table | str:
     body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m.get("task") or "", m["name"],
              analysis.mark(m["value"], m.get("verdict")), m.get("unit")] for m in rows]
@@ -456,20 +442,18 @@ class Actions:
 
     def metrics_csv(self, source: str) -> bytes:
         """The CSV of `edr metrics --source <source> --csv`."""
-        return _metrics_csv(self.c.db.metrics(sources=[source])).encode()
+        return _metrics_csv(analysis.mark_record(self.c.project, self.c.db.metrics(sources=[source]))).encode()
 
     def compare_text(self, handles: list[str]) -> str:
-        """One block per metric: its name, then one `name value` line per run, the name of `analysis.names`."""
-        rows = [self.c.resolve(h) for h in handles]
-        final, col = _final_metrics(self.c, rows), analysis.names(rows)
-        if not final:
-            return "no metrics"
-        out = []
-        for key, cur in sorted(final.items()):
-            out.append(key[:40])
-            out += board.cols(["", ""], [["  " + col[r["run_id"]], cur.get(r["run_id"], (0, None))[1]] for r in rows]
-                              ).splitlines()[1:]
-        return "\n".join(out)
+        """The rows of `edr compare`, one block per metric: its name, then one `name value (stage step)` line per
+        run, the name of `analysis.names`; the runs that lack the step of record at the end."""
+        runs = [self.c.resolve(h) for h in handles]
+        rows, missing = analysis.side_by_side(self.c.project, runs, self.c.db.metrics(run_ids=[r["run_id"] for r in runs]))
+        col, out = analysis.names(runs), []
+        for r in rows:
+            out.append((r["metric"] + (f"[{r['task']}]" if r["task"] else ""))[:40])
+            out += board.cols(["", ""], [["  " + col[i], analysis.cell(r, i)] for i in col]).splitlines()[1:]
+        return "\n".join(out + analysis.missing_lines(missing)) or "no metrics"
 
     def metric_text(self, name: str, source: str | None) -> str:
         """`label source step value` per metric row."""
@@ -629,7 +613,7 @@ def cmd_tools(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def _metrics_csv(rows: list[Row]) -> str:
-    """Metric rows as CSV with the columns of an export."""
+    """Metric rows as CSV with the columns of an export; `analysis.mark_record` sets their `record`."""
     return export.to_csv(export.METRIC_COLUMNS, [export.metric_row(m) for m in rows]).decode()
 
 
@@ -658,7 +642,9 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
         rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
         c.emit(analysis.over_steps_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    rows = c.db.metrics(sources=a.source, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
+    # The step of record needs every step of a run, so --step filters after the mark.
+    rows = analysis.mark_record(c.project, c.db.metrics(sources=a.source, stage=a.stage, name=a.metric, run_ids=run_ids))
+    rows = [m for m in rows if a.step is None or m.get("step") == a.step]
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
@@ -705,7 +691,8 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
-    """Two or more runs side by side, under a line that names the sources when they differ."""
+    """Two or more runs side by side, each at its step of record, under a line that names the sources when they
+    differ."""
     runs = [c.resolve(h) for h in a.handles]
     sources = sorted({str(r.get("source")) for r in runs})
     mixed = len(sources) > 1
@@ -713,16 +700,17 @@ def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     def shown(view: RenderableType) -> RenderableType:
         return Group(Text(f"mixed sources: {', '.join(sources)}", style="yellow"), view) if mixed else view
 
-    if not a.area:
-        mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage, step=a.step)
+    if a.area:
+        picked, rows, missing = analysis.area_delta(c.project, c.db, runs, a.depth, a.instance, a.stage, a.step)
+        c.emit(shown(analysis.area_view(picked, rows, a.depth, missing)),
+               {"runs": picked, "depth": a.depth, "rows": rows, "missing": missing, "mixed_sources": mixed})
+    else:
+        mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage)
                 if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
-        rows = analysis.side_by_side(c.project, runs, mets)
-        c.emit(shown(analysis.side_by_side_view(runs, rows)), {"runs": runs, "rows": rows, "mixed_sources": mixed})
-        return Exit.DONE if rows else Exit.NOTHING
-    picked, rows = analysis.area_delta(c.db, runs, a.depth, a.instance, a.stage, a.step)
-    c.emit(shown(analysis.area_view(picked, rows, a.depth)),
-           {"runs": picked, "depth": a.depth, "rows": rows, "mixed_sources": mixed})
-    return Exit.DONE if rows else Exit.NOTHING
+        rows, missing = analysis.side_by_side(c.project, runs, mets, a.stage, a.step)
+        c.emit(shown(analysis.side_by_side_view(runs, rows, missing)),
+               {"runs": runs, "rows": rows, "missing": missing, "mixed_sources": mixed})
+    return Exit.DONE if rows and not missing else Exit.NOTHING
 
 
 def cmd_runtime(c: Ctx, a: argparse.Namespace) -> int:
@@ -1742,30 +1730,36 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--source", action="append", metavar="SOURCE", help="every run of the exact source tag; repeatable")
     s = command("compare", "two or more runs side by side", """
         Puts two or more runs side by side. Without --area, it prints one row
-        per stage, step, task and metric: the step name, the value of each run, and the
-        percent of each run to the first. A value that breaks the pass rule of
-        its metric shows FAIL next to it. --metric (repeatable), --stage and
-        --step narrow the rows; --json keeps the source file and the verdict
-        of every value.
+        per task and metric: the value of each run with its stage and step,
+        and the delta and the percent of each run to the first. A metric
+        with `record` shows each run at its step of record, the deepest step
+        of the record stage at or after `from`. Any other metric shows each
+        run at the deepest step that every run has. With --step, every run
+        is at that step. A run that lacks its step of record or the --step is
+        named missing, and the command exits 2. A value that breaks the pass
+        rule of its metric shows FAIL next to it. --metric (repeatable) and
+        --stage narrow the rows; --json keeps the source file and the
+        verdict of every value and lists the missing runs.
 
         --area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
-        column per run, and the delta and the percent of each run to the
-        first. Each run is compared at its last step with an area report, or
-        at --stage and --step. The source file of each run is printed under
-        the table.
+        column per run with its stage and step in the header, and the delta
+        and the percent of each run to the first. Each run is at the step
+        the rules above give for the area metric. The source file of each
+        run is printed under the table.
 
         A column is named by the label, or by label@source when the runs come
         from more than one source; then a line above the table names the
         sources, and --json sets mixed_sources. Two runs with the same name
         get a prefix of their run ids after it.
-        """, exits={Exit.NOTHING: "no row to compare"})
+        """, exits={Exit.NOTHING: "no row to compare, or a run lacks its step of record or the --step"})
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
     s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
     s.add_argument("--metric", action="append", metavar="NAME", help="this metric, by name or canonical name; repeatable")
     s.add_argument("--depth", type=int, default=1, metavar="N", help="the instance depth; default 1")
     s.add_argument("--instance", metavar="PATH", help="only this instance and the instances below it")
-    s.add_argument("--stage", metavar="S", help="this stage only; with --area, compare at this stage")
-    s.add_argument("--step", type=int, metavar="N", help="this step only; with --area, compare at this step number")
+    s.add_argument("--stage", metavar="S", help="this stage only; another stage than the record stage takes the "
+                                                  "deepest step the runs share")
+    s.add_argument("--step", type=int, metavar="N", help="every run at this step number")
     s = command("runtime", "stage, step and task times", """
         With one handle, runtime prints the times of one run: a row per stage
         attempt from

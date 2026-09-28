@@ -70,6 +70,7 @@ needs = { cores = 1, disk_gb = 0.05, tools = { demo = 1 } }
 budget = { hours = 1, per = "task" }
 collect = ["{task_dir}/power/"]
 
+# The area of record is the routed area: the deepest pnr step from route on.
 [metrics.area_cell_um2]
 stage = ["synth", "pnr"]
 step = "*"
@@ -77,6 +78,7 @@ file = "reports/{step}/area.rpt"
 regex = '^i_top\s+(\S+)'
 unit = "um2"
 canonical = "design__instance__area"
+record = { stage = "pnr", from = 5 }
 
 # qor.rpt has one block per scenario and path group, the hold scenario
 # func_fast first. Each match starts at a block of the setup scenario

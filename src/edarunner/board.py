@@ -422,8 +422,9 @@ def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plo
                  areas: dict[str, Row] | None = None, step_names: dict[int, str] | None = None) -> str:
     """A self-contained page over the lists; the plots need `plotly_src`, the tables do not.
 
-    `areas` maps a run id to its last area report, {stage, step, source_file, rows: [[instance, depth, area]]};
-    `step_names` maps a step number to its name.
+    The compare table shows each run at the metric row whose `record` is 1, from `analysis.mark_record`, and `missing`
+    when a metric with `record` has no such row; any other metric at its last step. `areas` maps a run id to its area
+    report, {stage, step, source_file, rows: [[instance, depth, area]]}; `step_names` maps a step number to its name.
     """
     enriched = [{**r, "state": state_of(r), "core-h": round(cost(r), 2)} for r in order(runs)]
     script = f'<script src="{_h(plotly_src)}"></script>' if plotly_src else ""
@@ -489,11 +490,13 @@ const PAR = {}, PKEYS = [];
 for (const p of PARAMETERS) { (PAR[p.run_id] ??= {})[p.key] = p.value; if (!PKEYS.includes(p.key)) PKEYS.push(p.key); }
 PKEYS.sort();
 const mkey = m => (m.canonical || m.name) + (m.task ? '[' + m.task + ']' : '');
+// A metric with `record` shows its row of record, and `missing` without one; any other metric its last step.
 const FIN = {}, MKEYS = [];
 for (const m of METRICS) {
-  const k = mkey(m), s = m.step ?? 1e9, cur = (FIN[m.run_id] ??= {});
+  const k = mkey(m), s = m.step ?? 1e9, cur = (FIN[m.run_id] ??= {}), rank = m.record === 1 ? 2 : m.record === 0 ? 0 : 1;
   if (!MKEYS.includes(k)) MKEYS.push(k);
-  if (!(k in cur) || s >= cur[k].step) cur[k] = { v: m.value, step: s };
+  if (!(k in cur) || rank > cur[k].rank || (rank === cur[k].rank && s >= cur[k].step))
+    cur[k] = { v: rank ? m.value : null, step: s, rank, at: !rank ? 'missing' : m.step == null ? '' : m.stage + ' ' + m.step };
 }
 MKEYS.sort();
 const num = v => { const n = Number(v); return v === null || v === undefined || v === '' || !isFinite(n) ? null : n; };
@@ -543,8 +546,9 @@ function compareTable(sel) {
   if (!sel.length) { q('#cmp').innerHTML = tr(['tick a run']); return; }
   const base = FIN[sel[0].run_id] || {};
   const rows = MKEYS.filter(k => sel.some(r => FIN[r.run_id]?.[k] != null)).map(k => tr([esc(k), ...sel.map((r, i) => {
-    const v = FIN[r.run_id]?.[k]?.v, b = base[k]?.v, p = i ? pct(v, b) : '';
-    return fmt(v) + (p ? ' <small class="' + (v > b ? 'up' : 'dn') + '">' + p + '</small>' : '');
+    const f = FIN[r.run_id]?.[k], v = f?.v, b = base[k]?.v, p = i ? pct(v, b) : '';
+    return fmt(v) + (f?.at ? ' <small>' + esc(f.at) + '</small>' : '')
+      + (p ? ' <small class="' + (v > b ? 'up' : 'dn') + '">' + p + '</small>' : '');
   })]));
   q('#cmp').innerHTML = tr(['metric', ...sel.map(r => esc(r.label))], 'th') + rows.join('');
 }

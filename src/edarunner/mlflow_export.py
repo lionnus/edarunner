@@ -63,12 +63,14 @@ def export_mlflow(project: Project, db: Database, out: Path, sources: list[str] 
         params = {p["key"]: p["value"] for p in db.parameters(r["run_id"])}
         params.update({k: r.get(k) for k in ("config", "build_tag", "source") if r.get(k) and k not in params})
         metrics = []
-        for m in db.metrics(run_ids=[r["run_id"]]):
+        for m in analysis.mark_record(project, db.metrics(run_ids=[r["run_id"]])):
             if m["value"] is None:
                 continue
             key = _key(m["name"] + (f"/{m['task']}" if m.get("task") else ""))
-            metrics.append(Metric(key, float(m["value"]), int(m.get("extracted_at") or 0) * 1000,
-                                  int(m["step"]) if m.get("step") is not None else 0))
+            at = (float(m["value"]), int(m.get("extracted_at") or 0) * 1000, int(m["step"]) if m.get("step") is not None else 0)
+            metrics.append(Metric(key, *at))
+            if m["record"] == 1:
+                metrics.append(Metric(f"record/{key}", *at))
         rt = analysis.runtime(project, db, r)
         ts = started or 0
         for s in rt["stages"]:

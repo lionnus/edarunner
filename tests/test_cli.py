@@ -36,9 +36,10 @@ def with_vars(root: Path, run_id: str) -> None:
     (bdir(root) / f"{run_id}.spec.json").write_text(json.dumps({"vars": {"netlist_stage": "11"}}))
 
 
-def add_metric(root: Path, run_id: str, name: str, value: float, step: int | None = 3, task: str = "") -> None:
+def add_metric(root: Path, run_id: str, name: str, value: float, step: int | None = 3, task: str = "",
+               stage: str = "synth") -> None:
     with Database(config.load_project(root).data / "edr.db") as db:
-        db.add_metric({"run_id": run_id, "stage": "synth", "step": step, "task": task, "name": name,
+        db.add_metric({"run_id": run_id, "stage": stage, "step": step, "task": task, "name": name,
                         "canonical": "design__instance__area" if name == "area_cell_um2" else "", "value": value, "unit": "u"})
 
 
@@ -367,7 +368,7 @@ def test_stop_marks_a_queued_run_stopped(demo: Path, capsys) -> None:
 def test_actions_for_the_bot(demo: Path, capsys) -> None:
     a, b = seed(demo, "a", "done"), seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
     add_metric(demo, a, "area_cell_um2", 1000.0)
-    add_metric(demo, a, "area_cell_um2", 1031.5, step=4)
+    add_metric(demo, a, "area_cell_um2", 1031.5, step=5, stage="pnr")
     add_metric(demo, b, "area_cell_um2", 999.0)
     add_metric(demo, a, "power_w", 0.25, step=None, task="k_small")
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
@@ -393,7 +394,9 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert len(events) == 4 and "keep" in events[2]
     assert b not in acts.events_text(8)
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
-    assert cmp[:3] == ["design__instance__area", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
+    # The area of a is at its step of record, pnr 5; b_nodw has no pnr step, so it is named missing.
+    assert cmp[:3] == ["area_cell_um2", "  a       1031.5 (pnr 5)", "  b_nodw               -"]
+    assert cmp[3:] == ["power_w[k_small]", "  a       0.25", "  b_nodw     -", "missing: b_nodw has no pnr step"]
     assert len(acts.metric_text("design__instance__area", None).splitlines()) == 4 and acts.metric_text("design__instance__area", "zzz") == "no metrics"
     assert acts.hosts_text().startswith("🟢 <b>local</b> free ")
     assert acts.tools_text() == "<b>demo</b> 2/10 seats used, local"

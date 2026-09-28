@@ -98,7 +98,12 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     lines = out.splitlines()
     assert code == 0 and lines[0].startswith("run_id,label,config,source,stage,step,task,metric")
     assert any(",power,,k_small,energy_nj,energy,850.0,nJ," in ln for ln in lines)
-    assert any(f"{ids['b_nodw']},b_nodw,demo,{source},pnr,5,,area_cell_um2,design__instance__area,1052.5,um2,reports/5/area.rpt:1" == ln for ln in lines)
+    assert any(f"{ids['b_nodw']},b_nodw,demo,{source},pnr,5,,area_cell_um2,design__instance__area,1052.5,um2,reports/5/area.rpt:1,1"
+               == ln for ln in lines)
+    # The area of record is the deepest pnr step from route on, step 5, in both runs.
+    code, out, _ = edr(capsys, "compare", "a@demo", "b_nodw@demo", "--metric", "area_cell_um2")
+    assert code == 0 and out.splitlines()[2].split() == ["area_cell_um2", "1052.5", "(pnr", "5)", "1052.5", "(pnr", "5)", "0",
+                                                         "+0.0%"]
     # The regexes of the demo read the qor.rpt that flow.sh writes, and the pass rule gives the verdict.
     code, out, _ = edr(capsys, "metrics", "--run", ids["b_nodw"], "--over", "steps")
     lines = [ln.split() for ln in out.splitlines()]
