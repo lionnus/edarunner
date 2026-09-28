@@ -15,7 +15,7 @@ batch, every number and every action.
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id`, the cores the run reserved |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
 | `parameters` | key and origin of a run | the parameters of the run as text, each with its origin; [Run identity](#run-identity) lists them |
-| `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file or the error of a failed row, when it was extracted |
+| `metrics` | number | run, stage, step, task, name, canonical name, value after `scale`, unit, the source file or the error of a failed row, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
 | `store` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and under `telegram` the message ids and the forum topic of the project |
@@ -56,6 +56,41 @@ JSON, without the stage prefix, because the stage is its own column:
 A number the schema has no name for, such as an energy, keeps an empty
 canonical name or a name of the project. The metric name itself stays the
 project's own.
+
+## Readable numbers
+
+A view for people prints every number the same way: six significant
+digits, every digit before the decimal point, and no exponent. So
+`907.8570000000001` prints as `907.857`, `0.30000000000000004` as `0.3`
+and `10716000000.0` as `10716000000`. `board.num` holds the rule.
+`edr metrics`, `edr compare`, `--over steps`, `edr status`, `edr brief`,
+the bot's `/compare` and `/metric`, and compare.html print through it.
+`--json`, `--csv`, the export and MLflow keep the value as it is stored.
+
+The format cannot choose the unit. A flow that writes a window in
+femtoseconds gives `10716000000 fs` in every view. The `scale` key stores
+that window as `10716 ns` instead:
+
+```toml
+[metrics.window_ns]
+stage = "power"
+file = "{task_dir}/power/phases.json"
+json = "window_dur"
+scale = 1e-6
+unit = "ns"
+```
+
+`scale` multiplies each value when it is extracted, so the database holds
+the number in the unit that `unit` names. Every view, `--json`, the export
+and MLflow get that number, and a `pass` rule compares it. An `area_hier`
+metric scales its rows of the `area` table as well. A changed `scale`
+reaches the rows already in the database when `edr extract` runs; see
+[Extract again](#extract-again).
+
+A view for people names a metric by its key in `edr.toml`, such as
+`window_ns` above. The canonical name appears only where a program reads
+the rows: in `--json` and in the `canonical` column of `metrics.csv`.
+`--metric` takes either name.
 
 ## Run identity
 
@@ -466,11 +501,11 @@ step of each run:
 $ edr compare base@g8 lanes16@g7 lanes4@g7 --area --depth 2 --instance i_top
 area um2 at depth 2
 instance        base (pnr 12)  lanes16 (pnr 12)  lanes4 (pnr 12)  Δ lanes16     Δ %  Δ lanes4     Δ %
-i_top/i_engine        96580.1           96092.1          95942.9     -488.1   -0.5%    -637.3   -0.7%
+i_top/i_engine        96580.1           96092.1          95942.9       -488   -0.5%    -637.2   -0.7%
 i_top/i_accum         36583.7           36169.4          36001.1     -414.3   -1.1%    -582.6   -1.6%
-i_top/i_lanes         32453.8           19234.8           9372.4   -13219.0  -40.7%  -23081.4  -71.1%
-i_top/i_stream        14592.5           14738.5          14395.8      146.0   +1.0%    -196.7   -1.3%
-<top>                208030.0          193918.6         182995.8   -14111.4   -6.8%  -25034.2  -12.0%
+i_top/i_lanes         32453.8           19234.8           9372.4     -13219  -40.7%  -23081.4  -71.1%
+i_top/i_stream        14592.5           14738.5          14395.8        146   +1.0%    -196.7   -1.3%
+<top>                  208030            193919           182996   -14111.4   -6.8%  -25034.2  -12.0%
 base: flow/runs/<run>/reports/12/area_hier.rpt
 ...
 ```
@@ -619,7 +654,8 @@ parameters, metrics and the area report of each run at its step of
 record, else at its last step, down to depth 3. A filter keeps the rows
 whose cell holds its text; `>n` and `<n` compare numbers. The tables need nothing else, but the plots need Plotly. They show
 a metric over the steps with the step names, a scatter of any two columns,
-the power parts (`power__*` without `power__total`), and parallel
+the power parts (the metrics whose canonical name is `power__*`, without
+`power__total`), and parallel
 coordinates over every shown run, with an axis per parameter that differs
 and one for the chosen metric. The page loads `data/board/plotly.min.js`
 when that file exists, else the CDN URL; the watcher downloads nothing, so
