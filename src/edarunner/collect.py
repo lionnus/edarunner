@@ -9,6 +9,7 @@ from __future__ import annotations
 import posixpath
 import shlex
 import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -45,15 +46,18 @@ def spec_stages(spec: dict) -> list[str] | None:
     return names or None
 
 
-def spec_task_dirs(spec: dict, root: str) -> dict[str, str]:
-    """Task id -> task directory relative to the run root, from the spec's task groups."""
-    out: dict[str, str] = {}
+def spec_tasks(spec: dict, root: str) -> Iterator[tuple[str, str, str]]:
+    """(stage, task id, task directory relative to the run root) of each task of the spec's task groups."""
     base = root.rstrip("/") + "/"
     for stage in spec.get("stages") or []:
         for task in stage.get("tasks") or []:
             d = str(task.get("dir") or "")
-            out[str(task["id"])] = d[len(base):] if base != "/" and d.startswith(base) else d
-    return out
+            yield str(stage.get("name")), str(task["id"]), d[len(base):] if base != "/" and d.startswith(base) else d
+
+
+def spec_task_dirs(spec: dict, root: str) -> dict[str, str]:
+    """Task id -> task directory relative to the run root, from the spec's task groups."""
+    return {task: d for _, task, d in spec_tasks(spec, root)}
 
 
 def spec_task_fields(spec: dict) -> dict[str, dict[str, str]]:

@@ -123,10 +123,14 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
         "DW": [None, "0"], "build_tag": ["demo", "demo_DW0"], "vars.netlist_stage": ["11", None]}
 
     exp = tmp_path / "exp"
-    code, out, _ = edr(capsys, "export", "--source", source, "--out", str(exp))
+    code, out, _ = edr(capsys, "export", "--source", source, "--out", str(exp), "--files")
     manifest = json.loads((exp / "manifest.json").read_text())
     assert code == 0 and {r["label"] for r in manifest["runs"]} == {"a", "b_nodw"} and manifest["incomplete"] == []
-    assert (exp / "a" / "reports" / "6" / "area.rpt").is_file() and (exp / "runs.csv").is_file() and manifest["sources"] == [source]
+    assert (exp / "runs.csv").is_file() and manifest["sources"] == [source] and manifest["missing_files"] == []
+    # --files copies the files that the rows cite, each named with its stage, step and task.
+    files = {f["path"]: (f["stage"], f["step"], f["task"]) for f in manifest["files"] if "run_id" in f}
+    assert files[f"{ids['a']}/reports/5/area.rpt"] == ("pnr", 5, "") and (exp / ids["a"] / "reports" / "5" / "area.rpt").is_file()
+    assert files[f"{ids['a']}/simulation/tests/demo/GEMM_M64_N64/power/phases.json"] == ("power", None, "k_small")
     assert manifest["tables"]["task_fields.csv"] == 6 and f"{ids['a']},a,{source},k_small,test,GEMM_M64_N64,spec" in (
         exp / "task_fields.csv").read_text()
     code, out, _ = edr(capsys, "stop", "a@demo", "--after-task", "--why", "test")

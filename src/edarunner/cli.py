@@ -1301,11 +1301,13 @@ def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     if not a.source or not a.out:
         raise Refuse("export needs --source and --out, or --mlflow DIR")
     labels = a.labels.split(",") if a.labels else None
-    manifest = export.export(c.project, c.db, a.source, Path(a.out), labels, a.dry_run, a.with_logs)
+    manifest = export.export(c.project, c.db, a.source, Path(a.out), labels, a.dry_run, a.files, a.globs)
     if not a.dry_run:
         c.db.add_event("user", "", "export", f"{' '.join(a.source)} -> {os.path.abspath(a.out)}")
+    missing = len(manifest["missing_files"])
     c.emit(f"{a.out}: {len(manifest['runs'])} runs ({len(manifest['incomplete'])} not done), {len(manifest['skipped'])} "
-           f"skipped, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""), manifest)
+           f"skipped, {len(manifest['files'])} files" + (f", {missing} cited files missing" if missing else "")
+           + (" (dry)" if a.dry_run else ""), manifest)
     return Exit.DONE
 
 
@@ -2412,16 +2414,21 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
     s = command("export", "a frozen snapshot of one or more sources", """
         Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-        metrics.csv, parameters.csv, task_fields.csv, instances.csv, flags.csv and the
-        collected files of one run per label and source, the newest run by
-        start time that ended done, else the newest run. --source matches the
+        metrics.csv, parameters.csv, task_fields.csv, instances.csv and
+        flags.csv of one run per label and source, the newest run by start
+        time that ended done, else the newest run. --source matches the
         source tag exactly and may be given more than once. The manifest lists
         the exported runs whose phase is not done under incomplete, the other
         runs of each label and source under skipped, and each dirty source
         under dirty_sources, whose diff goes to sources/<tag>/source.diff.
-        log/ and *.log stay out unless you pass --with-logs. It refuses a DIR
-        that exists and is not empty. docs/guides/results.md explains the
-        layout.
+
+        The collected files come only on request. --files copies the files
+        that the exported metric rows cite, and --with GLOB the files of each
+        run that match GLOB under data/results/<run_id>/, where * matches
+        within a name and ** across directories. A file goes to
+        <run_id>/<path>, and its entry in the manifest names the run, stage,
+        step and task. It refuses a DIR that exists and is not empty.
+        docs/guides/results.md explains the layout.
 
         --mlflow DIR writes the project database into a local MLflow tracking store
         in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
@@ -2435,7 +2442,9 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--out", metavar="DIR", help="the directory to write; it must be absent or empty")
     s.add_argument("--mlflow", metavar="DIR", help="write an MLflow tracking store in DIR instead")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")
-    s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
+    s.add_argument("--files", action="store_true", help="also copy the collected files that the exported metric rows cite")
+    s.add_argument("--with", dest="globs", action="append", metavar="GLOB",
+                   help="also copy the collected files of each run that match GLOB, such as run.json or '**/*.rpt'; repeatable")
     command("coverage", "whether a run holds each test of a demand list", """
         Reads DEMAND.csv, the list of tests an analysis needs, and says for
         each row whether a run holds it. The header names the columns label or

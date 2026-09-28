@@ -911,20 +911,25 @@ batch sets it, and import refuses a run of another source there.
 ## export
 
 ```
-edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--labels a,b] [--with-logs]
+edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--labels a,b] [--files] [--with GLOB]
 ```
 
 Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-metrics.csv, parameters.csv, task_fields.csv, instances.csv, flags.csv and the
-collected files of one run per label and source, the newest run by
-start time that ended done, else the newest run. --source matches the
+metrics.csv, parameters.csv, task_fields.csv, instances.csv and
+flags.csv of one run per label and source, the newest run by start
+time that ended done, else the newest run. --source matches the
 source tag exactly and may be given more than once. The manifest lists
 the exported runs whose phase is not done under incomplete, the other
 runs of each label and source under skipped, and each dirty source
 under dirty_sources, whose diff goes to sources/&lt;tag&gt;/source.diff.
-log/ and *.log stay out unless you pass --with-logs. It refuses a DIR
-that exists and is not empty. docs/guides/results.md explains the
-layout.
+
+The collected files come only on request. --files copies the files
+that the exported metric rows cite, and --with GLOB the files of each
+run that match GLOB under data/results/&lt;run_id&gt;/, where * matches
+within a name and ** across directories. A file goes to
+&lt;run_id&gt;/&lt;path&gt;, and its entry in the manifest names the run, stage,
+step and task. It refuses a DIR that exists and is not empty.
+docs/guides/results.md explains the layout.
 
 --mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
@@ -941,7 +946,8 @@ mlflow extra: pip install 'edarunner[mlflow]'.
 | `--out DIR` | the directory to write; it must be absent or empty |
 | `--mlflow DIR` | write an MLflow tracking store in DIR instead |
 | `--labels a,b` | these labels only, comma separated |
-| `--with-logs` | also copy log/ directories and *.log files |
+| `--files` | also copy the collected files that the exported metric rows cite |
+| `--with GLOB` | also copy the collected files of each run that match GLOB, such as run.json or '**/*.rpt'; repeatable |
 
 ## coverage
 

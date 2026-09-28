@@ -1066,15 +1066,19 @@ per run, `/board` sends the two pages as files, and `/csv <source>`
 sends `metrics.csv`;
 [alerts.md](alerts.md#files) has the bot.
 
-## edr export
+## Snapshots
+
+An analysis reads a snapshot, a frozen directory of tables, instead of
+the live database. `edr export` writes one:
 
 ```sh
-edr export --source 3f9a2c1 --out exports/3f9a2c1 [--labels base,base_dw0] [--with-logs]
+edr export --source 3f9a2c1 --out exports/3f9a2c1 [--labels base,base_dw0] [--files] [--with GLOB]
 ```
 
 The export takes one run per label whose source tag equals `--source`,
-by the rule of [Which run a command takes](#which-run-a-command-takes),
-and writes:
+by the rule of [Which run a command takes](#which-run-a-command-takes).
+By default it writes only tables, so a snapshot stays small even when
+the runs collected the reports of every step:
 
 ```
 exports/3f9a2c1/
@@ -1086,12 +1090,12 @@ exports/3f9a2c1/
   instances.csv
   flags.csv
   sources/<tag>/source.diff   the diff of each dirty source
-  <label>/...                 the collected files of that run
+  <run_id>/...                the collected files that --files and --with chose
 ```
 
 | File | Holds |
 |---|---|
-| `manifest.json` | `producer`, `created`, `schema` (3), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `flags` with the rows of `flags.csv`, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
+| `manifest.json` | `producer`, `created`, `schema` (4), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `flags` with the rows of `flags.csv`, `files` with path, size and sha256 of each file, `missing_files` with the cited files that `data/results` lacks, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
 | `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended,batch,dirty,tree_id,retired,flags`; `retired` is 1 for a run that was retired, or whose batch was, and `flags` names the checks that flag the run, separated by spaces |
 | `parameters.csv` | `run_id,label,source,key,value,origin`, the rows of the `parameters` table for each exported run |
 | `task_fields.csv` | `run_id,label,source,task,key,value,origin`, the rows of the `task_fields` table for each exported run |
@@ -1099,17 +1103,54 @@ exports/3f9a2c1/
 | `sources/<tag>/source.diff` | the copy of `data/sources/<tag>/source.diff` for each dirty source |
 | `metrics.csv` | `run_id,label,config,build_tag,source,host,stage,step,task,metric,canonical,value,unit,source_file,record`; `build_tag` and `host` are those of the run, and `record` marks the [step of record](#stage-of-record) |
 | `instances.csv` | `run_id,label,source,stage,step,task,metric,part,instance,depth,value,local,cells,unit`, the rows of the `instances` table for each exported run; join it to `metrics.csv` on run, stage, step, task and metric to keep the step of record |
-| `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; `<label>@<source>/` when the runs come from more than one tag |
+| `<run_id>/` | the collected files of that run that `--files` and `--with` chose, at their path under `data/results/<run_id>/` |
+
+### Files on request
+
+Every row of `metrics.csv` names the file its value came from, so most
+analyses need no file at all. When a reader must see a report itself,
+ask for it:
+
+- `--files` copies each collected file that an exported metric row
+  cites: the path part of its `source_file`, without the `:line` of a
+  regex value. A failed row cites no file.
+- `--with GLOB` copies the collected files of each run that match GLOB
+  under `data/results/<run_id>/`. A `*` matches within a name and `**`
+  across directories, so `--with run.json` takes the file at the top of
+  each run and `--with '**/config.rpt'` takes it at any depth. Give
+  `--with` once per glob; `--with '**/*'` takes every file, logs
+  included.
+
+A file keeps its path under the run id, and its entry in `files` names
+the run, stage, step and task:
+
+```json
+{"path": "20260911_0930_base_cfg_a_g3f9a2c1/simulation/tests/cfg_a/GEMM_M64_N64/power/phases.json",
+ "bytes": 412, "sha256": "9c1e...", "run_id": "20260911_0930_base_cfg_a_g3f9a2c1",
+ "stage": "power", "step": null, "task": "k_small"}
+```
+
+The stage, step and task come from the metric rows that cite the file.
+A file that no row cites takes the stage and task of the task directory
+that holds it, and a file outside every task directory has an empty
+task. A value on which the citing rows differ is `null`: a suite file
+that the rows of several tasks read has the task `null`. A file that a
+row cites and `data/results` lacks goes to `missing_files`, and the
+output of the command counts it.
+
+### Several sources
 
 `--source` may be given more than once, for a table that needs a done
 run at a dirty tag next to the runs of the clean tag, for example. The
-export then holds one run per label and source. When its runs come from
-more than one tag, the files of a run go under `<label>@<source>/`:
+export then holds one run per label and source. The files of a run sit
+under its run id, so two runs of one label stay apart:
 
 ```
 $ edr export --source 3f9a2c1 --source 3f9a2c1-dirty-7b21c0d9 --out exports/3f9a2c1-both
-exports/3f9a2c1-both: 3 runs (1 not done), 1 skipped, 14 files
+exports/3f9a2c1-both: 3 runs (1 not done), 1 skipped, 7 files
 ```
+
+### Read the manifest first
 
 Read `incomplete` before you use a number of the export: a run listed
 there failed, stopped or has not ended. Read `flags` as well: a run listed
@@ -1128,9 +1169,59 @@ recorded.
 
 The directory is written under a temporary name and renamed at the end,
 so a reader never sees a half snapshot. A `--out` that exists and is not
-empty is refused. `--dry-run` lists the files.
-[reference/cli.md](../reference/cli.md) lists every flag of `metrics` and
-`export`.
+empty is refused. `--dry-run` lists the files. The export event records
+the absolute path of `--out`, and `edr metrics` lists the snapshots that
+hold each run; [Where a number comes from](#where-a-number-comes-from)
+shows the column. [reference/cli.md](../reference/cli.md) lists every
+flag of `metrics` and `export`.
+
+### A paper composes its result set
+
+An analysis should never read the live database, because the database
+changes with every watcher cycle and a number you quote must stay the
+number you read. Instead, the analysis keeps its snapshots under its own
+`data/`, one directory per export. Every table and figure comes from the
+tables of those snapshots:
+
+```
+report/
+  data/3f9a2c1/           an export, copied as is
+  data/7c0d9e2/
+  pins.json               which run feeds which number, and why
+  Makefile                reads data/<pin>/metrics.csv
+```
+
+A paper seldom takes every number from one source. The small builds may
+come from one commit and the wide ones from a later commit, or one test
+may run again after a fix. edarunner does not choose among them. The
+paper keeps its choice in a pin table of its own, under version control:
+a base export, and the labels or tasks it takes from another export,
+each with the reason. The script that composes the result set then does
+three things:
+
+- It moves the rows and the files of a pinned run together, by run and
+  task: the rows of `metrics.csv` and `instances.csv` with that run id and
+  task, and the entries of `files` that name them.
+- It stops when a pinned label, task or file is missing, or when a
+  whole-run pin did not end done.
+- It takes a dirty source only when the snapshot carries its diff.
+
+The analysis records its own commit, the diff of its scripts and the
+sha256 of each output next to the pin table, so a figure can be traced
+to the snapshot and to the script that made it.
+
+The source tag in the manifest is the commit the numbers came from, and
+the manifest's sha256 per file lets a `make check` prove that the copy is
+the one that was exported. A new source is a new export in a new
+directory, never a change to an old one. A caption or a chart title that
+names the tag then stays true. Say the tag next to every number you
+publish.
+
+A large collected file, a VCD or a full netlist, belongs to
+`data/results/` on the head node, not to a snapshot. Leave it out of
+`collect`, name it under `collect_on_request`, and fetch it with `edr
+continue <handle> --collect <name>` or `edr retire --collect` when you
+need it; [cleanup.md](cleanup.md#keep-the-large-files) shows both.
 
 ## MLflow
 
@@ -1162,35 +1253,6 @@ parameter diff, and a chart of each metric over its steps. It shows the
 last value of a metric, not its source file, and it has no view of the
 instances, of the runtime per step side by side, or of the hosts.
 Those stay with `edr compare`, `edr runtime` and the board.
-
-## An analysis reads snapshots
-
-An analysis should never read the live database, because the database
-changes with every watcher cycle and a number you quote must stay the
-number you read. Instead, the analysis keeps one snapshot per
-source under its own `data/`, pinned by the source tag. Every table and
-figure comes from `runs.csv`, `metrics.csv`, `parameters.csv`,
-`task_fields.csv` and `instances.csv` of that snapshot:
-
-```
-report/
-  data/3f9a2c1/           an export, copied as is
-  data/7c0d9e2/
-  Makefile                reads data/<pin>/metrics.csv; the pin is the tag
-```
-
-The tag in the directory name is the commit the numbers came from, and
-the manifest's sha256 per file lets a `make check` prove the copy is the
-one that was exported. A new source is a new export in a new
-directory, never a change to an old one. A caption or a chart title that
-names the tag then stays true. Say the tag next to every number you
-publish.
-
-A snapshot is small by design. A large collected file, a VCD or a full
-netlist, belongs to `data/results/` on the head node, not to a snapshot.
-Leave it out of `collect`, name it under `collect_on_request`, and fetch
-it with `edr continue <handle> --collect <name>` or `edr retire --collect`
-when you need it; [cleanup.md](cleanup.md#keep-the-large-files) shows both.
 
 ## Tasks as data
 

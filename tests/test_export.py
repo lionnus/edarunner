@@ -6,6 +6,7 @@ import json
 import shutil
 
 import pytest
+from helpers_results import QOR, SUITE
 
 from edarunner import config, export
 from edarunner.db import Database
@@ -88,7 +89,7 @@ def test_export_one_source(world, tmp_path):
                       "commands": []}
     assert manifest["runs"][1]["record"]["tools"] == {} and manifest["runs"][1]["record"]["ended"] is None
     assert manifest["sources"] == ["aaa111"] and manifest["project"] == "demo"
-    assert manifest["schema"] == 3 and manifest["producer"].startswith("edarunner ")
+    assert manifest["schema"] == 4 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [{"run_id": RUN_B, "label": "b_nodw", "source": "aaa111", "phase": "stage:pnr"}]
     assert manifest["skipped"] == [{"run_id": RUN_A_OLD, "label": "a", "source": "aaa111", "phase": "done"}]
     assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0, "task_fields.csv": 2, "instances.csv": 2,
@@ -118,14 +119,10 @@ def test_export_one_source(world, tmp_path):
             for i in instances] == [(RUN_A, "power", "k_small", "power_w", "WHOLE", "top", "0", "0.25", "W"),
                                     (RUN_A, "power", "k_small", "power_w", "WHOLE", "top/u_a", "1", "0.1", "W")]
 
-    assert (out / "a" / "reports" / "3" / "area.rpt").read_text() == "i_top 1000.0\n"
-    assert (out / "a" / "sim" / "power" / "reports" / "power.csv").read_text() == POWER_HIER
-    assert (out / "b_nodw" / "reports" / "0" / "power.csv").read_text() == POWER_FLAT
-    assert not (out / "a" / "reports" / "area.rpt").exists()
-    assert not (out / "a" / "log").exists() and not (out / "a" / "reports" / "3" / "run.log").exists()
-
+    # Tables only: no collected file of a run.
     on_disk = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()} - {"manifest.json"}
-    assert {f["path"] for f in manifest["files"]} == on_disk
+    assert on_disk == {"runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv", "instances.csv", "flags.csv"}
+    assert {f["path"] for f in manifest["files"]} == on_disk and manifest["missing_files"] == []
     for f in manifest["files"]:
         data = (out / f["path"]).read_bytes()
         assert f["bytes"] == len(data) and f["sha256"] == hashlib.sha256(data).hexdigest()
@@ -155,26 +152,60 @@ def test_labels_and_refusals(world, tmp_path):
 def test_dry_run_writes_nothing(world, tmp_path, capsys):
     project, db = world
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, db, ["aaa111"], out, dry_run=True)
+    manifest = export.export(project, db, ["aaa111"], out, dry_run=True, files=True, globs=["**/power.csv"])
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
     assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv", "instances.csv", "flags.csv",
-                     "a/reports/3/area.rpt",
-                     "a/sim/power/reports/power.csv", "b_nodw/reports/0/power.csv"]
+                     f"{RUN_A}/reports/3/area.rpt", f"{RUN_A}/sim/power/reports/power.csv", f"{RUN_B}/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
-    real = export.export(project, db, ["aaa111"], out)
+    real = export.export(project, db, ["aaa111"], out, files=True, globs=["**/power.csv"])
     assert [(f["path"], f["sha256"]) for f in manifest["files"]] == [(f["path"], f["sha256"]) for f in real["files"]]
+    assert (out / RUN_B / "reports" / "0" / "power.csv").read_text() == POWER_FLAT
 
 
-def test_with_logs_copies_the_logs(world, tmp_path):
+def test_files_copies_the_cited_files_and_with_adds_others(world, tmp_path):
     project, db = world
-    out = tmp_path / "with_logs"
-    manifest = export.export(project, db, ["aaa111"], out, labels=["a"], with_logs=True)
-    assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
-    assert (out / "a" / "reports" / "3" / "run.log").is_file()
-    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv",
-                                                       "instances.csv", "flags.csv", "a/log/synth.log", "a/reports/3/area.rpt", "a/reports/3/run.log",
-                                                       "a/sim/power/reports/power.csv"]
+    db.upsert_run({"run_id": RUN_A, "root": "/scratch/edr/a"})
+    config.save_json(project.state_dir / "demo" / f"{RUN_A}.spec.json", {"stages": [{"name": "power", "tasks": [
+        {"id": "k_small", "dir": "/scratch/edr/a/tests/k_small"}, {"id": "k_big", "dir": "/scratch/edr/a/tests/k_big"}]}]})
+    # A regex value cites path:line, a task value a file in its task directory, and a suite file serves two tasks.
+    db.add_metric({"run_id": RUN_A, "stage": "synth", "step": 3, "name": "wns_ns", "value": -0.031, "unit": "ns",
+                   "source_file": "reports/3/qor.rpt:25"})
+    for task in ("k_small", "k_big"):
+        db.add_metric({"run_id": RUN_A, "stage": "power", "task": task, "name": "energy_nj", "value": 9.5, "unit": "nJ",
+                       "source_file": f"tests/{task}/phases.json"})
+        db.add_metric({"run_id": RUN_A, "stage": "bench", "task": task, "name": "cycles", "value": 4100.0,
+                       "source_file": "bench/suite.csv:2"})
+    db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "leak_w", "value": None,
+                   "source_file": "tests/k_small/power.csv: no row for top"})  # a failed row cites no file
+    results = project.data / "results" / RUN_A
+    for rel, text in (("reports/3/qor.rpt", QOR), ("tests/k_small/phases.json", "{}\n"), ("tests/k_small/sim.log", "log\n"),
+                      ("bench/suite.csv", SUITE), ("reports/config.rpt", "DESIGN alpha\n")):
+        (results / rel).parent.mkdir(parents=True, exist_ok=True)
+        (results / rel).write_text(text)
+
+    def where(manifest):
+        return {f["path"]: (f["stage"], f["step"], f["task"]) for f in manifest["files"] if f.get("run_id") == RUN_A}
+
+    out = tmp_path / "files"
+    manifest = export.export(project, db, ["aaa111"], out, labels=["a"], files=True)
+    assert where(manifest) == {f"{RUN_A}/bench/suite.csv": ("bench", None, None),
+                               f"{RUN_A}/reports/3/area.rpt": ("synth", 3, ""),
+                               f"{RUN_A}/reports/3/qor.rpt": ("synth", 3, ""),
+                               f"{RUN_A}/tests/k_small/phases.json": ("power", None, "k_small")}
+    # k_big's file is cited but was never collected.
+    assert manifest["missing_files"] == [{"path": f"{RUN_A}/tests/k_big/phases.json", "run_id": RUN_A, "stage": "power",
+                                          "step": None, "task": "k_big"}]
+    assert (out / RUN_A / "reports" / "3" / "qor.rpt").read_text() == QOR
+    assert {str(p.relative_to(out)) for p in (out / RUN_A).rglob("*") if p.is_file()} == set(where(manifest))
+
+    # A file that no row cites takes the task of the task directory that holds it, else none.
+    manifest = export.export(project, db, ["aaa111"], tmp_path / "with", labels=["a"], globs=["**/config.rpt", "tests/*/*.log"])
+    assert where(manifest) == {f"{RUN_A}/reports/config.rpt": (None, None, ""), f"{RUN_A}/tests/k_small/sim.log": ("power", None, "k_small")}
+    assert manifest["missing_files"] == [] and (tmp_path / "with" / RUN_A / "reports" / "config.rpt").read_text() == "DESIGN alpha\n"
+    for bad in ("../b/*", "/etc/*", ""):
+        with pytest.raises(Refuse, match="not a glob"):
+            export.export(project, db, ["aaa111"], tmp_path / "z", globs=[bad])
 
 
 def test_an_export_of_two_sources_holds_one_run_per_label_and_source(world, tmp_path):
@@ -188,12 +219,12 @@ def test_an_export_of_two_sources_holds_one_run_per_label_and_source(world, tmp_
     clean = export.export(project, db, ["ccc333"], tmp_path / "clean")
     assert [r["run_id"] for r in clean["runs"]] == [CLEAN] and clean["skipped"] == []
     assert clean["incomplete"] == [{"run_id": CLEAN, "label": "x", "source": "ccc333", "phase": "FAILED:pnr"}]
-    assert (tmp_path / "clean" / "x" / "reports" / "area.rpt").is_file()
-    both = export.export(project, db, ["ccc333", DIRTY_TAG], tmp_path / "both")
+    both = export.export(project, db, ["ccc333", DIRTY_TAG], tmp_path / "both", globs=["reports/*"])
     assert [r["run_id"] for r in both["runs"]] == [CLEAN, DIRTY] and both["sources"] == ["ccc333", DIRTY_TAG]
     assert [r["run_id"] for r in both["incomplete"]] == [CLEAN]
-    assert (tmp_path / "both" / f"x@{DIRTY_TAG}" / "reports" / "area.rpt").read_text() == f"{DIRTY_TAG}\n"
-    assert (tmp_path / "both" / "x@ccc333" / "reports" / "area.rpt").read_text() == "ccc333\n"
+    # The files of a run go under its run id, so two runs of one label stay apart.
+    assert (tmp_path / "both" / DIRTY / "reports" / "area.rpt").read_text() == f"{DIRTY_TAG}\n"
+    assert (tmp_path / "both" / CLEAN / "reports" / "area.rpt").read_text() == "ccc333\n"
 
 
 def test_parameters_run_columns_commands_and_the_diff_of_a_dirty_source(world, tmp_path):

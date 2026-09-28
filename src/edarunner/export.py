@@ -1,5 +1,5 @@
-"""A frozen snapshot of one or more sources for a paper: manifest, six tables, the diff of each dirty source and the
-collected files."""
+"""A frozen snapshot of one or more sources for a paper: manifest, six tables, the diff of each dirty source and, on
+request, the collected files."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from . import __version__, analysis, collect, config
 from .board import is_live
 from .db import Database, pick
 from .guards import Refuse
+from .metrics import source_path
 from .model import Project
 
 Row = dict[str, Any]
@@ -39,19 +40,25 @@ def export(
     out: Path,
     labels: list[str] | None = None,
     dry_run: bool = False,
-    with_logs: bool = False,
+    files: bool = False,
+    globs: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, task_fields.csv, instances.csv, flags.csv and the
-    collected files of the runs of `sources` to `out`.
+    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, task_fields.csv, instances.csv and flags.csv of the
+    runs of `sources` to `out`; with `files` also the collected files that the exported metric rows cite, and the
+    collected files that a glob of `globs` matches under `data/results/<run_id>/`.
 
     The export holds the `pick` of each label and source. The manifest lists every exported run whose phase is
-    not done under `incomplete`, and the other runs of each label and source under `skipped`. The files of a run
-    go under its label, or under label@source when the runs come from more than one source. They are copied
-    verbatim; `log/` directories and `*.log` files only with `with_logs`. Each dirty source is listed under
-    `dirty_sources`, and its `data/sources/<tag>/source.diff` goes to `sources/<tag>/source.diff`.
+    not done under `incomplete`, and the other runs of each label and source under `skipped`. A collected file is
+    copied verbatim to `<run_id>/<path>`. Its entry names the run, and the stage, step and task that the rows citing
+    it share, else those of the task directory that holds it; a value they do not share is None. A cited file that
+    `data/results` lacks is listed under `missing_files`. Each dirty source is listed under `dirty_sources`, and its
+    `data/sources/<tag>/source.diff` goes to `sources/<tag>/source.diff`.
     """
     if not sources or not all(sources):
         raise Refuse("empty source")
+    for g in globs or []:
+        if not g or Path(g).is_absolute() or ".." in Path(g).parts:
+            raise Refuse(f"{g!r} is not a glob under data/results/<run_id>/")
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise Refuse(f"'{out}' exists and is not empty")
@@ -60,7 +67,6 @@ def export(
         raise Refuse(f"no run has the source {' or '.join(map(repr, sources))}" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
     metrics = analysis.mark_record(project, db.metrics(run_ids=ids))
-    names = analysis.names(runs)
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
     params = [[r["run_id"], r["label"], r["source"], p["key"], p["value"], p["origin"]]
               for r in runs for p in db.parameters(r["run_id"])]
@@ -72,28 +78,42 @@ def export(
     flags = [{"run_id": f["run_id"], "label": by_id[f["run_id"]]["label"], "source": by_id[f["run_id"]]["source"],
               **{k: f[k] for k in ("task", "check", "text")}} for f in db.flags(ids)]
 
-    plan: list[tuple[str, Path | bytes]] = [
-        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired, flags) for r in runs])),
-        ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics])),
-        ("parameters.csv", to_csv(PARAMETER_COLUMNS, params)),
-        ("task_fields.csv", to_csv(TASK_FIELD_COLUMNS, fields)),
-        ("instances.csv", to_csv(INSTANCE_COLUMNS, instances)),
-        ("flags.csv", to_csv(FLAG_COLUMNS, [list(f.values()) for f in flags])),
+    plan: list[tuple[str, Path | bytes, Row]] = [
+        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired, flags) for r in runs]), {}),
+        ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics]), {}),
+        ("parameters.csv", to_csv(PARAMETER_COLUMNS, params), {}),
+        ("task_fields.csv", to_csv(TASK_FIELD_COLUMNS, fields), {}),
+        ("instances.csv", to_csv(INSTANCE_COLUMNS, instances), {}),
+        ("flags.csv", to_csv(FLAG_COLUMNS, [list(f.values()) for f in flags]), {}),
     ]
-    plan += [(f"sources/{d['source']}/source.diff", project.data / "sources" / d["source"] / "source.diff")
+    plan += [(f"sources/{d['source']}/source.diff", project.data / "sources" / d["source"] / "source.diff", {})
              for d in dirty if d["diff_sha256"]]
+    cited: dict[str, dict[str, list[tuple[Any, ...]]]] = {}
+    for m in metrics:
+        if m["value"] is not None and m["source_file"]:
+            cited.setdefault(m["run_id"], {}).setdefault(source_path(m["source_file"]), []).append(
+                (m["stage"], m["step"], m["task"]))
+    missing: list[Row] = []
     for r in runs:
-        results = Path(project.data) / "results" / r["run_id"]
-        for src in sorted(p for p in results.rglob("*") if p.is_file()):
-            rel = src.relative_to(results)
-            if not with_logs and ("log" in rel.parts[:-1] or rel.suffix == ".log"):
-                continue
-            plan.append((f"{names[r['run_id']]}/{rel}", src))
+        rid, results = r["run_id"], project.data / "results" / r["run_id"]
+        rows = cited.get(rid, {})
+        want = set(rows) if files else set()
+        for g in globs or []:
+            want.update(p.relative_to(results).as_posix() for p in results.glob(g) if p.is_file())
+        tasks = list(collect.spec_tasks(collect.load_spec(project, r), str(r.get("root") or ""))) if want else []
+        for rel in sorted(want):
+            where = rows.get(rel) or [(s, None, t) for s, t, d in tasks if rel.startswith(d.rstrip("/") + "/")] or [(None, None, "")]
+            stage, step, task = (v[0] if len(set(v)) == 1 else None for v in zip(*where))
+            entry = {"run_id": rid, "stage": stage, "step": step, "task": task}
+            if (results / rel).is_file():
+                plan.append((f"{rid}/{rel}", results / rel, entry))
+            else:
+                missing.append({"path": f"{rid}/{rel}", **entry})
 
     manifest: dict[str, Any] = {
         "producer": f"edarunner {__version__}",
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "schema": 3,
+        "schema": 4,
         "project": project.project,
         "sources": sources,
         "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "source", "host", "phase")},
@@ -104,26 +124,27 @@ def export(
         "dirty_sources": dirty,
         "flags": flags,
         "files": [],
+        "missing_files": missing,
         "incomplete": [_ident(r) for r in runs if r.get("phase") != "done"],
         "skipped": [_ident(r) for r in skipped],
     }
     if dry_run:
-        for rel, item in plan:
+        for rel, item, entry in plan:
             print(rel)
-            manifest["files"].append(_entry(rel, item))
+            manifest["files"].append({**_entry(rel, item), **entry})
         return manifest
 
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f".{out.name}.tmp-{os.getpid()}")
     tmp.mkdir()
-    for rel, item in plan:
+    for rel, item, entry in plan:
         dst = tmp / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(item, bytes):
             dst.write_bytes(item)
         else:
             shutil.copy2(item, dst)
-        manifest["files"].append(_entry(rel, dst))
+        manifest["files"].append({**_entry(rel, dst), **entry})
     (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
     os.replace(tmp, out)
     return manifest
