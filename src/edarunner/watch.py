@@ -23,7 +23,6 @@ from .guards import Refuse
 from .hosts import HostError, Ssh
 from .model import SCHEDULERS, Project, Task
 from .notify import Notifier, alerts
-from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
 
 log = logging.getLogger(__name__)
@@ -469,12 +468,6 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     if start:
         _launch_queued(project, ssh, db)
     _boards(project, backend, db, notifiers, now, pin=not served)
-    digest = Digest(project, db)
-    if digest.due(now):
-        text = digest.text(now)
-        for n in notifiers:
-            n.post("digest", text)
-        digest.mark_sent(now)
     db.set_store("progress", progress)
     db.set_store("notified", notes)
     n = int(config.load_json(project.state_dir / "watch.json").get("cycle") or 0) + 1

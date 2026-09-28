@@ -3,9 +3,9 @@
 The process that holds `~/.edr/serve.lock` takes the census each cycle: one ssh call per host of
 every registered project's site, all at once, for the probe, the clock and the user's processes,
 and the live heartbeats of every registered project. From it that process alone checks for
-orphans, stops the newest run of a full host and sweeps the stale seat leases, once for all
-projects. `census.json` keeps the probes and the live runs for the watchers and the views, and
-`store.json` the alerts and clocks of this work between cycles.
+orphans, stops the newest run of a full host, sweeps the stale seat leases and sends the daily
+digest, once for all projects. `census.json` keeps the probes and the live runs for the watchers
+and the views, and `store.json` the alerts, clocks and digest time of this work between cycles.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from .db import Database
 from .guards import Refuse
 from .hosts import HostError, HostProbe, Proc, Ssh
 from .model import SCHEDULERS, Needs, Placement, Project, Site
-from .notify import Notifier, alerts
+from .notify import Notifier, alerts, digest
 
 log = logging.getLogger(__name__)
 Row = dict[str, Any]
@@ -302,6 +302,16 @@ def _clocks(census: Row, notifiers: list[Notifier], store: Row, now: float) -> N
             _alert(store, notifiers, f"clock:{host}", f"{skew:+.0f}", lambda h=host, s=skew: alerts.clock_alert(h, s), now)
 
 
+def _digest(found: dict[str, Project], notifiers: list[Notifier], store: Row, now: float) -> None:
+    """Send the digest of every project once a day, from `digest_at` of the user file on."""
+    if not digest.due(config.load_user().digest_at, store["digest"], now):
+        return
+    text = digest.text(found, digest.since(store["digest"], now), now)
+    for n in notifiers:
+        n.post("digest", text)
+    store["digest"] = {"day": time.strftime("%Y-%m-%d", time.localtime(now)), "ts": now}
+
+
 def work(notifiers: list[Notifier], now: float | None = None, own: Project | None = None) -> Row:
     """Take the census and do the work of the user; `own` is the project of a watcher that holds serve.lock."""
     now = time.time() if now is None else now
@@ -310,17 +320,20 @@ def work(notifiers: list[Notifier], now: float | None = None, own: Project | Non
         found.setdefault(own.project, own)
     census = take(found, now)
     config.save_json(home.root() / "census.json", {k: census[k] for k in ("ts", "hosts", "runs")})
-    store = config.load_json(home.root() / "store.json")
+    kept = home.Store()
+    store = {k: kept.get_store(k, {}) for k in ("alerts", "full", "digest")}
     for step in (lambda: _orphans(census, found, notifiers, store, now), lambda: _full_hosts(census, found, store, now),
-                 lambda: sweep_leases(found, now), lambda: _clocks(census, notifiers, store, now)):
+                 lambda: sweep_leases(found, now), lambda: _clocks(census, notifiers, store, now),
+                 lambda: _digest(found, notifiers, store, now)):
         try:
             step()
         except Exception:  # one step that fails must not stop the others
             log.exception("census work")
     # An alert that no longer holds is forgotten, so it comes again when it returns.
-    store["alerts"] = {k: v for k, v in (store.get("alerts") or {}).items() if v.get("seen") == now}
+    store["alerts"] = {k: v for k, v in store["alerts"].items() if v.get("seen") == now}
     reservations(now, drop=True)
-    config.save_json(home.root() / "store.json", store)
+    for key, value in store.items():
+        kept.set_store(key, value)
     return census
 
 

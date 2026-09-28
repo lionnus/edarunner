@@ -25,10 +25,10 @@ report files and the numbers in them.
 
 | Module | Owns |
 |---|---|
-| `model.py` | the dataclasses every module shares: `Project`, `Site`, `Stage`, `Metric`, `Task`, `Job`, `Batch`; nothing here reads a file |
-| `config.py` | loading and validation of the four TOML files, the type check against the model, placeholders, hooks |
+| `model.py` | the dataclasses every module shares: `Project`, `Site`, `User`, `Stage`, `Metric`, `Task`, `Job`, `Batch`; nothing here reads a file |
+| `config.py` | loading and validation of the five TOML files, the type check against the model, placeholders, hooks |
 | `guards.py` | `assert_safe_target`, `assert_run_id` and `Refuse` |
-| `home.py` | the user root `~/.edr` or `EDR_HOME`: the registry of the projects and the process locks |
+| `home.py` | the user root `~/.edr` or `EDR_HOME`: the registry of the projects, the process locks and `store.json` |
 | `runid.py` | the git calls, the source tag, the run id template |
 | `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe and the census call, placement with the disk floor, the head-node check |
@@ -51,7 +51,7 @@ report files and the numbers in them.
 | `notify/alerts.py` | what each alert says, its buttons, and its plain text for ntfy and mail |
 | `notify/ntfy.py` | `NtfyNotifier`: one JSON post per alert to an ntfy server |
 | `notify/mail.py` | `MailNotifier`: one mail per alert through `smtplib` |
-| `notify/digest.py` | `Digest`, the daily summary that the watcher sends and `/digest` shows |
+| `notify/digest.py` | the daily digest of every project, which the holder of `serve.lock` sends and `/digest` shows |
 | `notify/telegram/api.py` | `BotApi`, the HTTPS client: one method per Bot API call, the retry and the 429 wait |
 | `notify/telegram/format.py` | pure functions that turn database rows into Telegram HTML |
 | `notify/telegram/commands.py` | the built-in command table and one handler per command |

@@ -5,6 +5,11 @@ project. Only the holder of `~/.edr/serve.lock`, the supervisor or else the firs
 Telegram takes one poller per token. Its router finds the project of every command and button
 press. Long polling runs over outbound HTTPS only; one chat id is obeyed, and one user id when
 `user_id` is set.
+
+With `topics = true` in `user.toml`, each watcher sends into the forum topic of its project and
+makes the topic the first time; the topic id lives in the database of the project. The
+supervisor sends the global board and the digest to the main thread. A command in the topic of a
+project acts on that project.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from edarunner.model import Project, Site
+from edarunner.model import Project, Site, Telegram
 from edarunner.notify import Notifier
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import ApiError, BotApi
@@ -36,27 +41,30 @@ REACTIONS = {"busy": "👀", "ok": "👍", "failed": "👎"}
 
 
 class TelegramBot(Notifier):
-    """One bot and one chat; with a router it also takes the commands and button presses of every project."""
+    """One bot and one chat; with a router it also takes the commands and button presses of every project.
 
-    def __init__(self, site: Site, project: Project, db: Any, router: Router | None, token_file: str) -> None:
-        assert site.telegram is not None
-        self.site = site
-        self.tg = site.telegram
+    The custom commands are those of `site` and those of `tg`; with `topic`, the alerts, the board and
+    every post go into the forum topic of `project` when `tg.topics` is on."""
+
+    def __init__(self, tg: Telegram, site: Site | None, project: Project, db: Any, router: Router | None,
+                 token_file: str, topic: bool = True) -> None:
+        self.tg = tg
         self.project = project
         self.db = db
         self.router = router
         self.api = BotApi(Path(token_file).read_text().strip())
-        self.commands = Commands(router, db, self.tg, str(site.path.parent), self.repin) if router else None
+        custom = {**(site.commands if site else {}), **tg.commands}
+        self.commands = Commands(router, db, custom, str(site.path.parent) if site else "", self.repin) if router else None
         self.buttons = Buttons(router, db, self.commands.event) if router and self.commands else None
-        self.chat_id = int(self.tg.chat_id)
-        self.user_id = self.tg.user_id or None
-        self.topic = self.tg.topic_id
+        self.chat_id = int(tg.chat_id)
+        self.user_id = tg.user_id or None
+        self.topic = topic and tg.topics
         self._state: dict = db.get_store("telegram", {})
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._rejected: set[int] = set()
-        self._topics: set[int] = set()
+        self._no_topic = False
 
     def _call(self, fn: Any, *args: Any, **kw: Any) -> Any:
         """`fn(*args, **kw)` with an ApiError logged instead of raised."""
@@ -100,7 +108,37 @@ class TelegramBot(Notifier):
     def post(self, title: str, html: str, silent: bool = False) -> bool:
         """Send one message: the bold first line with `title`, then `html`."""
         text = fmt.fit(fmt.head(self.project.project, title) + "\n" + html)
-        return self._call(self.api.send_message, self.chat_id, text, silent=silent, thread_id=self.topic) is not None
+        return self._call(self._new, text, silent) is not None
+
+    def _topic(self) -> int | None:
+        """The forum topic of the project, made the first time; None for the main thread."""
+        if not self.topic or self._no_topic:
+            return None
+        with self._lock:
+            tid = self._state.get("topic")
+        if tid is None:
+            try:
+                tid = self.api.create_topic(self.chat_id, self.project.project)
+            except ApiError as e:
+                self._no_topic = True
+                log.warning("telegram: no topic for %s, so the main thread: %s", self.project.project, e)
+                return None
+            with self._lock:
+                self._state["topic"] = tid
+                self.db.set_store("telegram", self._state)
+        return tid
+
+    def _new(self, text: str, silent: bool = False, markup: dict | None = None) -> int:
+        """Send a new message into the topic of the project; a topic that someone deleted is made again."""
+        tid = self._topic()
+        try:
+            return self.api.send_message(self.chat_id, text, silent=silent, markup=markup, thread_id=tid)
+        except ApiError as e:
+            if tid is None or "thread not found" not in str(e):
+                raise
+        with self._lock:
+            self._state.pop("topic", None)
+        return self.api.send_message(self.chat_id, text, silent=silent, markup=markup, thread_id=self._topic())
 
     def repin(self) -> None:
         """Unpin the board message and pin a new one at the bottom of the chat."""
@@ -122,7 +160,7 @@ class TelegramBot(Notifier):
             except ApiError as e:
                 if "not found" not in str(e):
                     raise
-        mid = self.api.send_message(self.chat_id, text, silent=silent, markup=markup, thread_id=self.topic)
+        mid = self._new(text, silent, markup)
         if pin:
             self.api.pin(self.chat_id, mid)
         with self._lock:
@@ -190,8 +228,6 @@ class TelegramBot(Notifier):
                 self.commands.event("rejected", f"user {actor} in chat {who} ignored")
             return
         thread = m.get("message_thread_id") if m.get("is_topic_message") else None
-        if not self._in_topic(thread):
-            return
         if q:
             self._press(q)
         elif msg and msg.get("text", "").startswith("/"):
@@ -207,7 +243,9 @@ class TelegramBot(Notifier):
         assert self.commands is not None
         if self.commands.slow(name):
             self._react(msg, "busy")
-        r = self.commands.run(name, args, msg["text"] if msg["text"].startswith("/") else "/" + name, run)
+        assert self.router is not None
+        here = self.router.topic_of(thread) if thread else None
+        r = self.commands.run(name, args, msg["text"] if msg["text"].startswith("/") else "/" + name, run, here)
         sent = self._reply(r, thread)
         self._react(msg, "ok" if r.ok and sent else "failed")
 
@@ -218,22 +256,12 @@ class TelegramBot(Notifier):
         except ApiError as e:
             log.debug("telegram: %s", e)
 
-    def _in_topic(self, thread: int | None) -> bool:
-        """True when the bot obeys a message of forum thread `thread`; the first one of a thread prints its id."""
-        if self.topic is not None:
-            return thread == self.topic
-        if thread is not None and thread not in self._topics:
-            self._topics.add(thread)
-            print(f"telegram: a message came from topic {thread} of chat {self.chat_id}; "
-                  f"set topic_id = {thread} in [telegram]", file=sys.stderr)
-        return True
-
     def _reply(self, r: Reply, thread: int | None = None) -> bool:
-        """Send a reply under the bold first line, into the topic of the bot or the thread of the command.
+        """Send a reply under the bold first line, into the thread of the command.
 
         True when every part went out; a file over MAX_DOCUMENT goes out as a line that says so.
         """
-        thread, ok, name = self.topic or thread, True, r.project or self.project.project
+        ok, name = True, r.project or self.project.project
         for d in r.documents:
             if len(d.data) > MAX_DOCUMENT:
                 ok = False

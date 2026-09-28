@@ -25,7 +25,9 @@ def no_telegram(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def user_root(tmp_path: Path, monkeypatch) -> Path:
-    """Every test has its own user root, so no test reads or writes the registry, the leases or the locks of ~/.edr."""
+    """Every test has its own HOME and user root, so no test reads your user.toml or site.toml, and none reads or
+    writes the registry, the leases or the locks of ~/.edr."""
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("EDR_HOME", str(tmp_path / ".edr"))
     monkeypatch.delenv("EDR_PROJECT", raising=False)
     return tmp_path / ".edr"

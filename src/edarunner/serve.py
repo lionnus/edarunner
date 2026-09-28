@@ -53,31 +53,22 @@ def _notify(state: str) -> None:
         s.sendto(state.encode(), "\0" + addr[1:] if addr.startswith("@") else addr)
 
 
-class Store:
-    """The memory of the supervisor in `store.json`, with the store interface its notifiers use."""
-
-    path = property(lambda self: home.root() / "store.json")
-
-    def get_store(self, key: str, default: Any = None) -> Any:
-        return config.load_json(self.path).get(key, default)
-
-    def set_store(self, key: str, value: Any) -> None:
-        config.save_json(self.path, {**config.load_json(self.path), key: value})
-
-    def add_event(self, actor: str, run_id: str, kind: str, text: str) -> None:
-        log.info("%s %s: %s", actor, kind, text)
-
-
 def notifiers(router: Router | None = None) -> list[Notifier]:
-    """The channels of the default site file, with `edr` in the first line of each message; `router` lets the bot
-    take the commands of every project."""
+    """The channels of the user file, with `edr` in the first line of each message and in the main thread of a
+    forum; `router` lets the bot take the commands of every project, and the default site file adds its bot
+    commands."""
     try:
-        site = config.load_site(config.DEFAULT_SITE)
+        user = config.load_user()
     except config.ConfigError as e:
         log.warning("no channels: %s", e)
         return []
-    user = SimpleNamespace(project="edr", root=home.root(), data=home.root(), site=site)
-    return make_notifiers(site, user, Store(), router)  # type: ignore[arg-type]
+    try:
+        site = config.load_site(config.DEFAULT_SITE)
+    except config.ConfigError as e:
+        log.warning("no site bot commands: %s", e)
+        site = None
+    me = SimpleNamespace(project="edr", root=home.root(), data=home.root())
+    return make_notifiers(user, site, me, home.Store(), router, topic=False)  # type: ignore[arg-type]
 
 
 @dataclass
@@ -221,7 +212,7 @@ def global_board(found: dict[str, Project], taken: dict, now: float) -> str:
     probes = {h: p["error"] if "error" in p else HostProbe(**p) for h, p in (taken.get("hosts") or {}).items() if h in sites}
     view = census.host_view(probes, taken.get("runs") or [], {h: floor(sites[h], h) for h in probes}, Placement())
     # `#n` of the bot counts the runs in the order of this board.
-    Store().set_store("last_board", [[name, r["run_id"]] for name in sorted(rows)
+    home.Store().set_store("last_board", [[name, r["run_id"]] for name in sorted(rows)
                                      for r in board.order(rows[name]) if board.is_live(r)])
     return tgfmt.global_board(rows, labels, [r for r in view if r["runs"] or r["note"]], now)
 

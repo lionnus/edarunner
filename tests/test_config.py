@@ -45,7 +45,7 @@ def test_demo_end_to_end():
     assert p.site.hosts["local"].cores == 4 and p.site.hosts["local"].scratch is None
     assert p.site.hosts["local"].tools == {"demo": "1.0"} and p.site.hosts["local"].has("demo")
     assert p.site.tools["demo"].seats == 10 and p.site.tools["demo"].probe == ["bash", "{root}/flow/seats.sh"]
-    assert p.site.telegram is None
+    assert p.site.commands == {}
     assert p.site.ssh_timeout_s == 20 and p.site.scratch == ["/tmp/edr-demo"]
 
     b = config.load_batch(p, "demo")
@@ -155,33 +155,26 @@ def test_site_types_and_user_id(tmp_path):
     site.write_text(text.replace("cores = 4", 'cores = "4"'))
     with pytest.raises(ConfigError, match="hosts.local.cores must be int, not str"):
         config.load_project(root)
-    site.write_text(text + "\n[telegram]\nchat_id = 42\n")
-    assert config.load_project(root).site.telegram.user_id is None
-    site.write_text(text + "\n[telegram]\nchat_id = 42\nuser_id = 7\n")
-    tg = config.load_project(root).site.telegram
-    assert (tg.chat_id, tg.user_id) == (42, 7)
-    site.write_text(text + "\n[telegram]\nchat_id = 42\nuser_id = \"7\"\n")
-    with pytest.raises(ConfigError, match="telegram.user_id must be int, not str"):
-        config.load_project(root)
-    site.write_text(text + "\n[telegram]\nchat_id = \"42\"\n")
-    with pytest.raises(ConfigError, match="telegram.chat_id must be int, not str"):
-        config.load_project(root)
 
 
-def test_telegram_belongs_to_the_site_only(tmp_path):
-    root = demo_copy(tmp_path)
-    site, edr = root / "site.toml", root / "edr.toml"
-    site_text, edr_text = site.read_text(), edr.read_text()
-    site.write_text(site_text + '\n[telegram]\nchat_id = 42\nuser_id = 7\ntopic_id = 17\n[telegram.commands.x]\nhelp = "x"\nrun = ["true"]\n')
-    tg = config.load_project(root).site.telegram
-    assert (tg.chat_id, tg.user_id, tg.topic_id, tg.token_file.name, list(tg.commands)) == (42, 7, 17, "telegram.token", ["x"])
+def test_the_chat_belongs_to_the_user_file(tmp_path):
+    root, user = demo_copy(tmp_path), tmp_path / "user.toml"
+    user.write_text('[telegram]\nchat_id = 42\nuser_id = 7\ntopics = true\n[telegram.commands.x]\nhelp = "x"\nrun = ["true"]\n')
+    tg = config.load_user(user).telegram
+    token = tmp_path / ".config" / "edarunner" / "telegram.token"  # HOME is tmp_path
+    assert (tg.chat_id, tg.user_id, tg.topics, tg.token_file, list(tg.commands)) == (42, 7, True, token, ["x"])
+    user.write_text("[telegram]\nchat_id = 42\n")
+    assert config.load_user(user).telegram.user_id is None and not config.load_user(user).telegram.topics
     for bad, match in (('chat_id = "1"', "telegram.chat_id must be int, not str"), ("token_file = 5", "token_file must be str"),
-                       ("user_id = 9", "missing key 'telegram.chat_id'")):
-        site.write_text(site_text + f"\n[telegram]\n{bad}\n")
+                       ("user_id = 9", "missing key 'telegram.chat_id'"), ('chat_id = 1\nuser_id = "7"', "user_id must be int"),
+                       ("chat_id = 1\ntopics = 1", "telegram.topics must be bool")):
+        user.write_text(f"[telegram]\n{bad}\n")
         with pytest.raises(ConfigError, match=match):
-            config.load_project(root)
-    site.write_text(site_text)
-    for text, key in (("telegram_poll = false\n" + edr_text, "telegram_poll"), (edr_text + "\n[telegram]\nchat_id = 5\n", "telegram")):
+            config.load_user(user)
+    edr = root / "edr.toml"
+    edr_text = edr.read_text()
+    for text, key in (("telegram_poll = false\n" + edr_text, "telegram_poll"), (edr_text + "\n[telegram]\nchat_id = 5\n", "telegram"),
+                      (edr_text.replace("[limits]", '[limits]\ndigest_at = "08:00"'), "limits.digest_at")):
         edr.write_text(text)
         with pytest.raises(ConfigError, match=f"unknown key '{key}'"):
             config.load_project(root)
@@ -209,16 +202,14 @@ def test_the_disk_floor_belongs_to_the_site_and_a_host_may_set_its_own(tmp_path)
             config.load_project(root)
 
 def test_digest_at_is_a_time_of_day(tmp_path):
-    root = demo_copy(tmp_path)
-    edr = root / "edr.toml"
-    text = edr.read_text()
-    assert config.load_project(root).limits.digest_at == ""
-    edr.write_text(text.replace("[limits]", '[limits]\ndigest_at = "08:00"'))
-    assert config.load_project(root).limits.digest_at == "08:00"
-    for bad in ('"8:00"', '"24:00"', '"08:00:00"'):
-        edr.write_text(text.replace("[limits]", f"[limits]\ndigest_at = {bad}"))
-        with pytest.raises(ConfigError, match="limits.digest_at must be HH:MM"):
-            config.load_project(root)
+    user = tmp_path / "user.toml"
+    assert config.load_user(user).digest_at == ""
+    user.write_text('digest_at = "08:00"\n')
+    assert config.load_user(user).digest_at == "08:00"
+    for bad in ('"8:00"', '"24:00"', '"08:00:00"', "8"):
+        user.write_text(f"digest_at = {bad}\n")
+        with pytest.raises(ConfigError, match="digest_at must be HH:MM"):
+            config.load_user(user)
 
 
 def test_duplicate_label(tmp_path):

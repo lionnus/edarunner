@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from helpers_telegram import CHAT, USER, FakeApi, FakeDatabase, FakeRouter, make_project, make_site
+from helpers_telegram import CHAT, USER, FakeApi, FakeDatabase, FakeRouter, make_project, make_site, make_user
 
 from edarunner import board
 from edarunner.model import BotCommand
@@ -27,8 +27,8 @@ from edarunner.notify.telegram.api import BotApi
 from edarunner.notify.telegram.format import LIMIT, fit, pre
 
 
-def make_bot(tmp_path, monkeypatch, names=("demo",), **site) -> TelegramBot:
-    bots = make_notifiers(make_site(tmp_path, **site), make_project(tmp_path), FakeDatabase(),
+def make_bot(tmp_path, monkeypatch, names=("demo",), **user) -> TelegramBot:
+    bots = make_notifiers(make_user(tmp_path, **user), make_site(), make_project(tmp_path), FakeDatabase(),
                           FakeRouter(make_project(tmp_path), names))
     assert len(bots) == 1 and isinstance(bots[0], TelegramBot)
     monkeypatch.setattr(bots[0], "api", FakeApi())
@@ -66,11 +66,11 @@ def last_reply(bot: TelegramBot) -> str:
 
 
 def test_make_notifiers_needs_a_private_token(tmp_path):
-    site = make_site(tmp_path, mode=0o644)
-    assert make_notifiers(site, make_project(tmp_path), FakeDatabase()) == []
-    site.telegram.token_file.unlink()
-    assert make_notifiers(site, make_project(tmp_path), FakeDatabase()) == []
-    assert make_notifiers(SimpleNamespace(telegram=None), None, None, None) == []
+    user = make_user(tmp_path, mode=0o644)
+    assert make_notifiers(user, None, make_project(tmp_path), FakeDatabase()) == []
+    user.telegram.token_file.unlink()
+    assert make_notifiers(user, None, make_project(tmp_path), FakeDatabase()) == []
+    assert make_notifiers(SimpleNamespace(telegram=None, ntfy=None, mail=None), None, None, None) == []
 
 
 @pytest.mark.parametrize("text,call", [
@@ -253,8 +253,8 @@ def test_press_by_another_user_needs_no_user_id(bot, caplog):
 
 
 def test_a_bot_without_a_router_only_sends(tmp_path, monkeypatch):
-    site = make_site(tmp_path)
-    b = TelegramBot(site, make_project(tmp_path), FakeDatabase(), None, str(site.telegram.token_file))
+    user = make_user(tmp_path)
+    b = TelegramBot(user.telegram, None, make_project(tmp_path), FakeDatabase(), None, str(user.telegram.token_file))
     monkeypatch.setattr(b, "api", FakeApi())
     b.start()
     b.stop()
@@ -311,7 +311,7 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     assert edit["message_id"] == 1 and edit["reply_markup"] is None
     assert re.fullmatch(r"<b>demo: board \d\d:\d\d</b>\nboard v2", edit["text"])
     # A new bot on the same db edits the same message.
-    again = TelegramBot(bot.site, bot.project, bot.db, None, str(bot.tg.token_file))
+    again = TelegramBot(bot.tg, None, bot.project, bot.db, None, str(bot.tg.token_file))
     again.api = FakeApi()
     again.board("board v3")
     assert again.api.of("sendMessage") == [] and again.api.of("editMessageText")[-1]["message_id"] == 1
@@ -413,7 +413,7 @@ def test_api_turns_a_bad_body_into_apierror(monkeypatch):
 
 
 def test_custom_output_keeps_a_non_utf8_byte(bot):
-    bot.tg.commands["latin"] = BotCommand("latin", "latin", ["printf", "caf\\xe9\\n"])
+    bot.commands.table["latin"] = BotCommand("latin", "latin", ["printf", "caf\\xe9\\n"])
     bot.handle_update(msg("/latin"))
     assert last_reply(bot) == pre("caf\ufffd")
 
@@ -444,28 +444,58 @@ def in_topic(update: dict, thread: int) -> dict:
     return update
 
 
-def test_a_topic_routes_every_message_and_ignores_other_threads(bot, capsys):
-    bot.topic = 17
-    bot.handle_update(in_topic(msg("/status"), 99))
-    bot.handle_update(in_topic(callback("keep6:demo"), 99))
-    bot.handle_update(msg("/status"))
-    assert bot.api.calls == [] and bot.router.calls == [] and bot.db.events == []
-    bot.handle_update(in_topic(msg("/status"), 17))
-    assert bot.api.of("sendMessage")[-1]["message_thread_id"] == 17
+def test_with_topics_a_project_sends_into_its_own_topic(tmp_path, monkeypatch):
+    bot = make_bot(tmp_path, monkeypatch, topics=True)
     bot.send(hung())
     bot.board("board v1")
-    assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [17, 17, 17]
-    assert bot.api.of("pinChatMessage")[0]["message_id"] == 3
-    assert capsys.readouterr().err == ""
+    bot.post("note", "x")
+    assert bot.api.of("createForumTopic") == [{"chat_id": CHAT, "name": "demo"}]
+    assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [700, 700, 700]
+    assert bot.db.store["telegram"]["topic"] == 700
+    calls = bot.api.call
+
+    def gone(method, params, files=None):
+        if params.get("message_thread_id") == 700:
+            raise tgapi.ApiError("sendMessage: Bad Request: message thread not found")
+        return calls(method, params, files)
+
+    monkeypatch.setattr(bot.api, "call", gone)
+    assert bot.post("note", "y")  # someone deleted the topic: the bot makes it again
+    assert bot.db.store["telegram"]["topic"] == 701 and bot.api.of("sendMessage")[-1]["message_thread_id"] == 701
 
 
-def test_without_a_topic_the_reply_goes_to_the_thread_and_its_id_is_printed(bot, capsys):
-    bot.handle_update(in_topic(msg("/status"), 99))
-    bot.handle_update(in_topic(msg("/status"), 99))
-    assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [99, 99]
-    assert capsys.readouterr().err.count("set topic_id = 99 in [telegram]") == 1
-    bot.handle_update(msg("/status"))
-    assert bot.api.of("sendMessage")[-1]["message_thread_id"] is None
+def test_without_the_right_to_make_topics_the_messages_go_to_the_main_thread(tmp_path, monkeypatch, caplog):
+    bot = make_bot(tmp_path, monkeypatch, topics=True)
+    calls = bot.api.call
+
+    def refuse(method, params, files=None):
+        if method == "createForumTopic":
+            raise tgapi.ApiError("createForumTopic: Bad Request: not enough rights to create a topic")
+        return calls(method, params, files)
+
+    monkeypatch.setattr(bot.api, "call", refuse)
+    with caplog.at_level(logging.WARNING):
+        bot.send(hung())
+        bot.post("note", "x")
+    assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [None, None]
+    assert caplog.text.count("no topic for demo, so the main thread") == 1
+    main = TelegramBot(bot.tg, None, bot.project, FakeDatabase(), None, str(bot.tg.token_file), topic=False)
+    main.api = FakeApi()
+    main.board("board")  # the supervisor pins its board in the main thread
+    assert main.api.of("createForumTopic") == [] and main.api.of("sendMessage")[0]["message_thread_id"] is None
+
+
+def test_a_command_in_a_topic_acts_on_its_project_and_is_answered_there(two):
+    for text, call in (("/status", ("status_text", (), {"everything": False})), ("/events 3", ("events_text", (3,), {})),
+                       ("/metric power_w", ("metric_text", ("power_w", None), {}))):
+        two.handle_update(in_topic(msg(text), 701))
+        sent = two.api.of("sendMessage")[-1]
+        assert two.router.calls[-1] == call and sent["message_thread_id"] == 701
+        assert sent["text"].startswith("<b>other: "), text
+    two.handle_update(in_topic(msg("/status"), 99))  # a thread of no project
+    assert two.router.calls[-1] == ("board_text", (), {}) and two.api.of("sendMessage")[-1]["message_thread_id"] == 99
+    two.handle_update(msg("/status"))
+    assert two.api.of("sendMessage")[-1]["message_thread_id"] is None
 
 
 def reply_to(text: str, msg_id: int) -> dict:
@@ -496,11 +526,10 @@ def test_a_reply_to_an_alert_names_its_run(two):
 
 
 def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
-    bot.topic = 17
     assert bot.post("note", "a &amp; b", silent=True) is True
     sent = bot.api.of("sendMessage")[-1]
     assert sent["text"] == "<b>demo: note</b>\na &amp; b"
-    assert sent["disable_notification"] is True and sent["message_thread_id"] == 17
+    assert sent["disable_notification"] is True and sent["message_thread_id"] is None
 
     def refuse(method, params, files=None):
         raise tgapi.ApiError("sendMessage: chat not found")

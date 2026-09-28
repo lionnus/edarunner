@@ -125,11 +125,13 @@ the next command and the buttons Stop, +6h, +12h and +24h, which give the
 run more hours and hold off the watcher's own stop for as long. ntfy and
 mail get the same alerts, with the commands written out. One bot serves
 all your projects and answers `/status`, `/projects`, `/hosts`,
-`/events`, `/tools` and `/digest`. A site can
-add its own commands, such as one that opens a Claude Code session in the
-project directory. Scripts and hooks send their own messages with `edr
-notify`. See [docs/guides/alerts.md](docs/guides/alerts.md) for the bot,
-ntfy and mail.
+`/events`, `/tools` and `/digest`, and a daily digest covers every
+project. A site can add its own commands, such as one that opens a
+Claude Code session in the project directory. Scripts and hooks send
+their own messages with `edr notify`. The channels live in your own
+`~/.config/edarunner/user.toml`; see
+[docs/guides/alerts.md](docs/guides/alerts.md) for the bot, ntfy and
+mail.
 
 ## Operate it with an agent
 

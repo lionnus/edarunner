@@ -18,7 +18,7 @@ batch, every number and every action.
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
-| `store` | key | one JSON value per key, a small key-value store: the watcher's `progress`, `notified` and `digest`, the `last_board` row order for `#n`, and the `telegram` message ids |
+| `store` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and under `telegram` the message ids and the forum topic of the project |
 | `area` | instance of a hierarchical area report | run, stage, step, metric name, instance path, depth, area with the children, local area, cell count; the source file is the metric's |
 | `step_runs` | step of a run | stage, step number, the unix time the step started, from the driver's `step_times` |
 | `host_samples` | host and watcher cycle | cores, load, RAM and scratch total and in use, GPUs and busy GPUs; 30 days are kept |

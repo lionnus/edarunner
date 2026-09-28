@@ -91,6 +91,20 @@ def test_the_census_writes_probes_and_live_runs_for_the_watchers(two, fake, user
     assert len(rec.sent) == 1  # one alert per host while the skew holds
 
 
+def test_the_work_sends_one_digest_of_every_project_a_day_and_keeps_the_keys_of_the_bot(two, fake) -> None:
+    user = Path(config.DEFAULT_USER).expanduser()
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(f'digest_at = "{time.strftime("%H:%M", time.localtime(NOW))}"\n')
+    home.Store().set_store("telegram", {"board": 5})
+    rec, posts = Rec(), []
+    rec.post = lambda title, html, silent=False: posts.append((title, html)) or True
+    census.work([rec], NOW)
+    census.work([rec], NOW + 60)
+    assert [t for t, _ in posts] == ["digest"] and "<b>alpha</b> <i>nothing ended, nothing live</i>" in posts[0][1]
+    assert "<b>beta</b>" in posts[0][1] and home.Store().get_store("digest")["ts"] == NOW
+    assert home.Store().get_store("telegram") == {"board": 5}  # the work writes only its own keys
+
+
 def orphan_procs(alpha, beta) -> list[Proc]:
     live, dead, done = (heartbeat(alpha, "a")["run_id"], heartbeat(beta, "d", age=beta.limits.dead_s + 1)["run_id"],
                         heartbeat(beta, "g", phase="done")["run_id"])

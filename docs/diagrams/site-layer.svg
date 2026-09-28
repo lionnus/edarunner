@@ -66,8 +66,8 @@
 <text class="t" x="686" y="302">Hosts and scratch</text>
 <text class="m" x="686" y="320" xml:space="preserve">scratch  [hosts.&lt;name&gt;]</text>
 <rect class="box" x="672" y="344" width="248" height="52" rx="7"/>
-<text class="t" x="686" y="366">Env, alerts, commands</text>
-<text class="m" x="686" y="384" xml:space="preserve">env  [telegram]  [ntfy]  [mail]</text>
+<text class="t" x="686" y="366">Env and bot commands</text>
+<text class="m" x="686" y="384" xml:space="preserve">env  [telegram.commands]</text>
 
 <!-- Layers to core -->
 <path class="a" d="M210 176V128"/>

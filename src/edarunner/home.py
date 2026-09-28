@@ -1,20 +1,26 @@
-"""The user root, `~/.edr` or `EDR_HOME`: the registry of the projects and the process locks.
+"""The user root, `~/.edr` or `EDR_HOME`: the registry of the projects, the process locks and the store.
 
 `projects/<name>` is a link to the directory of each project, so the commands that span
 projects find them. A lock is an `flock` that a process holds until it exits; the lock file
-holds its pid.
+holds its pid. `store.json` is the memory of the work of the user and of the bot that polls.
 """
 
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import logging
 import os
+import threading
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+from .config import load_json, save_json
 from .guards import Refuse
+
+log = logging.getLogger(__name__)
 
 
 def root() -> Path:
@@ -111,3 +117,22 @@ def holder(path: Path) -> str:
         return path.read_text().strip() or "?"
     except OSError:
         return "?"
+
+
+class Store:
+    """`store.json` under the user root, with the store interface of a project database.
+
+    The cycle and the bot thread of one process both write it, so a write holds a lock."""
+
+    lock = threading.Lock()
+    path = property(lambda self: root() / "store.json")
+
+    def get_store(self, key: str, default: Any = None) -> Any:
+        return load_json(self.path).get(key, default)
+
+    def set_store(self, key: str, value: Any) -> None:
+        with self.lock:
+            save_json(self.path, {**load_json(self.path), key: value})
+
+    def add_event(self, actor: str, run_id: str, kind: str, text: str) -> None:
+        log.info("%s %s: %s", actor, kind, text)

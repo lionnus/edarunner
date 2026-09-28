@@ -7,7 +7,7 @@ from dataclasses import replace
 from unittest import mock
 
 import pytest
-from helpers_telegram import FakeActions, FakeApi, FakeDatabase, make_project, make_site
+from helpers_telegram import FakeApi, FakeDatabase, make_project, make_site, make_user
 
 from edarunner.config import load_project
 from edarunner.model import Mail, Ntfy
@@ -38,7 +38,7 @@ ALERTS = {
 
 
 def telegram(a: alerts.Alert, tmp_path) -> str:
-    bot = TelegramBot(make_site(tmp_path), make_project(tmp_path), FakeDatabase(), FakeActions(),
+    bot = TelegramBot(make_user(tmp_path).telegram, make_site(), make_project(tmp_path), FakeDatabase(), None,
                       str(tmp_path / "telegram.token"))
     bot.api = FakeApi()
     bot.send(a)

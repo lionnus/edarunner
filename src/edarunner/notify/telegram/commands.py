@@ -5,7 +5,8 @@ the project of a command first and the run second. A handle `project/label@batch
 `#n` is run n of the last global board. A bare handle or a run id prefix is searched in every
 project: one match acts, and several get the list of `project/label@batch` to copy and no action.
 A command that needs a project and names none takes the project of the alert it replies to, else
-the only registered project; else the reply lists the names.
+the project of the forum topic it came from, else the only registered project; else the reply
+lists the names.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from edarunner import home
-from edarunner.model import BotCommand, Telegram
+from edarunner.model import BotCommand
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.custom import run_custom
 
@@ -108,39 +109,42 @@ def keyboard_word(text: str) -> str | None:
 class Commands:
     """The built-in and custom commands of one bot, over every project of the router."""
 
-    def __init__(self, router: Router, db: Any, tg: Telegram, site_dir: str, repin: Callable[[], None]) -> None:
+    def __init__(self, router: Router, db: Any, custom: dict[str, BotCommand], site_dir: str,
+                 repin: Callable[[], None]) -> None:
         self.router = router
         self.db = db
-        self.tg = tg
+        self.table = custom
         self.site_dir = site_dir
         self.repin = repin
-        self.run_of: tuple[str, str] | None = None  # the (project, run id) of the alert the command replies to
+        self.here: str | None = None  # the project of the command: of the alert it replies to, or of its topic
 
     def menu(self) -> list[dict[str, str]]:
         """The `/` menu: every built-in, then every custom command."""
         out = [{"command": b.name, "description": (f"{b.help}: /{b.name} {b.args}" if b.args else b.help)[:256]}
                for b in BUILTINS.values()]
-        return out + [{"command": n, "description": (c.help or n)[:256]} for n, c in self.tg.commands.items()]
+        return out + [{"command": n, "description": (c.help or n)[:256]} for n, c in self.table.items()]
 
     def slow(self, name: str) -> bool:
         """True for a command that can take more than a second: a custom one, or a slow built-in."""
-        return name in self.tg.commands or (name in BUILTINS and BUILTINS[name].slow)
+        return name in self.table or (name in BUILTINS and BUILTINS[name].slow)
 
-    def run(self, name: str, args: list[str], text: str, run: tuple[str, str] | None = None) -> Reply:
+    def run(self, name: str, args: list[str], text: str, run: tuple[str, str] | None = None,
+            topic: str | None = None) -> Reply:
         """Answer one command; an unknown name gets the help. Every command lands in the events.
 
         `run` is the (project, run id) of the alert the message replies to: it fills the handle of a
-        built-in and the run placeholders of a custom command.
+        built-in and the run placeholders of a custom command. `topic` is the project of the forum
+        topic the message came from.
         """
-        if name not in self.tg.commands and name not in BUILTINS:
+        if name not in self.table and name not in BUILTINS:
             name = "help"
+        self.here = run[0] if run else topic
         try:
-            if name in self.tg.commands:
-                return self.custom(self.tg.commands[name], args, run)
+            if name in self.table:
+                return self.custom(self.table[name], args, run)
             b = BUILTINS[name]
             if run and b.on_run and args[:1] != [f"{run[0]}/{run[1]}"]:
                 args = [f"{run[0]}/{run[1]}", *args]
-            self.run_of = run
             out = getattr(self, "cmd_" + name)(args)
             if not b.self_logged:
                 self.event("command", text[:200])
@@ -155,7 +159,7 @@ class Commands:
         log_dir, project = home.root(), ""
         texts = [*c.run, c.cwd or "{root}", *(c.skip_if or []), c.skip_reply, c.reply]
         if any(k in t for t in texts for k in PROJECT_KEYS):
-            project, args = self.router.pick(args, run)
+            project, args = self.router.pick(args, self.here)
             with self.router.actions(project) as act:
                 p = act.c.project
                 root = str(p.root)
@@ -180,10 +184,10 @@ class Commands:
 
     def cmd_status(self, args: list[str]) -> Reply | str:
         """The board of every project, the board of one project with `all` its finished runs, or one run."""
-        if not args:
+        if not args and not self.here:
             return self.router.board_text()
-        if args[0] in self.router.names() or args[0] == "all":
-            project, rest = self.router.pick(args, None)
+        if not args or args[0] in self.router.names() or args[0] == "all":
+            project, rest = self.router.pick(args, self.here)
             with self.router.actions(project) as act:
                 return Reply("status", act.status_text(everything="all" in rest), "html", project=project)
         project, h = self._handle(args)
@@ -197,9 +201,10 @@ class Commands:
     def cmd_events(self, args: list[str]) -> Reply | str:
         """The last n events, default 8, at most 30, of every project or of the one named."""
         n = min(30, int(args[-1])) if args and args[-1].isdecimal() else 8
-        if args and args[0] in self.router.names():
-            with self.router.actions(args[0]) as act:
-                return Reply("events", act.events_text(n), "html", project=args[0])
+        project = args[0] if args and args[0] in self.router.names() else self.here
+        if project:
+            with self.router.actions(project) as act:
+                return Reply("events", act.events_text(n), "html", project=project)
         return self.router.events_text(n)
 
     def cmd_hosts(self, args: list[str]) -> str:
@@ -225,7 +230,7 @@ class Commands:
 
     def cmd_board(self, args: list[str]) -> Reply | str:
         """compare.html and status.html of the last watcher cycle as files."""
-        project, _ = self.router.pick(args, self.run_of)
+        project, _ = self.router.pick(args, self.here)
         with self.router.actions(project) as act:
             files = act.board_files()
         if not files:
@@ -234,7 +239,7 @@ class Commands:
 
     def cmd_csv(self, args: list[str]) -> Reply | str:
         """The metrics of one source as `metrics.csv`."""
-        project, args = self.router.pick(args, self.run_of)
+        project, args = self.router.pick(args, self.here)
         if not args or not SOURCE.match(args[0]):
             return "usage: /csv [project] <source>"
         with self.router.actions(project) as act:
@@ -245,21 +250,21 @@ class Commands:
         """The daily digest now."""
         return self.router.digest_text()
 
-    def cmd_keep(self, args: list[str]) -> str:
+    def cmd_keep(self, args: list[str]) -> Reply:
         """Give a run that many more hours, default 12, on its budget, and hold off the watcher for that long."""
         project, h = self._handle(args)
         hours = int(args[1]) if len(args) > 1 and args[1].isdigit() else 12
         with self.router.actions(project) as act:
-            return act.keep(h, hours, "telegram")
+            return Reply("keep", act.keep(h, hours, "telegram"), project=project)
 
-    def cmd_stop(self, args: list[str]) -> str:
+    def cmd_stop(self, args: list[str]) -> Reply:
         """Stop a run after its running task."""
         project, h = self._handle(args)
         why = " ".join(args[1:]) or "stopped from telegram"
         with self.router.actions(project) as act:
-            return act.stop_after_task(h, "telegram", why)
+            return Reply("stop", act.stop_after_task(h, "telegram", why), project=project)
 
-    def cmd_compare(self, args: list[str]) -> str:
+    def cmd_compare(self, args: list[str]) -> Reply | str:
         """The metrics of several runs of one project side by side."""
         if not args:
             return "usage: /compare <handle>..."
@@ -267,25 +272,25 @@ class Commands:
         if len({p for p, _ in found}) > 1:
             raise ValueError("compare takes the runs of one project")
         with self.router.actions(found[0][0]) as act:
-            return act.compare_text([h for _, h in found])
+            return Reply("compare", act.compare_text([h for _, h in found]), "pre", project=found[0][0])
 
-    def cmd_metric(self, args: list[str]) -> str:
+    def cmd_metric(self, args: list[str]) -> Reply | str:
         """One metric for every run of a project, or for the runs of one source."""
-        project, args = self.router.pick(args, self.run_of)
+        project, args = self.router.pick(args, self.here)
         if not args:
             return "usage: /metric [project] <name> [--source SOURCE]"
         source = args[args.index("--source") + 1] if "--source" in args[:-1] else None
         with self.router.actions(project) as act:
-            return act.metric_text(args[0], source)
+            return Reply("metric", act.metric_text(args[0], source), "pre", project=project)
 
     def cmd_help(self, args: list[str]) -> str:
         """The built-in commands by group, then the custom commands."""
         groups: dict[str, list[tuple[str, str]]] = {}
         for b in BUILTINS.values():
             groups.setdefault(b.group, []).append((f"/{b.name} {b.args}", b.help))
-        if self.tg.commands:
+        if self.table:
             groups["Custom"] = [(f"/{n} " + " ".join(f"<{a}>" for a in c.args), c.help or "")
-                                for n, c in self.tg.commands.items()]
+                                for n, c in self.table.items()]
         return fmt.help_text(groups)
 
     def cmd_start(self, args: list[str]) -> Reply:

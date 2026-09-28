@@ -7,6 +7,6 @@
 | Page | What it covers | Source |
 |---|---|---|
 | [cli.md](cli.md) | every command with its flags, description and exit codes | the argparse definitions in `src/edarunner/cli.py` |
-| [configuration.md](configuration.md) | every key of the four TOML files, and the placeholders | the dataclasses in `src/edarunner/model.py`, `PLACEHOLDERS` in `src/edarunner/config.py` |
+| [configuration.md](configuration.md) | every key of the five TOML files, and the placeholders | the dataclasses in `src/edarunner/model.py`, `PLACEHOLDERS` in `src/edarunner/config.py` |
 | [states.md](states.md) | every run state: test, action, mark, proposed command | `STATES` in `src/edarunner/watch.py`, `MARK` in `src/edarunner/notify/telegram/format.py`, `triage_cmd` in `src/edarunner/board.py` |
 | [bot.md](bot.md) | the built-in bot commands, the alert buttons, the custom command keys | `BUILTINS` in `src/edarunner/notify/telegram/commands.py`, `BotCommand` in `src/edarunner/model.py` |
