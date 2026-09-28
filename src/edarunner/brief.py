@@ -37,6 +37,14 @@ def _when(ts: float | None) -> str:
     return time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "an unknown time"
 
 
+def _took(row: Row, verb: str) -> str:
+    """How long a stage or step of `analysis.runtime` took, as the end of a sentence; an open one says so."""
+    if row.get("wall_s") is None:
+        return ", with no end recorded"
+    return f" and has run for {analysis.dur(row['wall_s'])} so far" if row.get("open") else \
+        f" and {verb} {analysis.dur(row['wall_s'])}"
+
+
 def _code(items: list[str]) -> str:
     return board.join([f"`{i}`" for i in items])
 
@@ -302,7 +310,7 @@ def run_text(d: Row) -> str:
         seen = [s["stage"] for s in rt["stages"]] + [s["stage"] for s in rt["steps"]]
         for name in dict.fromkeys(seen):
             for s in (x for x in rt["stages"] if x["stage"] == name):
-                took = f" and ran for {analysis.dur(s['wall_s'])}" if s.get("wall_s") is not None else ", with no end recorded"
+                took = _took(s, "ran for")
                 status = f", ending {s['status']}" if s.get("status") and s.get("ended") else ""
                 ex = f" with exit {s['exit']}" if s.get("exit") is not None and s.get("ended") else ""
                 if name == "setup" and s.get("status") == "skipped":
@@ -315,9 +323,8 @@ def run_text(d: Row) -> str:
                 out.append(f"- Stage `{name}`, attempt {s['attempt']}, started {_when(s.get('started'))}{took}"
                            f"{status}{ex}.")
             for s in (x for x in rt["steps"] if x["stage"] == name):
-                took = f" and took {analysis.dur(s['wall_s'])}" if s.get("wall_s") is not None else ""
                 label = f" ({s['name']})" if s.get("name") else ""
-                out.append(f"  - Step {s['step']}{label} started {_when(s['started'])}{took}.")
+                out.append(f"  - Step {s['step']}{label} started {_when(s['started'])}{_took(s, 'took')}.")
             for t in (x for x in rt["tasks"] if x["stage"] == name):
                 out.append(f"  - {_count(t['tasks'], 'task')} ran for {analysis.dur(t['wall_s'])} in total; the "
                            f"longest was `{t['longest']}` at {analysis.dur(t['longest_s'])}.")

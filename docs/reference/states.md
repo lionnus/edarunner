@@ -8,7 +8,8 @@ The state is the watcher's verdict on a run; the phase is the driver's word in t
 where the run is or how it ended. A live run gets its state from the heartbeat and the database;
 a finished run from its phase.
 Every change of state writes an event. A state that alerts sends one alert per run and reason,
-and a new reason edits that alert in place. A keep of N hours holds off the kill of `hung` and
+and a new reason edits that alert in place. A run that ends `done` alerts only a user who asks
+for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
 the stop of `superseded` for N hours; the full-host stop never waits for a keep.
 The triage proposes no retire for a run without a tree, such as one imported with `--results`,
 since a retire would only mark its row. When another run has the same label and batch, the

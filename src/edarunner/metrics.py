@@ -247,7 +247,7 @@ def _extract_one(
         text = str(e)
         return [_row(run_id, stage_name, None, task_id, metric, None, text, now)]
     rows = []
-    for step, path in _files(pattern, run_dir, metric.step):
+    for step, path in find_files(pattern, run_dir, metric.step):
         if step is not None and step not in owned:
             continue  # a numbered step belongs to one stage; the others skip it
         rel = str(path.relative_to(run_dir))
@@ -297,19 +297,20 @@ def owned_steps(project: Project) -> dict[str, range]:
     return owned
 
 
-def _files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | None, Path]]:
-    if step != "*":
+def find_files(pattern: str, run_dir: Path, step: str | None) -> list[tuple[int | None, Path]]:
+    """The files of `pattern` under `run_dir`, each with its step, in step order. With `step = "*"`, `{step}` matches
+    a step number; `*` matches any part of a name. Of several files for one step, the first by name counts."""
+    fixed = None if step in (None, "*") else int(step)
+    if step != "*" and "*" not in pattern:
         path = run_dir / pattern
-        return [(None if step is None else int(step), path)] if path.is_file() else []
-    rx = re.compile(re.escape(pattern).replace(re.escape("{step}"), r"(\d+)"))
-    found = []
-    for path in run_dir.glob(pattern.replace("{step}", "*")):
+        return [(fixed, path)] if path.is_file() else []
+    rx = re.compile(re.escape(pattern).replace(re.escape("{step}"), r"(\d+)").replace(r"\*", "[^/]*"))
+    found: dict[int | None, Path] = {}
+    for path in sorted(run_dir.glob(pattern.replace("{step}", "*"))):
         m = rx.fullmatch(str(path.relative_to(run_dir)))
         if m and path.is_file():
-            found.append((int(m.group(1)), path))
-    return sorted(found)
-
-
+            found.setdefault(int(m.group(1)) if step == "*" else fixed, path)
+    return sorted(found.items())
 
 
 def _row(

@@ -173,7 +173,7 @@ takes tasks from the same pool; `docs/guides/run.md` explains the queue and shar
 | `prepare` | a command once before a group starts | `""` |
 | `task_dir` | the directory of a task, relative to the tree; required in a group | `""` |
 | `after_each` | a command after each task, with `{task_dir}` | `""` |
-| `step_log` | `{ file, regex }`: step start times the flow writes into a collected file; group 1 of the regex is a unix time, and group 2, when present, the step number | `{}` |
+| `step_log` | `{ file, regex }`: step start times the flow writes into collected files; group 1 of the regex is a unix time, and group 2, when present, the step number. With `{step}` in `file`, each file is the log of one step and its first match starts it; `*` matches any part of a name | `{}` |
 
 #### needs
 
@@ -232,7 +232,7 @@ the number does not apply.
 |---|---|---|
 | `stage` | a stage name or a list: the stages whose files hold the number | required |
 | `step` | `"*"` for one row per step, a number, or absent | unset |
-| `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required |
+| `file` | the file under the collected results; `{step}` and `{task_dir}` allowed, and `*` matches any part of a name; of several files for one step, the first by name counts | required |
 | `regex` | a regex; group 1 of each match is a value | one of the six |
 | `reduce` | how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum names the line of its first value | `"first"` |
 | `csv` | `{ where = { column = value }, column }`; the first row that matches `where`, whose values take the placeholders of `file` | one of the six |
@@ -324,6 +324,7 @@ edarunner sends nothing.
 | Key | Meaning | Default |
 |---|---|---|
 | `digest_at` | the local time, `HH:MM`, of the daily digest of every registered project; empty is off | `""` |
+| `alerts` | the alerts you ask for on top of the ones that always come, on every channel: `done` when a run ends done, `metrics` when the watcher adds metric rows to a run | `[]` |
 
 ### [telegram]
 

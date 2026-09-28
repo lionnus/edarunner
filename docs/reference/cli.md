@@ -223,7 +223,7 @@ watch or telegram), the run, the kind and the text.
 ## hosts
 
 ```
-edr hosts [--json] [--history] [--since T] [--narrow]
+edr hosts [--json] [--history] [--since T] [--batch B] [--narrow]
 ```
 
 Probes every host of the site file, all at once, and prints one row per
@@ -255,11 +255,19 @@ row per host: the first and last sample, and a line each of cores in
 use (the load, capped at the cores), RAM, scratch and busy GPUs over
 --since, each with its peak and its last value.
 
+--batch B takes the window of a batch instead of --since: from the
+start of its first run to the last heartbeat of its last run, or to now
+while a run of it lives. It shows the hosts the batch ran on, and under
+each one a line of the batch's own use from the run_samples table: the
+CPU of its runs in cores, their RSS and the size of their trees, summed
+at each host sample.
+
 | Flag | Meaning |
 |---|---|
 | `--json` | the same as edr --json hosts |
 | `--history` | no probe: the samples the watcher kept, one line per host over --since |
 | `--since T` | with --history: 30m, 2h, 1d or seconds; default 1d |
+| `--batch B` | the history over the window of this batch, with a line of its own use under each of its hosts |
 | `--narrow` | only the mark (column ok), host, free cores, free scratch and your runs, in 48 columns |
 
 | Exit | Meaning |
@@ -479,16 +487,23 @@ edr runtime [--json] [--batch B] [HANDLE ...]
 ```
 
 With one handle, runtime prints the times of one run: a row per stage
-attempt from
-the stage_runs table, a row per step under it, and one row per task
-group with the task count, the summed task time and the longest task.
-A step starts when the driver first sees its number, or at the time
-the stage's step_log finds in a collected file; it ends when the next
-step starts or the stage ends. The source column names the table or
-the file and line of each time. The total sums the stage attempts.
+attempt from the stage_runs table, a row per step under it, and one
+row per task group with the task count, the summed task time and the
+longest task. A step starts at the time the stage's step_log finds in
+a collected file, else when the driver first saw its number. It ends
+when the next step of its stage starts, else when the stage ends, else
+at the mtime of its own log file. A stage without an end counts up to
+now while the run lives, else up to its last heartbeat. A time that
+counts up to now, or that has no end, is open; the total then reads
+"at least" and names it. The source column names the table or the
+file and line of each time. The total sums the stage attempts, or the
+steps of a run without stage rows, such as an imported one.
 
 With several handles or --batch, it prints one row per run: the wall
-time of each stage, with the attempts summed, and the total.
+time of each stage, with the attempts summed, the total, and an open
+column when a run has an open time. --json gives each stage and step
+row with wall_s and open, and the run with total_s and open, the list
+of its open times.
 
 | Flag | Meaning |
 |---|---|

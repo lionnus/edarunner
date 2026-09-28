@@ -57,7 +57,7 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [tools.<name>]", [model.Tool], ""),
     ("### [telegram.commands.<name>]", [], "One table per bot command of the lab; `bot.md` lists the keys. `[telegram]` "
                                           "in `site.toml` takes no other key."),
-    ("## user.toml", [(model.User, ["digest_at"])], ""),
+    ("## user.toml", [(model.User, ["digest_at", "alerts"])], ""),
     ("### [telegram]", [model.Telegram], ""),
     ("### [telegram.commands.<name>]", [], "One table per bot command of your own; it replaces the one of the same "
                                           "name in `site.toml`."),

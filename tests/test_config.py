@@ -212,6 +212,17 @@ def test_digest_at_is_a_time_of_day(tmp_path):
             config.load_user(user)
 
 
+def test_alerts_names_the_opt_in_kinds(tmp_path):
+    user = tmp_path / "user.toml"
+    assert config.load_user(user).alerts == []
+    user.write_text('alerts = ["done", "metrics"]\n')
+    assert config.load_user(user).alerts == ["done", "metrics"]
+    for bad in ('["dead"]', '"done"', '[{ kind = "done" }]'):
+        user.write_text(f"alerts = {bad}\n")
+        with pytest.raises(ConfigError, match="alerts is a list of done, metrics"):
+            config.load_user(user)
+
+
 def test_duplicate_label(tmp_path):
     root = demo_copy(tmp_path)
     jobs = root / "jobs" / "demo.toml"

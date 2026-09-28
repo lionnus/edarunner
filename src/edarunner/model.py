@@ -157,6 +157,10 @@ class Scheduler:
                              "extra `bsub` arguments for LSF", factory=list)
 
 
+# The alert kinds a user asks for with `alerts` in user.toml; every other kind always goes out.
+OPT_IN = ("done", "metrics")
+
+
 @dataclass
 class User:
     """`~/.config/edarunner/user.toml` holds what belongs to one person: the chat of the bot, the ntfy
@@ -166,6 +170,9 @@ class User:
 
     path: Path
     digest_at: str = doc("the local time, `HH:MM`, of the daily digest of every registered project; empty is off", "")
+    alerts: list[str] = doc("the alerts you ask for on top of the ones that always come, on every channel: `done` "
+                            "when a run ends done, `metrics` when the watcher adds metric rows to a run",
+                            factory=list)
     telegram: Telegram | None = None
     ntfy: Ntfy | None = None
     mail: Mail | None = None
@@ -288,9 +295,10 @@ class Stage:
     prepare: str = doc("a command once before a group starts", "")
     task_dir: str = doc("the directory of a task, relative to the tree; required in a group", "")
     after_each: str = doc("a command after each task, with `{task_dir}`", "")
-    step_log: dict[str, str] = doc("`{ file, regex }`: step start times the flow writes into a collected file; "
-                                   "group 1 of the regex is a unix time, and group 2, when present, the step number",
-                                   factory=dict)
+    step_log: dict[str, str] = doc("`{ file, regex }`: step start times the flow writes into collected files; group "
+                                   "1 of the regex is a unix time, and group 2, when present, the step number. With "
+                                   "`{step}` in `file`, each file is the log of one step and its first match starts "
+                                   "it; `*` matches any part of a name", factory=dict)
 
     @property
     def is_group(self) -> bool:
@@ -334,8 +342,8 @@ class Metric:
     stage: list[str] = doc("a stage name or a list: the stages whose files hold the number", factory=list,
                            shown="required")
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
-    file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
-                    shown="required")
+    file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed, and `*` matches any "
+                    "part of a name; of several files for one step, the first by name counts", "", shown="required")
     regex: str = doc("a regex; group 1 of each match is a value", "", shown="one of the six")
     reduce: str = doc("how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum "
                       "names the line of its first value", "first")

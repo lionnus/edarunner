@@ -68,7 +68,7 @@ A live run on a full host gets Stop, and Free space when the project declares pr
 keep does not hold off the full-host stop, since a full disk blocks every other user of the
 host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages left on its
 tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show each
-button as a command line.
+button as a command line. A run that ended `done` gets the opt-in alert `done`, without log lines.
 
 | Button | callback_data | Effect |
 |---|---|---|

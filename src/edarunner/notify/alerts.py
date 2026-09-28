@@ -127,7 +127,7 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
     keep does not hold off the full-host stop, since a full disk blocks every other user of the
     host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages left on its
     tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show each
-    button as a command line."""
+    button as a command line. A run that ended `done` gets the opt-in alert `done`, without log lines."""
     h, lim = board.handle(run, runs), project.limits
     host = str(hb.get("host") or run.get("host") or "-")
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
@@ -217,6 +217,10 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.title = "stopped run"
         a.about = f"A stop ended the run in stage {hb.get('stage') or run.get('stage') or '-'}."
         a.todo = [status]
+    elif state == "done":
+        a.title, a.log = "run done", []
+        a.about = "The run ended done" + (f" after {board.hm(hb['elapsed_s'])}" if hb.get("elapsed_s") else "") + "."
+        a.todo = [("See its numbers:", f"edr metrics --run {h}")]
     if left:
         stages, root = board.join(left), str(hb.get("root") or run.get("root") or "-")
         a.about += f" It did not run {stages}."
@@ -238,6 +242,14 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
                        if prune else
                        f"{stop}; on Telegram it asks once more.", None))
     return a
+
+
+def metrics_alert(run: Row, text: str, runs: list[Row] | None = None) -> Alert:
+    """The opt-in alert of the metric rows the watcher added to a run; `text` is that of the `metrics` event, such as
+    `6 new: area_um2, wns_ns at pnr 8, 9`. A channel that edits keeps one message per run."""
+    h = board.handle(run, runs)
+    return Alert("metrics", str(run.get("key") or run["run_id"]), "new metrics of", h, text + ".",
+                 todo=[("See them:", f"edr metrics --run {h}")])
 
 
 def orphan_alert(project: Project | None, o: Row) -> Alert:

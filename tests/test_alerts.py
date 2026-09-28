@@ -1,4 +1,5 @@
-"""The text of the orphan, dead, hung, over_budget, stopped and held alerts, exactly as each channel sends it."""
+"""The text of the orphan, dead, hung, over_budget, stopped, held, done and metrics alerts, exactly as each channel sends
+it."""
 
 from __future__ import annotations
 
@@ -39,6 +40,9 @@ ALERTS = {
     "stopped": alerts.run_alert(PROJECT, {**ENDED, "phase": "STOPPED"}, "stopped", [], {**HB, "phase": "STOPPED", "exit": 10},
                                 NOW, ["pnr"]),
     "held": alerts.run_alert(PROJECT, RUN, "held", ["held by the scheduler"], {}, NOW),
+    "done": alerts.run_alert(PROJECT, {**ENDED, "phase": "done"}, "done", [],
+                             {**HB, "phase": "done", "exit": 0, "elapsed_s": 5400}, NOW),
+    "metrics": alerts.metrics_alert(RUN, "6 new: area_um2, wns_ns at pnr 8, 9"),
 }
 
 
@@ -274,6 +278,36 @@ EXPECTED = {
         '\n'
         'Release it with the scheduler, or cancel it:\n'
         '    edr stop b@demo --why held\n',
+    ),
+    'done': (
+        '⚪ <b>demo: run done</b> <code>b@demo</code>\n'
+        'The run ended done after 1h.\n'
+        '\n'
+        'stage: synth, step 3 elaborate\n'
+        'host: hostA\n'
+        '\n'
+        'See its numbers:\n'
+        '<code>edr metrics --run b@demo</code>',
+        '⚪ demo: run done b@demo\n'
+        'The run ended done after 1h.\n'
+        '\n'
+        'stage: synth, step 3 elaborate\n'
+        'host: hostA\n'
+        '\n'
+        'See its numbers:\n'
+        '    edr metrics --run b@demo\n',
+    ),
+    'metrics': (
+        '⚪ <b>demo: new metrics of</b> <code>b@demo</code>\n'
+        '6 new: area_um2, wns_ns at pnr 8, 9.\n'
+        '\n'
+        'See them:\n'
+        '<code>edr metrics --run b@demo</code>',
+        '⚪ demo: new metrics of b@demo\n'
+        '6 new: area_um2, wns_ns at pnr 8, 9.\n'
+        '\n'
+        'See them:\n'
+        '    edr metrics --run b@demo\n',
     ),
 }
 
