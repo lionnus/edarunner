@@ -73,19 +73,13 @@ def test_render_and_placeholders():
         ('project = "demo"', 'project = "demo"\ncolour = 1', "unknown key 'colour'"),
         ("parallel = 2", "parallel = 2\nbogus = 1", "unknown key 'stages.power.bogus'"),
         ("stagger_s = 0", "stagger_s = 0\nfoo = 1", "unknown key 'limits.foo'"),
-        ("parallel = 2", 'parallel = 2\nafter = "export"', "unknown key 'stages.power.after'"),
         ('stage = ["synth", "pnr"]', 'stage = ["synth", "gone"]', "stage names unknown stage 'gone'"),
         ('task_dir = "simulation/tests/{config}/{task.test}"', "", "task group and needs task_dir"),
         ('tools = ["demo"]', 'tools = ["fc"]', "stages.synth.needs.tools names unknown tool 'fc'"),
         ("tools = { demo = 1 }", "tools = { questa = 1 }", "unknown tool 'questa'"),
-        ('tools = ["demo"]', 'licence = "demo"', "stages.synth.needs.licence is gone; use stages.synth.needs.tools"),
-        ("state_dir = ", "state = ", "'state' is now 'state_dir'"),
         ('tools = ["demo"]', "tools = 1", "stages.synth.needs.tools must be a list of names or"),
         ('tools = ["demo"]', 'tools = { demo = "2" }', "stages.synth.needs.tools must be a list of names or"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
-        ('python = "hooks/energy.py:energy_nj"', 'expr = "power_w * window_ns"',
-         r'metrics.energy_nj.expr is gone; write stage, file and python = "hooks/energy_nj.py:energy_nj" with '
-         r"def energy_nj\(path\): that reads the inputs and returns power_w \* window_ns"),
         ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
         ("host_free_min_gb = 1", 'host_free_min_gb = "1"', "limits.host_free_min_gb must be float, not str"),
         ("stagger_s = 0", "stagger_s = 0\nkill_hung = 1", "limits.kill_hung must be bool, not int"),
@@ -117,8 +111,7 @@ def test_site_tools_and_host_tools(tmp_path):
     for old, new, match in (('tools = { demo = "1.0" }', 'tools = ["nope"]', "hosts.local.tools names unknown tool 'nope'"),
                             ('tools = { demo = "1.0" }', "tools = 1", "hosts.local.tools must be dict, not int"),
                             ("seats = 10", 'seats = "10"', "tools.demo.seats must be int, not str"),
-                            ('probe = ["bash", "{root}/flow/seats.sh"]', 'probe = "bash seats.sh"', "tools.demo.probe must be list, not str"),
-                            ("[tools.demo]", "[licences.demo]", r"\[licences\] is gone; declare \[tools.<name>\]")):
+                            ('probe = ["bash", "{root}/flow/seats.sh"]', 'probe = "bash seats.sh"', "tools.demo.probe must be list, not str")):
         site.write_text(text.replace(old, new))
         with pytest.raises(ConfigError, match=match):
             config.load_project(root)
@@ -126,9 +119,6 @@ def test_site_tools_and_host_tools(tmp_path):
     tasks = root / "tasks.toml"
     tasks.write_text(tasks.read_text().replace("budget = { hours = 2 }", "budget = { hours = 2 }\nneeds = { tools = { demo = 2 } }"))
     assert config.load_project(root).tasks["k_big"].needs.tools == {"demo": 2}
-    tasks.write_text(tasks.read_text().replace("tools = { demo = 2 }", 'licence = "demo"'))
-    with pytest.raises(ConfigError, match="tasks.k_big.needs.licence is gone"):
-        config.load_project(root)
 
 
 def test_scheduler_backend(tmp_path):
@@ -254,14 +244,10 @@ def test_job_vars_and_optional_config(tmp_path):
     jobs.write_text(text.replace('label = "b_nodw"\nconfig = "demo"\n', 'label = "b_nodw"\n'))
     assert config.load_batch(config.load_project(root), "demo").jobs[1].config == ""
     for old, new, match in (("vars = { netlist_stage = 11 }", 'vars = { "not-id" = 1 }', "vars key 'not-id' is not an identifier"),
-                            ("vars = { netlist_stage = 11 }", "vars = { x = [1] }", r"job\[0\].vars.x must be a string or a number"),
-                            ("vars = { netlist_stage = 11 }", "netlist_stage = 11",
-                             r"job\[0\].netlist_stage is gone; write vars = \{ netlist_stage = 11 \}")):
+                            ("vars = { netlist_stage = 11 }", "vars = { x = [1] }", r"job\[0\].vars.x must be a string or a number")):
         jobs.write_text(text.replace(old, new))
         with pytest.raises(ConfigError, match=match):
             config.load_batch(config.load_project(root), "demo")
-    with pytest.raises(ConfigError, match=r"\{netlist_stage\} is gone; write \{vars.netlist_stage\}"):
-        config.load_project(demo_copy(tmp_path / "x", "out/{vars.netlist_stage}/", "out/{netlist_stage}/"))
 
 
 def test_site_path_forms(tmp_path, monkeypatch):

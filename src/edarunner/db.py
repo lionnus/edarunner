@@ -34,9 +34,6 @@ CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT
 CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
 """
 
-# A table of an older schema, with its current name.
-_RENAMED = {"kv": "store", "params": "parameters"}
-
 _PK = {
     "batches": ("batch",),
     "runs": ("run_id",),
@@ -118,26 +115,8 @@ class Database:
         self.conn.close()
 
     def init_schema(self) -> None:
-        """Rename every table of an older schema and create every table that does not exist yet, in one transaction."""
-        self.conn.commit()
-        self.conn.execute("BEGIN IMMEDIATE")
-        try:
-            tables = {r["name"] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            for old, new in _RENAMED.items():
-                if old in tables and new not in tables:
-                    self.conn.execute(f"ALTER TABLE {old} RENAME TO {new}")
-            for stmt in DDL.split(";"):
-                if stmt.strip():
-                    self.conn.execute(stmt)
-        except BaseException:
-            self.conn.rollback()
-            raise
-        # A database made before a column existed gets it here; SQLite adds a NULL column in place.
-        have = self._table_columns("runs")
-        for col in ("tree_id", "handle"):
-            if col not in have:
-                self.conn.execute(f"ALTER TABLE runs ADD COLUMN {col} TEXT")
-        self.conn.commit()
+        """Create every table that does not exist yet."""
+        self.conn.executescript(DDL)
 
     def _table_columns(self, table: str) -> tuple[str, ...]:
         return tuple(r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})"))

@@ -803,12 +803,6 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     assert not Path(row["root"]).exists()
 
 
-@pytest.mark.parametrize("old,new", [("lic", "tools"), ("stage", "checkout"), ("run", "continue")])
-def test_a_removed_command_names_its_replacement(demo: Path, capsys, old: str, new: str) -> None:
-    code, out, err = edr(capsys, "--json", old, "x")
-    assert code == 1 and out == "" and err == f"edr: {old} was removed in 0.4.0; use edr {new}\n"
-
-
 def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Path, capsys) -> None:
     subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
     repo = demo / "repo"

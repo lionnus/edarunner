@@ -109,14 +109,6 @@ def test_snapshot_drops_a_file_the_tree_deleted(project):
     assert "D README" in [ln.strip() for ln in git("status", "--porcelain", cwd=a.path).splitlines()]
 
 
-def test_an_old_worktree_stays(project):
-    repo = project.source.repo
-    head = git("rev-parse", "--short", "HEAD", cwd=repo)
-    old = project.source.worktrees / head
-    git("worktree", "add", "-q", "--detach", str(old), head, cwd=repo)
-    assert checkout.checkout(project, "HEAD").path == old and (old / ".git").is_file()
-
-
 def test_dry_run_writes_nothing(project, tmp_path, capsys):
     repo = project.source.repo
     a = checkout.checkout(project, "HEAD")

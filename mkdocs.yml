@@ -31,15 +31,6 @@ extra_css:
 plugins:
   - search
   - awesome-pages
-  - redirects:
-      redirect_maps:
-        concepts.md: how-it-works.md
-        guarantees.md: how-it-works.md
-        configure.md: guides/project.md
-        run.md: guides/run.md
-        results.md: guides/results.md
-        notify.md: guides/alerts.md
-        telegram.md: guides/alerts.md
 
 markdown_extensions:
   - admonition

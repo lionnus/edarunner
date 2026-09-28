@@ -74,9 +74,6 @@ A release is one commit, `:bookmark: Release X.Y.Z`, on `devel`:
    `## X.Y.Z (YYYY-MM-DD)`.
 2. Set `version` in `pyproject.toml` and `__version__` in
    `src/edarunner/__init__.py` to the same value.
-3. Remove every alias that the previous release marked `gone in the
-   next release`, such as an old command name in `cli.py` or
-   `ALIASES` in `notify/telegram/commands.py`.
 
 Merge `devel` into `main` once CI is green, tag `main` as `vX.Y.Z`, and
 push the tag. The site deploys from `main`.

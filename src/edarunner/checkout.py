@@ -105,7 +105,6 @@ def _pinned(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
             runid.git("fetch", "-q", cwd=repo)
     src = _short(repo, ref)
     path = wts / src
-    # A tree that exists stays, also a git worktree an older edr made.
     if not (path / ".git").exists():
         if not dry_run:
             wts.mkdir(parents=True, exist_ok=True)

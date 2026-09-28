@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -144,22 +143,11 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
 
 # classify
 
-def _signature(ssh: Ssh, hb: dict) -> list:
-    """What the hung check compares between cycles; the log size and the CPU time come from the heartbeat, else over ssh."""
+def _signature(hb: dict) -> list:
+    """What the hung check compares between cycles."""
     counts = hb.get("counts") or {}
-    sig = [hb.get("phase"), hb.get("step"), hb.get("tree_gb"), hb.get("last_log"),
-           sum(counts.get(k, 0) for k in ("done", "failed", "skipped"))]
-    if "cpu_s" in hb or "log_bytes" in hb:
-        return [*sig, [hb.get("log_bytes"), hb.get("cpu_s")]]
-    pgids = " ".join(str(int(g)) for g in hb.get("pgids") or [])
-    cmds = [f"stat -c %s {shlex.quote(str(hb['log']))} 2>/dev/null"] if hb.get("log") else []
-    if pgids:
-        cmds.append("ps -e -o pgid=,cputimes= | awk -v g=%s 'BEGIN{split(g,a,\" \");for(i in a)w[a[i]]=1}"
-                    " ($1 in w){s+=$2} END{print s+0}'" % shlex.quote(pgids))
-    if cmds and hb.get("host"):
-        rc, out, _ = ssh.run(hb["host"], "; ".join(cmds))
-        sig.append(out.split() if rc == 0 else None)
-    return sig
+    return [hb.get("phase"), hb.get("step"), hb.get("tree_gb"), hb.get("last_log"),
+            sum(counts.get(k, 0) for k in ("done", "failed", "skipped")), hb.get("log_bytes"), hb.get("cpu_s")]
 
 
 def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict, now: float,
@@ -193,7 +181,7 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
         found.append(("host_full", f"{host} below {lim.host_free_min_gb} GB free"))
     busy = str(hb.get("phase") or "").startswith(_BUSY) and (hb.get("pgids") or (hb.get("counts") or {}).get("running"))
     if busy and progress is not None:
-        rec, sig = progress.setdefault(hb["run_id"], {}), _signature(ssh, hb)
+        rec, sig = progress.setdefault(hb["run_id"], {}), _signature(hb)
         if rec.get("sig") != sig:
             rec.update(sig=sig, since=now)
         elif now - rec["since"] >= lim.hung_s:

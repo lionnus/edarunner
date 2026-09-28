@@ -60,8 +60,6 @@ def _since(text: str) -> int:
 
 
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-# The old command names that 0.4.0 removed, with the command that replaces each.
-REMOVED = {"lic": "tools", "stage": "checkout", "run": "continue"}
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "metrics", "compare", "runtime", "check", "notify", "plan"})
 
 
@@ -1040,17 +1038,12 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         (project.state_dir / a.batch / "RETIRED").touch()
         c.db.mark_batch_retired(a.batch)
     if worktree is not None:
-        # A git worktree of an older edr has a `.git` file; a clone and a snapshot go by a plain delete.
-        real = (worktree / ".git").is_file()
-        print(f"{a.batch}: {'git worktree remove --force' if real else 'rm -rf'} {worktree}{dry}")
+        print(f"{a.batch}: rm -rf {worktree}{dry}")
         if not a.dry_run:
             try:
-                if real:
-                    runid.git("worktree", "remove", "--force", str(worktree), cwd=project.source.repo)
-                else:
-                    shutil.rmtree(worktree)
+                shutil.rmtree(worktree)
                 c.db.add_event("user", "", "retire", f"{a.why}: worktree {worktree}")
-            except (runid.GitError, OSError) as e:
+            except OSError as e:
                 failed += 1
                 print(f"{a.batch}: worktree not removed: {e}", file=sys.stderr)
     c.data = {"retired": done, "failed": failed}
@@ -1074,8 +1067,7 @@ def _worktree_target(c: Ctx, batch: str) -> Path | None:
     try:
         return assert_safe_target(path, c.project.safety.marker, c.project.safety.min_depth)
     except Refuse as e:
-        how = "git worktree remove" if (path / ".git").is_file() else "rm -rf"
-        print(f"{batch}: worktree kept: {e}; remove it with {how}")
+        print(f"{batch}: worktree kept: {e}; remove it with rm -rf")
         return None
 
 
@@ -1663,10 +1655,6 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return its exit code."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
-    name = next((x for x in (sys.argv[1:] if argv is None else argv) if not x.startswith("-")), None)
-    if name in REMOVED:
-        print(f"edr: {name} was removed in 0.4.0; use edr {REMOVED[name]}", file=sys.stderr)
-        return Exit.REFUSED
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:

@@ -2,7 +2,6 @@
 
 import json
 import os
-import sqlite3
 
 import pytest
 
@@ -142,27 +141,6 @@ def test_store(tmp_path):
         assert db.get_store("x") == {"a": [1, 2, 3]}
     with Database(tmp_path / "edr.db") as db:
         assert db.get_store("x") == {"a": [1, 2, 3]}
-
-
-def test_old_schema_migrates_on_open(tmp_path):
-    path = tmp_path / "edr.db"
-    old = sqlite3.connect(path)
-    old.executescript("""
-        CREATE TABLE runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT);
-        CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT);
-        INSERT INTO kv VALUES('last_board', '["r1"]');
-        CREATE TABLE params(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));
-        INSERT INTO params VALUES('r1', 'DW', '0', 'spec');
-    """)
-    old.close()
-    with Database(path) as db:
-        tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert not {"kv", "params"} & tables and {"store", "parameters"} <= tables
-        assert db.conn.execute("SELECT value FROM parameters WHERE run_id='r1'").fetchone()[0] == "0"
-        assert db.get_store("last_board") == ["r1"]
-        assert {"tree_id", "handle"} <= set(db._table_columns("runs"))
-    with Database(path) as db:
-        assert db.get_store("last_board") == ["r1"]
 
 
 def test_board_json(tmp_path, monkeypatch):

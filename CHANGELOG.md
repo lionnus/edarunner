@@ -92,27 +92,3 @@ database.
   an agent who is new to it, and `edr status --triage` proposes one
   command for each run that needs attention.
 - `AGENTS.md` is the operating guide for an agent.
-
-### Changes from the pre-release versions
-
-Versions before 0.4.0 were pre-release. These changes can break a setup
-from that time:
-
-- The old command names are gone: `edr stage` is `edr checkout`,
-  `edr run` is `edr continue`, `edr lic` is `edr tools`, and the bot's
-  `/lic` is `/tools`.
-- `edr plan` is a read command and no longer creates `data/edr.db`.
-- `edr import --config` is optional and defaults to an empty
-  configuration name.
-- Custom bot commands and metric `file` strings render with the same
-  placeholder engine as the rest of the configuration. A placeholder
-  without a value is an error that names it, and the `{{` and `}}`
-  escapes no longer apply there.
-- A bot command sent as a reply to an alert can use `{handle}` and
-  `{run_root}`, the handle and the run tree of that run.
-- The `plots` extra is gone; the boards draw their plots in the browser.
-- The documentation is organized by what a reader wants to do: Get
-  started, How it works, one guide per task, the reference and the
-  development pages. The old pages `concepts`, `guarantees`,
-  `configure`, `run`, `results`, `notify` and `telegram` redirect to
-  their new places.

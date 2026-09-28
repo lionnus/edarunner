@@ -78,11 +78,6 @@ def test_builtin_dispatch(bot, text, call):
     assert last_reply(bot) == (pre(out) if call[0] in ("compare_text", "metric_text") else out)
 
 
-
-def test_a_removed_command_names_its_replacement(bot):
-    bot.handle_update(msg("/lic"))
-    assert bot.actions.calls == [] and last_reply(bot) == "/lic was removed; use /tools"
-
 def test_bad_handle_is_an_answer(bot):
     bot.handle_update(msg("/keep 'a;rm' 3"))
     assert bot.actions.calls == []
