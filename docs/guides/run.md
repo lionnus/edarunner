@@ -33,7 +33,7 @@ and `host` entries. The `vars` table holds any other value the flow
 needs, and each key becomes a placeholder `{vars.<name>}` for the stage
 strings, `[env]` and `collect`.
 
-The run id is `<date>_<label>_<build_tag>_g<src>`. The build tag is the
+The run id is `<date>_<label>_<build_tag>_g<source>`. The build tag is the
 configuration name followed by `_KEYVALUE` for each override, such as
 `base_DW0`; a job without either has an empty build tag, and the run id
 drops that part with its `_`. A batch name is used once. A second
@@ -43,7 +43,7 @@ sweep needs a new name.
 ## Check out and launch
 
 ```sh
-edr checkout origin/main      # prints <src> <path>
+edr checkout origin/main      # prints <source> <path>
 edr plan sweep1               # run id, host and root per job; writes nothing
 edr plan sweep1 --show-spec   # also the env, commands and collect paths of each run
 edr launch sweep1 --dry-run   # every path and command, nothing written
@@ -52,7 +52,7 @@ edr launch sweep1
 
 `edr checkout` prints the source tag and the path of the pinned clone.
 When the batch names a clean source that is not checked out yet, `plan`
-and `launch` check it out themselves and print a `checkout <src> <path>`
+and `launch` check it out themselves and print a `checkout <source> <path>`
 line. A tree with uncommitted changes needs `edr checkout --dirty <dir>`
 first, and `launch --allow-dirty`.
 
@@ -202,7 +202,7 @@ and `--root` it records a tree on a host, which `reuse` and
 `edr continue` can then use:
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --src abc1234 \
+edr import --run-id 20260830_0000_base_base_gabc1234 --label base --source abc1234 \
     --host hostA --root /scratch/user/edr/myflow/20260830_0000_base_base_gabc1234
 ```
 
@@ -210,7 +210,7 @@ With `--results` it links an archive of collected files instead, so
 `metrics` and `export` cover a result whose tree is gone:
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --src abc1234 \
+edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --source abc1234 \
     --results /archive/base --tasks softmax_197 --why "tree gone, reports kept"
 ```
 
@@ -237,7 +237,7 @@ The run gets one stage named by `--stage`. When `edr.toml` has a stage
 of that name, the run takes its `steps`, `progress`, `budget`, `retry`
 and `needs.tools`; the command replaces the stage's `cmd` as given, with
 no placeholder. The tree is `--root`, the current directory by default,
-and the driver writes `log/<stage>.log` there. `--src` defaults to the
+and the driver writes `log/<stage>.log` there. `--source` defaults to the
 source tag of the tree, and a tree outside git needs it. The batch is
 `--batch`, `track` by default.
 

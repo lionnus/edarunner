@@ -72,7 +72,7 @@ The three stages take about 30 s on two cores. The CI job takes about
 `EDR` names the `edr` binary (default `edr` on `PATH`) and `CAP_S` the wait
 for the run in seconds (default 900). The script fails when the run does
 not end `done`, or when the area and the timing rows are missing from
-`edr metrics --csv`. The export lands in `data/exports/<src>/`.
+`edr metrics --csv`. The export lands in `data/exports/<source>/`.
 
 ## Run it with Singularity
 

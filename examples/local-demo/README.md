@@ -44,7 +44,7 @@ The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 ```sh
 cd examples/local-demo
 bash setup.sh                 # repo/ with one commit
-edr checkout HEAD             # <src> and the path of the pinned clone
+edr checkout HEAD             # <source> and the path of the pinned clone
 edr check                     # load the config, probe the host, check the hooks
 edr plan demo                 # one run id, host and root per job; writes nothing
 edr launch demo               # 2 started, 0 queued, 0 with problems
@@ -56,19 +56,19 @@ Both runs end `done` within a minute. Then collect and read the results:
 ```sh
 edr watch --once              # collect the reports, extract the metrics, write data/board/
 edr status a@demo             # the stages, the metrics and the log tail of one run
-edr metrics --design <src> --csv
-edr export --design <src> --out data/exports/<src>
+edr metrics --source <source> --csv
+edr export --source <source> --out data/exports/<source>
 edr retire --batch demo --why "demo done"
 ```
 
-`<src>` is the short hash that `edr checkout` printed. `edr metrics` needs
-it, because one table holds one design.
+`<source>` is the short hash that `edr checkout` printed. `edr metrics` needs
+it, because one table holds one source.
 
 The run puts its files in these places:
 
 | Path | Holds |
 |---|---|
-| `wt/<src>/` | the checked-out clone |
+| `wt/<source>/` | the checked-out clone |
 | `/tmp/edr-demo/<user>/edr/demo/<run_id>/` | the run tree; `log/` holds one file per stage and task |
 | `~/.edr/demo/demo/` | `RUN_DATE`, the specs, the heartbeats, the queues, the driver log |
 | `~/.edr/demo/bin/edr_driver-<hash>.py` | the driver, one copy per driver version |

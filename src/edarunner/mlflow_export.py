@@ -28,9 +28,9 @@ def _key(text: str) -> str:
     return _KEY.sub("_", text)
 
 
-def export_mlflow(project: Project, db: Database, out: Path, design: str | None = None,
+def export_mlflow(project: Project, db: Database, out: Path, source: str | None = None,
                   max_bytes: int = MAX_ARTIFACT_BYTES) -> dict[str, Any]:
-    """Write every run (or the runs of `design`) into the store under `out`; a run already there is skipped."""
+    """Write every run (or the runs of `source`) into the store under `out`; a run already there is skipped."""
     try:
         from mlflow.entities import Metric, Param, RunTag
         from mlflow.tracking import MlflowClient
@@ -48,20 +48,20 @@ def export_mlflow(project: Project, db: Database, out: Path, design: str | None 
     exp_id = exp.experiment_id if exp else client.create_experiment(project.project,
                                                                      artifact_location=(out / "artifacts").as_uri())
     done = {r.data.tags.get("edr.run_id") for r in client.search_runs([exp_id], max_results=50000)}
-    runs = [r for r in db.runs() if design is None or r.get("src") == design]
+    runs = [r for r in db.runs() if source is None or r.get("source") == source]
     written, skipped = [], []
     for r in runs:
         if r["run_id"] in done:
             skipped.append(r["run_id"])
             continue
         started = int(r.get("started") or 0) * 1000
-        tags = {"edr.run_id": r["run_id"], "edr.project": project.project, "edr.design": r.get("src") or "",
+        tags = {"edr.run_id": r["run_id"], "edr.project": project.project, "edr.source": r.get("source") or "",
                 "edr.batch": r.get("batch") or "", "edr.label": r.get("label") or "", "edr.host": r.get("host") or "",
                 "edr.phase": r.get("phase") or "", "mlflow.runName": r.get("label") or r["run_id"]}
         run = client.create_run(exp_id, start_time=started or None, tags=tags)
         rid = run.info.run_id
         params = {p["key"]: p["value"] for p in db.parameters(r["run_id"])}
-        params.update({k: r.get(k) for k in ("config", "build_tag", "src") if r.get(k) and k not in params})
+        params.update({k: r.get(k) for k in ("config", "build_tag", "source") if r.get(k) and k not in params})
         metrics = []
         for m in db.metrics(run_ids=[r["run_id"]]):
             if m["value"] is None:

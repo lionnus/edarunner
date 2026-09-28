@@ -295,8 +295,8 @@ an HTML file in its browser and a CSV file in a sheet app.
   wrapper as `edr`. The file is `<handle>.log`.
 - `/board` sends `data/board/compare.html` and `data/board/status.html`
   of the last watcher cycle.
-- `/csv <design>` sends `metrics.csv`, the output of
-  `edr metrics --design <design> --csv`.
+- `/csv <source>` sends `metrics.csv`, the output of
+  `edr metrics --source <source> --csv`.
 
 A file over 20 MB is not sent; the bot answers with its size and the
 limit instead.

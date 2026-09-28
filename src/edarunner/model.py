@@ -343,7 +343,7 @@ class Source:
     nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
                             factory=list)
     run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows",
-                      "{date}_{label}_{build_tag}_g{src}")
+                      "{date}_{label}_{build_tag}_g{source}")
     build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)` or from "
                          "`(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each "
                          "override, such as `base_FREQ500`", "")

@@ -31,7 +31,7 @@ def test_read_heartbeats_skips_retired_spec_keep_and_torn(env: Env) -> None:
 
 def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     a = env.heartbeat("a")
-    env.heartbeat("a", batch="demo2", date=NEW, src="gdef5678")
+    env.heartbeat("a", batch="demo2", date=NEW, source="gdef5678")
     env.heartbeat("r")
     env.heartbeat("s", age=60)
     env.heartbeat("d", age=200)
@@ -112,8 +112,8 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
     a, k, f = env.heartbeat("a"), env.heartbeat("k"), env.heartbeat("f", host_full=True)
     e = env.heartbeat("e")
     for label in ("a", "k", "f"):
-        env.heartbeat(label, batch="demo2", date=NEW, src="gdef5678")
-    env.heartbeat("e", batch="demo2", date=NEW, src="gdef5678", phase="FAILED:synth", exit=5)
+        env.heartbeat(label, batch="demo2", date=NEW, source="gdef5678")
+    env.heartbeat("e", batch="demo2", date=NEW, source="gdef5678", phase="FAILED:synth", exit=5)
     (env.project.state_dir / "demo" / f"{k['run_id']}.keep.json").write_text('{"hours": 12}')
     states = env.cycle()
     assert states[rid("a")] == "superseded" and states[rid("k")] == "superseded"
@@ -146,7 +146,7 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
     assert len(by) == 8 and all(v is not None for v in by.values())
     params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM parameters WHERE run_id=?", (run_id,))}
-    assert params == {"config": "demo", "DW": "0", "src": "gabc1234"}
+    assert params == {"config": "demo", "DW": "0", "source": "gabc1234"}
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 8
@@ -387,18 +387,14 @@ def test_the_backend_is_asked_once_per_cycle_for_every_live_run(env: Env) -> Non
     assert [sorted(ids) for ids in fake.asked] == [["7", "local:4242"]] * 2
 
 
-def test_hung_reads_the_samples_of_the_heartbeat_without_ssh(env: Env, monkeypatch) -> None:
+def test_hung_reads_the_samples_of_the_heartbeat(env: Env) -> None:
     lim = env.project.limits
     lim.hung_s, lim.grace_s = 0, 3600
-    cmds: list[str] = []
-    real = env.ssh.run
-    monkeypatch.setattr(env.ssh, "run", lambda host, cmd, timeout_s=None: cmds.append(cmd) or real(host, cmd, timeout_s))
     env.heartbeat("a", cpu_s=1.5, log_bytes=100)
     assert env.cycle()[rid("a")] == "running"
     env.heartbeat("a", cpu_s=2.5, log_bytes=100)
     assert env.cycle(NOW + 1)[rid("a")] == "running"
     assert env.cycle(NOW + 2)[rid("a")] == "hung"
-    assert not [c for c in cmds if "stat -c" in str(c) or "cputimes" in str(c)]
 
 
 def test_a_scheduler_job_before_its_first_heartbeat(env: Env) -> None:

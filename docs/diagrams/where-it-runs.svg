@@ -31,7 +31,7 @@
 
 <rect class="box" x="40" y="64" width="264" height="52" rx="7"/>
 <text class="t" x="54" y="86">Checked-out source</text>
-<text class="m" x="54" y="104">wt/&lt;src&gt;/</text>
+<text class="m" x="54" y="104">wt/&lt;source&gt;/</text>
 
 <rect class="box" x="40" y="128" width="264" height="52" rx="7"/>
 <text class="t" x="54" y="150">Collected results</text>

@@ -18,7 +18,7 @@ from pathlib import Path
 from . import runid
 from .model import Project
 
-SRC_RE = re.compile(r"^[0-9a-f]+(-dirty-[0-9a-f]{8})?$")
+SOURCE_RE = re.compile(r"^[0-9a-f]+(-dirty-[0-9a-f]{8})?$")
 
 
 class CheckoutError(Exception):
@@ -30,7 +30,7 @@ class CheckoutResult:
     """A checked-out source: its path, its tag, the short hash of each nested repository, and whether it is dirty."""
 
     path: Path
-    src: str
+    source: str
     nested: dict[str, str] = field(default_factory=dict)
     dirty: bool = False
 
@@ -44,33 +44,33 @@ def checkout(
     return _pinned(project, ref or project.source.ref, dry_run)
 
 
-def find(project: Project, src: str) -> Path:
-    """The checked-out tree of a src tag; a ref resolves to its short hash."""
+def find(project: Project, source: str) -> Path:
+    """The checked-out tree of a source tag; a ref resolves to its short hash."""
     wts = project.source.worktrees
-    if SRC_RE.match(src) and (wts / src).is_dir():
-        return wts / src
+    if SOURCE_RE.match(source) and (wts / source).is_dir():
+        return wts / source
     try:
-        short = _short(project.source.repo, src)
+        short = _short(project.source.repo, source)
     except runid.GitError:
         short = ""
     if short and (wts / short).is_dir():
         return wts / short
-    raise CheckoutError(f"'{src}' is not checked out; run: edr checkout {src}")
+    raise CheckoutError(f"'{source}' is not checked out; run: edr checkout {source}")
 
 
-def ensure(project: Project, src: str, dry_run: bool = False) -> CheckoutResult | None:
+def ensure(project: Project, source: str, dry_run: bool = False) -> CheckoutResult | None:
     """Check out a clean source that is not checked out yet; None when it is. A dirty tag is refused."""
     try:
-        find(project, src)
+        find(project, source)
         return None
     except CheckoutError:
-        if "-dirty-" in src:
-            raise CheckoutError(f"'{src}' is a dirty snapshot that is not checked out; "
+        if "-dirty-" in source:
+            raise CheckoutError(f"'{source}' is a dirty snapshot that is not checked out; "
                                 f"run: edr checkout --dirty <tree>") from None
     try:
-        return checkout(project, src, dry_run=dry_run)
+        return checkout(project, source, dry_run=dry_run)
     except runid.GitError as e:
-        raise CheckoutError(f"'{src}' is not checked out and does not resolve: {e}") from None
+        raise CheckoutError(f"'{source}' is not checked out and does not resolve: {e}") from None
 
 
 # --- internals
@@ -103,15 +103,14 @@ def _pinned(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
             print(f"dry: git -C {repo} fetch")
         else:
             runid.git("fetch", "-q", cwd=repo)
-    src = _short(repo, ref)
-    path = wts / src
-    # A tree that exists stays, also a git worktree an older edr made.
+    source = _short(repo, ref)
+    path = wts / source
     if not (path / ".git").exists():
         if not dry_run:
             wts.mkdir(parents=True, exist_ok=True)
-        _clone(repo, path, src, dry_run)
+        _clone(repo, path, source, dry_run)
     nested = {n: _nested(repo / n, path / n, dry_run) for n in project.source.nested}
-    return CheckoutResult(path, src, {k: v for k, v in nested.items() if v}, False)
+    return CheckoutResult(path, source, {k: v for k, v in nested.items() if v}, False)
 
 
 def _nested(src: Path, dst: Path, dry_run: bool) -> str:
@@ -127,12 +126,12 @@ def _nested(src: Path, dst: Path, dry_run: bool) -> str:
 
 def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     """A clone at the HEAD of `tree` with the files of `tree` copied over it, so git on the copy sees the changes."""
-    src = runid.src_tag(tree)
-    if "-dirty-" not in src:
+    source = runid.source_tag(tree)
+    if "-dirty-" not in source:
         # A clean tree pins its commit; a snapshot would collide with that clone.
-        return _pinned(project, src, dry_run)
-    path = project.source.worktrees / src
-    base = src.split("-dirty-")[0]
+        return _pinned(project, source, dry_run)
+    path = project.source.worktrees / source
+    base = source.split("-dirty-")[0]
     nested = {
         n: runid.git("rev-parse", "--short", "HEAD", cwd=tree / n)
         for n in project.source.nested
@@ -149,7 +148,7 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
             _nested(tree / n, path / n, dry_run)
     if dry_run:
         print(f"dry: {' '.join(cmd)}")
-        return CheckoutResult(path, src, nested, True)
+        return CheckoutResult(path, source, nested, True)
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     if r.returncode:
         raise CheckoutError(f"{' '.join(cmd)}: {r.stdout.strip()}")
@@ -158,7 +157,7 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
         if rel and (path / rel).is_file():
             (path / rel).unlink()
     meta = {
-        "src": src,
+        "source": source,
         "base": base,
         "dirty": True,
         "nested": nested,
@@ -167,4 +166,4 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     }
     (path / "source.diff").write_text(runid.diff(tree) + "\n")
     (path / "source.json").write_text(json.dumps(meta, indent=1) + "\n")
-    return CheckoutResult(path, src, nested, True)
+    return CheckoutResult(path, source, nested, True)

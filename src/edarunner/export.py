@@ -1,4 +1,4 @@
-"""A frozen snapshot of one design for a paper: manifest, two tables and the collected files."""
+"""A frozen snapshot of one source for a paper: manifest, two tables and the collected files."""
 
 from __future__ import annotations
 
@@ -20,31 +20,31 @@ from .model import Project
 
 Row = dict[str, Any]
 
-RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "design", "host", "phase", "started", "ended"]
-METRIC_COLUMNS = ["run_id", "label", "config", "design", "stage", "step", "task", "metric", "canonical", "value", "unit", "source"]
+RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "phase", "started", "ended"]
+METRIC_COLUMNS = ["run_id", "label", "config", "source", "stage", "step", "task", "metric", "canonical", "value", "unit", "source_file"]
 
 
 def export(
     project: Project,
     db: Database,
-    design: str,
+    source: str,
     out: Path,
     labels: list[str] | None = None,
     dry_run: bool = False,
     with_logs: bool = False,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv and the collected files of `design` to `out`.
+    """Write manifest.json, runs.csv, metrics.csv and the collected files of `source` to `out`.
 
     The files are copied verbatim; `log/` directories and `*.log` files only with `with_logs`.
     """
-    if not design:
-        raise Refuse("empty design")
+    if not source:
+        raise Refuse("empty source")
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise Refuse(f"'{out}' exists and is not empty")
-    runs = _select(db, design, labels)
+    runs = _select(db, source, labels)
     if not runs:
-        raise Refuse(f"no run has the source '{design}'" + (f" and a label in {labels}" if labels else ""))
+        raise Refuse(f"no run has the source '{source}'" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
     metrics = db.metrics(run_ids=ids)
 
@@ -65,8 +65,8 @@ def export(
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "schema": 1,
         "project": project.project,
-        "source": design,
-        "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "src", "host", "phase")},
+        "source": source,
+        "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "source", "host", "phase")},
                   "record": _record(project, db, r)} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
         "files": [],
@@ -104,24 +104,24 @@ def _record(project: Project, db: Database, r: Row) -> dict[str, Any]:
             "stages": stages}
 
 
-def _select(db: Database, design: str, labels: list[str] | None) -> list[Row]:
-    """The newest run per label with the exact source tag `design`, in label order."""
+def _select(db: Database, source: str, labels: list[str] | None) -> list[Row]:
+    """The newest run per label with the exact source tag `source`, in label order."""
     newest: dict[str, Row] = {}
     for r in db.runs():
-        if r.get("src") == design and (labels is None or r["label"] in labels):
+        if r.get("source") == source and (labels is None or r["label"] in labels):
             newest[r["label"]] = r
     return [newest[k] for k in sorted(newest)]
 
 
 def _run_row(r: Row) -> list[Any]:
     ended = "" if is_live(r) else r.get("updated")
-    return [r["run_id"], r.get("label"), r.get("config"), r.get("build_tag"), r.get("src"), r.get("host"), r.get("phase"),
+    return [r["run_id"], r.get("label"), r.get("config"), r.get("build_tag"), r.get("source"), r.get("host"), r.get("phase"),
             r.get("started"), ended]
 
 
 def metric_row(m: Row) -> list[Any]:
     """One metrics.csv row in the order of METRIC_COLUMNS."""
-    return [m["run_id"], m.get("label"), m.get("config"), m.get("src"), m.get("stage"), m.get("step"), m.get("task"),
+    return [m["run_id"], m.get("label"), m.get("config"), m.get("source"), m.get("stage"), m.get("step"), m.get("task"),
             m.get("name"), m.get("canonical"), m.get("value"), m.get("unit"), m.get("source_file")]
 
 

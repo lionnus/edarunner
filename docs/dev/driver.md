@@ -70,7 +70,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `driver` | the driver copy the run started with; a resume uses it |
 | `record` | `edarunner` (the version that launched), `driver_sha256`, and `tools` with the version the site file gives per tool of the host; the export manifest copies it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
-| `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID` |
+| `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID` |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
 | `stages` | the stages in run order |
@@ -96,9 +96,7 @@ The driver writes `<run_id>.json` by a temporary file and a rename every
 `heartbeat_s` seconds and at every phase change, so a reader never sees
 a torn file. A heartbeat keeps its last phase after the driver dies;
 the watcher marks such a run `dead` after `dead_s`. The hung check of
-the watcher compares `cpu_s` and `log_bytes` from cycle to cycle. A
-heartbeat without them, from an older driver, makes the watcher read
-the two values over ssh.
+the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
 
 | Field | Meaning |
 |---|---|

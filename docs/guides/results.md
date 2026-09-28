@@ -14,7 +14,7 @@ batch, every number and every action.
 | `batches` | batch | the project, the source tag, the pinned date, when it was retired |
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id` |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
-| `parameters` | key of a run | `config`, `build_tag`, `src` and each override, as text |
+| `parameters` | key of a run | `config`, `build_tag`, `source` and each override, as text |
 | `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
@@ -56,14 +56,14 @@ project's own.
 ## edr metrics
 
 ```sh
-edr metrics --design 3f9a2c1
-edr metrics --design 3f9a2c1 --stage pnr --step 12
-edr metrics --design 3f9a2c1 --csv > metrics.csv
+edr metrics --source 3f9a2c1
+edr metrics --source 3f9a2c1 --stage pnr --step 12
+edr metrics --source 3f9a2c1 --csv > metrics.csv
 ```
 
-Each table holds one design. `--design` is the source tag exactly as
+Each table holds one source. `--source` is the source tag exactly as
 `edr checkout` printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs
-that full tag. The text form shows label, design, stage, step, task,
+that full tag. The text form shows label, source, stage, step, task,
 metric, value and unit; `--csv` writes the columns of `metrics.csv`
 below. Every row carries its source file, so you can check where a
 number came from before you put it in a table.
@@ -79,7 +79,7 @@ were collected for those runs:
 ```sh
 edr extract base@g8 --dry-run   # counts only, writes nothing
 edr extract --batch g8
-edr extract --design 3f9a2c1
+edr extract --source 3f9a2c1
 ```
 
 For each run it prints how many rows are new, changed, unchanged and
@@ -153,7 +153,7 @@ unit = "um2"
 canonical = "design__instance__area"
 ```
 
-`edr metrics --design <src> --instance i_top/i_streamer --depth 3` prints
+`edr metrics --source <source> --instance i_top/i_streamer --depth 3` prints
 the area rows of that subtree. `edr compare A B --area --depth 2` puts the
 blocks of two or more runs side by side, at the last step with an area
 report that every run has:
@@ -260,17 +260,17 @@ cd data/board && python -m http.server --bind 127.0.0.1 8000
 
 On the phone, `/compare <handle>...` puts the metrics of several runs
 side by side, `/metric <name>` shows one metric per run, `/board` sends
-the two pages as files, and `/csv <design>` sends `metrics.csv`;
+the two pages as files, and `/csv <source>` sends `metrics.csv`;
 [alerts.md](alerts.md#files) has the bot.
 
 ## edr export
 
 ```sh
-edr export --design 3f9a2c1 --out exports/3f9a2c1 [--labels base,base_dw0] [--with-logs]
+edr export --source 3f9a2c1 --out exports/3f9a2c1 [--labels base,base_dw0] [--with-logs]
 ```
 
 The export takes the newest run per label whose source tag equals
-`--design`, and writes:
+`--source`, and writes:
 
 ```
 exports/3f9a2c1/
@@ -283,8 +283,8 @@ exports/3f9a2c1/
 | File | Holds |
 |---|---|
 | `manifest.json` | `producer`, `created`, `schema`, `project`, `source`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `files` with path, size and sha256, `incomplete` with the runs still live or with a failed task |
-| `runs.csv` | `run_id,label,config,build_tag,design,host,phase,started,ended` |
-| `metrics.csv` | `run_id,label,config,design,stage,step,task,metric,canonical,value,unit,source` |
+| `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended` |
+| `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file` |
 | `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs` |
 
 A run's `record` holds what made it, as far as edarunner knows it: the
@@ -300,17 +300,17 @@ empty is refused. `--dry-run` lists the files.
 
 ## MLflow
 
-`edr export --mlflow <dir> [--design <src>]` writes the project database into
+`edr export --mlflow <dir> [--source <source>]` writes the project database into
 a local MLflow tracking store, for `mlflow ui`. It needs the extra:
 `pip install 'edarunner[mlflow]'`.
 
 ```sh
-edr export --mlflow data/mlflow --design 3f9a2c1
+edr export --mlflow data/mlflow --source 3f9a2c1
 mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db --host 127.0.0.1 --port 5000
 ```
 
 Each run becomes one MLflow run in one experiment per project, named by
-its label and tagged with `edr.run_id`, `edr.project`, `edr.design`,
+its label and tagged with `edr.run_id`, `edr.project`, `edr.source`,
 `edr.batch`, `edr.host` and `edr.phase`. The parameters are the
 `parameters` table. A metric is logged at its step, and a task metric
 under `<name>/<task>`. The stage and step times are the metrics
@@ -333,7 +333,7 @@ Those stay with `edr compare`, `edr runtime` and the board.
 An analysis should never read the live database, because the database
 changes with every watcher cycle and a number you quote must stay the
 number you read. Instead, the analysis keeps one snapshot per
-design under its own `data/`, pinned by the source tag. Every table and
+source under its own `data/`, pinned by the source tag. Every table and
 figure comes from `runs.csv` and `metrics.csv` of that snapshot:
 
 ```
@@ -345,7 +345,7 @@ report/
 
 The tag in the directory name is the commit the numbers came from, and
 the manifest's sha256 per file lets a `make check` prove the copy is the
-one that was exported. A new design version is a new export in a new
+one that was exported. A new source is a new export in a new
 directory, never a change to an old one. A caption or a chart title that
 names the tag then stays true. Say the tag next to every number you
 publish.

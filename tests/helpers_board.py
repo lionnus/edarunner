@@ -3,19 +3,19 @@
 import json
 
 NOW = 1_800_000_000
-SRC = "gaaa111"
+SOURCE = "gaaa111"
 RUN = {
-    "dead": "20261002_1130_a_demo_" + SRC,
-    "stale": "20261002_1130_b_nodw_demo_" + SRC,
-    "run1": "20261002_1130_c_demo_" + SRC,
-    "run2": "20261002_1130_d_demo_" + SRC,
-    "done": "20261001_0900_a_demo_" + SRC,
-    "fail": "20261001_0900_b_nodw_demo_" + SRC,
+    "dead": "20261002_1130_a_demo_" + SOURCE,
+    "stale": "20261002_1130_b_nodw_demo_" + SOURCE,
+    "run1": "20261002_1130_c_demo_" + SOURCE,
+    "run2": "20261002_1130_d_demo_" + SOURCE,
+    "done": "20261001_0900_a_demo_" + SOURCE,
+    "fail": "20261001_0900_b_nodw_demo_" + SOURCE,
 }
 
 
 def board_row(key, label, phase, state=None, age=10, **extra):
-    row = {"run_id": RUN[key], "batch": "demo", "label": label, "config": "demo", "build_tag": "demo", "src": SRC,
+    row = {"run_id": RUN[key], "batch": "demo", "label": label, "config": "demo", "build_tag": "demo", "source": SOURCE,
            "dirty": 0, "host": "local", "root": "/tmp/edr-demo/x/edr/demo/" + RUN[key], "created": NOW - 7200,
            "phase": phase, "state": state, "stage": "synth", "step": 3, "exit": None, "killed_by": None,
            "started": NOW - 7200, "updated": NOW - age, "disk_free_gb": 100.0, "tree_gb": 1.5,

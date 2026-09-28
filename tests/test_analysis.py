@@ -100,7 +100,7 @@ def test_area_rows_filter_and_compare(demo: Path, capsys) -> None:
     with Database(demo / "data" / "edr.db") as db:
         assert {r["depth"] for r in db.area()} == {0, 1, 2}  # area_hier = 2 keeps depth 2 at most
         assert db.metrics(name="area_hier_um2", step=2, run_ids=[a])[0]["value"] == 1000.0
-    code, out, _ = edr(capsys, "--json", "metrics", "--design", "abc1234", "--instance", "i_top/i_engine")
+    code, out, _ = edr(capsys, "--json", "metrics", "--source", "abc1234", "--instance", "i_top/i_engine")
     rows = json.loads(out)["data"]
     assert code == 0 and {r["instance"] for r in rows} == {"i_top/i_engine"}
     assert rows[0]["source_file"] == "reports/2/area_hier.rpt" and rows[0]["unit"] == "um2"
@@ -182,7 +182,7 @@ def test_metrics_over_the_steps_of_one_run(demo: Path, capsys) -> None:
     lines = [ln.split() for ln in out.splitlines()]
     assert lines[0] == ["stage", "step", "name", "wns_ns", "Δ", "source"]
     assert lines[4] == ["pnr", "4", "cts", "0.05", "0.15", "reports/4/qor.rpt"]
-    assert edr(capsys, "metrics", "--over", "steps", "--design", "abc1234")[0] == 1
+    assert edr(capsys, "metrics", "--over", "steps", "--source", "abc1234")[0] == 1
     assert edr(capsys, "metrics")[0] == 1
 
 
@@ -312,9 +312,9 @@ def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path
     assert data["written"][0]["artifacts"] == 1
     client = mlflow.tracking.MlflowClient(tracking_uri=data["tracking_uri"])
     run = client.get_run(data["written"][0]["mlflow_run"])
-    assert run.data.tags["edr.design"] == "abc1234" and run.data.params["config"] == "demo"
+    assert run.data.tags["edr.source"] == "abc1234" and run.data.params["config"] == "demo"
     assert [(m.step, m.value) for m in client.get_metric_history(run.info.run_id, "wns_ns")] == [(2, -0.1), (3, 0.2)]
     assert client.get_run(data["written"][1]["mlflow_run"]).info.status == "KILLED"
     code, out, _ = edr(capsys, "--json", "export", "--mlflow", str(tmp_path / "ml"))
     assert json.loads(out)["data"]["skipped"] == [a, b]
-    assert edr(capsys, "export", "--design", "abc1234")[0] == 1
+    assert edr(capsys, "export", "--source", "abc1234")[0] == 1

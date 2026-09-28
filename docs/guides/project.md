@@ -206,7 +206,7 @@ command without a terminal, with no `TERM` variable. On the host `local`
 it is the environment of the `edr` process that started the driver, so a
 flow can work under `local` from your terminal and still fail on a site
 host. On top of that it gets the site `[env]`, the project `[env]`, and three
-variables: `EDR_SRC`, the source tag of the batch, `EDR_RUN_ID`, the run
+variables: `EDR_SOURCE`, the source tag of the batch, `EDR_RUN_ID`, the run
 id, and `EDR_TREE_ID`, the id of the tree the run writes in.
 
 A tool that calls `tput`, or a script that runs `clear`, fails without

@@ -27,7 +27,7 @@ and the stop of `host_full`; any keep file holds off the stop of `superseded`.
 | `held` | 🟠 | the scheduler holds the job and runs it only after a person releases it | yes | none | `edr stop <label>@<batch> --why held` |
 | `suspended` | 🟡 | the scheduler suspended the job; the heartbeat stands still until it resumes |  | none | `edr status <label>@<batch> --live` |
 | `imported` | ⚫ | `edr import` recorded the run |  | none | `edr retire <label>@<batch> --why '<phase>'` |
-| `done` | ⚪ | the run ended `done` |  | none | `edr export --design <src> --out exports/<src>` |
+| `done` | ⚪ | the run ended `done` |  | none | `edr export --source <source> --out exports/<source>` |
 | `incomplete` | 🟠 | the run ended `INCOMPLETE`: a task failed or was skipped | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `failed` | 🔴 | the run ended `FAILED` | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `stopped` | ⚫ | a stop file or `edr stop` ended the run, or `edr stop` marked a queued run |  | none | `edr retire <label>@<batch> --why '<phase>'` |

@@ -92,7 +92,7 @@ PLACEHOLDERS = {
     "label": ("the label of the job", "the run id, the stage strings"),
     "config": ("the configuration name of the job; `\"\"` without one", "the run id, the stage strings"),
     "build_tag": ("the build tag of the job", "the run id, the stage strings"),
-    "src": ("the source tag of the batch", "the run id, the stage strings"),
+    "source": ("the source tag of the batch", "the run id, the stage strings"),
     "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
     "vars.<name>": ("a key of the job's `vars` table", "the stage strings, `[env]`, `collect`"),
     "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),
@@ -294,8 +294,6 @@ def load_site(path: PathLike) -> Site:
     """Load site.toml; `path` may start with ~."""
     file = Path(os.path.abspath(Path(path).expanduser()))
     raw = _read(file)
-    if "licences" in raw:
-        raise ConfigError(f"{file}: [licences] is gone; declare [tools.<name>] with seats and probe")
     raw = _table(raw, _SITE_KEYS, file, "")
     _schema(raw, file)
     ssh = _table(raw.get("ssh", {}), {"options", "timeout_s"}, file, "ssh")
@@ -388,13 +386,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     root = Path(os.path.abspath(Path(project_dir).expanduser()))
     file = root / "edr.toml"
     raw = _read(file)
-    if "state" in raw:
-        raise ConfigError(f"{file}: 'state' is now 'state_dir'")
     raw = _table(raw, _PROJECT_KEYS, file, "")
     _schema(raw, file)
-    if "{netlist_stage}" in repr(raw):
-        raise ConfigError(f"{file}: {{netlist_stage}} is gone; write {{vars.netlist_stage}} and set "
-                          "vars = { netlist_stage = <n> } in the job")
     name = _need(raw, "project", file, "")
     values: dict[str, object] = {"project": name, "project_root": str(root), "user": getpass.getuser()}
     if site_path is None:
@@ -468,8 +461,6 @@ def _stage(name: str, raw: object, file: Path) -> Stage:
 def _needs(raw: object, file: Path, at: str) -> Needs:
     """A needs table; `tools` is a list of names or `{ name = seats }` and is kept as a dict."""
     raw = dict(_table(raw, None, file, at))
-    if "licence" in raw:
-        raise ConfigError(f"{file}: {at}.licence is gone; use {at}.tools = [\"<name>\"] or {{ <name> = <seats> }}")
     tools = raw.get("tools", {})
     if isinstance(tools, list):
         tools = {str(t): 1 for t in tools}
@@ -491,9 +482,6 @@ def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path)
 def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Metric:
     at = f"metrics.{name}"
     raw = dict(_table(raw, None, file, at))
-    if "expr" in raw:
-        raise ConfigError(f"{file}: {at}.expr is gone; write stage, file and python = \"hooks/{name}.py:{name}\" "
-                          f"with def {name}(path): that reads the inputs and returns {raw['expr']}")
     stage = raw.get("stage", [])
     raw["stage"] = [stage] if isinstance(stage, str) else stage
     for s in raw["stage"]:
@@ -569,8 +557,6 @@ def _job(raw: object, index: int, project: Project, file: Path) -> Job:
     at = f"job[{index}]"
     raw = dict(_table(raw, None, file, at))
     raw["overrides"] = {k: str(v) for k, v in raw.get("overrides", {}).items()}
-    if "netlist_stage" in raw:
-        raise ConfigError(f"{file}: {at}.netlist_stage is gone; write vars = {{ netlist_stage = {raw['netlist_stage']} }}")
     for k, v in _table(raw.get("vars", {}), None, file, f"{at}.vars").items():
         if not re.fullmatch(r"[A-Za-z_]\w*", k):
             raise ConfigError(f"{file}: {at}.vars key {k!r} is not an identifier")

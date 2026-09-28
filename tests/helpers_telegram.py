@@ -53,8 +53,8 @@ class FakeActions:
     def board_files(self) -> list[Path]:
         return self.board
 
-    def metrics_csv(self, design: str) -> bytes:
-        return f"run_id,src\nr1,{design}\n".encode()
+    def metrics_csv(self, source: str) -> bytes:
+        return f"run_id,source\nr1,{source}\n".encode()
 
     def run_info(self, handle: str) -> dict:
         self.calls.append(("run_info", (handle,), {}))

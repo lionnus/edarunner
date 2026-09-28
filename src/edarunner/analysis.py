@@ -22,9 +22,9 @@ Row = dict[str, Any]
 
 
 def names(runs: list[Row]) -> dict[str, str]:
-    """A column name per run: the label, or label@src when two runs share a label."""
+    """A column name per run: the label, or label@source when two runs share a label."""
     labels = [r.get("label") for r in runs]
-    return {r["run_id"]: str(r.get("label")) if labels.count(r.get("label")) == 1 else f"{r.get('label')}@{r.get('src')}"
+    return {r["run_id"]: str(r.get("label")) if labels.count(r.get("label")) == 1 else f"{r.get('label')}@{r.get('source')}"
             for r in runs}
 
 
@@ -58,7 +58,7 @@ def area_delta(db: Database, runs: list[Row], depth: int, instance: str | None =
         if not have:
             continue
         top = have[max(common) if common else max(have)]
-        picked.append({"run_id": r["run_id"], "label": r.get("label"), "src": r.get("src"), "stage": top["stage"],
+        picked.append({"run_id": r["run_id"], "label": r.get("label"), "source": r.get("source"), "stage": top["stage"],
                        "step": top["step"], "name": top["name"], "area": top["area"], "unit": top.get("unit"),
                        "source_file": top.get("source_file")})
     table: dict[str, Row] = {}
@@ -280,7 +280,7 @@ def runtime(project: Project, db: Database, run: Row) -> Row:
                 t["longest"], t["longest_s"] = r["task"], w
     total = sum(s["wall_s"] or 0 for s in stages) if stages else (
         sum(s["wall_s"] or 0 for s in steps) if steps else None)
-    return {"run_id": run_id, "label": run.get("label"), "src": run.get("src"), "host": run.get("host"),
+    return {"run_id": run_id, "label": run.get("label"), "source": run.get("source"), "host": run.get("host"),
             "stages": stages, "steps": steps, "tasks": list(tasks.values()), "total_s": total}
 
 
@@ -313,10 +313,10 @@ def runtime_batch_view(project: Project, rts: list[Row]) -> RenderableType:
     body = []
     for rt in rts:
         per = {n: sum(s["wall_s"] or 0 for s in (rt["stages"] or rt["steps"]) if s["stage"] == n) or None for n in names}
-        body.append([rt["label"], rt.get("src"), rt.get("host"), *[dur(per[n]) for n in names], dur(rt["total_s"])])
+        body.append([rt["label"], rt.get("source"), rt.get("host"), *[dur(per[n]) for n in names], dur(rt["total_s"])])
     if not body:
         return "no runs"
-    return board.table(["label", "design", "host", *names, "total"], body, styles={"label": "bold", "design": "dim"},
+    return board.table(["label", "source", "host", *names, "total"], body, styles={"label": "bold", "source": "dim"},
                        right=(*names, "total"))
 
 

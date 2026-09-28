@@ -13,7 +13,7 @@ repo = "repo"
 worktrees = "wt"
 ref = "HEAD"
 nested = []
-run_id = "{date}_{label}_{build_tag}_g{src}"
+run_id = "{date}_{label}_{build_tag}_g{source}"
 
 [safety]
 marker = "/edr/"

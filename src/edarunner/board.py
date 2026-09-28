@@ -272,7 +272,7 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
     if state in STOP_FLAGS:
         return f"edr stop {h} {STOP_FLAGS[state]}"
     if state == "done":
-        return f"edr export --design {row.get('src')} --out exports/{row.get('src')}"
+        return f"edr export --source {row.get('source')} --out exports/{row.get('source')}"
     # The reason names what was observed, the phase the run ended with; without one the person writes it.
     return f"edr retire {h} --why {shlex.quote(str(row.get('phase') or '<why>'))}"
 
@@ -310,7 +310,7 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
         Text.assemble(state_text(state_of(row)), f"  {_s(row.get('phase')) or '-'}  {_stage_step(row)}" if ex is None
                       else f"  {_stage_step(row)}  driver exit {ex} ({_s(row.get('phase')) or '-'})"),
         Text(f"label {_s(row.get('label'))}  config {_s(row.get('config'))}  batch {_s(row.get('batch'))}  "
-             f"src {_s(row.get('src'))}{' dirty' if row.get('dirty') else ''}"),
+             f"source {_s(row.get('source'))}{' dirty' if row.get('dirty') else ''}"),
         Text.assemble(f"host {_s(row.get('host'))}  root ", (_s(row.get("root")), "dim")),
         Text.assemble("started ", (_ts(row.get("started")), "dim"), "  updated ", (_ts(row.get("updated")), "dim"),
                       f" ({hm(_age_s(row, now))} ago)  cost {cost(row, now):.1f} core-h"),
@@ -507,7 +507,7 @@ const LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', 
   margin: { t: 30, r: 10, b: 40, l: 50 }, height: 320 };
 const tr = (cells, tag = 'td') => '<tr>' + cells.map(c => '<' + tag + '>' + c + '</' + tag + '>').join('') + '</tr>';
 
-const COLS = ['label', 'src', 'batch', 'host', 'state', 'phase', 'cost', ...PKEYS];
+const COLS = ['label', 'source', 'batch', 'host', 'state', 'phase', 'cost', ...PKEYS];
 const cell = (r, c) => PKEYS.includes(c) && !(c in r) ? PAR[r.run_id]?.[c] : r[c];
 const TICK = new Set(RUNS.slice(0, 2).map(r => r.run_id));
 const FILTER = {};
@@ -527,7 +527,7 @@ function runsBody() {
     ...COLS.map((c, i) => i ? esc(cell(r, c)) : '<span title="' + esc(r.run_id) + '">' + esc(r.label) + '</span>')])).join('');
 }
 function runsTable() {
-  const head = tr(['', ...COLS.map(c => esc(c === 'src' ? 'design' : c))], 'th')
+  const head = tr(['', ...COLS.map(c => esc(c))], 'th')
     + tr(['', ...COLS.map(c => '<input class="f" data-col="' + esc(c) + '" placeholder="filter">')], 'th');
   q('#runs').innerHTML = '<thead>' + head + '</thead><tbody id="rb">' + runsBody() + '</tbody>';
   q('#runs').addEventListener('input', e => { if (e.target.dataset?.col) { FILTER[e.target.dataset.col] = e.target.value;
@@ -609,9 +609,9 @@ function draw() {
 runsTable();
 const dims = [...PKEYS, ...MKEYS];
 fill('#traj', MKEYS.filter(k => METRICS.some(m => mkey(m) === k && m.step != null)), null);
-fill('#sx', dims, dims[0]); fill('#sy', dims, dims[1] ?? dims[0]); fill('#sc', ['label', 'host', 'src', ...PKEYS], 'label');
+fill('#sx', dims, dims[0]); fill('#sy', dims, dims[1] ?? dims[0]); fill('#sc', ['label', 'host', 'source', ...PKEYS], 'label');
 fill('#pm', MKEYS, MKEYS.find(k => !k.includes('[')) ?? MKEYS[0]);
-const aids = ARUNS.map(r => r.run_id), alab = ARUNS.map(r => r.label + ' ' + r.src);
+const aids = ARUNS.map(r => r.run_id), alab = ARUNS.map(r => r.label + ' ' + r.source);
 fill('#aa', aids, aids[0], alab); fill('#ab', aids, aids[1] ?? aids[0], alab);
 const depths = [...new Set(Object.values(AREAS).flatMap(a => a.rows.map(r => r[1])))].filter(d => d > 0).sort((a, b) => a - b);
 fill('#ad', depths.map(String), String(depths[0] ?? 1));

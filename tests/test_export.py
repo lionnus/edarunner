@@ -28,13 +28,13 @@ def world(tmp_path, monkeypatch):
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
     project = config.load_project(root)
     db = Database(project.data / "edr.db")
-    for run_id, label, src, phase, failed in (
+    for run_id, label, source, phase, failed in (
         (RUN_A_OLD, "a", "aaa111", "done", 0),
         (RUN_A, "a", "aaa111", "done", 0),
         (RUN_B, "b_nodw", "aaa111", "stage:pnr", 0),
         (RUN_C, "a", "bbb222", "INCOMPLETE:1f0s", 1),
     ):
-        db.upsert_run({"run_id": run_id, "batch": "demo", "label": label, "config": "demo", "src": src, "host": "local",
+        db.upsert_run({"run_id": run_id, "batch": "demo", "label": label, "config": "demo", "source": source, "host": "local",
                         "phase": phase, "state": "running", "started": 100, "updated": 200,
                         "counts": {"done": 1, "failed": failed}})
     for run_id, value in ((RUN_A_OLD, 900.0), (RUN_A, 1000.0), (RUN_C, 2000.0)):
@@ -62,7 +62,7 @@ def _read_csv(path):
         return list(csv.DictReader(fh))
 
 
-def test_export_one_design(world, tmp_path):
+def test_export_one_source(world, tmp_path):
     project, db = world
     config.save_json(project.state_dir / "demo" / f"{RUN_A}.spec.json",
                      {"record": {"edarunner": "9.9", "driver_sha256": "ab12", "tools": {"fc": "V-2023.12"}}})
@@ -72,7 +72,7 @@ def test_export_one_design(world, tmp_path):
 
     assert [r["run_id"] for r in manifest["runs"]] == [RUN_A, RUN_B]
     record = manifest["runs"][0]["record"]
-    assert {k: v for k, v in manifest["runs"][0].items() if k != "record"} == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "src": "aaa111",
+    assert {k: v for k, v in manifest["runs"][0].items() if k != "record"} == {"run_id": RUN_A, "label": "a", "config": "demo", "build_tag": None, "source": "aaa111",
                                    "host": "local", "phase": "done"}
     # The spec of RUN_A names the versions; RUN_B has no spec, so they are empty.
     assert record == {"host": "local", "started": 100, "ended": 200, "edarunner": "9.9", "driver_sha256": "ab12",
@@ -87,13 +87,13 @@ def test_export_one_design(world, tmp_path):
 
     runs = _read_csv(out / "runs.csv")
     assert list(runs[0]) == export.RUN_COLUMNS
-    assert [(r["run_id"], r["design"], r["ended"]) for r in runs] == [(RUN_A, "aaa111", "200"), (RUN_B, "aaa111", "")]
+    assert [(r["run_id"], r["source"], r["ended"]) for r in runs] == [(RUN_A, "aaa111", "200"), (RUN_B, "aaa111", "")]
 
     metrics = _read_csv(out / "metrics.csv")
     assert list(metrics[0]) == export.METRIC_COLUMNS
     assert {m["run_id"] for m in metrics} == {RUN_A}
     area = next(m for m in metrics if m["metric"] == "area_cell_um2")
-    assert (area["label"], area["stage"], area["step"], area["canonical"], area["value"], area["source"]) == (
+    assert (area["label"], area["stage"], area["step"], area["canonical"], area["value"], area["source_file"]) == (
         "a", "synth", "3", "design__instance__area", "1000.0", "reports/3/area.rpt")
     power = next(m for m in metrics if m["metric"] == "power_w")
     assert (power["task"], power["step"], power["unit"]) == ("k_small", "", "W")
@@ -125,7 +125,7 @@ def test_labels_and_refusals(world, tmp_path):
         export.export(project, db, "aaa", tmp_path / "z")
     with pytest.raises(Refuse, match="no run"):
         export.export(project, db, "aaa111", tmp_path / "z", labels=["nope"])
-    with pytest.raises(Refuse, match="empty design"):
+    with pytest.raises(Refuse, match="empty source"):
         export.export(project, db, "", tmp_path / "z")
     assert not (tmp_path / "z").exists()
 

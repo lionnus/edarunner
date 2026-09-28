@@ -15,7 +15,7 @@ database.
   snapshot of a dirty tree. Its short hash tags every run built from it.
   The copy on the host keeps `.git`, so the flow asks git for its
   version there as it does anywhere else, and every command gets
-  `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID` in its environment.
+  `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID` in its environment.
 - `[runtime] setup` runs one command on the host before the first stage,
   such as `uv sync --frozen`, and logs it to `log/setup.log`. A failure
   ends the run as `FAILED:runtime` before any tool seat is taken, and
@@ -55,10 +55,10 @@ database.
 
 - A metric comes from a report file through a regex, a CSV row, a JSON
   path, a hierarchical area report or a Python hook.
-- `edr metrics` prints the metrics of one design or one run,
+- `edr metrics` prints the metrics of one source or one run,
   `edr compare` puts two or more runs side by side with the deltas, and
   `edr runtime` prints the time of each stage, step and task.
-- `edr export` writes a frozen snapshot of one design with a manifest,
+- `edr export` writes a frozen snapshot of one source with a manifest,
   and `edr export --mlflow` writes the runs into an MLflow tracking store.
 - The watcher writes two HTML boards: `status.html` for the farm and
   `compare.html` for the metrics of the runs.
@@ -92,27 +92,3 @@ database.
   an agent who is new to it, and `edr status --triage` proposes one
   command for each run that needs attention.
 - `AGENTS.md` is the operating guide for an agent.
-
-### Changes from the pre-release versions
-
-Versions before 0.4.0 were pre-release. These changes can break a setup
-from that time:
-
-- The old command names are gone: `edr stage` is `edr checkout`,
-  `edr run` is `edr continue`, `edr lic` is `edr tools`, and the bot's
-  `/lic` is `/tools`.
-- `edr plan` is a read command and no longer creates `data/edr.db`.
-- `edr import --config` is optional and defaults to an empty
-  configuration name.
-- Custom bot commands and metric `file` strings render with the same
-  placeholder engine as the rest of the configuration. A placeholder
-  without a value is an error that names it, and the `{{` and `}}`
-  escapes no longer apply there.
-- A bot command sent as a reply to an alert can use `{handle}` and
-  `{run_root}`, the handle and the run tree of that run.
-- The `plots` extra is gone; the boards draw their plots in the browser.
-- The documentation is organized by what a reader wants to do: Get
-  started, How it works, one guide per task, the reference and the
-  development pages. The old pages `concepts`, `guarantees`,
-  `configure`, `run`, `results`, `notify` and `telegram` redirect to
-  their new places.

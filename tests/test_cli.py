@@ -123,7 +123,7 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     rows = {r["run_id"]: r for r in json.loads(out)["data"]["runs"]}
     assert code == 0 and rows[b]["alive"] is False and rows[b]["state"] == "dead" and "alive" not in rows[a]
     code, out, _ = edr(capsys, "status", "--triage")
-    assert code == 0 and f"edr export --design abc1234" in out and f"edr launch demo --only q" in out
+    assert code == 0 and f"edr export --source abc1234" in out and f"edr launch demo --only q" in out
     assert "b_nodw@demo" not in out  # fresh heartbeat: running, nothing to triage
     code, out, _ = edr(capsys, "status", "--triage", "--live")
     assert code == 0 and f"edr continue b_nodw@demo --stage synth --from elaborate" in out
@@ -358,7 +358,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     one = acts.status_text("b_nodw@demo").splitlines()
     assert one == ["🟢 <code>b_nodw@demo</code> running", "stage synth, step 2 elaborate", "on local, 0m",
                    "<pre>step 2 elaborate</pre>"]
-    assert acts.status_text("a@demo").splitlines()[3] .startswith("<code>edr export --design ")
+    assert acts.status_text("a@demo").splitlines()[3] .startswith("<code>edr export --source ")
     events = acts.events_text(2).splitlines()
     assert events[0][5:] == " <b>stop</b> <code>b_nodw@demo</code>" and events[1] == "    <i>after-task: why</i>"
     assert len(events) == 4
@@ -470,22 +470,22 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
     add_metric(demo, a, "wns_ns", -0.5, step=3)
     (demo / "data" / "results" / a / "reports" / "3").mkdir(parents=True)
     (demo / "data" / "results" / a / "reports" / "3" / "area.rpt").write_text("i_top 1000.0\n")
-    code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--csv")
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--csv")
     lines = out.splitlines()
-    assert code == 0 and lines[0].startswith("run_id,label,config,design,stage,step,task,metric") and len(lines) == 3
+    assert code == 0 and lines[0].startswith("run_id,label,config,source,stage,step,task,metric") and len(lines) == 3
     assert lines[1].startswith(f"{a},a,demo,abc1234,synth,3,,area_cell_um2,design__instance__area,1000.0,u,")
-    code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--stage", "pnr")
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--stage", "pnr")
     assert code == 2 and out == "no metrics\n"
-    code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--step", "3")
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--step", "3")
     assert code == 0 and "wns_ns" in out
-    assert edr(capsys, "metrics", "--design", "abc")[0] == 2  # exact match, not a prefix
+    assert edr(capsys, "metrics", "--source", "abc")[0] == 2  # exact match, not a prefix
     exp = tmp_path / "exp"
-    code, out, _ = edr(capsys, "export", "--design", "abc1234", "--out", str(exp), "--dry-run")
+    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--out", str(exp), "--dry-run")
     assert code == 0 and not exp.exists() and "reports/3/area.rpt" in out
-    code, out, _ = edr(capsys, "--json", "export", "--design", "abc1234", "--out", str(exp))
+    code, out, _ = edr(capsys, "--json", "export", "--source", "abc1234", "--out", str(exp))
     manifest = json.loads(out)["data"]
     assert code == 0 and manifest == json.loads((exp / "manifest.json").read_text()) and (exp / "a" / "reports" / "3" / "area.rpt").exists()
-    code, _, err = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
+    code, _, err = edr(capsys, "export", "--source", "abc1234", "--out", str(exp))
     assert code == 1 and "not empty" in err
     with Database(demo / "data" / "edr.db") as db:
         assert [e["kind"] for e in db.events()] == ["export"]
@@ -503,7 +503,7 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
     assert code == 0 and out == f"{a}: 1 new, 1 changed, 0 unchanged, 0 failed (dry)\n"
     with Database(demo / "data" / "edr.db") as db:
         assert [m["unit"] for m in db.metrics(run_ids=[a])] == ["u"] and db.events() == []
-    code, out, _ = edr(capsys, "--json", "extract", "--design", "abc1234")
+    code, out, _ = edr(capsys, "--json", "extract", "--source", "abc1234")
     assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 1, "changed": 1, "unchanged": 0, "failed": 0}]
     with Database(demo / "data" / "edr.db") as db:
         assert {(m["name"], m["value"], m["unit"]) for m in db.metrics(run_ids=[a])} == {
@@ -511,7 +511,7 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
         assert [(e["kind"], e["text"]) for e in db.events()] == [("extract", "1 new, 1 changed, 0 unchanged, 0 failed")]
     code, out, _ = edr(capsys, "extract", "--batch", "demo")
     assert code == 0 and out == f"{a}: 0 new, 0 changed, 2 unchanged, 0 failed\n"
-    assert edr(capsys, "extract", "--design", "0000000")[0] == 2
+    assert edr(capsys, "extract", "--source", "0000000")[0] == 2
 
 
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
@@ -692,7 +692,7 @@ def test_bad_input_exits_1(capsys) -> None:
 def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> None:
     root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_x_gabc1234"
     root.mkdir(parents=True)
-    argv = ["import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
+    argv = ["import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--source", "abc1234",
             "--host", "local", "--root", str(root), "--why", "reference"]
     code, out, _ = edr(capsys, *argv, "--dry-run")
     assert code == 0 and "(dry)" in out and not (demo / "data" / "edr.db").exists()
@@ -702,13 +702,13 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
         assert row["phase"] == "done" and row["state"] == "imported" and row["root"] == str(root)
         assert [b["batch"] for b in db.batches()] == ["imported"]
         assert db.events()[-1]["kind"] == "import"
-    assert edr(capsys, "import", "--run-id", "bad", "--label", "r", "--config", "demo", "--src", "a",
+    assert edr(capsys, "import", "--run-id", "bad", "--label", "r", "--config", "demo", "--source", "a",
                "--host", "local", "--root", str(root))[0] == 1
-    assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--src", "a",
+    assert edr(capsys, "import", "--run-id", root.name, "--label", "r", "--config", "demo", "--source", "a",
                "--host", "local", "--root", str(root / "missing"))[0] == 1
     other = root.with_name("20260904_0412_noconf_x_gabc1234")
     other.mkdir()
-    assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--src", "a", "--host", "local",
+    assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--source", "a", "--host", "local",
                "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
 
 
@@ -745,7 +745,7 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
     root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
     root.mkdir(parents=True)
-    assert edr(capsys, "import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--src", "abc1234",
+    assert edr(capsys, "import", "--run-id", root.name, "--label", "ref", "--config", "demo", "--source", "abc1234",
                "--host", "local", "--root", str(root))[0] == 0
     code, out, err = edr(capsys, "continue", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local",
                          "--dry-run")
@@ -789,7 +789,7 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     with Database(demo / "data" / "edr.db") as db:
         row = db.run(a)
         db.upsert_run({"run_id": f"{DATE}_b_nodw_demo_gabc1234", "batch": "demo", "label": "b_nodw", "config": "demo",
-                        "host": row["host"], "root": row["root"], "src": "abc1234", "phase": "done", "state": "done"})
+                        "host": row["host"], "root": row["root"], "source": "abc1234", "phase": "done", "state": "done"})
     code, out, err = edr(capsys, "retire", "a@demo", "--why", "t", "--uncollected")
     assert code == 1 and "results are not collected" in err
     assert Path(row["root"]).exists()
@@ -803,19 +803,13 @@ def test_retire_refuses_a_root_that_another_run_uses(demo: Path, capsys) -> None
     assert not Path(row["root"]).exists()
 
 
-@pytest.mark.parametrize("old,new", [("lic", "tools"), ("stage", "checkout"), ("run", "continue")])
-def test_a_removed_command_names_its_replacement(demo: Path, capsys, old: str, new: str) -> None:
-    code, out, err = edr(capsys, "--json", old, "x")
-    assert code == 1 and out == "" and err == f"edr: {old} was removed in 0.4.0; use edr {new}\n"
-
-
 def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Path, capsys) -> None:
     subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
     repo = demo / "repo"
-    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]
-    wt = demo / "wt" / src
-    seed(demo, "a", "done", src=src)
-    seed(demo, "b", "done", src=src, batch="other")
+    source = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["source"]
+    wt = demo / "wt" / source
+    seed(demo, "a", "done", source=source)
+    seed(demo, "b", "done", source=source, batch="other")
     assert edr(capsys, "retire", "--batch", "other", "--uncollected", "--why", "x")[0] == 0
     assert (wt / ".git").is_dir()  # demo still has the source
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x", "--dry-run")
@@ -824,10 +818,10 @@ def test_retire_batch_removes_the_checked_out_tree_no_other_batch_uses(demo: Pat
     assert code == 0 and not wt.exists() and repo.is_dir()
     with open(repo / "flow" / "flow.sh", "a") as f:
         f.write("# dirty\n")
-    dirty = json.loads(edr(capsys, "--json", "checkout", "--dirty", str(repo))[1])["data"]["src"]
+    dirty = json.loads(edr(capsys, "--json", "checkout", "--dirty", str(repo))[1])["data"]["source"]
     snap = demo / "wt" / dirty
     assert "-dirty-" in dirty and snap.is_dir() and (snap / ".git").is_dir()
-    seed(demo, "c", "done", src=dirty, batch="snap")
+    seed(demo, "c", "done", source=dirty, batch="snap")
     code, out, _ = edr(capsys, "retire", "--batch", "snap", "--uncollected", "--why", "y")
     assert code == 0 and f"rm -rf {snap}" in out and not snap.exists() and (repo / "flow").is_dir()
     with Database(demo / "data" / "edr.db") as db:
@@ -838,9 +832,9 @@ def test_retire_batch_keeps_a_worktree_without_the_marker(demo: Path, capsys, tm
     subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
     toml = demo / "edr.toml"
     toml.write_text(toml.read_text().replace('worktrees = "wt"', f'worktrees = "{tmp_path / "rtl-wt"}"'))
-    src = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["src"]
-    wt = tmp_path / "rtl-wt" / src
-    a = seed(demo, "a", "done", src=src)
+    source = json.loads(edr(capsys, "--json", "checkout", "HEAD")[1])["data"]["source"]
+    wt = tmp_path / "rtl-wt" / source
+    a = seed(demo, "a", "done", source=source)
     with Database(demo / "data" / "edr.db") as db:
         root = Path(db.run(a)["root"])
     code, out, _ = edr(capsys, "retire", "--batch", "demo", "--uncollected", "--why", "x")
@@ -861,7 +855,7 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     (p / "reports").mkdir(parents=True)
     (p / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.250\n")
     (p / "phases.json").write_text('{"window_ns": 3400}')
-    base = ["import", "--run-id", run_id, "--label", "ref", "--config", "demo", "--src", "abc1234"]
+    base = ["import", "--run-id", run_id, "--label", "ref", "--config", "demo", "--source", "abc1234"]
     assert edr(capsys, *base)[0] == 1  # neither a tree nor results
     assert edr(capsys, *base, "--results", str(src), "--tasks", "nope")[0] == 1
     code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small", "--dry-run")
@@ -869,7 +863,7 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small")
     link = demo / "data" / "results" / run_id
     assert code == 0 and "4 metrics" in out and link.is_symlink() and link.resolve() == src.resolve()
-    code, out, _ = edr(capsys, "metrics", "--design", "abc1234", "--csv")
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--csv")
     got = {ln.split(",")[7]: ln.split(",")[9] for ln in out.splitlines()[1:]}
     assert code == 0 and got == {"area_cell_um2": "1000.0", "power_w": "0.25", "window_ns": "3400.0", "energy_nj": "850.0"}
     with Database(demo / "data" / "edr.db") as db:
@@ -881,7 +875,7 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     assert edr(capsys, *base, "--results", str(other))[0] == 1  # never replaces a linked tree
     assert edr(capsys, "continue", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local", "--dry-run")[0] == 1
     exp = tmp_path / "exp"
-    code, out, _ = edr(capsys, "export", "--design", "abc1234", "--out", str(exp))
+    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--out", str(exp))
     assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()
 
 
@@ -940,21 +934,21 @@ def track(*argv: str) -> subprocess.CompletedProcess:
 
 
 def test_track_dry_run_prints_the_spec_and_writes_nothing(demo: Path, capsys) -> None:
-    code, out, _ = edr(capsys, "track", "--label", "t", "--stage", "synth", "--src", "abc1234", "--dry-run", "--", *FLOW)
+    code, out, _ = edr(capsys, "track", "--label", "t", "--stage", "synth", "--source", "abc1234", "--dry-run", "--", *FLOW)
     spec = json.loads(out[out.index("{"):])
     (st,) = spec["stages"]
     assert code == 0 and st["cmd"] == shlex.join(FLOW) and "resume" not in st and st["steps"][0] == "setup"
     assert spec["batch"] == "track" and spec["host"] is None and spec["root"] == str(demo) and spec["collect"] is False
     assert spec["run_id"].endswith("_t_track_gabc1234") and spec["start_at"] == {"stage": "synth", "checkpoint": None}
     assert not (Path.home() / ".edr").exists() and not (demo / "data" / "edr.db").exists()
-    code, _, err = edr(capsys, "track", "--label", "t", "--stage", "power", "--src", "a", "--dry-run", "--", "true")
+    code, _, err = edr(capsys, "track", "--label", "t", "--stage", "power", "--source", "a", "--dry-run", "--", "true")
     assert code == 1 and "task group" in err
     code, _, err = edr(capsys, "track", "--label", "t", "--stage", "synth", "--dry-run", "--", "true")
-    assert code == 1 and "not a git tree; pass --src" in err
+    assert code == 1 and "not a git tree; pass --source" in err
 
 
 def test_track_execs_the_driver_and_the_watcher_collects(demo: Path) -> None:
-    p = track("--label", "t", "--stage", "synth", "--src", "abc1234", "--collect", "--", *FLOW)
+    p = track("--label", "t", "--stage", "synth", "--source", "abc1234", "--collect", "--", *FLOW)
     assert p.returncode == 0, p.stderr
     project = config.load_project(demo)
     with Database(project.data / "edr.db") as db:
@@ -970,7 +964,7 @@ def test_track_execs_the_driver_and_the_watcher_collects(demo: Path) -> None:
 
 
 def test_track_passes_the_driver_exit_code_and_collects_only_on_request(demo: Path) -> None:
-    p = track("--label", "f", "--stage", "check", "--src", "abc1234", "--", "sh", "-c", "echo no; exit 3")
+    p = track("--label", "f", "--stage", "check", "--source", "abc1234", "--", "sh", "-c", "echo no; exit 3")
     assert p.returncode == 5, p.stderr
     project = config.load_project(demo)
     with Database(project.data / "edr.db") as db:

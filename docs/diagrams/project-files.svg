@@ -77,7 +77,7 @@
 <rect class="gen" x="316" y="256" width="220" height="52" rx="7"/>
 <rect class="mark" x="317" y="266" width="4" height="32"/>
 <text class="t" x="330" y="278">Checked-out source</text>
-<text class="m" x="330" y="296">wt/&lt;src&gt;/</text>
+<text class="m" x="330" y="296">wt/&lt;source&gt;/</text>
 
 <!-- Outside the project -->
 <rect class="frame" x="576" y="24" width="360" height="364" rx="10"/>
