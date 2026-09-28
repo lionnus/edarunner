@@ -362,7 +362,7 @@ definitions. It uses the same function as the watcher, so it reads
 the tasks that ended done, the stages that exited 0, and in any other
 stage the steps that the run has passed: step_runs holds the step and
 a later one. A run without a heartbeat, such as an imported one, is
-read for every stage and for the tasks its rows name.
+read for every stage and for every task of its spec.
 
 New rows are added. A row is replaced when its value, canonical name,
 unit or source file has changed, or when its area rows differ. A row
@@ -686,7 +686,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 ## track
 
 ```
-edr track [--dry-run] [--json] --label L --stage S [--batch B] [--source SOURCE] [--root DIR] [--collect] ...
+edr track [--dry-run] [--json] --label L --stage S [--batch B] [--config C] [--build-tag TAG] [--source SOURCE] [--root DIR] [--collect] ...
 ```
 
 Runs one command in the foreground under the driver, on this machine, and
@@ -698,8 +698,11 @@ The run is one stage named --stage. A stage of edr.toml with that name
 gives its steps, progress, budget, retry and tools, so the gate and the
 budget work; the command replaces its cmd. The tree is --root, default
 the current directory, and the driver writes log/&lt;stage&gt;.log there. The
-run id follows source.run_id with the label as config, track as the
-build tag, and --source (default the source tag of the tree) as {source}.
+run id follows source.run_id with --config (default the label) as
+config, --build-tag (default track) as the build tag, and --source
+(default the source tag of the tree) as {source}. A bench run tracked
+with the build tag of a backend build joins the backend runs of that
+build on the tag, as edr coverage does.
 
 edr track then replaces itself with the driver: the pid, the signals
 and the exit code are the driver's. With --collect, the watcher copies
@@ -720,6 +723,8 @@ the global table. docs/guides/run.md lists the phases.
 | `--label L` | the label of the run, required |
 | `--stage S` | the stage name; a stage of edr.toml lends its settings, required |
 | `--batch B` | the batch; default track |
+| `--config C` | the configuration name of the run; default the label |
+| `--build-tag TAG` | the build tag of the run, the tag of the backend runs it belongs to; default track |
 | `--source SOURCE` | the source tag; default the tag of the tree |
 | `--root DIR` | the run tree; default the current directory |
 | `--collect` | the watcher collects the stage and extracts its metrics |
@@ -763,15 +768,35 @@ one before.
 ## import
 
 ```
-edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --source SOURCE [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
+edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --source SOURCE [--host HOST] [--started TIME] [--ended TIME] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--param KEY=VALUE] [--why WHY]
 ```
 
 Records a run that edr did not start, such as one you ran by hand. With
 --host and --root, it records the tree on that host, so reuse and edr
 continue can build on it. --results DIR names a directory of collected
 files from a run whose tree is gone; it is linked as
-data/results/&lt;run id&gt;, and the project's metrics are extracted from it; --tasks names the tasks whose files it holds. The run id must start
-with YYYYMMDD_HHMM_.
+data/results/&lt;run id&gt;, and the project's metrics are extracted from
+it; --tasks names the tasks whose files it holds. The run id must
+start with YYYYMMDD_HHMM_.
+
+The run holds what you tell it and nothing more. --host, --started
+and --ended give its host, start and end; without them these stay
+empty. Each --param KEY=VALUE writes a parameter of origin import, next
+to config, build_tag and source. The dirty flag is set when the source
+tag holds -dirty, and a tag that edr checkout would not make, &lt;hash&gt;
+or &lt;hash&gt;-dirty-&lt;8 hex&gt;, gets a warning. --phase is a phase that the
+driver ends a run with: done, INCOMPLETE:&lt;n&gt;f&lt;m&gt;s where a task failed
+or was skipped, FAILED:&lt;stage&gt;, OVER_BUDGET:&lt;stage&gt;, STOPPED or
+KILLED:&lt;signal&gt;. A run whose driver died is FAILED:&lt;stage&gt;, with the
+stage it died in.
+
+Import writes the spec &lt;state_dir&gt;/&lt;batch&gt;/&lt;run id&gt;.spec.json in the
+format of launch, with every task group and the directory of each
+task, so a later edr extract reads every imported task. The task
+counts of the run give a task whose files gave a value and no failed
+row as done, and any other task as failed. A batch holds one source:
+the launch or import that makes a batch sets it, and import refuses a
+run of another source there.
 
 | Flag | Meaning |
 |---|---|
@@ -781,13 +806,16 @@ with YYYYMMDD_HHMM_.
 | `--label LABEL` | the label of the run, required |
 | `--config CONFIG` | the configuration name of the run; default empty |
 | `--source SOURCE` | the source tag of the tree, required |
-| `--host HOST` | the host of the tree |
+| `--host HOST` | the host of the tree, or of the run whose files --results holds |
+| `--started TIME` | the start of the run: a unix time, or an ISO time such as 2026-08-30T09:12 |
+| `--ended TIME` | the end of the run, in the same forms |
 | `--root PATH` | the tree on the host |
 | `--results DIR` | collected files in the run layout; linked as data/results/&lt;run id&gt; |
 | `--tasks ID ...` | the tasks whose files the results hold |
 | `--batch BATCH` | the batch to record it in; default imported |
-| `--phase PHASE` | the terminal phase; default done |
+| `--phase PHASE` | the phase the run ended with, as the driver writes it; default done |
 | `--build-tag TAG` | the build tag of the run |
+| `--param KEY=VALUE` | a parameter of the run, such as vars.netlist_stage=11; repeatable |
 | `--why WHY` | the reason; it goes into the events table |
 
 ## export

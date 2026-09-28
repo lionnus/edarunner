@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -1119,7 +1120,7 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
                "--host", "local", "--root", str(root / "missing"))[0] == 1
     other = root.with_name("20260904_0412_noconf_x_gabc1234")
     other.mkdir()
-    assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--source", "a", "--host", "local",
+    assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--source", "abc1234", "--host", "local",
                "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
 
 
@@ -1290,6 +1291,67 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()
 
 
+def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> None:
+    run_id = "20260830_0900_ref_demo_gabc1234-dirty"
+    src = tmp_path / "legacy" / run_id
+    tests = src / "simulation" / "tests" / "demo"
+    # k_small parses; power.csv of k_big has no WHOLE row; k_bad has no file at all.
+    for test, text in (("GEMM_M64_N64", "phase,total_w\nWHOLE,0.250\n"), ("SOFTMAX_R197", "phase,total_w\n")):
+        (tests / test / "power" / "reports").mkdir(parents=True)
+        (tests / test / "power" / "reports" / "power.csv").write_text(text)
+        (tests / test / "power" / "phases.json").write_text('{"window_ns": 3400}')
+    start = int(datetime.fromisoformat("2026-08-30T09:00").timestamp())
+    base = ["import", "--run-id", run_id, "--label", "ref", "--config", "demo", "--source", "abc1234-dirty",
+            "--results", str(src), "--tasks", "k_small", "k_big", "k_bad", "--batch", "legacy"]
+    for bad in (["--phase", "INCOMPLETE:0f0s"], ["--phase", "FAILED:nope"], ["--phase", "done:"],
+                ["--started", "yesterday"], ["--started", str(start), "--ended", str(start - 1)], ["--param", "source=x"]):
+        assert edr(capsys, *base, *bad)[0] == 1, bad
+    assert "a run whose driver died is FAILED:<stage>" in edr(capsys, *base, "--phase", "INCOMPLETE:0f0s")[2]
+    assert not (demo / "data").exists()
+    code, out, _ = edr(capsys, *base, "--phase", "FAILED:power", "--host", "hostA", "--started", "2026-08-30T09:00",
+                       "--ended", str(start + 3600), "--param", "vars.netlist_stage=11")
+    assert code == 0 and "warning: abc1234-dirty does not have the form of an edr checkout tag" in out
+    spec = json.loads((bdir(demo, "legacy") / f"{run_id}.spec.json").read_text())
+    assert spec["vars"] == {"netlist_stage": "11"} and not any("cmd" in st for st in spec["stages"])
+    assert [(t["id"], t["dir"]) for st in spec["stages"] for t in st["tasks"]] == [
+        ("k_small", "simulation/tests/demo/GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_R197"),
+        ("k_bad", "simulation/tests/demo/BAD")]
+    with Database(demo / "data" / "edr.db") as db:
+        row = db.run(run_id)
+        assert (row["dirty"], row["host"], row["phase"], row["started"], row["updated"]) == (
+            1, "hostA", "FAILED:power", start, start + 3600)
+        assert row["counts"] == {"done": 1, "failed": 2}
+        assert {(p["key"], p["value"]) for p in db.parameters(run_id)} == {
+            ("config", "demo"), ("source", "abc1234-dirty"), ("vars.netlist_stage", "11")}
+        db.upsert_batch({"batch": "legacy", "created": 1})
+    # A second source in the batch is refused; one more run of its source leaves the batch row as it is.
+    other = ["import", "--label", "ref2", "--config", "demo", "--results", str(src), "--batch", "legacy"]
+    code, _, err = edr(capsys, *other, "--run-id", "20260830_0901_ref2_demo_gdef5678", "--source", "def5678")
+    assert code == 1 and "batch legacy holds the source abc1234-dirty" in err
+    code, out, _ = edr(capsys, *other, "--run-id", "20260830_0901_ref2_demo_gabc1234-dirty", "--source", "abc1234-dirty")
+    assert code == 0
+    code, out, _ = edr(capsys, "import", "--run-id", "20260830_0902_ref3_demo_gdef5678", "--label", "ref3",
+                       "--source", "def5678", "--results", str(src), "--batch", "clean")
+    assert code == 0 and "warning" not in out
+    launched = seed(demo, "a", "done")
+    code, _, err = edr(capsys, "import", "--run-id", launched, "--label", "a", "--source", "abc1234", "--results", str(src),
+                       "--batch", "demo")
+    assert code == 1 and "exists in state running" in err
+    with Database(demo / "data" / "edr.db") as db:
+        assert [(b["batch"], b["source"], b["created"]) for b in db.batches() if b["batch"] == "legacy"] == [
+            ("legacy", "abc1234-dirty", 1)]
+        assert (db.run("20260830_0902_ref3_demo_gdef5678")["dirty"], db.run("20260830_0901_ref2_demo_gabc1234-dirty")[
+            "started"], db.run("20260830_0901_ref2_demo_gabc1234-dirty")["updated"]) == (0, None, None)
+    # Once its files are fixed, a later extract reads every task of the spec, also the one without a row.
+    (tests / "SOFTMAX_R197" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
+    (tests / "BAD" / "power" / "reports").mkdir(parents=True)
+    (tests / "BAD" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.125\n")
+    assert edr(capsys, "extract", "ref@legacy")[0] == 0
+    with Database(demo / "data" / "edr.db") as db:
+        got = {(m["task"], m["name"]): m["value"] for m in db.metrics(run_ids=[run_id])}
+    assert (got[("k_big", "power_w")], got[("k_big", "energy_nj")], got[("k_bad", "power_w")]) == (0.5, 1700.0, 0.125)
+
+
 def test_coverage_says_where_each_row_of_a_demand_is(demo: Path, capsys, tmp_path: Path) -> None:
     demand = tmp_path / "demand.csv"
     demand.write_text("label,build_tag,stage,task,source,note\n"
@@ -1399,7 +1461,12 @@ def test_track_dry_run_prints_the_spec_and_writes_nothing(demo: Path, capsys) ->
     assert code == 0 and st["cmd"] == shlex.join(FLOW) and "resume" not in st and st["steps"][0] == "setup"
     assert spec["batch"] == "track" and spec["host"] is None and spec["root"] == str(demo) and spec["collect"] is False
     assert spec["run_id"].endswith("_t_track_gabc1234") and spec["start_at"] == {"stage": "synth", "checkpoint": None}
+    assert spec["config"] == "t"
     assert not (Path.home() / ".edr").exists() and not (demo / "data" / "edr.db").exists()
+    code, out, _ = edr(capsys, "track", "--label", "t", "--stage", "synth", "--source", "abc1234", "--build-tag", "bt_a",
+                       "--config", "cfg_a", "--dry-run", "--", "true")
+    spec = json.loads(out[out.index("{"):])
+    assert code == 0 and spec["run_id"].endswith("_t_bt_a_gabc1234") and spec["config"] == "cfg_a"
     code, _, err = edr(capsys, "track", "--label", "t", "--stage", "power", "--source", "a", "--dry-run", "--", "true")
     assert code == 1 and "task group" in err
     code, _, err = edr(capsys, "track", "--label", "t", "--stage", "synth", "--dry-run", "--", "true")
@@ -1407,11 +1474,12 @@ def test_track_dry_run_prints_the_spec_and_writes_nothing(demo: Path, capsys) ->
 
 
 def test_track_execs_the_driver_and_the_watcher_collects(demo: Path) -> None:
-    p = track("--label", "t", "--stage", "synth", "--source", "abc1234", "--collect", "--", *FLOW)
+    p = track("--label", "t", "--stage", "synth", "--source", "abc1234", "--build-tag", "bt_a", "--collect", "--", *FLOW)
     assert p.returncode == 0, p.stderr
     project = config.load_project(demo)
     with Database(project.data / "edr.db") as db:
         (row,) = db.runs(batch="track")
+        assert (row["build_tag"], row["config"]) == ("bt_a", "t")
         hb = json.loads((project.state_dir / "track" / f"{row['run_id']}.json").read_text())
         host = socket.gethostname()
         assert (hb["phase"], hb["host"], hb["stage"]) == ("done", host, "synth")

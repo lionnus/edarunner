@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import shlex
 import shutil
 import socket
@@ -25,6 +26,7 @@ import textwrap
 import time
 from collections.abc import Iterator
 from dataclasses import asdict, replace
+from datetime import datetime
 from enum import IntEnum
 from pathlib import Path
 from string import Template
@@ -60,6 +62,39 @@ def _since(text: str) -> int:
     except (ValueError, IndexError):
         raise Refuse(f"--since {text!r}: use 30m, 2h, 1d or seconds") from None
     return int(time.time() - secs)
+
+
+def _unix(text: str) -> int:
+    """A unix time, or an ISO 8601 time, local unless it names its offset, as a unix time."""
+    try:
+        return int(float(text))
+    except (ValueError, OverflowError):
+        pass
+    try:
+        return int(datetime.fromisoformat(text).timestamp())
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is neither a unix time nor an ISO time such as 2026-08-30T09:12") from None
+
+
+def _param(text: str) -> tuple[str, str]:
+    """KEY=VALUE as (key, value); config, build_tag and source have flags of their own."""
+    key, sep, value = text.partition("=")
+    if not sep or not key or key in ("config", "build_tag", "source"):
+        raise argparse.ArgumentTypeError(f"{text!r} is not KEY=VALUE with a key other than config, build_tag and source")
+    return key, value
+
+
+def _check_phase(project: Project, phase: str) -> None:
+    """Refuse a phase that the driver never ends a run with."""
+    kind, sep, arg = phase.partition(":")
+    n = re.fullmatch(r"(\d+)f(\d+)s", arg)
+    stages = set(project.stages)
+    if not {"done": not sep, "STOPPED": not sep, "KILLED": re.fullmatch(r"SIG[A-Z]+", arg),
+            "INCOMPLETE": n and int(n[1]) + int(n[2]) > 0, "FAILED": arg in stages | {"setup", "runtime"},
+            "OVER_BUDGET": arg in stages}.get(kind):
+        raise Refuse(f"--phase {phase}: a run ends done, INCOMPLETE:<n>f<m>s with a task that failed or was skipped, "
+                     "FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or KILLED:<signal>, with a stage of edr.toml; a run "
+                     "whose driver died is FAILED:<stage>")
 
 
 # These commands link the project into the registry, so the commands that span projects find it.
@@ -1008,9 +1043,9 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     except runid.GitError:
         raise Refuse(f"{root} is not a git tree; pass --source") from None
     date, host = time.strftime(launch.DATE_FMT), socket.gethostname()
-    job = Job(label=a.label, config=a.label)
+    job = Job(label=a.label, config=a.config or a.label)
     batch = Batch(batch=a.batch, source=source, jobs=[job], path=project.root / "jobs" / f"{a.batch}.toml")
-    v = config.placeholders(project, date=date, batch=a.batch, label=a.label, config=a.label, build_tag="track",
+    v = config.placeholders(project, date=date, batch=a.batch, label=a.label, config=job.config, build_tag=a.build_tag,
                             source=source, overrides={})
     run_id = config.render(project.source.run_id, v)
     assert_run_id(run_id)
@@ -1032,7 +1067,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     now = int(time.time())
     c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": source, "run_date": date})
-    c.db.upsert_run({"run_id": run_id, "batch": a.batch, "label": a.label, "config": a.label, "build_tag": "track",
+    c.db.upsert_run({"run_id": run_id, "batch": a.batch, "label": a.label, "config": job.config, "build_tag": a.build_tag,
                      "source": source, "dirty": int("-dirty" in source), "host": host, "root": str(root), "created": now,
                      "phase": "setup", "state": "running", "started": now, "tree_id": run_id, "cores": stage.needs.cores,
                      "handle": str(Handle("track", f"{host}:{os.getpid()}", host))})
@@ -1056,10 +1091,16 @@ def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
-    """Record a run tree that edr did not make, or its collected results, so `reuse`, `metrics` and `export` see it."""
+    """Record a run tree that edr did not make, or its collected results, so `reuse`, `metrics` and `export` see it.
+
+    The run holds what the flags say and nothing more, and a spec in the format of `launch`, so that a later extract
+    reads every task."""
     assert_run_id(a.run_id)
     if not a.results and not (a.host and a.root):
         raise Refuse("import needs --host and --root, or --results DIR")
+    _check_phase(c.project, a.phase)
+    if a.started and a.ended and a.ended < a.started:
+        raise Refuse("--ended is before --started")
     root = (a.root or "").rstrip("/")
     if root:
         if not root.startswith("/"):
@@ -1069,22 +1110,41 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
             raise Refuse(f"{a.host}:{root} is not a directory")
     results = _results_dir(c, a.run_id, a.results) if a.results else None
     tasks = {t: config.resolve_task(c.project, t) for t in a.tasks or []}
-    now = int(time.time())
+    params = dict(a.param or [])
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
-               source=a.source, dirty=0, host=a.host or "", root=root or None, created=now, phase=a.phase, state="imported",
-               stage="", step=-1, exit=0 if a.phase == "done" else None, started=now, updated=now,
-               counts=json.dumps({}), tree_id=a.run_id)
+               source=a.source, dirty=int("-dirty" in a.source), host=a.host or "", root=root or None,
+               created=int(time.time()), phase=a.phase, state="imported", stage="", step=-1,
+               exit=0 if a.phase == "done" else None, started=a.started, updated=a.ended, counts={}, tree_id=a.run_id)
+    spec = _import_spec(c.project, row, tasks, params)
+    if (old := c.db.run(a.run_id)) and old.get("state") != "imported":
+        raise Refuse(f"{a.run_id} exists in state {old.get('state')}; import records a new run or updates an imported one")
+    batch = next((b for b in c.db.batches() if b["batch"] == a.batch), None)
+    if batch and batch.get("source") and batch["source"] != a.source:
+        raise Refuse(f"batch {a.batch} holds the source {batch['source']}; give {a.source} a batch of its own with --batch")
+    if not checkout.SOURCE_RE.match(a.source):
+        print(f"warning: {a.source} does not have the form of an edr checkout tag, <hash> or <hash>-dirty-<8 hex>")
+    spec_path = c.project.state_dir / a.batch / f"{a.run_id}.spec.json"
     where = f"{a.host}:{root}" if root else f"results {results}"
     text = f"{where} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
+    print(f"write {spec_path}" + (" (dry)" if a.dry_run else ""))
     if not a.dry_run:
-        c.db.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.source, created=now))
+        if batch is None:
+            c.db.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.source))
+        config.save_json(spec_path, spec)
         c.db.upsert_run(row)
-        c.db.set_parameters(a.run_id, {k: row[k] for k in ("config", "build_tag", "source") if row[k]}, "import")
+        c.db.set_parameters(a.run_id, {**{k: row[k] for k in ("config", "build_tag", "source") if row[k]}, **params},
+                            "import")
         if results:
-            rows = _import_results(c, row, results, tasks)
+            rows = _import_results(c, row, results, spec)
             failed = metrics.failures(rows)
             text += f", {sum(r['value'] is not None for r in rows)} metrics" + (
                 f"; {metrics.failure_text(failed)}" if failed else "")
+            # A task counts done when its files gave a value and no failed row.
+            got = c.db.metrics(run_ids=[a.run_id])
+            parsed = {m["task"] for m in got if m["value"] is not None} - {m["task"] for m in got if m["value"] is None}
+            done = len(parsed & set(tasks))
+            row["counts"] = {"done": done, "failed": len(tasks) - done}
+            c.db.upsert_run({"run_id": a.run_id, "counts": row["counts"]})
         c.db.add_event("user", a.run_id, "import", text)
     c.emit(f"imported {text}" + (" (dry)" if a.dry_run else ""), row)
     return Exit.DONE
@@ -1101,13 +1161,27 @@ def _results_dir(c: Ctx, run_id: str, text: str) -> Path:
     return src
 
 
-def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> list[Row]:
-    """Link `src` under data/results, extract every metric of the project from it, and return the rows that went in."""
+def _import_spec(project: Project, row: Row, tasks: dict, params: dict[str, str]) -> dict[str, Any]:
+    """The spec of an imported run in the format of `launch`: the run, its vars from the `vars.<name>` parameters,
+    and each task group with the tasks and their directories. It renders no command, since edr ran none."""
+    job_vars = {k[5:]: v for k, v in params.items() if k.startswith("vars.")}
+    values = config.placeholders(project, **{k: v for k, v in row.items() if isinstance(v, (str, int, float))}, vars=job_vars)
+    groups = [{"name": name, "tasks": [
+        {"id": t.id, "dir": os.path.normpath(os.path.join(
+            row["root"] or "", config.render(st.task_dir, {**values, **{f"task.{k}": v for k, v in t.fields.items()}})))}
+        for t in tasks.values()]} for name, st in project.stages.items() if st.is_group and tasks]
+    return {"schema": 1, "project": project.project, **{k: row[k] for k in ("run_id", "batch", "label", "config")},
+            "vars": job_vars, "host": row["host"], "root": row["root"], "stages": groups}
+
+
+def _import_results(c: Ctx, row: Row, src: Path, spec: dict) -> list[Row]:
+    """Link `src` under data/results, extract every metric of the project from it as `edr extract` does, and return
+    the rows that went in."""
     dest = c.project.data / "results" / row["run_id"]
     if not (dest.is_symlink() or dest.exists()):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.symlink_to(src)
-    rows = metrics.extract(c.project, row, c.project.data / "results", tasks)
+    rows = watch.extract_run(c.project, c.db, row, {}, spec, actor=None)
     with c.db.conn:  # one commit for the rows of the run
         return [r for r in rows if c.db.add_metric(r)]
 
@@ -1862,7 +1936,7 @@ def _parser() -> argparse.ArgumentParser:
         the tasks that ended done, the stages that exited 0, and in any other
         stage the steps that the run has passed: step_runs holds the step and
         a later one. A run without a heartbeat, such as an imported one, is
-        read for every stage and for the tasks its rows name.
+        read for every stage and for every task of its spec.
 
         New rows are added. A row is replaced when its value, canonical name,
         unit or source file has changed, or when its area rows differ. A row
@@ -2056,8 +2130,11 @@ def _parser() -> argparse.ArgumentParser:
         gives its steps, progress, budget, retry and tools, so the gate and the
         budget work; the command replaces its cmd. The tree is --root, default
         the current directory, and the driver writes log/<stage>.log there. The
-        run id follows source.run_id with the label as config, track as the
-        build tag, and --source (default the source tag of the tree) as {source}.
+        run id follows source.run_id with --config (default the label) as
+        config, --build-tag (default track) as the build tag, and --source
+        (default the source tag of the tree) as {source}. A bench run tracked
+        with the build tag of a backend build joins the backend runs of that
+        build on the tag, as edr coverage does.
 
         edr track then replaces itself with the driver: the pid, the signals
         and the exit code are the driver's. With --collect, the watcher copies
@@ -2077,6 +2154,9 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--label", required=True, metavar="L", help="the label of the run")
     s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
     s.add_argument("--batch", default="track", metavar="B", help="the batch; default track")
+    s.add_argument("--config", metavar="C", help="the configuration name of the run; default the label")
+    s.add_argument("--build-tag", dest="build_tag", default="track", metavar="TAG",
+                   help="the build tag of the run, the tag of the backend runs it belongs to; default track")
     s.add_argument("--source", metavar="SOURCE", help="the source tag; default the tag of the tree")
     s.add_argument("--root", metavar="DIR", help="the run tree; default the current directory")
     s.add_argument("--collect", action="store_true", help="the watcher collects the stage and extracts its metrics")
@@ -2097,20 +2177,45 @@ def _parser() -> argparse.ArgumentParser:
         --host and --root, it records the tree on that host, so reuse and edr
         continue can build on it. --results DIR names a directory of collected
         files from a run whose tree is gone; it is linked as
-        data/results/<run id>, and the project's metrics are extracted from it; --tasks names the tasks whose files it holds. The run id must start
-        with YYYYMMDD_HHMM_.
+        data/results/<run id>, and the project's metrics are extracted from
+        it; --tasks names the tasks whose files it holds. The run id must
+        start with YYYYMMDD_HHMM_.
+
+        The run holds what you tell it and nothing more. --host, --started
+        and --ended give its host, start and end; without them these stay
+        empty. Each --param KEY=VALUE writes a parameter of origin import, next
+        to config, build_tag and source. The dirty flag is set when the source
+        tag holds -dirty, and a tag that edr checkout would not make, <hash>
+        or <hash>-dirty-<8 hex>, gets a warning. --phase is a phase that the
+        driver ends a run with: done, INCOMPLETE:<n>f<m>s where a task failed
+        or was skipped, FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or
+        KILLED:<signal>. A run whose driver died is FAILED:<stage>, with the
+        stage it died in.
+
+        Import writes the spec <state_dir>/<batch>/<run id>.spec.json in the
+        format of launch, with every task group and the directory of each
+        task, so a later edr extract reads every imported task. The task
+        counts of the run give a task whose files gave a value and no failed
+        row as done, and any other task as failed. A batch holds one source:
+        the launch or import that makes a batch sets it, and import refuses a
+        run of another source there.
         """, write=True)
     s.add_argument("--run-id", required=True, dest="run_id", help="the run id; it must start with YYYYMMDD_HHMM_")
     s.add_argument("--label", required=True, help="the label of the run")
     s.add_argument("--config", default="", help="the configuration name of the run; default empty")
     s.add_argument("--source", required=True, metavar="SOURCE", help="the source tag of the tree")
-    s.add_argument("--host", help="the host of the tree")
+    s.add_argument("--host", help="the host of the tree, or of the run whose files --results holds")
+    s.add_argument("--started", type=_unix, metavar="TIME",
+                   help="the start of the run: a unix time, or an ISO time such as 2026-08-30T09:12")
+    s.add_argument("--ended", type=_unix, metavar="TIME", help="the end of the run, in the same forms")
     s.add_argument("--root", metavar="PATH", help="the tree on the host")
     s.add_argument("--results", metavar="DIR", help="collected files in the run layout; linked as data/results/<run id>")
     s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks whose files the results hold")
     s.add_argument("--batch", default="imported", help="the batch to record it in; default imported")
-    s.add_argument("--phase", default="done", help="the terminal phase; default done")
+    s.add_argument("--phase", default="done", help="the phase the run ended with, as the driver writes it; default done")
     s.add_argument("--build-tag", dest="build_tag", metavar="TAG", help="the build tag of the run")
+    s.add_argument("--param", action="append", type=_param, metavar="KEY=VALUE",
+                   help="a parameter of the run, such as vars.netlist_stage=11; repeatable")
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
     s = command("export", "a frozen snapshot of one or more sources", """
         Writes a snapshot of the sources to DIR: manifest.json, runs.csv,

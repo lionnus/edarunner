@@ -29,9 +29,9 @@ command names the run by the shortest unique prefix of its run id instead of `<l
 | `pending` | 🔵 | the scheduler has the job in its queue and the driver has not started |  | none | `edr status <label>@<batch> --live` |
 | `held` | 🟠 | the scheduler holds the job and runs it only after a person releases it | yes | none | `edr stop <label>@<batch> --why held` |
 | `suspended` | 🟡 | the scheduler suspended the job; the heartbeat stands still until it resumes |  | none | `edr status <label>@<batch> --live` |
-| `imported` | ⚫ | `edr import` recorded the run |  | none | `edr retire <label>@<batch> --why '<phase>'` |
+| `imported` | ⚫ | `edr import` recorded the run with a phase that the driver ends a run with: `done`, `INCOMPLETE:<n>f<m>s`, `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED` or `KILLED:<signal>`; a run whose driver died is `FAILED:<stage>` |  | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `done` | ⚪ | the run ended `done` |  | none | `edr export --source <source> --out exports/<source>` |
-| `incomplete` | 🟠 | the run ended `INCOMPLETE`: a task failed or was skipped | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
+| `incomplete` | 🟠 | the run ended `INCOMPLETE:<n>f<m>s`: every stage ran, and a task failed or was skipped | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `failed` | 🔴 | the run ended `FAILED` | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `stopped` | ⚫ | a stop file or `edr stop` ended the run, or `edr stop` marked a queued run | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `killed` | 🔴 | a signal ended the run | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
