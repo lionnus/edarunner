@@ -34,7 +34,7 @@ Two switches make failures:
 
 | File | Holds |
 |---|---|
-| `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; six metrics, two of them tied to the setup scenario of `qor.rpt`; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
+| `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; six metrics, two of them tied to the setup scenario of `qor.rpt`, and the area with its step of record at `route`; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
 | `site.toml` | one host, `local`, with the tool `demo` in version `1.0`; the scratch `/tmp/edr-demo`; the tool `demo` with 10 seats and its probe |
 | `hooks/energy.py` | the metric hook of `energy_nj`: the power times the window of one task |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
@@ -61,6 +61,7 @@ Both runs end `done` within a minute. Then collect and read the results:
 edr watch --once              # collect the reports, extract the metrics, write data/board/
 edr status a@demo             # the stages, the metrics and the log tail of one run
 edr metrics --run b_nodw@demo --over steps   # the steps of b_nodw and the verdict of each
+edr compare a@demo b_nodw@demo   # both runs side by side, the area at its step of record
 edr metrics --source <source> --csv
 edr export --source <source> --out data/exports/<source>
 edr retire --batch demo --why "demo done"
