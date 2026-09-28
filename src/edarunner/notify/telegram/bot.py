@@ -211,8 +211,10 @@ class TelegramBot(Notifier):
         msg, q = u.get("message"), u.get("callback_query")
         m = msg or (q or {}).get("message") or {}
         who = m.get("chat", {}).get("id")
-        actor = (q or msg or {}).get("from", {}).get("id")
-        if who is None:
+        sender = (q or msg or {}).get("from", {})
+        actor = sender.get("id")
+        # The service message of a pin by this bot comes back as an update, and a bot never commands.
+        if who is None or sender.get("is_bot"):
             return
         if who != self.chat_id or self.chat_id == 0:
             if who not in self._rejected:

@@ -274,6 +274,10 @@ def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
         b.start()
     b.stop()
     assert "only gate" not in caplog.text
+    pin = msg("", user=999)
+    pin["message"]["from"]["is_bot"] = True  # the service message of the pin of the board
+    b.handle_update(pin)
+    assert b.db.events == []
     b.handle_update(msg("/status", user=USER))
     b.handle_update(callback("keep6:demo", user=USER))
     b.handle_update(msg("/stop a@demo", user=USER))
