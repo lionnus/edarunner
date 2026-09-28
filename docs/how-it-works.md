@@ -82,11 +82,17 @@ from its configuration name and overrides, and names each run
 the date in `<state_dir>/sweep1/RUN_DATE`, so runs of the batch that
 start later, after the stagger or from the queue, keep the same date; a
 plan before that first launch shows the current time. A job with
-`host = "auto"` goes to a host with enough free cores, RAM and disk and
-with every tool the job needs (`hosts.place`); when no host fits, the job
-is queued. Every
-string of the job is then rendered into a spec. A placeholder without a
-value stops the plan with an error that names it.
+`host = "auto"` goes to a host with enough free cores, RAM and disk, with
+its scratch above the floor of the host, with fewer than `max_per_host`
+of your runs, and with every tool the job needs (`hosts.place`); when no
+host fits, the job is queued. Your runs on a host are the live
+heartbeats of every registered project, plus the launches that wrote no
+heartbeat yet: a launch records each run it places in
+`~/.edr/reservations/`, and it counts and records under
+`~/.edr/place.lock`, so two launches at once never both take the last
+place on a host (`census.running_per_host`). Every string of the job is
+then rendered into a spec. A placeholder without a value stops the plan
+with an error that names it.
 
 When the batch's source is not checked out yet, `plan` and `launch`
 check out a clean ref for you.
@@ -208,7 +214,7 @@ deletes a file:
 | `budget.hours`, `budget.disk_gb` | the driver while a command runs | the phase becomes `OVER_BUDGET:<stage>`; with `kill = true` the process group gets `SIGTERM`, else the command runs to its end; the run then stops with exit 9 |
 | `budget` with `per = "task"` | the driver per task | only that task gets `SIGTERM` |
 | `retry` | the driver after a failure | when `retry.match` is in the last 80 lines of the log, the stage runs again after `retry.wait_s`, up to `retry.max` times, as `retry:<stage>:<n>` |
-| `limits.host_free_min_gb` | the driver between stages and before each claim | nothing new starts and `host_full` is set; after `grace_s` the watcher stops the newest run on that host |
+| `host_free_min_gb` of the site, or of the host | the driver between stages and before each claim | nothing new starts and `host_full` is set; after `grace_s` the watcher that holds `serve.lock` stops the newest run on that host, of any of your projects |
 | `limits.streak` | the driver per task group | `looping` is set and the group claims nothing more |
 | `limits.hung_s` | the watcher | a run without progress for that long is `hung` |
 
@@ -246,9 +252,9 @@ without a restart. A file that does not load gets one alert per error
 text, and the watcher goes on with the last config that loaded: it
 still reads the heartbeats, alerts and collects, but it resumes and
 launches nothing until the file loads again (`watch.run_forever`). edr
-never deletes a file of yours on its own:
-the only files the watcher removes are expired seat leases of its
-project in `~/.edr/leases/`. One cycle does this, in order:
+never deletes a file of yours on its own: the only files a watcher
+removes are expired seat leases and reservations in `~/.edr/`. One cycle
+does this, in order:
 
 1. It reads the heartbeat of every run in every batch without a
    `RETIRED` file, and writes the runs, their stages and steps and a
@@ -261,11 +267,9 @@ project in `~/.edr/leases/`. One cycle does this, in order:
 3. A state that alerts sends one message per run and state to every
    channel in the site file. A new reason for the same state edits the
    Telegram message in place. After `grace_s`, the watcher takes the
-   action of the state: it stops the newest run of a full host with
-   `--now` unless that run has an `ack`, stops a `superseded` run after
-   its task unless the run has a keep file, and sends `SIGTERM` to a
-   `hung` run only with `kill_hung` and to an orphan only with
-   `kill_orphan` (`watch._act`).
+   action of the state: it stops a `superseded` run after its task
+   unless the run has a keep file, and sends `SIGTERM` to a `hung` run
+   only with `kill_hung` (`watch._act`).
 4. For every stage and task that ended, it copies `log/` and the stage's
    `collect` paths from the run tree into `data/results/<run_id>/` on
    the head node, plus the step directories of a running stage that are
@@ -278,28 +282,59 @@ project in `~/.edr/leases/`. One cycle does this, in order:
 6. A `dead` run is resumed once, from the last step in its heartbeat,
    when its stage has a `resume` command and no process group of the run
    is still alive on the host (`watch._resume`).
-7. On ssh hosts it lists your processes that match `tool_procs` and
-   that no live run owns, with one ssh call per host (`watch.orphans`).
-   The call reads `EDR_RUN_ID` from the environment of each process;
-   the driver sets it for every stage command of every project. A live
-   run of this project owns its processes, and a dead or ended run
-   leaves them orphans. A run id that the database does not know belongs
-   to another project, whose watcher judges it, unless the working
-   directory or command line of the process holds `/<project>/<run_id>`
-   under the safety marker. A process without `EDR_RUN_ID` is owned
-   when its working directory or command line holds the safety marker.
-8. It removes a seat lease of this project whose run is dead, retired
-   or has left the stage, or that is older than the stage budget, and
-   writes a `lease` event with the reason (`watch.sweep_leases`).
-9. A queued job starts when a host now fits it, one per batch per cycle.
-10. It writes `data/board/`, edits the pinned Telegram board, sends the
-    daily digest when it is due, and writes `<state_dir>/watch.json`,
-    the watcher's own heartbeat that `edr watch --check` reads.
+7. A queued job starts when a host now fits it, one per batch per cycle.
+8. It writes `data/board/`, edits the pinned Telegram board, sends the
+   daily digest when it is due, and writes `<state_dir>/watch.json`,
+   the watcher's own heartbeat that `edr watch --check` reads. The host
+   probes of the boards come from the census when it is younger than two
+   cycles, and from a probe of its own otherwise.
 
 The watcher never downloads anything, never resumes a run twice and
 never reads a retired batch. The read commands such as `edr status`
 ingest the heartbeats too, so the board follows the driver even between
 two cycles.
+
+### The work of the user
+
+Some work belongs to the user and not to one project: a host, a tool
+process and a seat lease are one each, whatever project they serve. The
+first watcher that takes `~/.edr/serve.lock` keeps it for its life and
+does this work after each of its cycles, for every registered project
+(`census.work`):
+
+1. It takes the census: one ssh call per host of the site of every
+   registered project, all at once, for the probe, the clock of the host
+   and the list of your processes, plus the live heartbeats of every
+   project. It writes the probes and the live runs to
+   `~/.edr/census.json`, where the other watchers and `edr brief` read
+   them.
+2. It sends one alert per tool process of yours that matches
+   `tool_procs` and that no live run owns. The process list carries
+   `EDR_RUN_ID`, which the driver sets for every stage command. A live
+   run of a registered project owns its processes; a run that ended, or
+   whose driver is gone from the host after `dead_s`, leaves them
+   orphans, and the alert names the run as `project/label@batch`. A run
+   id that no registered project knows is left alone, unless the working
+   directory or the command line of the process lies in the tree
+   `/<project>/<run_id>` of a registered project under its safety
+   marker. A process without `EDR_RUN_ID` is owned when its working
+   directory or command line holds the safety marker of a registered
+   project. With `kill_orphan` of the project the process belongs to, it
+   sends `SIGTERM` after `grace_s`; a process of no project is never
+   killed.
+3. While a live run on a host reports `host_full`, it stops the newest
+   run on that host with `--now` once per `grace_s`, whatever project
+   the run belongs to, unless that run has an `ack`.
+4. It removes a seat lease whose run has no heartbeat in a registered
+   project, has ended, is dead or has left the stage, or that is older
+   than the stage budget, and writes a `lease` event with the reason
+   into the database of the lease's project (`census.sweep_leases`).
+5. It sends one alert per host whose clock is more than 60 s off the
+   head node's, and drops the reservations of runs that wrote their first
+   heartbeat or are older than 30 minutes.
+
+A watcher that does not hold the lock runs its own cycle only and tries
+again at the next cycle, so the role moves on when its holder stops.
 
 The Telegram bot is a thread of the watcher. It obeys one chat and,
 when set, one user, and it never runs a shell string or free text: a

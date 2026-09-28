@@ -27,17 +27,17 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
-from rich.console import Console, RenderableType
+from rich.console import Console, Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, analysis, board, brief, checkout, collect, config, export, home, launch, metrics, runid, sync, watch
+from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, runid, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, network_fs
 from .guards import Refuse, assert_run_id, assert_safe_target
-from .hosts import HostError, HostProbe, Ssh
-from .model import SCHEDULERS, Batch, Job, Project, Stage
+from .hosts import HostError, HostProbe, Ssh, probe_all
+from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
 from .notify import make_notifiers, untag
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
@@ -62,7 +62,8 @@ def _since(text: str) -> int:
 # These commands link the project into the registry, so the commands that span projects find it.
 _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
-_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "metrics", "compare", "runtime", "check", "notify", "plan"})
+_READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
+                            "notify", "plan"})
 
 
 class Ctx:
@@ -77,10 +78,18 @@ class Ctx:
     @property
     def project(self) -> Project:
         if self._project is None:
-            self._project = config.load_project(self.project_dir())
+            root = self.project_dir()
+            if root is None:
+                raise Refuse(f"no edr.toml in {os.getcwd()} or above; run edr init")
+            self._project = config.load_project(root)
         return self._project
 
-    def project_dir(self) -> Path:
+    @property
+    def in_project(self) -> bool:
+        """True when the command names a project or runs inside one."""
+        return self._project is not None or self.project_dir() is not None
+
+    def project_dir(self) -> Path | None:
         """The directory of the project -P names, else EDR_PROJECT, else the first edr.toml in the current directory or above.
 
         EDR_PROJECT is refused inside the directory of another project, so a shell variable never acts on the wrong one."""
@@ -89,8 +98,6 @@ class Ctx:
         pick = getattr(self.a, "project", None)
         name = pick or os.environ.get("EDR_PROJECT")
         if not name:
-            if here is None:
-                raise Refuse(f"no edr.toml in {cwd} or above; run edr init")
             return here
         target = home.owner(name)
         if target is None:
@@ -215,53 +222,54 @@ def _events_table(c: Ctx, events: list[Row]) -> Table | str:
 
 
 def _probe_rows(c: Ctx) -> list[Row]:
-    out: list[Row] = []
-    for host in c.project.site.hosts:
-        try:
-            out.append(asdict(c.ssh.probe(host)))
-        except HostError as e:
-            out.append({"host": host, "error": str(e)})
-    return out
+    """The probe of each site host, or its error."""
+    return [asdict(p) if isinstance(p, HostProbe) else {"host": h, "error": p}
+            for h, p in probe_all(c.ssh, c.project.site.hosts).items()]
 
 
-def _mark_hosts(c: Ctx, rows: list[Row]) -> list[Row]:
-    """Give each probe row its `marks`; sort the rows by the worst mark, black and red first, then by host."""
+def _host_rows(c: Ctx) -> list[Row]:
+    """Every host of the site, probed now, with your live runs of every registered project; census.host_view has the rest.
+
+    Outside a project it takes the default site file and the default [placement]."""
+    found = census.projects()
+    if c.in_project:
+        found[c.project.project] = c.project
+        site, pl = c.project.site, c.project.placement
+    else:
+        site, pl = config.load_site(config.DEFAULT_SITE), Placement()
+    probes = probe_all(Ssh(site), site.hosts)
+    return census.host_view(probes, census.live_runs(found.values(), time.time()), site, pl)
+
+
+def _yours(r: Row) -> str:
+    return ", ".join(f"{p} {n}" for p, n in sorted(r["runs"].items())) or "-"
+
+
+def _hosts_table(rows: list[Row], narrow: bool) -> RenderableType:
+    """One row per host: whether a run can start, the free room of total, your runs and what they use; the notes under it."""
+    head = ["ok", "host", "free cores", "free GB", "yours"] if narrow else [
+        "ok", "host", "free cores", "free RAM GB", "free scratch GB", "idle GPUs", "tools", "your runs", "your cores",
+        "your RAM GB", "your scratch GB"]
+    body, notes = [], []
     for r in rows:
-        r["marks"] = board.host_marks(None if "error" in r else HostProbe(**r), c.project.site.marks)
-    return sorted(rows, key=lambda r: (board.SEVERITY.index(board.worst_mark(r["marks"].values())), r["host"]))
-
-
-def _hosts_table(rows: list[Row], narrow: bool) -> Table:
-    """One row per host: the worst mark, then used or free of total with a mark, a bar for the cores and the scratch."""
-    head = ["ok", "host", "cores", "ram GB", "scratch GB", "gpu"] if narrow else [
-        "ok", "host", "cores", "", "load", "ram GB", "mount", "scratch GB", "", "gpu", "gpu GB", "tools", "runs"]
-    body = []
-    for r in rows:
-        m = r["marks"]
-        ok = board.worst_mark(m.values())
+        mark = board.START[r["start"]]
+        notes += [f"{r['host']}: {t}" for t in (r.get("error") or r["why"], r["note"]) if t]
         if "error" in r:
-            body.append([ok, r["host"], Text("error: " + r["error"], style="red", justify="left")])
+            body.append([mark, r["host"], Text("no answer", style="red")])
             continue
-        cores, used = r["cores"], max(0, min(r["cores"], round(r["load"])))
-        sep = "" if narrow else " "  # 48 columns leave no room for the space
-        cpu, ram = f"{m['cores']}{sep}{used}/{cores}", f"{m['ram']}{sep}{r['free_ram_gb']:g}/{r['total_ram_gb']:g}"
-        disk = f"{m['scratch']}{sep}{r['free_gb']:g}/{r['total_gb']:g}"
-        gpu = f"{m['gpu']}{sep}{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-"
+        cores, disk = f"{r['free_cores']:g}/{r['cores']}", f"{r['free_gb']:g}/{r['total_gb']:g}"
         if narrow:
-            body.append([ok, r["host"], cpu, ram, disk, gpu])
+            body.append([mark, r["host"], cores, disk, sum(r["runs"].values())])
             continue
-        body.append([ok, r["host"], cpu, board.bar(used, cores), f"{r['load']:g}", ram, r["mount"], disk,
-                     board.bar(r["total_gb"] - r["free_gb"], r["total_gb"]), gpu,
-                     f"{r['gpu_total_gb'] - r['gpu_used_gb']:g}/{r['gpu_total_gb']:g}" if r["gpus"] else "-",
-                     f"{r['our_tool_procs']}/{r['other_tool_procs']}", r["our_runs"]])
-    t = board.table(head, body, styles={"host": "bold", "mount": "dim"},
-                    right=("cores", "load", "ram GB", "scratch GB", "gpu", "gpu GB", "tools", "runs"))
+        body.append([mark, r["host"], cores, f"{r['free_ram_gb']:g}/{r['total_ram_gb']:g}", disk,
+                     f"{r['gpus_idle']}/{r['gpus']}" if r["gpus"] else "-", f"{r['our_tool_procs']}/{r['other_tool_procs']}",
+                     _yours(r), f"{r['our_cores']:g}", f"{r['our_ram_gb']:g}", f"{r['our_gb']:g}"])
+    right = ("free cores", "free GB", "yours", "free RAM GB", "free scratch GB", "idle GPUs", "tools", "your cores",
+             "your RAM GB", "your scratch GB")
+    t = board.table(head, body, styles={"host": "bold"}, right=right)
     if narrow:
-        # One space between columns, and only the cores column, which holds an error, folds.
-        t.padding = (0, 0)
-        for col in t.columns:
-            col.no_wrap = col.header != "cores"
-    return t
+        t.padding = (0, 0)  # 48 columns leave room for one space between columns
+    return Group(t, Text("\n".join(notes))) if notes else t
 
 
 def _seats(text: str) -> tuple[int, int | None] | None:
@@ -395,8 +403,8 @@ class Actions:
         return tgfmt.events(self.c.db.events(n=n), {r["run_id"]: board.handle(r) for r in self.c.db.runs()})
 
     def hosts_text(self) -> str:
-        """One line per host, the worst mark first."""
-        return tgfmt.hosts(_mark_hosts(self.c, _probe_rows(self.c)))
+        """One line per host, the hosts where a run can start first."""
+        return tgfmt.hosts(_host_rows(self.c))
 
     def tools_text(self) -> str:
         """One line per tool."""
@@ -480,6 +488,10 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples),
                {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples})
         return Exit.DONE
+    if a.all:
+        rows = _all_rows(a)
+        c.emit(board.wide(rows), {"runs": rows})
+        return Exit.DONE
     code = Exit.DONE
     while True:
         rows = c.rows(a.batch or os.environ.get("EDR_BATCH"))
@@ -495,6 +507,19 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         if not a.watch or a.json:
             return code
         time.sleep(c.project.limits.heartbeat_s)
+
+
+def _all_rows(a: argparse.Namespace) -> list[Row]:
+    """The board rows of every registered project, each with its project."""
+    out = []
+    for name, project in census.projects().items():
+        other = Ctx(a)
+        other._project = project
+        try:
+            out += [{**r, "project": name} for r in other.rows()]
+        finally:
+            other.close()
+    return out
 
 
 def _mark_live(c: Ctx, rows: list[Row]) -> int:
@@ -543,15 +568,36 @@ def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
         rows = analysis.host_history(c.db.host_samples(_since(a.since)))
         c.emit(analysis.host_history_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    rows = _mark_hosts(c, _probe_rows(c))
-    runs = board.live_per_host(c.rows())
-    for r in rows:
-        r["our_runs"] = runs[r["host"]]
+    rows = _host_rows(c)
     if a.narrow:
-        # A long cell, such as an error, folds inside its column instead of widening the table.
         c.console.width = 48
     c.emit(_hosts_table(rows, a.narrow), rows)
     return Exit.HOSTS if any("error" in r for r in rows) else Exit.DONE
+
+
+def cmd_projects(c: Ctx, a: argparse.Namespace) -> int:
+    """Every registered project: its directory, its watcher and its live runs."""
+    d, now, rows = home.root() / "projects", time.time(), []
+    for name in sorted(p.name for p in d.iterdir()) if d.is_dir() else []:
+        path = home.owner(name)
+        row: Row = {"project": name, "root": str(path or os.path.realpath(d / name)), "watcher": None, "live": None, "note": ""}
+        rows.append(row)
+        if path is None:
+            row["note"] = "the link names no project; edr register in the right directory replaces it"
+            continue
+        try:
+            p = config.load_project(path)
+        except ConfigError as e:
+            row["note"] = str(e)
+            continue
+        w = config.load_json(p.state_dir / "watch.json")
+        if w and now - float(w.get("ts") or 0) <= 3 * p.limits.heartbeat_s:
+            row["watcher"] = w.get("pid")
+        row["live"] = len(census.live_runs([p], now))
+    body = [[r["project"], r["root"], f"pid {r['watcher']}" if r["watcher"] else "-", r["live"], r["note"]] for r in rows]
+    c.emit(board.table(["project", "directory", "watcher", "live", "note"], body, styles={"project": "bold"},
+                       right=("live",)) if rows else "no registered project", rows)
+    return Exit.DONE if rows else Exit.NOTHING
 
 
 def cmd_tools(c: Ctx, a: argparse.Namespace) -> int:
@@ -818,7 +864,8 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
     job.label = f"{job.label}.{a.stage}"
     batch.batch, batch.jobs = str(row["batch"]), [job]
     state = project.state_dir
-    (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT), backend=c.backend)
+    (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT), backend=c.backend,
+                       reserve=not a.dry_run)
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
         return Exit.REFUSED
@@ -1345,6 +1392,9 @@ def _parser() -> argparse.ArgumentParser:
         names the stage that failed. The command exit column of the stage table
         is the code of the stage command itself. The tasks line with the done
         and failed counts appears only for a run with a task group.
+
+        --all prints the board of every registered project in one table, with
+        the project in the first column; it needs no project directory.
         """, exits={Exit.HOSTS: "with --live, a host did not answer"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH, else every batch")
@@ -1353,6 +1403,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
     s.add_argument("--digest", action="store_true", help="the daily digest that the watcher sends, as plain text")
+    s.add_argument("--all", action="store_true", help="the runs of every registered project, with a project column")
     s = command("events", "the last events", """
         Prints the last N events, oldest first, with the time, the actor (user,
         watch or telegram), the run, the kind and the text.
@@ -1360,32 +1411,29 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--since", metavar="T", help="only events newer than this: 30m, 2h, 1d or seconds")
     s.add_argument("--run", metavar="HANDLE", help="the events of one run")
     s.add_argument("-n", type=int, default=50, help="the last N events; default 50")
-    s = command("hosts", "probe every host", """
-        Probes every host of the site file and prints one row per host: the
-        worst mark of the host; the name; cores in use of total, with a bar; the
-        one-minute load average; RAM free of total; the largest writable scratch
-        of the host's list, and its space free of total, with a bar of the used
-        part; GPUs idle of total, where idle means under 5 % utilisation and
-        under 5 % memory in use; GPU memory free of total, summed over the GPUs;
-        processes that match tool_procs, split into yours and other users';
-        and the live runs of this project on the host, from the database.
+    s = command("hosts", "probe every host: its free room, and your runs on it", """
+        Probes every host of the site file, all at once, and prints one row per
+        host: whether a run can start there; the free cores, RAM and scratch
+        of total, where the scratch is the largest writable one of the host's
+        list; the idle GPUs of total, where idle means under 5 % utilisation
+        and under 5 % memory in use; the processes that match tool_procs,
+        yours and other users'; and your live runs on the host, by project over
+        every registered project, with the cores, RAM and scratch they use,
+        read from their heartbeats.
 
-        A mark tells how full a resource is. It is 🟢 below the first threshold
-        of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
-        the third. A value exactly at a threshold takes the colour of that
-        threshold. The used fraction is the load over the cores for cores, the
-        used part of the total for ram GB and scratch GB, and the busy GPUs over
-        all GPUs for gpu. A host without GPUs shows -, and a host that did not
-        answer shows ⚫ and its error in the row. The rows go by the worst mark,
-        ⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by host name within one mark.
+        The mark says whether a run can start: 🟢 when the host passes every
+        rule of [placement] of this project and keeps its scratch above the
+        floor host_free_min_gb, 🔴 when it does not, and ⚫ when the host did
+        not answer. The hosts where a run can start come first, the most free
+        cores first. Under the table, a line per host says why no run can
+        start there, and when your own runs fill the host: your trees push its
+        scratch under the floor, or your runs use most of its busy cores or
+        RAM. That is the case where your runs block other people's work.
 
-        The GPU columns come from nvidia-smi; a host without it shows -. A bar is
-        green below 70 % used, yellow below 90 % and red above; unlike the
-        marks, the bar colour does not follow [marks]. --json gives the
-        numbers: cores, load, free_cores, free_ram_gb, total_ram_gb, mount,
-        free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
-        our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
-        ram, scratch and gpu in marks.
+        Outside a project, hosts reads the default site file
+        ~/.config/edarunner/site.toml and the default [placement]. --json
+        gives each row with the probe numbers, runs, our_cores, our_ram_gb,
+        our_gb, floor_gb, start, why and note.
 
         --history probes nothing. It reads the host_samples table, where the
         watcher keeps one probe per host and cycle for 30 days, and prints one
@@ -1397,8 +1445,13 @@ def _parser() -> argparse.ArgumentParser:
                    help="no probe: the samples the watcher kept, one line per host over --since")
     s.add_argument("--since", default="1d", metavar="T", help="with --history: 30m, 2h, 1d or seconds; default 1d")
     s.add_argument("--narrow", action="store_true",
-                   help="only the mark (column ok), host, cores, RAM, scratch and GPUs, in 48 columns, "
-                        "with no space between a mark and its number")
+                   help="only the mark (column ok), host, free cores, free scratch and your runs, in 48 columns")
+    command("projects", "every registered project, its watcher and its live runs", """
+        Prints one row per project of the registry ~/.edr/projects/: its
+        directory, the pid of its watcher when watch.json is younger than
+        three cycles, its live runs, and a note when its files do not load or
+        the link names no project. It needs no project directory.
+        """, exits={Exit.NOTHING: "no project is registered"})
     command("tools", "every site tool: free seats and hosts", """
         Prints one row per tool of the site file. free and total are the seats the
         probe reports; the probe runs on the head node with the project

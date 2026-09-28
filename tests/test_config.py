@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import config
+from edarunner import config, hosts
 from edarunner.config import ConfigError
 from helpers_driver import DEMO
 
@@ -81,7 +81,7 @@ def test_render_and_placeholders():
         ('tools = ["demo"]', 'tools = { demo = "2" }', "stages.synth.needs.tools must be a list of names or"),
         ('regex = \'^i_top\\s+(\\S+)\'', "", "exactly one of"),
         ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
-        ("host_free_min_gb = 1", 'host_free_min_gb = "1"', "limits.host_free_min_gb must be float, not str"),
+        ("stale_s = 30", 'stale_s = "30"', "limits.stale_s must be int, not str"),
         ("stagger_s = 0", "stagger_s = 0\nkill_hung = 1", "limits.kill_hung must be bool, not int"),
         ('marker = "/edr/"', "marker = 1", "safety.marker must be str, not int"),
         ('steps = ["setup", "analyze", "elaborate", "synth"]', 'steps = "setup"', "stages.synth.steps must be list, not str"),
@@ -193,26 +193,26 @@ def test_project_telegram_overrides_the_site(tmp_path):
     assert config.load_project(root).site.telegram.chat_id == 5
 
 
-def test_marks_defaults_site_and_project_override(tmp_path):
+def test_the_disk_floor_belongs_to_the_site_and_a_host_may_set_its_own(tmp_path):
     root = demo_copy(tmp_path)
     site, edr = root / "site.toml", root / "edr.toml"
     site_text, edr_text = site.read_text(), edr.read_text()
-    m = config.load_project(root).site.marks
-    assert (m.cores, m.ram, m.scratch, m.gpu) == ([0.6, 0.8, 0.9], [0.6, 0.8, 0.9], [0.7, 0.85, 0.95], [0.6, 0.8, 0.9])
-    site.write_text(site_text + "\n[marks]\ncores = [0.5, 0.7, 0.8]\nram = [0, 0.5, 1]\n")
-    edr.write_text(edr_text + "\n[marks]\ncores = [0.1, 0.2, 0.3]\n")
-    m = config.load_project(root).site.marks
-    assert (m.cores, m.ram, m.scratch) == ([0.1, 0.2, 0.3], [0, 0.5, 1], [0.7, 0.85, 0.95])
-    for bad, match in (("gpu = [0.9, 0.8, 0.95]", "marks.gpu must be three ascending numbers between 0 and 1"),
-                       ("ram = [0.6, 0.8]", "marks.ram must be three ascending"),
-                       ("scratch = [0.5, 0.8, 1.2]", "marks.scratch must be three ascending"),
-                       ("cores = [0.5, 0.8, true]", "marks.cores must be three ascending"),
-                       ('cores = "0.5"', "marks.cores must be list, not str"),
-                       ("disk = [0.5, 0.8, 0.9]", "unknown key 'marks.disk'")):
-        edr.write_text(edr_text + f"\n[marks]\n{bad}\n")
+    p = config.load_project(root)
+    assert hosts.floor(p.site, "local") == 1 and hosts.floor(p.site, "elsewhere") == 1
+    site.write_text(site_text.replace("host_free_min_gb = 1\n", "") + "\n[hosts.big]\ncores = 64\nram_gb = 256\n"
+                    "host_free_min_gb = 500\n")
+    p = config.load_project(root)
+    assert hosts.floor(p.site, "local") == 100 and hosts.floor(p.site, "big") == 500
+    site.write_text(site_text.replace("host_free_min_gb = 1", 'host_free_min_gb = "1"'))
+    with pytest.raises(ConfigError, match="host_free_min_gb must be float, not str"):
+        config.load_project(root)
+    site.write_text(site_text)
+    for extra, match in (("\n[marks]\ncores = [0.5, 0.7, 0.8]\n", "unknown key 'marks'"),
+                         ("", "unknown key 'limits.host_free_min_gb'")):
+        text = edr_text + extra if extra else edr_text.replace("grace_s = 10\n", "grace_s = 10\nhost_free_min_gb = 5\n")
+        edr.write_text(text)
         with pytest.raises(ConfigError, match=match):
             config.load_project(root)
-
 
 def test_digest_at_is_a_time_of_day(tmp_path):
     root = demo_copy(tmp_path)

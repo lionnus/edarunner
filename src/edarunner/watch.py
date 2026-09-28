@@ -1,10 +1,11 @@
-"""The watcher: one cycle over every heartbeat.
+"""The watcher: one cycle over every heartbeat of one project.
 
-The cycle reads, classifies, acts, collects, resumes, sweeps the stale
-seat leases, launches and writes the boards. It never deletes a tree, and
-the only files it removes are stale seat leases. Its memory between cycles
-is two rows of the database's store table: progress (what each run looked
-like last time) and notified (states, alerts, grace clocks).
+The cycle reads, classifies, acts, collects, resumes, launches and writes
+the boards. It never deletes a tree. Its memory between cycles is two rows
+of the database's store table: progress (what each run looked like last
+time) and notified (states, alerts, grace clocks). The watcher that holds
+`serve.lock` also does the work of the user after its cycle; `census.py`
+has it.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import analysis, board, collect, config, home, launch, metrics
+from . import analysis, board, census, collect, config, home, hosts, launch, metrics
 from .backend import Backend, Live, make_backend, run_handle
 from .db import Database
 from .guards import Refuse
@@ -32,8 +33,6 @@ _RUN_KEYS = ("run_id", "label", "config", "host", "root", "phase", "stage", "ste
              "started", "updated", "disk_free_gb", "tree_gb", "counts")
 _TASK_KEYS = ("started", "ended", "exit", "signature", "log")
 _BUSY = ("stage:", "group:", "retry:")
-# A lease this young may belong to a driver that started after the cycle read the heartbeats.
-_LEASE_YOUNG_S = 120
 
 
 @dataclass(frozen=True)
@@ -65,15 +64,16 @@ STATES = {
                   "`SIGTERM` to the process groups, only with `kill_hung` and no `ack`", alert=True),
     "looping": State("the driver set `looping`: `streak` equal failure signatures in a row", "none", alert=True),
     "over_budget": State("the driver set `over_budget`, or the run ended `OVER_BUDGET`", "none", alert=True),
-    "host_full": State("the driver set `host_full`: free space below `host_free_min_gb`",
-                       "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
+    "host_full": State("the driver set `host_full`: the free scratch is below the floor of the host",
+                       "`stop --now` on the newest run of the host, of any of your projects, once per `grace_s` "
+                       "while the host stays full, unless that run has `ack`", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, unless the run has a keep file", alert=True),
     "orphan": State("a process of the current user that matches `tool_procs` and that no live run owns: its "
-                    "`EDR_RUN_ID` names a dead or ended run of this project, or a run the database does not know "
-                    "whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and no safety "
-                    "marker in its cwd or command line",
-                    "`SIGTERM`, only with `kill_orphan`", alert=True),
+                    "`EDR_RUN_ID` names a run of a registered project that ended or whose driver is gone, or an "
+                    "unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and "
+                    "no safety marker of a registered project in its cwd or command line",
+                    "`SIGTERM`, only with `kill_orphan` of the project the process belongs to", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),
     "pending": State("the scheduler has the job in its queue and the driver has not started", "none"),
@@ -181,7 +181,7 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
     if hb.get("over_budget"):
         found.append(("over_budget", f"stage {hb['over_budget']}"))
     if hb.get("host_full"):
-        found.append(("host_full", f"{host} below {lim.host_free_min_gb} GB free"))
+        found.append(("host_full", f"{host} below {hosts.floor(project.site, str(host)):g} GB free"))
     busy = str(hb.get("phase") or "").startswith(_BUSY) and (hb.get("pgids") or (hb.get("counts") or {}).get("running"))
     if busy and progress is not None:
         rec, sig = progress.setdefault(hb["run_id"], {}), _signature(hb)
@@ -200,11 +200,6 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
 
 # actions
 
-def _newest_on(db: Database, host: str) -> Row | None:
-    live = [r for r in db.runs() if r.get("host") == host and r.get("phase") and board.is_live(r)]
-    return max(live, key=lambda r: r["run_id"], default=None)
-
-
 def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons: list[str], text: str,
          now: float, notes: dict) -> bool:
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
@@ -215,21 +210,11 @@ def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons
             launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state_dir, actor="watch")
         if state == "superseded":
             return True
-    if state == "host_full":
-        clocks, target = notes.setdefault("_hosts", {}), _newest_on(db, host)
-        if target is None or now - clocks.get(host, 0) < lim.grace_s or _keep(project, target).get("ack"):
-            return False
-        clocks[host] = now
-        launch.stop(ssh, db, target, _hb(project, target), now=True, why=f"{host} full: {text}", actor="watch")
-        return True
     if state == "hung" and lim.kill_hung and not _keep(project, run).get("ack"):
         pgids = _hb(project, run).get("pgids") or []
         for pgid in pgids:
             ssh.kill_pgid(host, pgid, "TERM")
         db.add_event("watch", run_id, "kill", f"hung: TERM pgids {pgids} on {host}")
-    if state == "orphan" and lim.kill_orphan:
-        ssh.run(host, f"kill -TERM {int(run['pid'])}")
-        db.add_event("watch", run_id, "kill", f"orphan: TERM pid {run['pid']} on {host}")
     return True
 
 
@@ -247,8 +232,7 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
             # A repeat send edits the earlier message in place and keeps its buttons.
-            alert = (alerts.orphan_alert(project, run) if state == "orphan"
-                     else alerts.run_alert(project, run, state, reasons, _hb(project, run), now))
+            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now)
             ids = [n.send(alert) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
@@ -258,47 +242,6 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     except (HostError, Refuse, OSError, ValueError) as e:
         db.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
         rec["acted"] = True
-
-
-def _ended(run: Row) -> str:
-    """The state of a run that no longer runs its tools: dead, retired, stopped or ended; "" for a live run."""
-    state = run["state"] if run.get("state") in ("retired", "abandoned") else board.state_of(run)
-    return state if not board.is_live(run) or state in ("dead", "stopped", "retired", "abandoned") else ""
-
-
-def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
-    """Our tool processes on every site host that no live run owns.
-
-    A process with `EDR_RUN_ID` belongs to that run. A live run of this project owns it; a run of this
-    project that is dead or ended leaves it an orphan. A run id this database does not know belongs to
-    another project, whose watcher judges it, unless the process's cwd or command line holds
-    `/<project>/<run_id>` under the safety marker. A process without `EDR_RUN_ID` is owned when its cwd
-    or command line holds the safety marker."""
-    if not project.site.tool_procs:
-        return []
-    marker, runs = project.safety.marker, {r["run_id"]: r for r in db.runs()}
-    out = []
-    for host in project.site.hosts:
-        try:
-            procs = ssh.tool_processes(host, project.site.tool_procs)
-        except HostError as e:
-            log.warning("%s: %s", host, e)
-            continue
-        for p in procs:
-            run, texts = runs.get(p.run_id), (p.cwd, p.args)
-            if run is not None:
-                ended = _ended(run)
-                owned = not ended
-            elif p.run_id:
-                ended = "unknown"
-                owned = not any(marker in t and f"/{project.project}/{p.run_id}" in t for t in texts)
-            else:
-                ended, owned = "", any(marker in t for t in texts)
-            if not owned:
-                out.append({"key": f"orphan:{host}:{p.pid}", "run_id": run["run_id"] if run else "", "label": p.comm,
-                            "batch": host, "host": host, "pid": p.pid, "phase": p.args, "etimes": p.etimes, "cwd": p.cwd,
-                            "owner": p.run_id, "owner_handle": board.handle(run) if run else "", "owner_state": ended})
-    return out
 
 
 # collect, extract, resume, queue
@@ -408,47 +351,6 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
     db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {handle}")
 
 
-def sweep_leases(project: Project, db: Database, heartbeats: list[tuple[str, dict]], states: dict[str, str],
-                 now: float, dry_run: bool = False) -> list[str]:
-    """Remove each stale seat lease of this project with an event, and return their paths.
-
-    The leases of every project of the user share one directory per tool under the user root. A
-    lease is stale when its run has no live heartbeat, is dead or retired, has left the lease's
-    stage, or when the lease is older than the budget of its stage."""
-    live = {hb["run_id"]: hb for _, hb in heartbeats}
-    out = []
-    for f in sorted((home.root() / "leases").glob("*/*")):
-        if f.name.startswith("."):
-            continue
-        lease = config.load_json(f)
-        run_id, age = lease.get("run_id"), now - float(lease.get("ts") or 0)
-        if age < _LEASE_YOUNG_S or lease.get("project") != project.project:
-            continue
-        hb, row = live.get(run_id), db.run(run_id) if run_id else None
-        if hb is None:
-            why = "no live heartbeat of the run"
-        elif not board.is_live(hb):
-            why = f"the run ended {hb.get('phase')}"
-        elif states.get(run_id) == "dead":
-            why = "the run is dead"
-        elif (row or {}).get("state") in ("retired", "abandoned"):
-            why = f"the run is {row['state']}"
-        elif hb.get("stage") != lease.get("stage"):
-            why = f"the run left stage {lease.get('stage')}"
-        elif lease.get("budget_s") and age > float(lease["budget_s"]):
-            why = f"older than the stage budget of {int(lease['budget_s'])} s"
-        else:
-            continue
-        text = f"stale lease {f.parent.name}/{f.name}: {why}"
-        out.append(str(f))
-        if dry_run:
-            print(f"{run_id}: {text}")
-            continue
-        f.unlink(missing_ok=True)
-        db.add_event("watch", run_id, "lease", text)
-    return out
-
-
 def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
     queued: dict[str, list[str]] = {}
     for r in db.runs(state="queued"):
@@ -464,8 +366,10 @@ def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
 # boards and the cycle
 
 def _boards(project: Project, backend: Backend, db: Database, notifiers: list[Notifier], now: float) -> None:
-    free = backend.free(project.site.hosts) or {}
-    probes: dict[str, Any] = {h: {"error": p} if isinstance(p, str) else asdict(p) for h, p in free.items()}
+    # The census of the last two cycles saves an ssh call per host.
+    probes = census.probes(project, 2 * project.limits.heartbeat_s)
+    if probes is None:
+        probes = {h: {"error": p} if isinstance(p, str) else asdict(p) for h, p in (backend.free(project.site.hosts) or {}).items()}
     bdir = project.data / "board"
     db.add_host_samples(int(now), probes)
     db.write_board_json(bdir / "board.json", probes)
@@ -551,13 +455,6 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
         if state == "dead" and start:
             _resume(project, ssh, backend, db, run, hb, progress, now)
-    for o in [] if backend.name in SCHEDULERS else orphans(project, ssh, db):
-        states[o["key"]] = "orphan"
-        if dry_run:
-            print(f"{o['key']}: orphan {o['phase']} ({o['etimes']} s)")
-        else:
-            actions(project, ssh, db, notifiers, o, "orphan", [o["phase"]], now, notes)
-    sweep_leases(project, db, heartbeats, states, now, dry_run)
     if dry_run:
         return states
     if start:
@@ -580,10 +477,11 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
     """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed.
 
     A config that stops loading gets one alert per error text, and the cycles go on with the last one
-    that loaded and start nothing until the file loads again."""
+    that loaded and start nothing until the file loads again. The first watcher that takes
+    `serve.lock` keeps it and does the work of the user after each cycle."""
     for n in notifiers:
         n.start()
-    failed, broken = False, ""
+    failed, broken, serve = False, "", None
     try:
         while True:
             t0 = time.time()
@@ -606,12 +504,21 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
                 failed = True
+            serve = serve if serve is not None else home.lock(home.root() / "serve.lock")
+            if serve is not None:
+                try:
+                    census.work(notifiers, own=project)
+                except Exception:
+                    log.exception("census failed")
+                    failed = True
             if once:
                 return int(failed)
             time.sleep(max(1.0, project.limits.heartbeat_s - (time.time() - t0)))
     finally:
         for n in notifiers:
             n.stop()
+        if serve is not None:
+            os.close(serve)
 
 
 def check(project: Project, notifiers: list[Notifier] = ()) -> int:

@@ -84,8 +84,10 @@ lists every state with its test and the command that `--triage`
 proposes. A heartbeat file keeps its last phase after the driver dies,
 so use `--live` before you trust a running count.
 
-`edr hosts` shows the load and the free resources of each host, and
-`edr tools` shows the free licence seats.
+`edr hosts` shows the free room of each host and your live runs on it,
+the hosts where a run can start first, and `edr tools` shows the free
+licence seats. `edr status --all` prints the board of every registered
+project, and `edr projects` lists the projects with their watchers.
 
 ### Phases
 

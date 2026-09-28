@@ -10,7 +10,8 @@ import time
 from collections import Counter
 from typing import Any
 
-from . import analysis, board, watch
+from . import analysis, board, census, watch
+from .hosts import HostProbe
 from .model import SCHEDULERS, Project
 
 Row = dict[str, Any]
@@ -68,27 +69,15 @@ def _stages(project: Project) -> list[Row]:
              "tools": sorted(st.needs.tools)} for name, st in project.stages.items()]
 
 
-def _hosts(project: Project, conn: Any) -> list[Row]:
-    """The site hosts with the marks of their last sample in host_samples; no sample means not probed."""
-    last = {r["host"]: dict(r) for r in conn.execute(
-        "SELECT * FROM host_samples WHERE (host, ts) IN (SELECT host, max(ts) FROM host_samples GROUP BY host)")}
-    marks, out = project.site.marks, []
-    for name in project.site.hosts:
-        s = last.get(name)
-        if s is None:
-            out.append({"host": name, "probed": None})
-            continue
-
-        def frac(used: float | None, total: float | None) -> float:
-            return (used or 0) / total if total else 0.0
-
-        m = {"cores": board.resource_mark(frac(s["load"], s["cores"]), marks.cores),
-             "ram": board.resource_mark(frac(s["ram_used_gb"], s["ram_gb"]), marks.ram),
-             "scratch": board.resource_mark(frac(s["scratch_used_gb"], s["scratch_gb"]), marks.scratch)}
-        if s.get("gpus"):
-            m["gpu"] = board.resource_mark(frac(s["gpus_busy"], s["gpus"]), marks.gpu)
-        out.append({"host": name, "probed": s["ts"], "marks": m, "sample": s})
-    return out
+def _hosts(project: Project) -> Row:
+    """The site hosts as the last census saw them, with your runs on each; `probed` is None before a census."""
+    c = census.read(float("inf"))
+    probes = {h: p["error"] if "error" in p else HostProbe(**p) for h, p in (c.get("hosts") or {}).items()
+              if h in project.site.hosts}
+    if not probes:
+        return {"probed": None, "hosts": [], "names": list(project.site.hosts)}
+    return {"probed": c["ts"], "hosts": census.host_view(probes, c.get("runs") or [], project.site, project.placement),
+            "names": list(project.site.hosts)}
 
 
 def _step(m: Row) -> int:
@@ -119,7 +108,7 @@ def project_data(c: Any, tools: list[Row]) -> Row:
         "project": project.project, "root": str(project.root), "repo": str(project.source.repo),
         "worktrees": str(project.source.worktrees), "sources": _sources(project, batches),
         "backend": project.site.scheduler.backend, "stages": _stages(project),
-        "hosts": _hosts(project, c.db.conn), "tools": tools,
+        "hosts": _hosts(project), "tools": tools,
         "batches": [{"batch": b, "source": next((x.get("source") for x in batches if x["batch"] == b), None),
                      "states": dict(n)} for b, n in per_batch.items()],
         "live": [r for r in runs if board.is_live({"phase": r["phase"]}) and r["state"] != "queued"],
@@ -169,11 +158,20 @@ def _stage_line(s: Row) -> str:
     return f"- `{s['stage']}` {_join(parts)}."
 
 
-def _host_line(h: Row, now: float) -> str:
-    if h["probed"] is None:
-        return f"- `{h['host']}` has not been probed yet."
-    marks = ", ".join(f"{k} {v}" for k, v in h["marks"].items())
-    return f"- `{h['host']}` at the probe {ago(now - h['probed'])} ago: {marks}."
+def _host_line(h: Row) -> str:
+    head = f"- {board.START[h['start']]} `{h['host']}`"
+    if "error" in h:
+        return f"{head} did not answer: {h['error']}"
+    out = [f"{head}: {h['free_cores']:g} of {h['cores']} cores, {h['free_ram_gb']:.0f} of {h['total_ram_gb']:.0f} GB RAM "
+           f"and {h['free_gb']:.0f} of {h['total_gb']:.0f} GB scratch are free"]
+    if h["why"]:
+        out.append(f"No run can start there: {h['why']}")
+    if h["runs"]:
+        out.append("Your runs there: " + ", ".join(f"{p} {n}" for p, n in sorted(h["runs"].items())) +
+                   f", using {h['our_cores']:g} cores, {h['our_ram_gb']:g} GB RAM and {h['our_gb']:g} GB scratch")
+    if h["note"]:
+        out.append(_cap(h["note"]))
+    return ". ".join(out) + "."
 
 
 def _tool_line(t: Row) -> str:
@@ -226,12 +224,14 @@ def project_text(d: Row, now: float | None = None) -> str:
     if d["stages"]:
         out += ["## The flow", "", "A run passes these stages in this order:", "",
                 *(_stage_line(s) for s in d["stages"]), ""]
-    if d["hosts"] or d["tools"]:
+    if d["hosts"]["names"] or d["tools"]:
         out += ["## The site", ""]
-        if d["hosts"]:
-            out += [("The hosts, with the marks of their last probe: 🟢 has room, 🟡 is filling up, 🟠 is nearly "
-                    "full and 🔴 is full. The thresholds come from `[marks]`."), "",
-                    *(_host_line(h, now) for h in d["hosts"]), ""]
+        if d["hosts"]["names"] and not d["hosts"]["hosts"]:
+            out += ["No census has probed the hosts yet; `edr hosts` probes them now.", ""]
+        if d["hosts"]["hosts"]:
+            out += [(f"The hosts at the census {ago(now - d['hosts']['probed'])} ago, the ones where a run of this project "
+                     "can start first: 🟢 a run can start there, 🔴 none can, and ⚫ the host did not answer."), "",
+                    *(_host_line(h) for h in d["hosts"]["hosts"]), ""]
         if d["tools"]:
             out += ["The tools, with the seats their probe reports now:", "", *(_tool_line(t) for t in d["tools"]), ""]
     out += ["## The state", ""]

@@ -11,6 +11,9 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
@@ -47,6 +50,7 @@ class HostProbe:
     gpus_idle: int = 0
     gpu_used_gb: float = 0.0
     gpu_total_gb: float = 0.0
+    skew_s: float = 0.0  # the clock of the host less the clock of the head node
 
 
 # Placement
@@ -75,14 +79,27 @@ def tool_versions(site: Site, host: str | None) -> dict[str, str]:
     return {f"tool.{n}.version": v for n, v in have.items()}
 
 
-def _fits(pl: Placement, p: HostProbe, running: int, needs: Needs) -> bool:
-    return (
-        p.host not in pl.avoid
-        and running < pl.max_per_host
-        and p.free_cores >= max(pl.min_free_cores, needs.cores)
-        and p.free_ram_gb >= pl.min_free_ram_gb
-        and p.free_gb > needs.disk_gb
-    )
+def floor(site: Site, host: str) -> float:
+    """The free scratch that `host` keeps: its own `host_free_min_gb`, else the site's."""
+    h = site.hosts.get(host)
+    return site.host_free_min_gb if h is None or h.host_free_min_gb is None else h.host_free_min_gb
+
+
+def why_not(pl: Placement, p: HostProbe, running: int, needs: Needs, keep_gb: float) -> str:
+    """Why a run with `needs` cannot start on the probed host, or "" when it can."""
+    if p.host in pl.avoid:
+        return "placement avoids it"
+    if running >= pl.max_per_host:
+        return f"{running} of your runs, max_per_host is {pl.max_per_host}"
+    if p.free_cores < max(pl.min_free_cores, needs.cores):
+        return f"{p.free_cores:g} cores free, a run needs {max(pl.min_free_cores, needs.cores)}"
+    if p.free_ram_gb < pl.min_free_ram_gb:
+        return f"{p.free_ram_gb:g} GB RAM free, a run needs {pl.min_free_ram_gb}"
+    if p.free_gb < keep_gb:
+        return f"{p.free_gb:g} GB scratch free, under the floor of {keep_gb:g} GB"
+    if p.free_gb <= needs.disk_gb:
+        return f"{p.free_gb:g} GB scratch free, the stage needs {needs.disk_gb:g}"
+    return ""
 
 
 def place(
@@ -111,7 +128,7 @@ def place(
             take(job.host, needs)
             continue
         ranked = sorted(free, key=lambda h: (prefer.get(h, len(prefer)), -free[h].free_cores))
-        host = next((h for h in ranked if _fits(pl, free[h], running.get(h, 0), needs)
+        host = next((h for h in ranked if not why_not(pl, free[h], running.get(h, 0), needs, floor(project.site, h))
                      and not missing_tools(project.site, h, tools)), None)
         out[job.label] = host
         if host is not None:
@@ -130,7 +147,7 @@ def _text(data: bytes | str | None) -> str:
 def _probe_cmd(dirs: list[str]) -> str:
     quoted = " ".join(shlex.quote(d) for d in dirs)
     return (
-        "id -un; nproc; cut -d' ' -f1 /proc/loadavg; "
+        "date +%s; id -un; nproc; cut -d' ' -f1 /proc/loadavg; "
         "awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print t; print a}' /proc/meminfo; "
         f"echo {_SEP}; for d in {quoted}; do "
         '[ -w "$d" ] && df -Pk "$d" | awk -v d="$d" \'NR==2{print d, $2, $4}\'; done; '
@@ -150,16 +167,27 @@ def _gpus(lines: list[str]) -> list[tuple[int, int, int]]:
     return out
 
 
-def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
+def _sections(out: str) -> list[list[str]]:
+    """The lines of a remote command's output between the separator lines, blank lines left out."""
     sections: list[list[str]] = [[]]
     for line in out.splitlines():
         if line == _SEP:
             sections.append([])
         elif line.strip():
             sections[-1].append(line)
-    if len(sections) != 4 or len(sections[0]) != 5:
-        raise HostError(f"{host}: unreadable probe output: {out[:200]!r}")
-    me, ncpu, load, ram_kb, mem_kb = (s.strip() for s in sections[0])
+    return sections
+
+
+def _parse_probe(host: str, sections: list[list[str]], tool_procs: str, sent: float, answered: float) -> HostProbe:
+    """The probe from the first four sections; `sent` and `answered` bracket the call on the head node's clock."""
+    try:
+        return _probe(host, sections, tool_procs, sent, answered)
+    except (ValueError, IndexError):
+        raise HostError(f"{host}: unreadable probe output: {sections[:2]!r}"[:250]) from None
+
+
+def _probe(host: str, sections: list[list[str]], tool_procs: str, sent: float, answered: float) -> HostProbe:
+    clock, me, ncpu, load, ram_kb, mem_kb = (s.strip() for s in sections[0])
     scratch = [(int(free), int(total), d) for d, total, free in (ln.rsplit(None, 2) for ln in sections[1])]
     free_kb, total_kb, mount = max(scratch) if scratch else (0, 0, "")
     gpus = _gpus(sections[3])
@@ -189,6 +217,8 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
         gpus_idle=sum(1 for used, total, util in gpus if util < 5 and used < 0.05 * total),
         gpu_used_gb=round(sum(g[0] for g in gpus) / 1024, 1),
         gpu_total_gb=round(sum(g[1] for g in gpus) / 1024, 1),
+        # `date +%s` has whole seconds, so a skew below a second is noise.
+        skew_s=0.0 if host == "local" else float(round(int(clock) - (sent + answered) / 2)),
     )
 
 
@@ -210,6 +240,34 @@ _PROCS_CMD = (
     f"echo {_SEP}; grep -Hasz '^EDR_RUN_ID=' /proc/[0-9]*/environ | tr '\\0' '\\n'; "
     f"echo {_SEP}; find /proc -mindepth 2 -maxdepth 2 -name cwd -user \"$(id -un)\" -printf '%h %l\\n' 2>/dev/null; true"
 )
+
+
+def _parse_procs(sections: list[list[str]]) -> list[Proc]:
+    """Every process of ours from the listing, the `EDR_RUN_ID` lines and the cwd lines."""
+    listing, env, cwds = (sections + [[], []])[:3]
+    run_ids = {int(m[1]): m[2] for m in (re.match(r"/proc/(\d+)/environ:EDR_RUN_ID=(.*)", ln) for ln in env) if m}
+    cwd = {int(m[1]): m[2] for m in (re.match(r"/proc/(\d+) (.*)", ln) for ln in cwds) if m}
+    rows = []
+    for line in listing:
+        parts = line.split(None, 4)
+        # A comm with a space misaligns the row; no tool name has one.
+        if len(parts) == 5 and parts[0].isdigit():
+            pid = int(parts[0])
+            rows.append(Proc(pid, int(parts[1]), float(parts[2]), parts[3], parts[4], cwd.get(pid, ""), run_ids.get(pid, "")))
+    return rows
+
+
+def probe_all(ssh: Ssh, hosts: Iterable[str]) -> dict[str, HostProbe | str]:
+    """The probe of each host, all at once, or the error text of a host that did not answer."""
+    def one(host: str) -> HostProbe | str:
+        try:
+            return ssh.probe(host)
+        except HostError as e:
+            return str(e)
+
+    names = list(hosts)
+    with ThreadPoolExecutor(max_workers=max(1, len(names))) as pool:
+        return dict(zip(names, pool.map(one, names)))
 
 
 class Ssh:
@@ -256,9 +314,16 @@ class Ssh:
         return list(h.scratch) if h and h.scratch else list(self.site.scratch)
 
     def probe(self, host: str) -> HostProbe:
-        """Cores, RAM, the largest writable scratch, the GPUs and the tool processes of `host`, free and total."""
+        """Cores, RAM, the largest writable scratch, the GPUs, the tool processes and the clock of `host`."""
+        sent = time.time()
         out = self._run_ok(host, _probe_cmd(self.scratch_dirs(host)))
-        return _parse_probe(host, out, self.site.tool_procs)
+        return _parse_probe(host, _sections(out), self.site.tool_procs, sent, time.time())
+
+    def census(self, host: str) -> tuple[HostProbe, list[Proc]]:
+        """The probe of `host` and every process of ours there, with its cwd and its `EDR_RUN_ID`, in one call."""
+        sent = time.time()
+        sections = _sections(self._run_ok(host, _probe_cmd(self.scratch_dirs(host)) + f"; echo {_SEP}; " + _PROCS_CMD))
+        return _parse_probe(host, sections, self.site.tool_procs, sent, time.time()), _parse_procs(sections[4:])
 
     def pids_alive(self, host: str, pids: list[int]) -> set[int]:
         """The pids of `pids` that run on `host`, by one `ps`; HostError when the host did not answer."""
@@ -279,30 +344,6 @@ class Ssh:
         if rc not in (0, 1):
             raise HostError(f"{host}: rc {rc}: {err.strip()}")
         return rc == 0
-
-    def tool_processes(self, host: str, pattern: str) -> list[Proc]:
-        """Our processes on `host` whose comm matches `pattern`, with their cwd and their `EDR_RUN_ID`.
-
-        One ssh call: ps, the `EDR_RUN_ID` of every environment that holds it, and the cwd links of our processes."""
-        sections: list[list[str]] = [[]]
-        for line in self._run_ok(host, _PROCS_CMD).splitlines():
-            if line == _SEP:
-                sections.append([])
-            else:
-                sections[-1].append(line)
-        listing, env, cwds = (sections + [[], []])[:3]
-        run_ids = {int(m[1]): m[2] for m in (re.match(r"/proc/(\d+)/environ:EDR_RUN_ID=(.*)", ln) for ln in env) if m}
-        cwd = {int(m[1]): m[2] for m in (re.match(r"/proc/(\d+) (.*)", ln) for ln in cwds) if m}
-        rx = re.compile(pattern)
-        rows = []
-        for line in listing:
-            parts = line.split(None, 4)
-            # A comm with a space misaligns the row; no tool name has one.
-            if len(parts) == 5 and rx.search(parts[3]):
-                pid = int(parts[0])
-                rows.append(Proc(pid, int(parts[1]), float(parts[2]), parts[3], parts[4], cwd.get(pid, ""),
-                                 run_ids.get(pid, "")))
-        return rows
 
     def check_local(self) -> list[str]:
         """The faults of the head node, as `local: ...` lines: a missing tool, or a ps without the columns."""

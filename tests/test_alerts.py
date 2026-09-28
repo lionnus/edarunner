@@ -27,8 +27,8 @@ HB = {"host": "hostA", "stage": "synth", "step": 3, "step_name": "elaborate", "d
 ORPHAN = {"key": "orphan:hostA:4711", "host": "hostA", "pid": 4711, "label": "fc_shell", "etimes": 12000,
           "cwd": "/home/me/work", "phase": "fc_shell -f /home/me/work/run.tcl -x " + "y" * 120}
 ALERTS = {
-    "orphan": alerts.orphan_alert(PROJECT, ORPHAN),
-    "orphan of a dead run": alerts.orphan_alert(PROJECT, {**ORPHAN, "owner": RUN["run_id"], "owner_handle": "b@demo",
+    "orphan": alerts.orphan_alert(None, ORPHAN),
+    "orphan of a dead run": alerts.orphan_alert(PROJECT, {**ORPHAN, "owner": RUN["run_id"], "owner_handle": "demo/b@demo",
                                                           "owner_state": "dead"}),
     "dead": alerts.run_alert(PROJECT, RUN, "dead", ["heartbeat older than 2700 s, driver 4711 gone on hostA"], HB, NOW),
     "hung": alerts.run_alert(PROJECT, RUN, "hung", ["hung: no progress since 14.01 03:00"], HB, NOW),
@@ -75,7 +75,7 @@ EXPECTED = {
         '<code>ssh hostA ps -o pid,etime,args -p 4711</code>\n'
         'If it is yours and stale, end it:\n'
         '<code>ssh hostA kill 4711</code>\n'
-        'edarunner never kills it, since kill_orphan is off.',
+        'edarunner never kills a process that belongs to no project.',
         '🔴 demo: tool process with no run on hostA\n'
         'Your process fc_shell runs on hostA, and no edarunner run owns it. It may hold a licence seat.\n'
         '\n'
@@ -88,11 +88,11 @@ EXPECTED = {
         '    ssh hostA ps -o pid,etime,args -p 4711\n'
         'If it is yours and stale, end it:\n'
         '    ssh hostA kill 4711\n'
-        'edarunner never kills it, since kill_orphan is off.\n',
+        'edarunner never kills a process that belongs to no project.\n',
     ),
     'orphan of a dead run': (
         '🔴 <b>demo: tool process of an ended run on</b> <code>hostA</code>\n'
-        'Your process fc_shell runs on hostA for the run b@demo, whose driver is gone. It may hold a licence seat.\n'
+        'Your process fc_shell runs on hostA for the run demo/b@demo, whose driver is gone. It may hold a licence seat.\n'
         '\n'
         'process: fc_shell, pid 4711\n'
         'running for: 3h\n'
@@ -105,7 +105,7 @@ EXPECTED = {
         '<code>ssh hostA kill 4711</code>\n'
         'edarunner never kills it, since kill_orphan is off.',
         '🔴 demo: tool process of an ended run on hostA\n'
-        'Your process fc_shell runs on hostA for the run b@demo, whose driver is gone. It may hold a licence seat.\n'
+        'Your process fc_shell runs on hostA for the run demo/b@demo, whose driver is gone. It may hold a licence seat.\n'
         '\n'
         'process: fc_shell, pid 4711\n'
         'running for: 3h\n'

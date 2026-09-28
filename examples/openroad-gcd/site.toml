@@ -4,6 +4,7 @@ scratch = ["/tmp"]
 env = {}
 ssh = { options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"], timeout_s = 20 }
 tool_procs = "^(openroad|yosys)$"
+host_free_min_gb = 1
 
 [hosts.local]
 cores = 2
