@@ -82,7 +82,7 @@ The `parameters` table holds one row per run, key and origin:
 |---|---|---|
 | `spec` | `config`, `build_tag`, each override under its own name, and `vars.<name>` for each var of the job | the watcher at the first collect of the run |
 | `checkout` | `source`, and `nested.<name>` with the commit of each nested repository | the watcher at the first collect of the run |
-| `import` | `config`, `build_tag` and `source` | `edr import` |
+| `import` | `config`, `build_tag`, `source`, and each `--param KEY=VALUE` | `edr import` |
 
 The watcher reads the overrides, the vars and the nested commits from the
 run's spec, which `launch` wrote, and never from the batch file. An edit
@@ -807,9 +807,10 @@ held, so a Makefile rule can stop before it builds a table on a gap.
 `--json` gives each row with its status and runs.
 
 A build tag matches every run of one build: the backend runs, the runs
-that continue them, and a bench suite imported with
-`edr import --build-tag` and the same tag. One demand list by build tag
-then covers the RTL cycle counts and the energies of each test. A label
+that continue them, and the bench runs of the RTL recorded with the same
+tag, a suite imported with `edr import --build-tag` or a bench tracked
+with `edr track --build-tag`. One demand list by build tag then covers
+the RTL cycle counts and the energies of each test. A label
 matches that label only. A run that `edr continue` starts on a tree has
 the label `<label>.<stage>`, so a demand by label misses it and a demand
 by build tag finds it.

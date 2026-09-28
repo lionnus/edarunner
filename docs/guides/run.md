@@ -297,16 +297,46 @@ With `--results` it links an archive of collected files instead, so
 
 ```sh
 edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --source abc1234 \
-    --results /archive/base --tasks softmax_197 --why "tree gone, reports kept"
+    --results /archive/base --tasks k_small k_big --host hostA \
+    --started 2026-08-30T00:00 --ended 2026-08-30T09:12 --phase FAILED:power \
+    --param vars.netlist_stage=11 --why "tree gone, reports kept"
 ```
 
 This links `/archive/base` as `data/results/<run id>` and extracts the
 project's metrics from it. The directory holds the collected files in
 the layout of the run tree, the same paths that `collect` names.
 `--config` is optional and defaults to empty. An imported run goes into
-the batch `imported` unless `--batch` names another, and it carries the
-import time as `started` and `ended`. `edr retire` deletes an imported tree only
-when its path carries the safety marker.
+the batch `imported` unless `--batch` names another.
+
+An import records what you tell it, and nothing it would have to guess:
+
+- `--host`, `--started` and `--ended` give the host and the times of the
+  run, as unix times or ISO times. Without them they stay empty, since
+  the time of the import is no time of the run.
+- The dirty flag comes from the source tag: a tag with `-dirty` is a
+  dirty run. A tag that `edr checkout` would not make, such as
+  `abc1234-dirty` without the eight hex digits of its diff, gets a
+  warning, because edarunner has no diff for it.
+- Each `--param KEY=VALUE` writes a parameter with the origin `import`,
+  such as `vars.netlist_stage=11` for the netlist that a power run read.
+  `edr compare` prints it when it differs between the runs it compares.
+- `--phase` is a phase that the driver ends a run with, as the table in
+  [Phases](#phases) lists; any other text is refused. A run whose
+  driver died is `FAILED:<stage>`, with the stage it died in.
+  `INCOMPLETE` means that every stage ran and a task failed or was
+  skipped, so `INCOMPLETE:0f0s` is refused.
+
+The import writes a spec into the state directory, in the format that
+`launch` writes, with each task group, its tasks and their directories.
+A later `edr extract` reads every task of that spec, so a task whose
+file did not parse at the import gets its numbers once the file is
+fixed. The task counts of the run give a task whose files gave a value
+and no failed row as done, and any other task as failed.
+
+A batch holds one source. The launch or import that makes a batch sets
+its source, and an import of another source into that batch is refused;
+give that run a batch of its own. `edr retire` deletes an imported tree
+only when its path carries the safety marker.
 
 ## Track a run started elsewhere
 
@@ -325,7 +355,14 @@ and `needs.tools`; the command replaces the stage's `cmd` as given, with
 no placeholder. The tree is `--root`, the current directory by default,
 and the driver writes `log/<stage>.log` there. `--source` defaults to the
 source tag of the tree, and a tree outside git needs it. The batch is
-`--batch`, `track` by default.
+`--batch`, `track` by default. The run id takes `--config` as the
+configuration, the label by default, and `--build-tag` as the build
+tag, `track` by default. A bench run tracked with the build tag of a
+backend build joins the backend runs of that build on the tag:
+
+```sh
+edr track --label rtl --stage bench --build-tag cfg_a --collect -- make bench CONFIG=cfg_a
+```
 
 `edr track` then replaces itself with the driver. The pid stays the
 same, so a signal to the job reaches the driver, and the job ends with
