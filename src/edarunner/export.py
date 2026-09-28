@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import __version__, analysis, collect, config
+from . import __version__, analysis, collect, config, runid
 from .board import is_live
 from .db import Database, pick
 from .guards import Refuse
@@ -166,10 +166,10 @@ def _record(project: Project, db: Database, r: Row) -> dict[str, Any]:
 
 def _dirty_source(project: Project, tag: str) -> Row:
     """A dirty source with its base, the commit of each nested repository and the sha256 of its diff, from
-    `data/sources/<tag>/`; the sha256 is None when that directory has no diff."""
+    `data/sources/<tag>/`, else from the tag; the sha256 is None when that directory has no diff."""
     d = project.data / "sources" / tag
-    meta, diff = config.load_json(d / "source.json"), d / "source.diff"
-    return {"source": tag, "base": meta.get("base") or tag.split("-dirty")[0], "nested": meta.get("nested") or {},
+    meta, diff, t = config.load_json(d / "source.json"), d / "source.diff", runid.parse_tag(tag, project.source.nested)
+    return {"source": tag, "base": meta.get("base") or (t and t.base), "nested": meta.get("nested") or (t and t.nested) or {},
             "diff_sha256": hashlib.sha256(diff.read_bytes()).hexdigest() if diff.is_file() else None}
 
 

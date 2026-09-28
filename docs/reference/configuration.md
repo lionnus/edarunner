@@ -44,9 +44,9 @@ rules hold for every file:
 | Key | Meaning | Default |
 |---|---|---|
 | `repo` | the git repository of the flow | required |
-| `worktrees` | where `edr checkout` puts a local clone per commit | required |
+| `worktrees` | where `edr checkout` puts a local clone per source tag | required |
 | `ref` | the ref `edr checkout` takes without an argument, and the one `edr brief` counts the lag of each source against | `"HEAD"` |
-| `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has; a run records the commit of each as the parameter `nested.<name>`, and their changes count in a dirty tag | `[]` |
+| `nested` | the nested repositories inside the tree. The source tag gives the commit of each as `-n<short hash>`, in this order. A checkout of a ref clones each at the HEAD that the repository copy has, a checkout of a tag at the commit that the tag names. A run records each commit as the parameter `nested.<name>`, and their changes count in a dirty tag. A git repository in the tree that this list does not name and git does not ignore stops `edr checkout --dirty` | `[]` |
 | `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{source}"` |
 | `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)` or from `(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each override, such as `base_FREQ500` | `""` |
 
@@ -440,8 +440,9 @@ budget = { hours = 8 }
 
 ## jobs/<batch>.toml
 
-`jobs/<batch>.toml` holds the jobs of one batch on one source. A tag is a short hash, or
-`<hash>-dirty-<8 hex>` for a snapshot of a tree with uncommitted changes. The date is pinned once
+`jobs/<batch>.toml` holds the jobs of one batch on one source. A tag is the short hash of the commit, then
+`-n<short hash>` for each nested repository, then `-dirty-<8 hex>` for a snapshot of a tree with uncommitted
+changes, such as `3f9a2c1-n8e0d4b2-dirty-7b21c0d9`. The date is pinned once
 per batch in `<state_dir>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
 ids. A batch name is used once; a second launch of the same batch finds its specs and does
 nothing.

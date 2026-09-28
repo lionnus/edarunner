@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from . import analysis, board, census, checkout, runid, watch
+from . import analysis, board, census, runid, watch
 from .hosts import HostProbe, floor
 from .model import SCHEDULERS, Project
 
@@ -68,13 +68,13 @@ def _sources(project: Project, runs: list[Row]) -> list[Row]:
 
 
 def _behind(project: Project, tag: str) -> int | None:
-    """The commits of the tracking ref `[source] ref` that the source `tag` lacks, a dirty tag counted on the commit it
-    starts from; None when the tag is no commit hash or git cannot count them."""
-    base = tag.split("-dirty")[0]
-    if not checkout.SOURCE_RE.match(base):
+    """The commits of the tracking ref `[source] ref` that the commit of the source `tag` lacks, without its nested and
+    dirty parts; None when the tag is not in the checkout form or git cannot count them."""
+    t = runid.parse_tag(tag, project.source.nested)
+    if not t:
         return None
     try:
-        return int(runid.git("rev-list", "--count", f"{base}..{project.source.ref}", cwd=project.source.repo))
+        return int(runid.git("rev-list", "--count", f"{t.base}..{project.source.ref}", cwd=project.source.repo))
     except runid.GitError:
         return None
 

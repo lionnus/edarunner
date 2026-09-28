@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, board, census, checkout, collect, config, home, hosts, sync
+from . import __version__, board, census, checkout, collect, config, home, hosts, runid, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, NotFound, pick
@@ -43,7 +43,7 @@ class RunPlan:
     reuse: str = ""  # the run id whose tree this run continues, or whose archive it restores
     restore: str = ""  # the collect_on_request list copied back from data/results of `reuse`
     values: dict[str, object] = field(default_factory=dict)
-    nested: dict[str, str] = field(default_factory=dict)  # the commit of each nested repository of the checkout
+    nested: dict[str, str] = field(default_factory=dict)  # the commit of each nested repository that the source tag names
 
 
 # --- date pin and build tag
@@ -341,14 +341,11 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             spec = _spec(project, batch, job, names, tasks, v)
         except (ConfigError, Refuse, KeyError) as e:
             problems.append(str(e))
-    try:
-        nested = checkout.nested_heads(project, checkout.find(project, source))
-    except checkout.CheckoutError:
-        nested = {}
+    parsed = runid.parse_tag(source, project.source.nested)
     return RunPlan(run_id=run_id, label=job.label, host=host, root=root, spec=spec,
                    queued=not spec and not problems, problems=problems, source=source, build_tag=tag,
                    tree_host="local" if sched and _fresh(job) else host or "", reuse=reused, restore=restore, values=v,
-                   nested=nested)
+                   nested=parsed.nested if parsed else {})
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
@@ -464,7 +461,7 @@ def _src_dir(project: Project, source: str, src_dir: Path | None, dry_run: bool 
         return Path(checkout.find(project, source))
     except checkout.CheckoutError:
         # A dry run checked nothing out; the tree would be at the path of the checkout.
-        if dry_run and checkout.SOURCE_RE.match(source):
+        if dry_run and runid.parse_tag(source, project.source.nested):
             return project.source.worktrees / source
         raise
 
