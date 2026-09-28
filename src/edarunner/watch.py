@@ -352,13 +352,15 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
 
 
 def _launch_queued(project: Project, ssh: Ssh, db: Database) -> None:
-    queued: dict[str, list[str]] = {}
+    queued: dict[str, list[Row]] = {}
     for r in db.runs(state="queued"):
-        queued.setdefault(str(r["batch"]), []).append(str(r["label"]))
-    for name, labels in queued.items():
+        queued.setdefault(str(r["batch"]), []).append(r)
+    for name, rows in queued.items():
         try:
-            launch.launch(project, config.load_batch(project, name), ssh, db, only=labels[:1], stagger_s=0,
-                          allow_dirty=True)
+            batch = config.load_batch(project, name)
+            # The batch file may name a ref; the queued run keeps the source tag, and so its run id.
+            batch.source = rows[0]["source"] or batch.source
+            launch.launch(project, batch, ssh, db, only=[str(rows[0]["label"])], stagger_s=0, allow_dirty=True)
         except Exception:  # one bad batch must not end the watcher
             log.exception("queued batch %s", name)
 
