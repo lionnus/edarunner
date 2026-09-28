@@ -120,7 +120,7 @@ the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
 | `cpu_s`, `rss_gb` | the CPU time in seconds and the summed RSS of every process in `pgids`, read in one pass over `/proc` at every heartbeat; the CPU time includes reaped children. Without `/proc`, both come from `ps -e -o pgid=,cputimes=,rss=`, which gives whole seconds and leaves out the children |
 | `log_bytes` | the size of `log` in bytes; every heartbeat |
 | `stages` | per stage started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
-| `tasks` | per task: `phase`, `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
+| `tasks` | per task: `stage`, `phase` (`running`, `done`, `failed`, `skipped` or `held`), `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
 | `counts` | `done`, `failed`, `skipped`, `running`, `queued`, over every task group of the run |
 | `started`, `updated`, `elapsed_s` | unix times; the watcher reads the age of `updated` |
 | `disk_free_gb`, `tree_gb` | free space at `root`; `du -s` of the tree at most once per ten minutes |
@@ -170,7 +170,10 @@ one pool. `edr continue` gives its run a queue of its own.
 
 A task that fails gets a `signature`, the last log line with every digit
 removed. `streak` equal signatures in a row set `looping`, and the group
-claims nothing more.
+claims nothing more. A group that stops claiming, on `looping`, a stop
+file or `over_budget`, lets its running tasks end and then records each
+task still in `pending/` as `held`; `launch.stages_left` reads them, and
+`edr continue` runs them.
 
 ## What a change touches
 

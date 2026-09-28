@@ -129,6 +129,18 @@ def test_on_request(env) -> None:
     assert collect.collect_on_request(project, ssh, db, run, "nope").failures == ["no stage has collect_on_request.nope"]
 
 
+def test_on_request_takes_the_tasks_that_started(env) -> None:
+    project, ssh, db, run, root = env
+    run_tree(root)
+    power = replace(project.stages["power"], collect_on_request={"vcd": ["{task_dir}/wave.vcd"]})
+    project = replace(project, stages={**project.stages, "power": power})
+    (project.state_dir / "demo").mkdir(parents=True, exist_ok=True)
+    hb = heartbeat(run, "STOPPED", "power", {"k_small": "done", "k_big": "held"})
+    (project.state_dir / "demo" / f"{RUN_ID}.json").write_text(json.dumps(hb))
+    r = collect.collect_on_request(project, ssh, db, run, "vcd")
+    assert r.failures == [] and r.copied == ["simulation/tests/demo/GEMM_M64_N64/wave.vcd"]
+
+
 def test_nfs_export_fallback(env, monkeypatch) -> None:
     project, ssh, db, run, root = env
     run_tree(root)

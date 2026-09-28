@@ -299,14 +299,15 @@ class Driver(object):
             e.update(fields)
         self.beat()
 
-    def record_task(self, tid, phase, **fields):
+    def record_task(self, tid, phase, beat=True, **fields):
         with self.lock:
             e = self.hb["tasks"].setdefault(tid, {
                 "phase": phase, "pid": None, "pgid": None, "started": None,
                 "ended": None, "exit": None, "signature": None, "log": None})
             e["phase"] = phase
             e.update(fields)
-        self.beat()
+        if beat:
+            self.beat()
 
     def read_keep(self):
         # type: () -> tuple
@@ -752,6 +753,8 @@ class Driver(object):
             with self.lock:
                 self.hb["counts"]["queued"] = len(pending)
             if not running and (hold or not pending):
+                for tid in pending:
+                    self.record_task(tid, "held", beat=False, stage=name)
                 return
             while pending and len(running) < parallel and not hold and time.time() >= gate_until:
                 if self.host_full():
@@ -764,7 +767,7 @@ class Driver(object):
                     skipped.add(tid)
                     with self.lock:
                         self.hb["counts"]["skipped"] += 1
-                    self.record_task(tid, "skipped")
+                    self.record_task(tid, "skipped", stage=name)
                     continue
                 key = "%s.%s.%s" % (self.key, name, tid)
                 why = self.take(task.get("tools") or tools, key, task.get("budget") or budget)
@@ -783,7 +786,7 @@ class Driver(object):
                 running[tid] = (p, task, int(time.time()), log)
                 with self.lock:
                     self.hb["log"] = log
-                self.record_task(tid, "running", pid=p.pid, pgid=p.pid, started=running[tid][2], log=log)
+                self.record_task(tid, "running", stage=name, pid=p.pid, pgid=p.pid, started=running[tid][2], log=log)
             time.sleep(TICK_S)
 
     # the run

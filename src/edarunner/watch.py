@@ -143,8 +143,8 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
             db.set_step_times(hb["run_id"], hb["step_times"])
         db.add_run_sample(hb)
         for tid, t in (hb.get("tasks") or {}).items():
-            db.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
-                                     **{k: t.get(k) for k in _TASK_KEYS}})
+            db.upsert_stage_run({"run_id": hb["run_id"], "stage": t.get("stage") or hb.get("stage") or "", "task": tid,
+                                 "status": t.get("phase"), **{k: t.get(k) for k in _TASK_KEYS}})
 
 
 # classify
@@ -237,9 +237,9 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
-            left, why = launch.stages_left(project, db, run) if ended else ([], "")
+            left, held, why = launch.stages_left(project, db, run) if ended else ([], [], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs())
+            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs(), held=held)
             ids = [n.send(alert) for n in wanted(notifiers, state)]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:

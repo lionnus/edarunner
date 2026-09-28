@@ -411,23 +411,27 @@ one handle, so one mistake costs at most one run.
 
 There are three strengths. `edr stop <handle> --after-task` writes the
 stop file next to the spec; the driver lets a one-command stage run to
-its end and a task group finish its running tasks, and then ends the
-run `STOPPED`. A plain `edr stop` sends `SIGTERM` to the driver and its
-groups and waits up to 60 seconds. The driver forwards the signal to its
-groups, waits 10 seconds, sends `SIGKILL` to what is left, writes a
-final heartbeat and exits 10 (`Driver.on_signal`). When the driver is
-still alive after the wait, `edr stop` exits 3, and `--now` is the next
-step: `SIGTERM`, then `SIGKILL` after 30 seconds. A queued run that is
-stopped is marked `stopped` and never starts.
+its end and a task group finish its running tasks, records the tasks
+the group did not start as `held`, and then ends the run `STOPPED`. A
+plain `edr stop` sends `SIGTERM` to the driver and its groups and waits
+up to 60 seconds. The driver forwards the signal to its groups, waits
+10 seconds, sends `SIGKILL` to what is left, writes a final heartbeat
+and exits 10 (`Driver.on_signal`). When the driver is still alive after
+the wait, `edr stop` exits 3, and `--now` is the next step: `SIGTERM`,
+then `SIGKILL` after 30 seconds. A queued run that is stopped is marked
+`stopped` and never starts.
 
 A run that ended `STOPPED` after a one-command stage, or `OVER_BUDGET`
 after a stage that ran to its end, did not run the stages after that
 stage. The watcher sends one alert for it, and `edr continue <handle>`
 runs those stages as one new run on the same tree, from the stage after
-the last one that ended with exit 0 (`launch.stages_left`). It refuses
-while a run on the tree has not ended. It also refuses when that next
-stage started but did not end with exit 0, since the stage would start
-over and could delete the checkpoints its resume needs.
+the last one that ended with exit 0 (`launch.stages_left`). A task group
+that a stop or its budget cut short ends with exit 0, but it holds the
+tasks it did not start, so it counts as left, and `continue` runs only
+those tasks in it. `continue` refuses while a run on the tree has not
+ended. It also refuses when that next stage started but did not end
+with exit 0, since the stage would start over and could delete the
+checkpoints its resume needs.
 [guides/run.md](guides/run.md#more-work-on-an-existing-tree) shows the
 commands.
 

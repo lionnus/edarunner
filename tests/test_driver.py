@@ -126,17 +126,20 @@ def test_a_tool_that_ignores_sigterm_gets_sigkill_after_the_grace(tmp_path: Path
         os.kill(tool, signal.SIGKILL)
         pytest.fail("the tool %d survived the stop" % tool)
 
-def test_stop_file_after_task_ends_the_group(tmp_path: Path) -> None:
-    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=1)
+def test_stop_file_after_task_ends_the_group_and_holds_the_tasks_not_started(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=2)
+    tasks = spec["stages"][0]["tasks"]
+    tasks += [dict(t, id=t["id"] + "_2") for t in tasks]
     proc = start(spec)
-    wait_for(spec, lambda h: h["tasks"].get("k_small", {}).get("phase") == "running")
+    wait_for(spec, lambda h: h["counts"]["running"] == 2)
     stop = Path(spec["state_file"]).with_name(RUN_ID + ".stop")
     stop.write_text("after-task")
     rc, hb = finish(proc, spec)
     assert (rc, hb["phase"], hb["exit"]) == (10, "STOPPED", 10)
-    assert hb["tasks"]["k_small"]["phase"] == "done" and "k_big" not in hb["tasks"]
-    assert (Path(spec["queue_dir"]) / "power" / "pending" / "k_big").exists()
-    assert hb["counts"]["done"] == 1
+    assert {t: (e["stage"], e["phase"]) for t, e in hb["tasks"].items()} == {
+        "k_small": ("power", "done"), "k_big": ("power", "done"), "k_small_2": ("power", "held"), "k_big_2": ("power", "held")}
+    assert sorted(os.listdir(Path(spec["queue_dir"]) / "power" / "pending")) == ["k_big_2", "k_small_2"]
+    assert hb["counts"]["done"] == 2
 
 
 def test_stop_file_now_kills_the_task(tmp_path: Path) -> None:
@@ -263,7 +266,7 @@ def test_streak_of_equal_signatures_sets_looping(tmp_path: Path) -> None:
     rc, hb = finish(start(spec), spec)
     assert (rc, hb["phase"], hb["looping"]) == (8, "INCOMPLETE:2f0s", True)
     assert hb["tasks"]["k_bad"]["signature"] == hb["tasks"]["k_bad2"]["signature"] == "boom: kernel bad failed"
-    assert "k_small" not in hb["tasks"] and hb["counts"]["failed"] == 2
+    assert hb["tasks"]["k_small"]["phase"] == "held" and hb["counts"]["failed"] == 2
     assert (Path(spec["queue_dir"]) / "power" / "pending" / "k_small").exists()
 
 

@@ -251,6 +251,15 @@ def join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
 
 
+def left_text(stages: list[str], tasks: list[str]) -> str:
+    """What `edr continue` runs: `export and power`, or with `tasks`, the held tasks of the first stage,
+    `the tasks k_a and k_b of power, then report`."""
+    if not tasks:
+        return join(stages)
+    return f"the task{'s' if len(tasks) > 1 else ''} {join(tasks)} of {stages[0]}" + (
+        f", then {join(stages[1:])}" if stages[1:] else "")
+
+
 def cols(head: list[str], body: list[list[Any]], width: int = 40) -> str:
     """Plain columns in `width`: the first left-aligned and cut to fit, the rest right-aligned. None prints as '-'."""
     rows = [head] + [["-" if c is None else _s(c) for c in r] for r in body]

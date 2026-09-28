@@ -1013,6 +1013,50 @@ def test_continue_follows_the_tree_across_its_runs(demo: Path, capsys) -> None:
     assert code == 0 and "_a.export-power.2_demo_g" in stages_of(out)[0]
 
 
+def test_continue_runs_exactly_the_tasks_a_group_held_back(demo: Path, capsys) -> None:
+    (demo / "tasks.toml").write_text((demo / "tasks.toml").read_text() + "".join(
+        f'\n[tasks.{t}]\nkernel = "gemm"\ntest = "{t.upper()}"\nargs = ""\n' for t in ("k_c", "k_d")))
+    jobs = demo / "jobs" / "demo.toml"
+    jobs.write_text(jobs.read_text().replace('tasks = ["k_small", "k_big"]', 'tasks = ["k_small", "k_big", "k_c", "k_d"]'))
+
+    def group(done: tuple[str, ...], held: tuple[str, ...]) -> dict:
+        """The task entries of a power group as the driver writes them after a stop."""
+        return {**{t: {"stage": "power", "phase": "done", "started": 110, "ended": 120, "exit": 0} for t in done},
+                **{t: {"stage": "power", "phase": "held"} for t in held}}
+
+    def tasks_of(out: str) -> list[tuple[str, list[str]]]:
+        return [(s["name"], [t["id"] for t in s["tasks"]]) for s in json.loads(out)["data"]["spec"]["stages"]]
+
+    a = seed(demo, "a", "STOPPED")
+    ran(demo, a, "STOPPED", {n: ("done", 0) for n in DEMO_STAGES})
+    beat(demo, a, tasks=group(("k_small", "k_big"), ("k_c", "k_d")))
+    edr(capsys, "status")
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--dry-run")
+    assert code == 0 and tasks_of(out) == [("power", ["k_c", "k_d"])]
+    assert f"\n{stages_of(out)[0]}: the tasks k_c and k_d of power on local " in edr(capsys, "continue", "a@demo", "--dry-run")[1]
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--tasks", "k_small", "--dry-run")
+    assert code == 0 and tasks_of(out) == [("power", ["k_small"])]
+    # The run that continues the tree starts k_c and holds k_d back again; the tree then holds k_d alone.
+    root = json.loads((bdir(demo) / f"{a}.json").read_text())["root"]
+    x = seed(demo, "a.power", "STOPPED", date="20260926_1300")
+    ran(demo, x, "STOPPED", {"power": ("done", 0)}, names=("power",), t0=200, tree=root)
+    beat(demo, x, tasks=group(("k_c",), ("k_d",)))
+    edr(capsys, "status")
+    jobs.write_text(jobs.read_text().replace(', "k_d"]', "]"))  # a held task runs also when the job drops it
+    for handle in ("a@demo", "a.power@demo"):
+        code, out, _ = edr(capsys, "--json", "continue", handle, "--dry-run")
+        assert code == 0 and tasks_of(out) == [("power", ["k_d"])]
+
+
+def test_only_a_task_group_holds_tasks(demo: Path, capsys) -> None:
+    b = seed(demo, "b_nodw", "OVER_BUDGET:synth")
+    ran(demo, b, "OVER_BUDGET:synth", {"synth": ("over_budget", 0)}, names=("synth", "pnr"))
+    beat(demo, b, tasks={"k_small": {"phase": "skipped"}})  # an entry without a stage lands under synth
+    edr(capsys, "status")
+    code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
+    assert code == 0 and stages_of(out)[1] == ["pnr"]
+
+
 def test_continue_without_stage_refuses_a_stage_that_did_not_end_with_exit_0(demo: Path, capsys) -> None:
     c = seed(demo, "c", "FAILED:pnr")
     ran(demo, c, "FAILED:pnr", {"synth": ("done", 0), "pnr": ("failed", 1)})
@@ -1042,12 +1086,12 @@ def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monke
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     root = json.loads((bdir(demo) / f"{a}.json").read_text())["root"]
     note = acts.continue_run("a@demo", "telegram")
-    assert note == f"{submitted[0]}: export, power on local {root}" and "_a.export-power_" in submitted[0]
+    assert note == f"{submitted[0]}: export and power on local {root}" and "_a.export-power_" in submitted[0]
     with pytest.raises(Refuse, match="a.export-power@demo on the same tree has not ended"):
         acts.continue_run("a@demo", "telegram")  # a second tap starts no second run on the tree
     with Database(demo / "data" / "edr.db") as db:
         assert [(e["actor"], e["run_id"], e["kind"], e["text"]) for e in db.events()] == [
-            ("telegram", submitted[0], "continue", f"export power on {a}")]
+            ("telegram", submitted[0], "continue", f"export and power on {a}")]
     assert len(submitted) == 1
 
 

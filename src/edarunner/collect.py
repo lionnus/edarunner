@@ -145,9 +145,10 @@ def restore_on_request(
 
 
 def _on_request_paths(project: Project, c: _Copier, spec: dict, run: dict, name: str) -> list[str]:
-    """The rendered `collect_on_request.<name>` entries of the stages the spec ran, for the tasks of the heartbeat."""
+    """The rendered `collect_on_request.<name>` entries of the stages the spec ran, for the tasks of the heartbeat
+    that started."""
     heartbeat = load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
-    tasks = list(heartbeat.get("tasks") or {})
+    tasks = [t for t, e in (heartbeat.get("tasks") or {}).items() if e.get("phase") not in ("held", "skipped")]
     only = spec_stages(spec)
     paths = [p for stage in project.stages.values() if only is None or stage.name in only
              for p in c.render(stage, stage.collect_on_request.get(name, []), tasks)]
