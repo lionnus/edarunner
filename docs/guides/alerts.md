@@ -162,7 +162,7 @@ for the run, in monospace. The alert carries three inline buttons:
 | stop | `stop:<handle>` | asks first, then `edr stop <handle> --after-task` |
 
 The bot answers every press, appends the result to the alert text, and
-keeps the buttons. A press records one event in the run database: the `keep` or the
+keeps the buttons. A press records one event in the project database: the `keep` or the
 `stop` event of the action, with the actor `telegram`.
 
 The stop button acts only on a second tap. The first tap adds the line

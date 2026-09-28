@@ -85,7 +85,7 @@
 
 <path class="box" d="M377 262v56a75 12 0 0 0 150 0V262"/>
 <ellipse class="box" cx="452" cy="262" rx="75" ry="12"/>
-<text class="s" x="452" y="293" text-anchor="middle">run database</text>
+<text class="s" x="452" y="293" text-anchor="middle">project database</text>
 <text class="t" x="452" y="312" text-anchor="middle">data/edr.db</text>
 <path class="a" d="M553 290H527"/>
 

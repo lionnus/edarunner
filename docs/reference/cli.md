@@ -6,7 +6,7 @@
 edr [--json] [--version] command ...
 ```
 
-Run flows on hosts, keep a run database, watch, export.
+Run flows on hosts, keep a project database, watch, export.
 
 | Flag | Meaning |
 |---|---|
@@ -648,7 +648,7 @@ metrics.csv and the collected files of the newest run per label.
 --with-logs. Refuses a DIR that exists and is not empty. docs/guides/results.md
 explains the layout.
 
---mlflow DIR writes the run database into a local MLflow tracking store
+--mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
 per run, of every design or of --design, with the parameters, the
 metrics at their step, the stage and step times, and the collected

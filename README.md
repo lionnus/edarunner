@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.svg" alt="edarunner" width="300"></p>
 
-<p align="center">Run the EDA flow you already have on the machines you already use, and keep one database of every run.</p>
+<p align="center">Run the EDA flow you already have on the machines you already use, and keep all your runs in one database.</p>
 
 <p align="center">
 <a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>

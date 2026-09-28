@@ -43,7 +43,7 @@
 
 <path class="box" d="M40 262v40a132 6 0 0 0 264 0V262"/>
 <ellipse class="box" cx="172" cy="262" rx="132" ry="6"/>
-<text class="s" x="54" y="283">run database</text>
+<text class="s" x="54" y="283">project database</text>
 <text class="t" x="54" y="300">data/edr.db</text>
 
 <rect class="box" x="40" y="320" width="264" height="52" rx="7"/>

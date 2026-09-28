@@ -1,14 +1,14 @@
 # Get the results out
 
 What did my runs produce, and how do I compare them? This page gets the
-numbers of a design out of the run database, compares runs on the
+numbers of a design out of the project database, compares runs on the
 terminal, the board or the phone, and hands a frozen snapshot to an
 analysis.
 
 ## The database
 
-The run database is one SQLite file, `data/edr.db`, on the head node. It
-holds every run, every number and every action.
+The project database is `data/edr.db`. It holds every run of every
+batch, every number and every action.
 
 | Table | One row per | Holds |
 |---|---|---|
@@ -300,7 +300,7 @@ empty is refused. `--dry-run` lists the files.
 
 ## MLflow
 
-`edr export --mlflow <dir> [--design <src>]` writes the run database into
+`edr export --mlflow <dir> [--design <src>]` writes the project database into
 a local MLflow tracking store, for `mlflow ui`. It needs the extra:
 `pip install 'edarunner[mlflow]'`.
 

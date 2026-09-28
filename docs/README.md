@@ -1,8 +1,8 @@
 # Documentation
 
 edarunner runs the flow you already have on the machines you already use,
-over ssh or through a batch scheduler, and keeps one database of every
-run. This index tells you which page to open. The same pages are
+over ssh or through a batch scheduler, and keeps all your runs in one
+database. This index tells you which page to open. The same pages are
 published at <https://lionnus.github.io/edarunner/>.
 
 ## Use the tool

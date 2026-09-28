@@ -27,9 +27,9 @@
   </marker>
 </defs>
 
-<!-- Project directory, written by you -->
+<!-- Project directory, config -->
 <rect class="frame" x="24" y="24" width="252" height="364" rx="10"/>
-<text class="h" x="40" y="48">PROJECT, YOU WRITE</text>
+<text class="h" x="40" y="48">PROJECT, CONFIG</text>
 
 <rect class="box" x="40" y="64" width="220" height="52" rx="7"/>
 <text class="t" x="54" y="86">Project config</text>
@@ -55,13 +55,13 @@
 <text class="s" x="246" y="342" text-anchor="end">edr init</text>
 <text class="m" x="54" y="360">edr-watch.service</text>
 
-<!-- Project directory, written by edr -->
+<!-- Project directory, generated -->
 <rect class="frame" x="300" y="24" width="252" height="364" rx="10"/>
-<text class="h" x="316" y="48">PROJECT, EDR WRITES</text>
+<text class="h" x="316" y="48">PROJECT, GENERATED</text>
 
 <rect class="gen" x="316" y="64" width="220" height="52" rx="7"/>
 <rect class="mark" x="317" y="74" width="4" height="32"/>
-<text class="t" x="330" y="86">Run database</text>
+<text class="t" x="330" y="86">Project database</text>
 <text class="m" x="330" y="104">data/edr.db</text>
 
 <rect class="gen" x="316" y="128" width="220" height="52" rx="7"/>
