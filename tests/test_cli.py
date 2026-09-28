@@ -555,6 +555,27 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
     assert edr(capsys, "extract", "--source", "0000000")[0] == 2
 
 
+def test_extract_takes_every_step_of_a_stage_over_budget_with_exit_0(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    hb_path = bdir(demo) / f"{a}.json"
+    hb = json.loads(hb_path.read_text())
+    hb.update(stage="pnr", step=5, exit=9, stages={"synth": {"status": "done", "exit": 0},
+                                                   "pnr": {"status": "over_budget", "exit": 0}})
+    hb_path.write_text(json.dumps(hb))
+    with Database(demo / "data" / "edr.db") as db:
+        db.set_step_times(a, {"synth": {str(n): n for n in range(4)}, "pnr": {"4": 4, "5": 5}})
+    for n in range(6):
+        reports = demo / "data" / "results" / a / "reports" / str(n)
+        reports.mkdir(parents=True)
+        (reports / "area.rpt").write_text(f"i_top {1000 + n}\n")
+        (reports / "qor.rpt").write_text(f"Critical Path Slack: -0.0{n}\n")
+    code, out, _ = edr(capsys, "extract", "a@demo")
+    assert code == 0 and out == f"{a}: 12 new, 0 changed, 0 unchanged, 0 failed\n"
+    with Database(demo / "data" / "edr.db") as db:
+        steps = {(m["stage"], m["step"]) for m in db.metrics(run_ids=[a])}
+    assert steps == {("synth", n) for n in range(4)} | {("pnr", 4), ("pnr", 5)}
+
+
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
     row = out.splitlines()[2]

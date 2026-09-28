@@ -151,7 +151,7 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 8
 
 
-def test_a_failed_stage_yields_no_metrics(env: Env) -> None:
+def test_without_step_runs_only_a_done_stage_keeps_its_steps(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="FAILED:pnr", exit=5, stage="pnr", step=4, step_name="cts",
                        stages={"synth": {"status": "done", "exit": 0}, "pnr": {"status": "failed", "exit": 5}})
     root = Path(hb["root"])
@@ -162,6 +162,28 @@ def test_a_failed_stage_yields_no_metrics(env: Env) -> None:
     assert (env.project.data / "results" / hb["run_id"] / "reports" / "5" / "area.rpt").is_file()
     rows = env.db.metrics(run_ids=[hb["run_id"]])
     assert [(r["stage"], r["step"]) for r in rows] == [("synth", 0), ("synth", 1), ("synth", 2), ("synth", 3)]
+
+
+@pytest.mark.parametrize("phase, stages", [
+    ("stage:synth", {}),
+    ("STOPPED", {}),
+    ("KILLED:SIGTERM", {}),
+    ("FAILED:synth", {"synth": {"status": "failed", "exit": 1}}),
+    ("OVER_BUDGET:synth", {"synth": {"status": "over_budget", "exit": -15}}),
+])
+def test_a_stage_that_did_not_exit_0_keeps_the_steps_it_finished(env: Env, phase: str, stages: dict) -> None:
+    hb = env.heartbeat("b_nodw", phase=phase, stage="synth", step=3, step_name="synth", stages=stages,
+                       step_times={"synth": {str(n): int(NOW) - 400 + 100 * n for n in range(4)}})
+    root = Path(hb["root"])
+    for n in range(6):  # step 3 runs or broke off; a copied tree adds the pnr reports 4 and 5 of another run
+        (root / "reports" / str(n)).mkdir(parents=True)
+        (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
+        (root / "reports" / str(n) / "qor.rpt").write_text(f"Critical Path Slack: -0.0{n}\n")
+    env.cycle()
+    rows = env.db.metrics(run_ids=[hb["run_id"]])
+    assert sorted({(r["stage"], r["step"]) for r in rows}) == [("synth", 0), ("synth", 1), ("synth", 2)]
+    assert [e["text"] for e in env.db.events() if e["kind"] == "metrics"] == [
+        "6 new: area_cell_um2, wns_ns at synth 0, 1, 2"]
 
 
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:

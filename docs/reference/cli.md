@@ -326,11 +326,13 @@ edr extract [--dry-run] [--json] [--batch B] [--source SOURCE] [handle]
 
 Extracts every metric in edr.toml again from the files collected for
 each run under data/results. It uses the same function as the watcher,
-so it reads the tasks that finished and the stages that ended done. A
-run without a heartbeat, such as an imported one, is read for every
-stage. New rows are added. A row is replaced when its value, canonical
-name or unit has changed, or when its area_hier metric has no area
-rows yet. Rows that the new extraction does not find are kept.
+so it reads the tasks that ended done, the stages that exited 0, and
+in any other stage the steps that the run has passed: step_runs holds
+the step and a later one. A run without a heartbeat, such as an
+imported one, is read for every stage. New rows are added. A row is
+replaced when its value, canonical name or unit has changed, or when
+its area_hier metric has no area rows yet. Rows that the new
+extraction does not find are kept.
 
 Pass exactly one of a handle, --batch or --source. For each run,
 extract prints how many rows are new, changed, unchanged and failed,

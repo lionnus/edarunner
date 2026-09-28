@@ -121,8 +121,19 @@ stage, or the subset its `stages` list names, in that same order.
 
 A flow that runs several steps inside one tool session stays one stage, and `edr` tracks the
 steps. The driver runs `progress` every 5 s in the stage's `cwd` and takes the first number it
-prints as the current step. `steps[step]` is the step name in the heartbeat and on the board,
-and the checkpoint the watcher resumes from. A numbered step belongs to one stage.
+prints as the number of the step that runs now. `steps[step]` is the step name in the heartbeat
+and on the board, and the checkpoint the watcher resumes from. A numbered step belongs to one
+stage. Once the run reaches a later step, the watcher copies the directory of the step and
+extracts its metrics, whether the stage ends `done` or not.
+
+A count of the numbered report directories gives the step that runs now when the flow creates
+the directory of a step as the step ends. A flow that creates it when the step starts needs the
+highest directory that is not empty, because a count names the next step, and such a flow can
+leave empty directories for the steps it skips:
+
+```toml
+progress = "find reports -mindepth 2 -maxdepth 2 -type f 2>/dev/null | awk -F/ '$(NF-1) ~ /^[0-9]+$/ { print $(NF-1) }' | sort -n | tail -1"
+```
 
 The numbering starts at 0 and runs on across the stages. A later stage lists either every name
 from step 0 or only its own names. Both forms below give `synth` the steps 0 to 3 and `pnr` the
@@ -149,11 +160,11 @@ takes tasks from the same pool; `docs/guides/run.md` explains the queue and shar
 | `resume` | the command with `{checkpoint}`, for a resume | `""` |
 | `cwd` | the working directory, relative to the run tree | `"."` |
 | `steps` | the step names the flow passes, indexed by step number | `[]` |
-| `progress` | a command that prints the current step number | `""` |
+| `progress` | a command that prints the number of the step that runs now | `""` |
 | `needs` | `{ cores, disk_gb, tools, ram_gb }`; the table below | `{ cores = 1, disk_gb = 0.0, tools = {}, ram_gb = 0.0 }` |
 | `budget` | `{ hours, disk_gb, kill, per }`; the table below | `{ kill = false, per = "stage" }` |
 | `retry` | `{ match, wait_s, max }`; the table below | unset |
-| `collect` | paths under the run tree the watcher copies when the stage ends | `[]` |
+| `collect` | paths under the run tree the watcher copies when the stage ends; while a stage with steps runs, it copies each numbered directory under them below the step that runs now | `[]` |
 | `collect_on_request` | named path sets for `edr continue --collect <name>` | `{}` |
 | `prune` | named path sets for `edr retire --prune <name>` | `{}` |
 | `foreach` | `"tasks"` makes the stage a task group | `""` |
@@ -202,8 +213,11 @@ A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python`
 the flow does not print, such as an energy from a power and a window, comes from a `python`
 hook that reads the input files itself.
 
-A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
-row per step directory found, under the stage that owns that step number. A file that does not
+A metric row comes from a task that ended `done` or from a stage that exited 0 (done, or over
+budget without a kill). Any other stage gives the rows of the numbered steps that the run has
+passed: `step_runs` holds the step and a later step of the run. There, a report of a step that
+the run never recorded, as in a copied tree, gives no row. A `step = "*"` metric gives one row
+per step directory found, under the stage that owns that step number. A file that does not
 parse gives a row with an empty value and the error in `source_file`; the extraction goes on.
 
 | Key | Meaning | Default |

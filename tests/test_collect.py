@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -82,16 +80,16 @@ def test_done_run_and_idempotent(env) -> None:
     assert artifacts(db) == rows
 
 
-def test_running_stage_copies_final_steps_only(env) -> None:
+def test_running_stage_copies_the_steps_below_its_step(env) -> None:
     project, ssh, db, run, root = env
     run_tree(root)
-    old = time.time() - 3600
-    for n in (0, 1):
-        os.utime(root / "reports" / str(n), (old, old))
-    hb = heartbeat(run, "stage:synth", "synth")
-    r = collect.collect_run(project, ssh, db, run, hb, step_final_s=600)
-    assert r.failures == []
+    (root / "reports" / "qor_data").mkdir()  # not a step
     results = project.data / "results" / RUN_ID
+    assert collect.collect_run(project, ssh, db, run, heartbeat(run, "stage:synth", "synth")).failures == []
+    assert not (results / "reports").exists()
+    # The directories were written a moment ago; below the step that runs now, they are final all the same.
+    r = collect.collect_run(project, ssh, db, run, {**heartbeat(run, "stage:synth", "synth"), "step": 2})
+    assert r.failures == []
     assert sorted(p.name for p in (results / "reports").iterdir()) == ["0", "1"]
     assert (results / "log" / "synth.log").is_file()
     assert not (results / "simulation").exists()
