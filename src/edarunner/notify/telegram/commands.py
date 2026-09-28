@@ -41,7 +41,7 @@ class Builtin:
 
 
 BUILTINS = {b.name: b for b in (
-    Builtin("status", "[handle]", "the board, or one run", "Look", "html", on_run=True),
+    Builtin("status", "[handle|all]", "the board, every finished run with all, or one run", "Look", "html", on_run=True),
     Builtin("events", "[n]", "the last events, newest first", "Look", "html"),
     Builtin("hosts", "", "cores, RAM, scratch and GPUs, used of total", "Look", "html", slow=True),
     Builtin("tools", "", "seats used of total, and the hosts, per tool", "Look", "html"),
@@ -158,7 +158,9 @@ class Commands:
     # built-in commands
 
     def cmd_status(self, args: list[str]) -> str:
-        """The board, or one run."""
+        """The board, every finished run with `all`, or one run."""
+        if args == ["all"]:
+            return self.actions.status_text(everything=True)
         return self.actions.status_text(handle(args) if args else None)
 
     def cmd_events(self, args: list[str]) -> str:

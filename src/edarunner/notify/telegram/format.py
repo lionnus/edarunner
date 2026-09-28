@@ -11,9 +11,12 @@ import textwrap
 import time
 from collections import Counter
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from edarunner import board as runs
+
+if TYPE_CHECKING:
+    from edarunner.notify.alerts import Alert
 
 Row = dict[str, Any]
 
@@ -50,43 +53,85 @@ def head(project: str, title: str) -> str:
     return f"<b>{esc(project)}: {esc(title)}</b>"
 
 
-def alert(project: str, text: str, cmd: str | None = None) -> str:
-    """The first line of `text` as the title, the rest as prose, `cmd` in monospace.
+def alert(project: str, a: Alert) -> str:
+    """An alert: the mark and the bold title, then what was seen, the facts and each command in monospace."""
+    from edarunner.notify.alerts import blocks
 
-    A title `state handle` gets the mark of the state and the handle in monospace.
-    """
-    title, _, rest = text.partition("\n")
-    state, _, who = title.partition(" ")
-    top = f"{MARK[state]} {head(project, state)} <code>{esc(who)}</code>" if state in MARK and who else head(project, title)
-    return top + (f"\n{esc(rest)}" if rest else "") + (f"\n<code>{esc(cmd)}</code>" if cmd else "")
+    title = f"{MARK.get(a.kind, '🔴')} <b>{esc(project)}: {esc(a.title)}</b>" + (f" <code>{esc(a.who)}</code>" if a.who else "")
+    return fit(title + "\n" + blocks(a, lambda c: f"<code>{esc(c)}</code>", esc))
 
 
-def run_line(row: Row, now: float, totals: dict[str, int] | None = None) -> str:
-    """`mark handle state, stage step/total, age`; a running run leaves out its state."""
-    st, parts = runs.state_of(row), []
-    if st != "running":
-        parts.append(st)
-    if runs.is_live(row) and row.get("stage"):
-        step = "" if row.get("step") is None else f" {row['step']}" + (
-            f"/{totals[row['stage']]}" if (totals or {}).get(row["stage"]) else "")
-        parts.append(f"{row['stage']}{step}")
-    age = None if row.get("updated") is None else max(0.0, now - row["updated"])
-    parts.append(runs.hm(age))
-    return f"{mark(st)} <code>{esc(runs.handle(row))}</code> {esc(', '.join(parts))}"
+# A state in plain words, for the legend under a board.
+WORDS = {"stale": "stale (no heartbeat for a while)", "dead": "dead (driver gone)", "hung": "hung (no progress)",
+         "looping": "looping (the same failure again)", "over_budget": "over budget", "host_full": "host disk full",
+         "superseded": "replaced by a newer run", "pending": "waiting in the scheduler", "held": "held by the scheduler",
+         "suspended": "suspended by the scheduler", "incomplete": "incomplete (some tasks failed)",
+         "stopped": "stopped by hand", "abandoned": "retired while live"}
+DAY_S = 86400
 
 
-def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None, most: int = 30) -> str:
-    """One run line per run in board order, then the count per state in italics."""
+def where(row: Row, totals: dict[str, int] | None = None, names: dict[int, str] | None = None) -> str:
+    """`stage step/total name`; `stage, starting` for a stage with steps before its first step."""
+    stage, step, totals = row.get("stage"), row.get("step"), totals or {}
+    if not stage:
+        return ""
+    if step is None:
+        return f"{stage}, starting" if stage in totals else str(stage)
+    return f"{stage} {step}" + (f"/{totals[stage]}" if totals.get(stage) else "") + (
+        f" {names[step]}" if (names or {}).get(step) else "")
+
+
+def run_line(row: Row, now: float, totals: dict[str, int] | None = None, names: dict[int, str] | None = None) -> str:
+    """A live run: `mark handle state, stage step/total name, runtime`; a running run leaves out its state.
+    A finished run: `mark handle state, ended <when>`."""
+    st = runs.state_of(row)
+    if runs.is_live(row):
+        parts = [st if st != "running" else "", where(row, totals, names),
+                 runs.hm(now - row["started"]) if row.get("started") else ""]
+    else:
+        end = row.get("updated")
+        parts = [st, "" if end is None else "ended " + (runs.hm(now - end) + " ago" if now - end < DAY_S
+                                                      else time.strftime("%d.%m %H:%M", time.localtime(end)))]
+    return f"{mark(st)} <code>{esc(runs.handle(row))}</code> {esc(', '.join(p for p in parts if p))}".rstrip()
+
+
+def legend(states: Iterable[str]) -> str:
+    """Each mark of `states` in plain words, in the order the marks first appear."""
+    words: dict[str, list[str]] = {}
+    for st in states:
+        w = words.setdefault(mark(st), [])
+        if WORDS.get(st, st) not in w:
+            w.append(WORDS.get(st, st))
+    return ", ".join(f"{m} {' or '.join(w)}" for m, w in words.items())
+
+
+def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None,
+          names: dict[int, str] | None = None, everything: bool = False, most: int = 30) -> str:
+    """The live runs, then the runs that ended in the last day (with `everything`, every run that ended),
+    then the count per state and a legend of the marks, in italics."""
     now = now or time.time()
     ordered = runs.order(rows)
-    lines = [run_line(r, now, totals) for r in ordered[:most]]
-    if len(ordered) > most:
-        lines.append(f"<i>… and {len(ordered) - most} more</i>")
-    if ordered and not any(runs.is_live(r) for r in ordered):
+    if not ordered:
+        return "<i>no runs</i>"
+    live = [r for r in ordered if runs.is_live(r)]
+    ended = [r for r in ordered if not runs.is_live(r)]
+    recent = ended if everything else [r for r in ended if now - (r.get("updated") or 0) < DAY_S]
+    lines = ["<b>Running</b>", *(run_line(r, now, totals, names) for r in live[:most])]
+    if len(live) > most:
+        lines.append(f"<i>… and {len(live) - most} more</i>")
+    if not live:
         lines.append("<i>nothing live</i>")
+    if ended:
+        lines += ["", "<b>" + ("Finished" if everything else "Finished in the last 24 hours") + "</b>",
+                  *(run_line(r, now) for r in recent[:most])]
+        if len(recent) > most:
+            lines.append(f"<i>… and {len(recent) - most} more</i>")
+        if older := len(ended) - len(recent):
+            lines.append(f"<i>and {older} older run{'s' if older != 1 else ''}: /status all</i>")
     counts = Counter(runs.state_of(r) for r in ordered)
-    lines.append("<i>" + (", ".join(f"{v} {esc(k)}" for k, v in sorted(counts.items(), key=lambda kv: runs.RANK.get(kv[0], 7)))
-                          or "no runs") + "</i>")
+    shown = [runs.state_of(r) for r in live[:most] + recent[:most]]
+    lines += ["", "<i>" + esc(", ".join(f"{v} {k}" for k, v in sorted(counts.items(), key=lambda kv: runs.RANK.get(kv[0], 7))))
+              + "</i>", "<i>" + esc(legend(shown)) + "</i>"]
     return fit("\n".join(lines))
 
 

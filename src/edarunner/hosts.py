@@ -12,13 +12,14 @@ import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 
 from .guards import Refuse
 from .model import Job, Needs, Placement, Project, Site
 
 TIMEOUT_RC = 255
 # What the head node runs itself: the controller calls the first four, the `local` host the rest.
-HEAD_TOOLS = ("ssh", "rsync", "git", "python3", "nproc", "df", "ps", "awk", "stat", "readlink")
+HEAD_TOOLS = ("ssh", "rsync", "git", "python3", "nproc", "df", "ps", "awk", "stat", "readlink", "grep", "find", "tr")
 _SEP = "@@"
 _SIG_RE = re.compile(r"^[A-Z0-9]+$")
 
@@ -38,7 +39,6 @@ class HostProbe:
     free_gb: float
     our_tool_procs: int = 0
     other_tool_procs: int = 0
-    our_runs: int = 0
     cores: int = 0
     load: float = 0.0
     total_ram_gb: float = 0.0
@@ -135,8 +135,6 @@ def _probe_cmd(dirs: list[str]) -> str:
         f"echo {_SEP}; for d in {quoted}; do "
         '[ -w "$d" ] && df -Pk "$d" | awk -v d="$d" \'NR==2{print d, $2, $4}\'; done; '
         f"echo {_SEP}; ps -eo user:32=,comm=; "
-        # The bracket keeps this shell and the grep out of the count.
-        f"echo {_SEP}; ps -eww -o user:32=,args= | grep '[e]dr_driver.py'; "
         f"echo {_SEP}; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi "
         "--query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null; true"
     )
@@ -159,12 +157,12 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
             sections.append([])
         elif line.strip():
             sections[-1].append(line)
-    if len(sections) != 5 or len(sections[0]) != 5:
+    if len(sections) != 4 or len(sections[0]) != 5:
         raise HostError(f"{host}: unreadable probe output: {out[:200]!r}")
     me, ncpu, load, ram_kb, mem_kb = (s.strip() for s in sections[0])
     scratch = [(int(free), int(total), d) for d, total, free in (ln.rsplit(None, 2) for ln in sections[1])]
     free_kb, total_kb, mount = max(scratch) if scratch else (0, 0, "")
-    gpus = _gpus(sections[4])
+    gpus = _gpus(sections[3])
     rx = re.compile(tool_procs) if tool_procs else None
     ours = others = 0
     for line in sections[2]:
@@ -174,7 +172,6 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
                 ours += 1
             else:
                 others += 1
-    runs = sum(1 for ln in sections[3] if ln.split(None, 1)[0] == me)
     return HostProbe(
         host=host,
         # A load above the core count leaves no core free, not a negative count.
@@ -184,7 +181,6 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
         free_gb=round(free_kb / 2**20, 1),
         our_tool_procs=ours,
         other_tool_procs=others,
-        our_runs=runs,
         cores=int(ncpu),
         load=float(load),
         total_ram_gb=round(int(ram_kb) / 2**20, 1),
@@ -194,6 +190,26 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
         gpu_used_gb=round(sum(g[0] for g in gpus) / 1024, 1),
         gpu_total_gb=round(sum(g[1] for g in gpus) / 1024, 1),
     )
+
+
+class Proc(NamedTuple):
+    """One tool process: `run_id` is the value of `EDR_RUN_ID` in its environment, "" without it."""
+
+    pid: int
+    etimes: int
+    pcpu: float
+    comm: str
+    args: str
+    cwd: str = ""
+    run_id: str = ""
+
+
+# grep and find skip the processes of other users: their environ and cwd are not readable.
+_PROCS_CMD = (
+    'ps -ww -u "$(id -un)" -o pid=,etimes=,pcpu=,comm=,args= || exit 1; '
+    f"echo {_SEP}; grep -Hasz '^EDR_RUN_ID=' /proc/[0-9]*/environ | tr '\\0' '\\n'; "
+    f"echo {_SEP}; find /proc -mindepth 2 -maxdepth 2 -name cwd -user \"$(id -un)\" -printf '%h %l\\n' 2>/dev/null; true"
+)
 
 
 class Ssh:
@@ -264,16 +280,28 @@ class Ssh:
             raise HostError(f"{host}: rc {rc}: {err.strip()}")
         return rc == 0
 
-    def tool_processes(self, host: str, pattern: str) -> list[tuple[int, int, float, str, str]]:
-        """Our processes on `host` whose comm matches `pattern`: (pid, etimes_s, pcpu, comm, args)."""
-        out = self._run_ok(host, 'ps -ww -u "$(id -un)" -o pid=,etimes=,pcpu=,comm=,args=')
+    def tool_processes(self, host: str, pattern: str) -> list[Proc]:
+        """Our processes on `host` whose comm matches `pattern`, with their cwd and their `EDR_RUN_ID`.
+
+        One ssh call: ps, the `EDR_RUN_ID` of every environment that holds it, and the cwd links of our processes."""
+        sections: list[list[str]] = [[]]
+        for line in self._run_ok(host, _PROCS_CMD).splitlines():
+            if line == _SEP:
+                sections.append([])
+            else:
+                sections[-1].append(line)
+        listing, env, cwds = (sections + [[], []])[:3]
+        run_ids = {int(m[1]): m[2] for m in (re.match(r"/proc/(\d+)/environ:EDR_RUN_ID=(.*)", ln) for ln in env) if m}
+        cwd = {int(m[1]): m[2] for m in (re.match(r"/proc/(\d+) (.*)", ln) for ln in cwds) if m}
         rx = re.compile(pattern)
         rows = []
-        for line in out.splitlines():
+        for line in listing:
             parts = line.split(None, 4)
             # A comm with a space misaligns the row; no tool name has one.
             if len(parts) == 5 and rx.search(parts[3]):
-                rows.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3], parts[4]))
+                pid = int(parts[0])
+                rows.append(Proc(pid, int(parts[1]), float(parts[2]), parts[3], parts[4], cwd.get(pid, ""),
+                                 run_ids.get(pid, "")))
         return rows
 
     def check_local(self) -> list[str]:

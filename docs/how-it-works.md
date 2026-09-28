@@ -270,7 +270,15 @@ directory. One cycle does this, in order:
    when its stage has a `resume` command and no process group of the run
    is still alive on the host (`watch._resume`).
 7. On ssh hosts it lists your processes that match `tool_procs` and
-   belong to no live run tree.
+   that no live run owns, with one ssh call per host (`watch.orphans`).
+   The call reads `EDR_RUN_ID` from the environment of each process;
+   the driver sets it for every stage command of every project. A live
+   run of this project owns its processes, and a dead or ended run
+   leaves them orphans. A run id that the database does not know belongs
+   to another project, whose watcher judges it, unless the working
+   directory or command line of the process holds `/<project>/<run_id>`
+   under the safety marker. A process without `EDR_RUN_ID` is owned
+   when its working directory or command line holds the safety marker.
 8. It removes a seat lease whose run is dead, retired or has left the
    stage, or that is older than the stage budget, and writes a `lease`
    event with the reason (`watch.sweep_leases`).

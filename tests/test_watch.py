@@ -11,6 +11,7 @@ from helpers_watch import NEW, NOW, Env, rid
 
 from edarunner import board, collect, config, launch, watch
 from edarunner.backend import Live
+from edarunner.hosts import Proc
 from helpers_backend import FakeBackend
 
 
@@ -52,10 +53,11 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert sorted(env.notifier.sent) == sorted([("superseded", rid("a")), ("dead", rid("d")), ("looping", rid("l")),
                                                 ("over_budget", rid("o")), ("host_full", rid("f"))])
     assert len(env.notifier.boards) == 1
-    assert env.notifier.boards[0].splitlines()[0] == "🔴 <code>d@demo</code> dead, synth 1/4, 3m"
-    text, cmd = env.notifier.texts[rid("l")]
-    assert text.splitlines()[0] == "looping l@demo" and cmd == "edr stop l@demo --why looping"
-    assert env.notifier.texts[rid("d")][1].startswith("edr continue d@demo --stage ")
+    assert env.notifier.boards[0].splitlines()[:2] == ["<b>Running</b>", "🔴 <code>d@demo</code> dead, synth 1/4 analyze, 1h"]
+    looping = env.notifier.alerts[rid("l")]
+    assert (looping.title, looping.who, looping.todo[0][1]) == ("same failure again in", "l@demo",
+                                                                "edr stop l@demo --why looping")
+    assert env.notifier.alerts[rid("d")].todo[0][1].startswith("edr continue d@demo --stage ")
     bdir = env.project.data / "board"
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
     assert set(env.db.get_store("progress")) == set(states) and rid("d") in env.db.get_store("notified")
@@ -201,17 +203,39 @@ def test_queued_runs_are_relaunched(env: Env, monkeypatch) -> None:
 def test_orphans_are_reported_and_killed_only_when_asked(env: Env) -> None:
     env.project.limits.grace_s = 0
     hb = env.heartbeat("a")
-    env.ssh.procs = [(99999, 120, 0.0, "sleep", "sleep 100"), (99998, 5, 0.0, "sleep", f"sleep 1 {hb['root']}")]
+    env.ssh.procs = [Proc(99999, 120, 0.0, "sleep", "sleep 100"), Proc(99998, 5, 0.0, "sleep", f"sleep 1 {hb['root']}")]
     states = env.cycle()
     assert states["orphan:local:99999"] == "orphan" and "orphan:local:99998" not in states
     assert env.events() == [("", "orphan")] and env.notifier.sent == [("orphan", "orphan:local:99999")]
-    env.ssh.procs = [(99999, 121, 0.0, "sleep", "sleep 100")]
+    env.ssh.procs = [Proc(99999, 121, 0.0, "sleep", "sleep 100")]
     env.cycle(NOW + 1)
     assert len(env.notifier.sent) == 1 and env.ssh.killed == []  # the age is not part of the alert text
     env.project.limits.kill_orphan = True
-    env.ssh.procs = [(99997, 130, 0.0, "sleep", "sleep 200")]
+    env.ssh.procs = [Proc(99997, 130, 0.0, "sleep", "sleep 200")]
     env.cycle(NOW + 1)
     assert env.ssh.killed == [("cmd", "kill -TERM 99997")] and ("", "kill") in env.events()
+
+
+def test_the_run_id_in_the_environment_decides_who_owns_a_tool(env: Env) -> None:
+    live, dead, done = env.heartbeat("a")["run_id"], env.heartbeat("d", age=200)["run_id"], env.heartbeat(
+        "g", phase="done", exit=0)["run_id"]
+    env.ssh.procs = [Proc(501, 60, 99.0, "fc_shell", "fc_shell", "/home/me", live),
+                     Proc(502, 60, 99.0, "fc_shell", "fc_shell", "/home/me", dead),
+                     Proc(503, 60, 99.0, "fc_shell", "fc_shell", "/home/me", done),
+                     Proc(504, 60, 99.0, "fc_shell", "fc_shell", "/scratch/x/edr/other/r9/pnr", "r9"),
+                     Proc(505, 60, 99.0, "fc_shell", "fc_shell", "/scratch/x/edr/demo/r8/pnr", "r8"),
+                     Proc(506, 60, 99.0, "fc_shell", "fc_shell -f /scratch/x/edr/other/r1/main.tcl", "/home/me"),
+                     Proc(507, 60, 99.0, "fc_shell", "fc_shell", "/home/me")]
+    states = env.cycle()
+    assert sorted(k for k, s in states.items() if s == "orphan") == [f"orphan:local:{p}" for p in (502, 503, 505, 507)]
+    you = "Your process fc_shell runs on local"
+    assert {k.rsplit(":", 1)[1]: a.about.removesuffix(" It may hold a licence seat.")
+            for k, a in env.notifier.alerts.items() if a.kind == "orphan"} == {
+        "502": f"{you} for the run d@demo, whose driver is gone.",
+        "503": f"{you} for the run g@demo, which has ended (done).",
+        "505": f"{you} in the tree of the run r8, but this project has no record of that run.",
+        "507": f"{you}, and no edarunner run owns it."}
+    assert {e for e in env.events() if e[1] == "orphan"} == {(dead, "orphan"), (done, "orphan"), ("", "orphan")}
 
 
 def test_dry_run_writes_nothing(env: Env, capsys) -> None:

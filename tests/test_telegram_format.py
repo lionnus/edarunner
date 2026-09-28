@@ -7,22 +7,36 @@ from helpers_board import NOW, RUN, board_row, board_rows
 from edarunner.notify.telegram import format as fmt
 
 
-def test_board_is_one_line_per_run_then_the_counts():
-    lines = fmt.board(board_rows(), now=NOW, totals={"synth": 4}).splitlines()
-    assert lines[:3] == ["🔴 <code>a@demo</code> dead, synth 3/4, 1h", "🟡 <code>b_nodw@demo</code> stale, synth 3/4, 15m",
-                         "🟢 <code>c@demo</code> synth 3/4, 0m"]
-    assert lines[4:] == ["🟠 <code>b_nodw@demo</code> incomplete, 1h", "⚪ <code>a@demo</code> done, 1h",
-                         "<i>1 dead, 1 incomplete, 1 stale, 2 running, 1 done</i>"]
+def test_board_has_running_and_finished_sections_then_the_counts_and_a_legend():
+    rows = [*board_rows(), board_row("done", "old", "FAILED:synth", age=200_000),
+            board_row("run1", "fresh", "stage:synth", "running", step=None)]
+    assert fmt.board(rows, now=NOW, totals={"synth": 4}, names={3: "elaborate"}).splitlines() == [
+        "<b>Running</b>",
+        "🔴 <code>a@demo</code> dead, synth 3/4 elaborate, 2h",
+        "🟡 <code>b_nodw@demo</code> stale, synth 3/4 elaborate, 2h",
+        "🟢 <code>c@demo</code> synth 3/4 elaborate, 2h",
+        "🟢 <code>dddddddddddddddddddddddddddddddddddddddd@sweep10_long_name</code> synth 3/4 elaborate, 2h",
+        "🟢 <code>fresh@demo</code> synth, starting, 2h",
+        "",
+        "<b>Finished in the last 24 hours</b>",
+        "🟠 <code>b_nodw@demo</code> incomplete, ended 1h ago",
+        "⚪ <code>a@demo</code> done, ended 1h ago",
+        "<i>and 1 older run: /status all</i>",
+        "",
+        "<i>1 dead, 1 failed, 1 incomplete, 1 stale, 3 running, 1 done</i>",
+        "<i>🔴 dead (driver gone), 🟡 stale (no heartbeat for a while), 🟢 running, 🟠 incomplete (some tasks failed), "
+        "⚪ done</i>"]
+    every = fmt.board(rows, now=NOW, everything=True).splitlines()
+    assert every[7:12] == ["<b>Finished</b>", "🔴 <code>old@demo</code> failed, ended "
+                           + time.strftime("%d.%m %H:%M", time.localtime(NOW - 200_000)),
+                           "🟠 <code>b_nodw@demo</code> incomplete, ended 1h ago", "⚪ <code>a@demo</code> done, ended 1h ago", ""]
+    assert every[-1] == "<i>🔴 dead (driver gone) or failed, 🟡 stale (no heartbeat for a while), 🟢 running, " \
+                        "🟠 incomplete (some tasks failed), ⚪ done</i>"
     done = [board_row("done", "<a>", "done")]
-    assert fmt.board(done * 32, now=NOW).splitlines()[-3:] == [
-        "<i>… and 2 more</i>", "<i>nothing live</i>", "<i>32 done</i>"]
+    assert fmt.board(done * 32, now=NOW).splitlines()[:4] == ["<b>Running</b>", "<i>nothing live</i>", "",
+                                                              "<b>Finished in the last 24 hours</b>"]
+    assert "<i>… and 2 more</i>" in fmt.board(done * 32, now=NOW).splitlines()
     assert "&lt;a&gt;@demo" in fmt.board(done, now=NOW) and fmt.board([], now=NOW) == "<i>no runs</i>"
-
-
-def test_alert_marks_the_state_and_escapes_the_reason():
-    assert fmt.alert("demo", "hung a@demo\nno progress <3 h", "edr stop a@demo --why hung") == (
-        "🔴 <b>demo: hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>")
-    assert fmt.alert("demo", "watch stale\nno watch.json") == "<b>demo: watch stale</b>\nno watch.json"
 
 
 def test_run_detail_of_a_dead_run():

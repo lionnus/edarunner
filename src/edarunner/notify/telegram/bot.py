@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from edarunner.model import Project, Site
-from edarunner.notify import Button, Notifier
+from edarunner.notify import Notifier
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import ApiError, BotApi
 from edarunner.notify.telegram.buttons import Buttons, markup
@@ -22,6 +22,7 @@ from edarunner.notify.telegram.commands import Commands, Reply, keyboard_word
 
 if TYPE_CHECKING:
     from edarunner.cli import Actions
+    from edarunner.notify.alerts import Alert
 
 log = logging.getLogger(__name__)
 
@@ -64,18 +65,17 @@ class TelegramBot(Notifier):
 
     # Notifier
 
-    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
-             cmd: str | None = None) -> str | None:
-        """Send one alert; a repeat with the same kind and run id edits it in place."""
+    def send(self, alert: Alert) -> str | None:
+        """Send one alert; a repeat with the same kind and key edits it in place."""
         # A press reaches the watcher that polls, which acts on its own project only.
-        keys = markup(buttons) if buttons and self.project.telegram_poll else None
+        keys = markup(alert.buttons) if alert.buttons and self.project.telegram_poll else None
         try:
-            mid = self._upsert(f"alert:{kind}:{run_id}", fmt.alert(self.project.project, text, cmd), keys)
+            mid = self._upsert(f"alert:{alert.kind}:{alert.key}", fmt.alert(self.project.project, alert), keys)
         except ApiError as e:
             log.warning("telegram: %s", e)
             return None
-        if buttons:
-            self._remember(mid, run_id)
+        if alert.buttons:
+            self._remember(mid, alert.key)
         return str(mid)
 
     def _remember(self, msg_id: int, run_id: str) -> None:

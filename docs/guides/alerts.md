@@ -24,13 +24,15 @@ others, stays off, and `edr watch` logs the reason.
 ### Message kinds
 
 Every channel gets every kind with the same title and the same text.
-The title is `<project>: <kind>`, and an alert title adds the run handle.
+The title of an alert holds the mark of its state, the project, the
+state in plain words, and the run handle or the host. The title of any
+other message is `<project>: <kind>`.
 
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
-| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command and the keep, ack and stop buttons | one push per change, with the next command, the button commands and three copy buttons | one mail per change, with the next command and the button commands |
-| alert: `orphan` | the watcher | one message with the kill command, no buttons | one push, the same text | one mail, the same text |
-| `watch stale` | `edr watch --check` | one message | one urgent push | one mail |
+| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; `hung`, `looping`, `over_budget`, `host_full` and `superseded` also get the keep, ack and stop buttons | one push per change, with the next command, and the button commands with three copy buttons | one mail per change, with the next command and the button commands |
+| alert: `orphan` | the watcher | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
+| alert: `watch` | `edr watch --check` | one message | one urgent push | one mail |
 | `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |
 | `board` | the watcher every cycle | one pinned message, edited in place | none | none |
 | `board` on request | `edr notify --board` | one new message | one low push | one mail |
@@ -142,19 +144,21 @@ the limit of 4096 characters; the bot cuts a long reply at a line end.
 ### Alerts
 
 The watcher sends one message per run and state. A new reason for the
-same state edits that message instead of sending another. An alert looks
-like this:
+same state edits that message instead of sending another. An alert has
+four parts:
 
-```
-🔴 demo: dead b_nodw@demo
-heartbeat older than 90 s, driver 4711 gone on local
-edr continue b_nodw@demo --stage synth --from elaborate
-```
+- the title: the mark of the state, the project and the state in bold,
+  then the run handle or the host in monospace;
+- one or two sentences on what edarunner saw and why it matters;
+- the facts: the stage and step, the host, and the last log line or the
+  command line in monospace, cut to 120 characters;
+- what to do: the command to run next in monospace, and what edarunner
+  does by itself.
 
-The first line holds the mark of the state, the project and the state
-in bold, and the handle in monospace. The second line is the reason.
-The third line is the one command that `edr status --triage` proposes
-for the run, in monospace. The alert carries three inline buttons:
+[What each alert says](#what-each-alert-says) shows every kind. The
+alerts of a live run that still reads its keep and stop files (`hung`,
+`looping`, `over_budget`, `host_full` and `superseded`) carry three
+inline buttons:
 
 | Button | `callback_data` | Action |
 |---|---|---|
@@ -177,21 +181,37 @@ survives a restart of the watcher.
 
 The board is one message, pinned once and edited silently on every
 watcher cycle. Its first line holds the project name and the time of the
-last edit. Under it, each run has one line: the mark, the handle, the
-state and the age. A running run shows its stage in place of the state,
-and a live run also shows its step out of the total. Live runs come
-first. The last line, in italics, holds the count per state:
+last edit. Under it come two sections, each with one line per run: the
+mark, the handle in monospace, which a tap copies, and what the run
+does.
+
+- Running: the live runs, the worst state first. A line holds the state
+  when it is not `running`, the stage with its step of the total and the
+  step name, and the time since the run started. A stage with steps
+  shows `starting` until the first step.
+- Finished in the last 24 hours: the state and when the run ended. The
+  older runs fold into one line, `and N older runs: /status all`, and
+  `/status all` lists every run.
+
+The last two lines, in italics, hold the count per state and a legend
+that names each mark of the message in plain words:
 
 ```
 demo: board 14:05
-🔴 a@demo dead, synth 3/13, 1h
-🟢 c@demo pnr 4/13, 0m
-⚪ b@demo done, 1h
-1 dead, 1 running, 1 done
+Running
+🔴 a@demo dead, synth 3/13 elaborate, 5h
+🟢 c@demo pnr 9/13 route_opt, 3h
+
+Finished in the last 24 hours
+⚪ b@demo done, ended 1h ago
+and 4 older runs: /status all
+
+1 dead, 1 running, 5 done
+🔴 dead (driver gone), 🟢 running, ⚪ done
 ```
 
-The board shows at most 30 runs and then a line `… and N more`. When
-no run is live, a line `nothing live` comes before the counts. The board's
+Each section shows at most 30 runs and then a line `… and N more`.
+When no run is live, the Running section says `nothing live`. The board's
 message id lives in the database's `store` table under `telegram`, so a
 restart edits the same message.
 `/pin` unpins the old message and pins a new one at the bottom of the
@@ -407,6 +427,220 @@ Without `topic_id`, the bot answers a command in the thread it came
 from, and it sends its alerts and its board to the main thread. Each
 project that answers commands still needs its own bot, because one
 token has one poller.
+
+## What each alert says
+
+Each example shows the Telegram message as it reads on the phone. ntfy
+and mail carry the same text; mail indents each command by four
+spaces, and a button becomes a line `<label>: <command>`.
+[reference/states.md](../reference/states.md) says when the watcher
+finds each state.
+
+`dead`: the heartbeat is old and the driver is gone.
+
+```
+🔴 demo: driver gone for b_nodw@demo
+The run has written no heartbeat for 50m, and its driver 4711 is gone from hostA. Nothing runs until it is resumed.
+
+stage: synth, step 3 elaborate
+host: hostA
+Information: elaborating top
+
+Resume it from the last step:
+edr continue b_nodw@demo --stage synth --from elaborate
+edarunner resumes it once by itself when the stage has a resume command.
+```
+
+`hung`: the run is alive but nothing changes.
+
+```
+🔴 demo: no progress in b_nodw@demo
+The run is alive, but it has shown no progress since 14.01 03:00: the step, the log, the tree size and the CPU time stand still. The tool may wait for a licence, or it is stuck.
+
+stage: synth, step 3 elaborate
+host: hostA
+Information: elaborating top
+
+If it is stuck, stop it:
+edr stop b_nodw@demo --why hung
+edarunner leaves it alone, since kill_hung is off.
+```
+
+`looping`: the same failure, `streak` times in a row.
+
+```
+🔴 demo: same failure again in b_nodw@demo
+The last 2 tasks failed with the same error, so the driver starts no new task. More retries would fail the same way.
+
+stage: synth, step 3 elaborate
+host: hostA
+tasks: 4 done, 3 failed
+Information: elaborating top
+
+Read the log and fix the cause, then stop the run:
+edr stop b_nodw@demo --why looping
+```
+
+`over_budget`: a stage went past its `budget`.
+
+```
+🔴 demo: over budget in b_nodw@demo
+Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end, and the run then ends OVER_BUDGET.
+
+stage: synth, step 3 elaborate
+host: hostA
+Information: elaborating top
+
+Stop it now if the rest of the stage is of no use:
+edr stop b_nodw@demo --why over-budget
+```
+
+`host_full`: the free scratch of a host is below `host_free_min_gb`.
+
+```
+🟡 demo: disk almost full on hostA
+hostA has less than 100 GB of free scratch, so the driver starts nothing new there. edarunner stops the newest run on hostA 1h after this alert unless that run has an ack.
+
+stage: synth, step 3 elaborate
+run: b_nodw@demo
+Information: elaborating top
+
+Free scratch on the host. To keep this run from the stop, ack it:
+edr keep b_nodw@demo --ack
+```
+
+`superseded`: a newer batch runs the same label at another source.
+
+```
+🟡 demo: newer run replaces b_nodw@demo
+A newer run of the same label runs at another source (20260927_0900_b_nodw_demo_gdef5678). edarunner stops this run after its running task, 1h after this alert, unless it has a keep file.
+
+stage: synth, step 3 elaborate
+host: hostA
+Information: elaborating top
+
+To keep it running:
+edr keep b_nodw@demo --hours 12
+```
+
+`held`: the scheduler holds the job.
+
+```
+🟠 demo: scheduler holds b_nodw@demo
+The scheduler holds the job, and it starts only after someone releases it.
+
+job: slurm:4711
+
+Release it with the scheduler, or cancel it:
+edr stop b_nodw@demo --why held
+```
+
+`incomplete`: the run ended with failed or skipped tasks.
+
+```
+🟠 demo: failed tasks in b_nodw@demo
+The run ended with 3 failed and 1 skipped tasks. Their results are missing.
+
+stage: synth, step 3 elaborate
+host: hostA
+tasks: 4 done, 3 failed, 1 skipped
+Information: elaborating top
+
+See which tasks failed and the log tail:
+edr status b_nodw@demo
+```
+
+`failed`: the run ended `FAILED`.
+
+```
+🔴 demo: failed run b_nodw@demo
+The run ended in stage synth with exit code 1.
+
+stage: synth, step 3 elaborate
+host: hostA
+Information: elaborating top
+
+See the stage that failed and the log tail:
+edr status b_nodw@demo
+```
+
+`killed`: a signal ended the run.
+
+```
+🔴 demo: killed run b_nodw@demo
+A signal ended the run (SIGTERM), so its last stage did not finish.
+
+stage: synth, step 3 elaborate
+host: hostA
+Information: elaborating top
+
+See the last stage and the log tail:
+edr status b_nodw@demo
+```
+
+`orphan`: a tool process of yours that no live run owns. The watcher
+reads `EDR_RUN_ID` from the environment of the process; the driver sets
+it for every stage command of every project.
+
+- A live run of this project owns the process.
+- A run of this project that is dead or has ended leaves it an orphan,
+  and the alert names that run.
+- A run id that the database does not know belongs to another project,
+  whose watcher judges it. The process is an orphan only when its
+  working directory or command line holds `/<project>/<run_id>` under
+  the safety marker.
+- A process without `EDR_RUN_ID` is owned when its working directory or
+  command line holds the safety marker.
+
+A tool process that no run owns:
+
+```
+🔴 demo: tool process with no run on hostA
+Your process fc_shell runs on hostA, and no edarunner run owns it. It may hold a licence seat.
+
+process: fc_shell, pid 5120
+running for: 3h
+directory: /home/me/work
+fc_shell -f /home/me/work/run.tcl
+
+Check it:
+ssh hostA ps -o pid,etime,args -p 5120
+If it is yours and stale, end it:
+ssh hostA kill 5120
+edarunner never kills it, since kill_orphan is off.
+```
+
+A tool that a dead run left behind:
+
+```
+🔴 demo: tool process of an ended run on hostA
+Your process fc_shell runs on hostA for the run b_nodw@demo, whose driver is gone. It may hold a licence seat.
+
+process: fc_shell, pid 5120
+running for: 2d
+directory: /scratch/me/edr/demo/20260926_1200_b_nodw_demo_gabc1234/pnr
+fc_shell -f /scratch/me/edr/demo/20260926_1200_b_nodw_demo_gabc1234/pnr/run.tcl
+
+Check it:
+ssh hostA ps -o pid,etime,args -p 5120
+If it is yours and stale, end it:
+ssh hostA kill 5120
+edarunner never kills it, since kill_orphan is off.
+```
+
+`watch`: `edr watch --check` found no watcher cycle for three heartbeats.
+
+```
+🔴 demo: watcher stopped
+The watcher has not finished a cycle for 11m. No alert arrives until it runs again.
+
+pid: 3141
+project: /home/me/myflow
+
+Run one cycle that writes nothing; it prints the error that stops the watcher:
+edr watch --dry-run
+Then restart the watcher service.
+```
 
 ## ntfy
 

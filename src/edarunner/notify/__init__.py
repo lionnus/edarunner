@@ -19,6 +19,7 @@ from edarunner.model import Project, Site
 
 if TYPE_CHECKING:
     from edarunner.cli import Actions
+    from edarunner.notify.alerts import Alert
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +35,8 @@ class Notifier:
     def stop(self) -> None:
         """Stop that thread."""
 
-    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
-             cmd: str | None = None) -> str | None:
-        """Send one alert of `kind` for `run_id`: a title line, the reason, and the command to run next; return its message id."""
+    def send(self, alert: Alert) -> str | None:
+        """Send one alert; return its message id."""
         return None
 
     def board(self, text: str) -> None:
@@ -64,11 +64,6 @@ def button_cmds(buttons: list[Button] | None) -> list[tuple[str, str]]:
         if action in BUTTON_CMDS:
             out.append((label, BUTTON_CMDS[action].format(handle)))
     return out
-
-
-def plain(text: str, buttons: list[Button] | None = None, cmd: str | None = None) -> str:
-    """An alert body as plain text: `text`, the command to run next, and one line per button."""
-    return "\n".join([text, *([cmd] if cmd else []), *(f"{label}: {c}" for label, c in button_cmds(buttons))])
 
 
 def untag(text: str) -> str:

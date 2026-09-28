@@ -15,7 +15,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 
 | Command | Effect |
 |---|---|
-| `/status [handle]` | the board, or one run |
+| `/status [handle\|all]` | the board, every finished run with all, or one run |
 | `/events [n]` | the last events, newest first |
 | `/hosts` | cores, RAM, scratch and GPUs, used of total |
 | `/tools` | seats used of total, and the hosts, per tool |

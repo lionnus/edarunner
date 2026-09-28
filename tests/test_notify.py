@@ -19,6 +19,7 @@ from edarunner import cli, config
 from edarunner.config import ConfigError
 from edarunner.model import Mail, Ntfy
 from edarunner.notify import BUTTON_CMDS, alert_buttons, make_notifiers, untag
+from edarunner.notify.alerts import Alert
 from edarunner.notify.mail import MailNotifier
 from edarunner.notify.ntfy import NtfyNotifier
 from edarunner.notify.telegram import TelegramBot
@@ -55,36 +56,41 @@ def secret(tmp_path: Path, name: str, mode: int = 0o600) -> Path:
     return path
 
 
+def dead(buttons: bool = True) -> Alert:
+    return Alert("dead", "r1", "driver gone for", "a@demo", "no heartbeat", todo=[("Look:", "edr status a@demo")],
+                 buttons=alert_buttons("a@demo") if buttons else [])
+
+
 def test_ntfy_sends_alerts_with_priority_and_button_lines(ntfy_server, tmp_path):
     url, got = ntfy_server
     n = NtfyNotifier(PROJECT, Ntfy(topic="edr-x", url=url, token_file=secret(tmp_path, "t")))
-    assert n.send("dead", "r1", "dead a@demo\nno heartbeat", alert_buttons("a@demo"), "edr status a@demo") is None
+    assert n.send(dead()) is None
     path, auth, body = got[0]
     assert path == "/" and auth == "Bearer s3cret"
-    assert body == {"topic": "edr-x", "title": "demo: dead a@demo", "priority": 5, "message":
-                    "no heartbeat\nedr status a@demo\nkeep 12h: edr keep a@demo --hours 12\n"
+    assert body == {"topic": "edr-x", "title": "🔴 demo: driver gone for a@demo", "priority": 5, "message":
+                    "no heartbeat\n\nLook:\nedr status a@demo\n\nkeep 12h: edr keep a@demo --hours 12\n"
                     "ack: edr keep a@demo --ack\nstop: edr stop a@demo --after-task",
                     "actions": [{"action": "copy", "label": "keep 12h", "value": "edr keep a@demo --hours 12"},
                                 {"action": "copy", "label": "ack", "value": "edr keep a@demo --ack"},
                                 {"action": "copy", "label": "stop", "value": "edr stop a@demo --after-task"}]}
-    n.send("hung", "r1", "hung a@demo")
-    assert got[1][2]["priority"] == 4 and got[1][2]["message"] == "hung a@demo" and "actions" not in got[1][2]
+    n.send(Alert("hung", "r1", "no progress in", "a@demo", "stuck"))
+    assert got[1][2]["priority"] == 4 and got[1][2]["message"] == "stuck" and "actions" not in got[1][2]
     assert n.post("note", "a &amp; <b>b</b>", silent=True)
-    assert got[2][2]["message"] == "a & b" and got[2][2]["priority"] == 1
+    assert got[2][2]["message"] == "a & b" and got[2][2]["priority"] == 1 and got[2][2]["title"] == "demo: note"
     assert not NtfyNotifier(PROJECT, Ntfy(topic="x", url="http://127.0.0.1:9")).post("note", "x")
 
 
 def test_mail_sends_one_mail_per_alert():
     cfg = Mail(host="smtp.example.org", sender="edr@example.org", to=["a@example.org", "b@example.org"])
     with mock.patch("smtplib.SMTP") as smtp:
-        MailNotifier(PROJECT, cfg).send("failed", "r1", "failed a@demo\nexit 1", alert_buttons("a@demo"))
+        MailNotifier(PROJECT, cfg).send(dead())
         s = smtp.return_value.__enter__.return_value
         smtp.assert_called_once_with("smtp.example.org", 587, timeout=30)
         s.starttls.assert_called_once()
         s.login.assert_not_called()
         msg = s.send_message.call_args[0][0]
-        assert msg["Subject"] == "demo: failed a@demo" and msg["To"] == "a@example.org, b@example.org"
-        assert msg.get_content().splitlines()[:2] == ["exit 1", "keep 12h: edr keep a@demo --hours 12"]
+        assert msg["Subject"] == "🔴 demo: driver gone for a@demo" and msg["To"] == "a@example.org, b@example.org"
+        assert msg.get_content().splitlines()[:5] == ["no heartbeat", "", "Look:", "    edr status a@demo", ""]
         s.send_message.side_effect = OSError("refused")
         assert not MailNotifier(PROJECT, cfg).post("note", "x")
 
@@ -181,11 +187,13 @@ def test_ntfy_resends_without_actions_when_the_server_refuses_them(monkeypatch):
 # (the call, the title after "<project>: ", the text lines, the button commands).
 BUTTONS = [c.format("a@demo") for c in BUTTON_CMDS.values()]
 KINDS = {
-    "alert": (lambda n: n.send("dead", "r1", "dead a@demo\nno heartbeat", alert_buttons("a@demo"), "edr status a@demo"),
-              "dead a@demo", ["no heartbeat", "edr status a@demo"], BUTTONS),
-    "orphan": (lambda n: n.send("orphan", "orphan:h:7", "orphan sleep\nsleep 99", None, "kill -TERM 7"),
-               "orphan sleep", ["sleep 99", "kill -TERM 7"], []),
-    "watch stale": (lambda n: n.send("watch", "", "watch stale\nno watch.json"), "watch stale", ["no watch.json"], []),
+    "alert": (lambda n: n.send(dead()), "driver gone for a@demo", ["no heartbeat", "", "Look:", "edr status a@demo"],
+              BUTTONS),
+    "orphan": (lambda n: n.send(Alert("orphan", "orphan:h:7", "tool process with no run on", "h", "sleep 99",
+                                      todo=[("End it:", "kill 7")])),
+               "tool process with no run on h", ["sleep 99", "", "End it:", "kill 7"], []),
+    "watch stale": (lambda n: n.send(Alert("watch", "", "watcher stopped", "", "no watch.json")), "watcher stopped",
+                    ["no watch.json"], []),
     "digest": (lambda n: n.post("digest", "<b>Live</b>\n🟢 <code>a@demo</code> pnr"), "digest", ["Live", "🟢 a@demo pnr"], []),
     "board": (lambda n: n.post("board", "🟢 <code>a@demo</code> pnr 3/7\n<i>1 running</i>"), "board",
               ["🟢 a@demo pnr 3/7", "1 running"], []),
@@ -215,7 +223,7 @@ def ntfy_got(tmp_path, monkeypatch, call):
     [body] = bodies
     cmds = [a["value"] for a in body.get("actions", [])]
     assert all(any(line.endswith(": " + c) for line in body["message"].splitlines()) for c in cmds)
-    return body["title"], body["message"].splitlines(), cmds
+    return body["title"][body["title"].index("demo: "):], body["message"].splitlines(), cmds
 
 
 def mail_got(tmp_path, monkeypatch, call):
@@ -223,8 +231,8 @@ def mail_got(tmp_path, monkeypatch, call):
     with mock.patch("smtplib.SMTP") as smtp:
         call(MailNotifier(PROJECT, Mail(host="h", sender="f@example.org", to=["t@example.org"])))
     [(msg,), _] = smtp.return_value.__enter__.return_value.send_message.call_args
-    lines = msg.get_content().splitlines()
-    return msg["Subject"], lines, [ln.split(": ", 1)[1] for ln in lines if ln.startswith(("keep 12h:", "ack:", "stop:"))]
+    lines = [ln.strip() for ln in msg.get_content().splitlines()]
+    return msg["Subject"][msg["Subject"].index("demo: "):], lines, [ln.split(": ", 1)[1] for ln in lines if ln.startswith(("keep 12h:", "ack:", "stop:"))]
 
 
 @pytest.mark.parametrize("channel", [telegram_got, ntfy_got, mail_got], ids=["telegram", "ntfy", "mail"])

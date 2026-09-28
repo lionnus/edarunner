@@ -21,7 +21,7 @@ from .db import Database
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .model import SCHEDULERS, Project, Task
-from .notify import Notifier, alert_buttons
+from .notify import Notifier, alerts
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
 
@@ -69,7 +69,10 @@ STATES = {
                        "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, unless the run has a keep file", alert=True),
-    "orphan": State("a process of the current user that matches `tool_procs`, outside every live run tree",
+    "orphan": State("a process of the current user that matches `tool_procs` and that no live run owns: its "
+                    "`EDR_RUN_ID` names a dead or ended run of this project, or a run the database does not know "
+                    "whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and no safety "
+                    "marker in its cwd or command line",
                     "`SIGTERM`, only with `kill_orphan`", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),
@@ -243,12 +246,10 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     if state in _NOTIFY:
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
-            handle = board.handle(run)
-            cmd = board.triage_cmd(run, state, _hb(project, run) if state == "dead" else {})
             # A repeat send edits the earlier message in place and keeps its buttons.
-            reason = text if reasons else run.get("phase") or state
-            ids = [n.send(state, run.get("key") or run_id, f"{state} {handle}\n{reason}",
-                          alert_buttons(handle) if run_id else None, cmd) for n in notifiers]
+            alert = (alerts.orphan_alert(project, run) if state == "orphan"
+                     else alerts.run_alert(project, run, state, reasons, _hb(project, run), now))
+            ids = [n.send(alert) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
@@ -259,14 +260,23 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         rec["acted"] = True
 
 
+def _ended(run: Row) -> str:
+    """The state of a run that no longer runs its tools: dead, retired, stopped or ended; "" for a live run."""
+    state = run["state"] if run.get("state") in ("retired", "abandoned") else board.state_of(run)
+    return state if not board.is_live(run) or state in ("dead", "stopped", "retired", "abandoned") else ""
+
+
 def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
-    """Our tool processes on every site host that no live run root owns."""
+    """Our tool processes on every site host that no live run owns.
+
+    A process with `EDR_RUN_ID` belongs to that run. A live run of this project owns it; a run of this
+    project that is dead or ended leaves it an orphan. A run id this database does not know belongs to
+    another project, whose watcher judges it, unless the process's cwd or command line holds
+    `/<project>/<run_id>` under the safety marker. A process without `EDR_RUN_ID` is owned when its cwd
+    or command line holds the safety marker."""
     if not project.site.tool_procs:
         return []
-    roots: dict[str, list[str]] = {}
-    for r in db.runs():
-        if r.get("root") and r.get("phase") and board.is_live(r):
-            roots.setdefault(str(r.get("host")), []).append(r["root"])
+    marker, runs = project.safety.marker, {r["run_id"]: r for r in db.runs()}
     out = []
     for host in project.site.hosts:
         try:
@@ -274,14 +284,20 @@ def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
         except HostError as e:
             log.warning("%s: %s", host, e)
             continue
-        pids = " ".join(str(p[0]) for p in procs)
-        _, cwds, _ = ssh.run(host, f'for p in {pids}; do echo "$p $(readlink /proc/$p/cwd)"; done') if pids else (0, "", "")
-        cwd = dict(line.split(" ", 1) for line in cwds.splitlines() if " " in line)
-        for pid, etimes, _, comm, args in procs:
-            own = roots.get(host, [])
-            if not any(r in args or cwd.get(str(pid), "").startswith(r) for r in own):
-                out.append({"key": f"orphan:{host}:{pid}", "run_id": "", "label": comm, "batch": host, "host": host,
-                            "pid": pid, "phase": args, "etimes": etimes})
+        for p in procs:
+            run, texts = runs.get(p.run_id), (p.cwd, p.args)
+            if run is not None:
+                ended = _ended(run)
+                owned = not ended
+            elif p.run_id:
+                ended = "unknown"
+                owned = not any(marker in t and f"/{project.project}/{p.run_id}" in t for t in texts)
+            else:
+                ended, owned = "", any(marker in t for t in texts)
+            if not owned:
+                out.append({"key": f"orphan:{host}:{p.pid}", "run_id": run["run_id"] if run else "", "label": p.comm,
+                            "batch": host, "host": host, "pid": p.pid, "phase": p.args, "etimes": p.etimes, "cwd": p.cwd,
+                            "owner": p.run_id, "owner_handle": board.handle(run) if run else "", "owner_state": ended})
     return out
 
 
@@ -461,7 +477,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     areas = analysis.last_areas(db, [r["run_id"] for r in rows])
     config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly, areas,
                                                                 analysis.step_names(project)))
-    text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
+    text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
     for n in notifiers:
         n.board(text)
 
@@ -595,6 +611,7 @@ def check(project: Project, notifiers: list[Notifier] = ()) -> int:
         return 0
     text = f"watch.json is {int(age)} s old (pid {w.get('pid')})" if w else "no watch.json"
     print(f"edr watch: {text}")
+    alert = alerts.watch_alert(project, age if w else None, w.get("pid"))
     for n in notifiers:
-        n.send("watch", "", f"watch stale\n{text}")
+        n.send(alert)
     return 1

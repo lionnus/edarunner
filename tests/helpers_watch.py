@@ -9,8 +9,9 @@ from pathlib import Path
 from edarunner import watch
 from edarunner.config import load_project
 from edarunner.db import Database
-from edarunner.hosts import HostProbe, Ssh
+from edarunner.hosts import HostProbe, Proc, Ssh
 from edarunner.notify import Notifier
+from edarunner.notify.alerts import Alert
 from helpers_driver import DEMO
 
 NOW = 1_800_000_000.0
@@ -27,7 +28,7 @@ class FakeSsh(Ssh):
     def __init__(self, site) -> None:
         super().__init__(site)
         self.alive: dict[int, bool] = {}
-        self.procs: list[tuple] = []
+        self.procs: list[Proc] = []
         self.killed: list[tuple] = []
 
     def probe(self, host):
@@ -55,16 +56,16 @@ class FakeSsh(Ssh):
 class Rec(Notifier):
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
-        self.texts: dict[str, tuple[str, str | None]] = {}
+        self.alerts: dict[str, Alert] = {}
         self.boards: list[str] = []
         self.started = 0
 
     def start(self):
         self.started += 1
 
-    def send(self, kind, run_id, text, buttons=None, cmd=None):
-        self.sent.append((kind, run_id))
-        self.texts[run_id] = (text, cmd)
+    def send(self, alert):
+        self.sent.append((alert.kind, alert.key))
+        self.alerts[alert.key] = alert
         return str(len(self.sent))
 
     def board(self, text):

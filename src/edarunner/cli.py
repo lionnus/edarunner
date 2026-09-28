@@ -360,12 +360,14 @@ class Actions:
         launch.stop(c.ssh, c.db, row, {}, after_task=True, why=why, state=c.project.state_dir, actor=actor)
         return f"{board.handle(row)} stops after its task"
 
-    def status_text(self, handle: str | None = None) -> str:
-        """The board, or the state, stage, step, host, age, next command and last log line of one run."""
+    def status_text(self, handle: str | None = None, everything: bool = False) -> str:
+        """The board, with `everything` every finished run; or the state, stage, step, host, age, next command
+        and last log line of one run."""
         if handle is None:
             rows = self.c.rows()
             self.c.save_board(rows)
-            return tgfmt.board(rows, totals=metrics.step_totals(self.c.project))
+            return tgfmt.board(rows, totals=metrics.step_totals(self.c.project),
+                               names=analysis.step_names(self.c.project), everything=everything)
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.db.run(row["run_id"]) or row
@@ -467,7 +469,9 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         if a.live:
             code = max(code, _mark_live(c, rows))
         c.save_board(rows)
-        text = _triage(c, rows) if a.triage else board.narrow_text(rows) if a.narrow else board.wide(rows)
+        totals = metrics.step_totals(c.project)
+        text = _triage(c, rows) if a.triage else board.narrow_text(rows, totals=totals) if a.narrow else board.wide(
+            rows, totals=totals)
         if a.watch and not a.json:
             c.console.clear()
         c.emit(text, {"runs": rows})
@@ -523,6 +527,9 @@ def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
         c.emit(analysis.host_history_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
     rows = _mark_hosts(c, _probe_rows(c))
+    runs = board.live_per_host(c.rows())
+    for r in rows:
+        r["our_runs"] = runs[r["host"]]
     if a.narrow:
         # A long cell, such as an error, folds inside its column instead of widening the table.
         c.console.width = 48
@@ -1274,7 +1281,8 @@ def _parser() -> argparse.ArgumentParser:
         Without a handle, status prints the board: one line per run of every
         batch that is not retired, live runs first and dead ones on top. The columns are the row
         number, label, host, state, phase, stage/step, heartbeat age, failed and
-        done task counts, and the core hours so far. The state of a live run
+        done task counts, and the core hours so far. A live stage with steps
+        shows <stage>, starting until its first step. The state of a live run
         follows the heartbeat age (running, stale, dead) or the watcher's last
         verdict (hung, host_full, ...). A finished run shows its phase class:
         done, incomplete, failed, over_budget, stopped or killed.
@@ -1309,7 +1317,7 @@ def _parser() -> argparse.ArgumentParser:
         part; GPUs idle of total, where idle means under 5 % utilisation and
         under 5 % memory in use; GPU memory free of total, summed over the GPUs;
         processes that match tool_procs, split into yours and other users';
-        and your edr drivers.
+        and the live runs of this project on the host, from the database.
 
         A mark tells how full a resource is. It is 🟢 below the first threshold
         of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
