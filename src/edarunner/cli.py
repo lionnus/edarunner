@@ -1432,9 +1432,10 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handles", nargs="*", metavar="HANDLE", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")
     command("init", "write edr.toml and the watch unit here", """
-        Writes edr.toml and edr-watch.service into the current directory. --site
-        is the directory or the file of the site file; init does not write that
-        file. Refuses when edr.toml exists.
+        Writes edr.toml and edr-watch.service into the current directory, the
+        project directory where you run edr. --site is the directory or the
+        file of the site file; init does not write that file. Refuses when
+        edr.toml exists.
         """, write=True).add_argument("--site", required=True, metavar="DIR", help="the site directory, or a site.toml path")
     command("check", "load everything, probe the hosts, check the hooks", """
         Loads the project, the site and every batch under jobs/, imports every

@@ -43,7 +43,7 @@
 
 <!-- Project -->
 <rect class="frame" x="24" y="176" width="536" height="240" rx="10"/>
-<text class="h" x="40" y="200">PROJECT, IN GIT</text>
+<text class="h" x="40" y="200">YOUR PROJECT</text>
 <text class="m" x="544" y="200" text-anchor="end">edr.toml</text>
 <rect class="box" x="40" y="216" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="238">Each stage</text>

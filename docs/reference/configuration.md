@@ -232,7 +232,8 @@ parse gives a row with an empty value and the error in `source_file`, never a cr
 ## site.toml
 
 `site.toml` holds the hosts, the tools and the bot of a site; `site` in `edr.toml` names it,
-and `docs/guides/site.md` sets it up. Every remote command runs through `sh -c`, so the login
+and `docs/guides/site.md` sets it up. Every project and every user of the machines shares it,
+usually as a clone of the lab's site repository at `~/.config/edarunner/`. Every remote command runs through `sh -c`, so the login
 shell of a host may be `csh` or `tcsh`.
 
 | Key | Meaning | Default |

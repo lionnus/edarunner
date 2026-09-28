@@ -18,7 +18,8 @@ one SQLite database. From there you compare runs on the board, on your
 phone or in an exported snapshot.
 
 A project is a few TOML files: `edr.toml`, `tasks.toml`,
-`jobs/<batch>.toml` and a private `site.toml`. edarunner knows no EDA tool
+`jobs/<batch>.toml` in a directory where you run `edr`, and a
+`site.toml` that the lab shares. edarunner knows no EDA tool
 itself; your flow scripts stay as they are. [AGENTS.md](AGENTS.md) lets an
 agent set up a project and operate it.
 

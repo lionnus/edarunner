@@ -383,9 +383,10 @@ each stage, attempts summed, and the total.
 edr init [--dry-run] [--json] --site DIR
 ```
 
-Writes edr.toml and edr-watch.service into the current directory. --site
-is the directory or the file of the site file; init does not write that
-file. Refuses when edr.toml exists.
+Writes edr.toml and edr-watch.service into the current directory, the
+project directory where you run edr. --site is the directory or the
+file of the site file; init does not write that file. Refuses when
+edr.toml exists.
 
 | Flag | Meaning |
 |---|---|

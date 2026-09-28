@@ -12,9 +12,11 @@ to read the code.
 
 The **head node** is the machine you work on. It runs `edr`, the command
 you type, and `edr watch`, the one long-running process per project. The
-project directory lives there, and with it the run database
-`data/edr.db`, the checked-out copies of your source and the results
-collected from the hosts.
+project directory lives there, where you run `edr`, and with it the run
+database `data/edr.db`, the checked-out copies of your source and the
+results collected from the hosts. The site file lives there too, in
+`~/.config/edarunner/`, a clone of the site repository that every
+project and every user of the lab shares.
 
 A **compute host** is a machine that runs the flow. The site file lists
 the hosts under `[hosts]`, and the name `local` stands for the head node
