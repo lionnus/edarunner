@@ -143,8 +143,9 @@ def _counts(row: Row) -> dict[str, int]:
 
 
 def _fd(row: Row) -> str:
+    """`<failed>f/<done>d`, then `/<n>s` and `/<n>h` when tasks were skipped or held: `2f/0d/3h`."""
     c = _counts(row)
-    return f"{c.get('failed', 0)}f/{c.get('done', 0)}d"
+    return f"{c.get('failed', 0)}f/{c.get('done', 0)}d" + "".join(f"/{c[k]}{k[0]}" for k in ("skipped", "held") if c.get(k))
 
 
 def _age_s(row: Row, now: float) -> float | None:

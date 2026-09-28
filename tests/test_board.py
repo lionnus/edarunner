@@ -55,6 +55,13 @@ def test_wide_all_states():
     assert "ABANDONED:" + "x" * 30 in cut and "x" * 31 not in cut
 
 
+def test_fail_done_adds_the_skipped_and_held_tasks():
+    held = board_row("fail", "b", "INCOMPLETE:2f1s3h", counts={"done": 4, "failed": 2, "skipped": 1, "held": 3})
+    plain = board_row("done", "a", "done", counts={"done": 4, "failed": 0, "skipped": 0, "held": 0})
+    lines = board.plain(board.wide([held, plain], now=NOW)).splitlines()
+    assert " 2f/4d/1s/3h " in lines[2] and " 0f/4d " in lines[3]
+
+
 def test_a_stage_with_steps_is_starting_before_its_first_step():
     fresh = [board_row("run1", "c", "stage:pnr", "running", stage="pnr", step=None),
              board_row("fail", "b", "INCOMPLETE:1f0s", "running", stage="pnr", step=None)]

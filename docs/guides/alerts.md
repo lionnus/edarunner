@@ -646,15 +646,15 @@ Release it with the scheduler, or cancel it:
 edr stop b_nodw@demo --why held
 ```
 
-`incomplete`: the run ended with failed or skipped tasks.
+`incomplete`: the run ended with failed, skipped or held tasks.
 
 ```
 🟠 demo: failed tasks in b_nodw@demo
-The run ended with 3 failed and 1 skipped tasks. Their results are missing.
+The run ended with 3 failed, 1 skipped and 2 held tasks. Their results are missing.
 
 stage: synth, step 3 elaborate
 host: hostA
-tasks: 4 done, 3 failed, 1 skipped
+tasks: 4 done, 3 failed, 1 skipped, 2 held
 
 Information: elaborating top
 

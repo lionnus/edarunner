@@ -86,11 +86,11 @@ STATES = {
     "held": State("the scheduler holds the job and runs it only after a person releases it", "none", alert=True),
     "suspended": State("the scheduler suspended the job; the heartbeat stands still until it resumes", "none"),
     "imported": State("`edr import` recorded the run with a phase that the driver ends a run with: `done`, "
-                      "`INCOMPLETE:<n>f<m>s`, `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED` or `KILLED:<signal>`; "
+                      "`INCOMPLETE:<n>f<m>s<k>h`, `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED` or `KILLED:<signal>`; "
                       "a run whose driver died is `FAILED:<stage>`", "none"),
     "done": State("the run ended `done`", "none"),
-    "incomplete": State("the run ended `INCOMPLETE:<n>f<m>s`: every stage ran, and a task failed or was skipped",
-                        "none", alert=True),
+    "incomplete": State("the run ended `INCOMPLETE:<n>f<m>s<k>h`: every stage ran, and a task failed, was skipped "
+                        "or was held", "none", alert=True),
     "failed": State("the run ended `FAILED`", "none", alert=True),
     "stopped": State("a stop file or `edr stop` ended the run, or `edr stop` marked a queued run", "none", alert=True),
     "killed": State("a signal ended the run", "none", alert=True),

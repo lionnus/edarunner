@@ -196,10 +196,10 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.todo = [("Release it with the scheduler, or cancel it:", cmd)]
     elif state == "incomplete":
         a.title = "failed tasks in"
-        a.about = (f"The run ended with {counts.get('failed', 0)} failed and {counts.get('skipped', 0)} skipped "
-                   "tasks. Their results are missing.")
+        a.about = (f"The run ended with {counts.get('failed', 0)} failed, {counts.get('skipped', 0)} skipped and "
+                   f"{counts.get('held', 0)} held tasks. Their results are missing.")
         a.facts.append(("tasks", f"{counts.get('done', 0)} done, {counts.get('failed', 0)} failed, "
-                                 f"{counts.get('skipped', 0)} skipped"))
+                                 f"{counts.get('skipped', 0)} skipped, {counts.get('held', 0)} held"))
         a.todo = [("See which tasks failed and the log tail:", f"edr status {h}")]
     elif state == "failed":
         a.title = "failed run"

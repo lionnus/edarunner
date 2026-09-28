@@ -87,14 +87,14 @@ def _param(text: str) -> tuple[str, str]:
 def _check_phase(project: Project, phase: str) -> None:
     """Refuse a phase that the driver never ends a run with."""
     kind, sep, arg = phase.partition(":")
-    n = re.fullmatch(r"(\d+)f(\d+)s", arg)
+    n = re.fullmatch(r"(\d+)f(\d+)s(\d+)h", arg)
     stages = set(project.stages)
     if not {"done": not sep, "STOPPED": not sep, "KILLED": re.fullmatch(r"SIG[A-Z]+", arg),
-            "INCOMPLETE": n and int(n[1]) + int(n[2]) > 0, "FAILED": arg in stages | {"setup", "runtime"},
+            "INCOMPLETE": n and sum(map(int, n.groups())) > 0, "FAILED": arg in stages | {"setup", "runtime"},
             "OVER_BUDGET": arg in stages}.get(kind):
-        raise Refuse(f"--phase {phase}: a run ends done, INCOMPLETE:<n>f<m>s with a task that failed or was skipped, "
-                     "FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or KILLED:<signal>, with a stage of edr.toml; a run "
-                     "whose driver died is FAILED:<stage>")
+        raise Refuse(f"--phase {phase}: a run ends done, INCOMPLETE:<n>f<m>s<k>h with a task that failed, was skipped or "
+                     "was held, FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or KILLED:<signal>, with a stage of "
+                     "edr.toml; a run whose driver died is FAILED:<stage>")
 
 
 # These commands link the project into the registry, so the commands that span projects find it.
@@ -1927,10 +1927,11 @@ def _parser() -> argparse.ArgumentParser:
         Without a handle, status prints the board: one line per run of every
         batch that is not retired, live runs first and dead ones on top. The columns are the row
         number, label, source tag, host, state, phase (its first 40 characters),
-        stage/step, heartbeat age, failed and done task counts, and core-h: the
-        hours so far times the cores the run reserved, the most that any of its
-        stages needs. A live stage with steps shows <stage>, starting until its
-        first step. The state of a live run
+        stage/step, heartbeat age, failed and done task counts with the skipped
+        and held ones after them when there are any, such as 2f/5d/3h, and
+        core-h: the hours so far times the cores the run reserved, the most
+        that any of its stages needs. A live stage with steps shows <stage>,
+        starting until its first step. The state of a live run
         follows the heartbeat age (running, stale, dead) or the watcher's last
         verdict (hung, host_full, ...). A finished run shows its phase class:
         done, incomplete, failed, over_budget, stopped or killed.
@@ -2372,7 +2373,7 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True, exits={Exit.DONE: "the command ended done", 2: "FAILED:setup, the stage is not in the spec; "
                                 "or FAILED:<stage>, a checkpoint on a stage without resume",
                                 3: "FAILED:<stage>, too little disk for the stage", 4: "FAILED:<stage>, the tool gate timed out",
-                                5: "FAILED:<stage>, the command failed", 8: "INCOMPLETE, a task failed or was skipped",
+                                5: "FAILED:<stage>, the command failed", 8: "INCOMPLETE, a task failed, was skipped or was held",
                                 9: "OVER_BUDGET:<stage>, a budget passed", 10: "STOPPED or KILLED:<signal>"})
     s.add_argument("--label", required=True, metavar="L", help="the label of the run")
     s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
@@ -2411,10 +2412,10 @@ def _parser() -> argparse.ArgumentParser:
         tag holds -dirty, and a tag that edr checkout would not make, <hash>
         with -n<hash> for each source.nested repository and an optional
         -dirty-<8 hex>, gets a warning. --phase is a phase that the
-        driver ends a run with: done, INCOMPLETE:<n>f<m>s where a task failed
-        or was skipped, FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or
-        KILLED:<signal>. A run whose driver died is FAILED:<stage>, with the
-        stage it died in.
+        driver ends a run with: done, INCOMPLETE:<n>f<m>s<k>h where a task
+        failed, was skipped or was held, FAILED:<stage>, OVER_BUDGET:<stage>,
+        STOPPED or KILLED:<signal>. A run whose driver died is
+        FAILED:<stage>, with the stage it died in.
 
         Each task takes its fields from tasks.toml, as a launch would, and
         the task_fields table records them with the origin resolver. When a

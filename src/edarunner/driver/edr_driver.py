@@ -217,7 +217,7 @@ class Driver(object):
             "label": spec.get("label"), "config": spec.get("config"),
             "host": spec.get("host"), "root": self.root, "driver_pid": os.getpid(),
             "pgids": [], "phase": "setup", "stage": None, "step": None, "step_name": None,
-            "tasks": {}, "stages": {}, "step_times": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0},
+            "tasks": {}, "stages": {}, "step_times": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "held": 0, "running": 0, "queued": 0},
             "started": now, "updated": now, "elapsed_s": 0, "disk_free_gb": None,
             "tree_gb": None, "cpu_pct": None, "rss_gb": None, "exit": None, "killed_by": None, "last_cmd": None,
             "last_log": None, "log": None}
@@ -750,12 +750,15 @@ class Driver(object):
                 self.check_budget(name, budget, t_group, [r[0] for r in running.values()])
             hold = bool(self.stop_mode or self.over_budget or self.hb.get("looping"))
             pending = self.pending(q, tasks, skipped)
-            with self.lock:
-                self.hb["counts"]["queued"] = len(pending)
             if not running and (hold or not pending):
+                with self.lock:
+                    self.hb["counts"]["queued"] = 0
+                    self.hb["counts"]["held"] += len(pending)
                 for tid in pending:
                     self.record_task(tid, "held", beat=False, stage=name)
                 return
+            with self.lock:
+                self.hb["counts"]["queued"] = len(pending)
             while pending and len(running) < parallel and not hold and time.time() >= gate_until:
                 if self.host_full():
                     break
@@ -827,8 +830,8 @@ class Driver(object):
             if self.stop_mode:
                 raise Fail(10, "STOPPED")
         c = self.hb["counts"]
-        if c["failed"] or c["skipped"]:
-            return 8, "INCOMPLETE:%df%ds" % (c["failed"], c["skipped"])
+        if c["failed"] or c["skipped"] or c["held"]:
+            return 8, "INCOMPLETE:%df%ds%dh" % (c["failed"], c["skipped"], c["held"])
         return 0, "done"
 
     def run(self):

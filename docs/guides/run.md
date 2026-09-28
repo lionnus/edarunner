@@ -110,8 +110,8 @@ metrics, `--source` and `--csv`.
 | `stage:<stage>` | | one command runs |
 | `retry:<stage>:<n>` | | attempt `n` after a failure that matched `retry.match` |
 | `group:<stage>` | | a task group runs |
-| `done` | 0 | every stage ran; no task failed or was skipped |
-| `INCOMPLETE:<n>f<m>s` | 8 | every stage ran; `n` tasks failed, `m` were skipped |
+| `done` | 0 | every stage ran; no task failed, was skipped or was held |
+| `INCOMPLETE:<n>f<m>s<k>h` | 8 | every stage ran; `n` tasks failed, `m` were skipped, and `k` were held when a group stopped at `looping` |
 | `FAILED:<stage>` | 3 | free space at the run tree is below `needs.disk_gb` of the first stage |
 | `FAILED:<stage>` | 4 | the tool gate timed out after `gate_max_s` |
 | `FAILED:<stage>` | 5 | a command or `prepare` failed with no retry left, or the driver hit an error |
@@ -338,8 +338,8 @@ An import records what you tell it, and nothing it would have to guess:
 - `--phase` is a phase that the driver ends a run with, as the table in
   [Phases](#phases) lists; any other text is refused. A run whose
   driver died is `FAILED:<stage>`, with the stage it died in.
-  `INCOMPLETE` means that every stage ran and a task failed or was
-  skipped, so `INCOMPLETE:0f0s` is refused.
+  `INCOMPLETE` means that every stage ran and a task failed, was
+  skipped or was held, so `INCOMPLETE:0f0s0h` is refused.
 
 The import writes a spec into the state directory, in the format that
 `launch` writes, with each task group, its tasks and their directories

@@ -325,6 +325,14 @@ def test_an_alert_stays_under_the_message_limit(tmp_path, monkeypatch):
     assert len(telegram(a, tmp_path)) <= alerts.LIMIT + 2 and len(ntfy(a, monkeypatch)) <= alerts.LIMIT + 100
 
 
+def test_the_incomplete_alert_counts_the_held_tasks():
+    counts = {"done": 1, "failed": 2, "skipped": 0, "held": 3}
+    a = alerts.run_alert(PROJECT, {**ENDED, "phase": "INCOMPLETE:2f0s3h"}, "incomplete", [],
+                         {**HB, "phase": "INCOMPLETE:2f0s3h", "exit": 8, "counts": counts}, NOW)
+    assert a.about == "The run ended with 2 failed, 0 skipped and 3 held tasks. Their results are missing."
+    assert ("tasks", "1 done, 2 failed, 0 skipped, 3 held") in a.facts
+
+
 def test_which_alert_gets_which_buttons():
     hung = alerts.run_alert(PROJECT, RUN, "hung", ["hung: no progress"], HB, NOW)
     assert [b[1] for b in hung.buttons] == ["stop:demo", "keep6:demo", "keep12:demo", "keep24:demo"]

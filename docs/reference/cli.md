@@ -152,10 +152,11 @@ edr status [--json] [--batch B] [--source SOURCE] [--metric NAME] [--csv] [--nar
 Without a handle, status prints the board: one line per run of every
 batch that is not retired, live runs first and dead ones on top. The columns are the row
 number, label, source tag, host, state, phase (its first 40 characters),
-stage/step, heartbeat age, failed and done task counts, and core-h: the
-hours so far times the cores the run reserved, the most that any of its
-stages needs. A live stage with steps shows &lt;stage&gt;, starting until its
-first step. The state of a live run
+stage/step, heartbeat age, failed and done task counts with the skipped
+and held ones after them when there are any, such as 2f/5d/3h, and
+core-h: the hours so far times the cores the run reserved, the most
+that any of its stages needs. A live stage with steps shows &lt;stage&gt;,
+starting until its first step. The state of a live run
 follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.
@@ -830,7 +831,7 @@ the global table. docs/guides/run.md lists the phases.
 | 3 | FAILED:&lt;stage&gt;, too little disk for the stage |
 | 4 | FAILED:&lt;stage&gt;, the tool gate timed out |
 | 5 | FAILED:&lt;stage&gt;, the command failed |
-| 8 | INCOMPLETE, a task failed or was skipped |
+| 8 | INCOMPLETE, a task failed, was skipped or was held |
 | 9 | OVER_BUDGET:&lt;stage&gt;, a budget passed |
 | 10 | STOPPED or KILLED:&lt;signal&gt; |
 
@@ -880,10 +881,10 @@ to config, build_tag and source. The dirty flag is set when the source
 tag holds -dirty, and a tag that edr checkout would not make, &lt;hash&gt;
 with -n&lt;hash&gt; for each source.nested repository and an optional
 -dirty-&lt;8 hex&gt;, gets a warning. --phase is a phase that the
-driver ends a run with: done, INCOMPLETE:&lt;n&gt;f&lt;m&gt;s where a task failed
-or was skipped, FAILED:&lt;stage&gt;, OVER_BUDGET:&lt;stage&gt;, STOPPED or
-KILLED:&lt;signal&gt;. A run whose driver died is FAILED:&lt;stage&gt;, with the
-stage it died in.
+driver ends a run with: done, INCOMPLETE:&lt;n&gt;f&lt;m&gt;s&lt;k&gt;h where a task
+failed, was skipped or was held, FAILED:&lt;stage&gt;, OVER_BUDGET:&lt;stage&gt;,
+STOPPED or KILLED:&lt;signal&gt;. A run whose driver died is
+FAILED:&lt;stage&gt;, with the stage it died in.
 
 Each task takes its fields from tasks.toml, as a launch would, and
 the task_fields table records them with the origin resolver. When a

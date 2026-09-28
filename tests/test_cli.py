@@ -1306,6 +1306,14 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
                "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
 
 
+def test_an_incomplete_phase_carries_the_held_tasks() -> None:
+    project = config.load_project(DEMO)
+    cli._check_phase(project, "INCOMPLETE:2f0s1h")
+    for bad in ("INCOMPLETE:0f0s0h", "INCOMPLETE:1f0s"):
+        with pytest.raises(Refuse, match="INCOMPLETE:<n>f<m>s<k>h with a task that failed, was skipped or was held"):
+            cli._check_phase(project, bad)
+
+
 def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys) -> None:
     now = int(time.time())
     b = seed(demo, "b_nodw", "setup", state=None, updated=now - 5000)

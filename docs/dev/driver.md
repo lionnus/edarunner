@@ -121,7 +121,7 @@ the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
 | `log_bytes` | the size of `log` in bytes; every heartbeat |
 | `stages` | per stage started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
 | `tasks` | per task: `stage`, `phase` (`running`, `done`, `failed`, `skipped` or `held`), `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
-| `counts` | `done`, `failed`, `skipped`, `running`, `queued`, over every task group of the run |
+| `counts` | `done`, `failed`, `skipped`, `held`, `running`, `queued`, over every task group of the run; a task still pending when its group ends counts as `held`, not `queued` |
 | `started`, `updated`, `elapsed_s` | unix times; the watcher reads the age of `updated` |
 | `disk_free_gb`, `tree_gb` | free space at `root`; `du -s` of the tree at most once per ten minutes |
 | `cpu_pct` | the CPU use since the previous sample as a percent of one core, computed from two successive `cpu_s` values and the time between them. It is null on the first sample, and a heartbeat less than a second after the previous one keeps the old value. A process group that ended takes its CPU seconds with it, so a drop in `cpu_s` reads as zero |
