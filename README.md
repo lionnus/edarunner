@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.svg" alt="edarunner" width="300"></p>
 
-<p align="center">Run the EDA flow you already have on the machines you already use, and keep one database of every run.</p>
+<p align="center">Run the EDA flow you already have on the machines you already use, and keep all your runs in one database.</p>
 
 <p align="center">
 <a href="https://github.com/lionnus/edarunner/actions/workflows/ci.yml"><img src="https://github.com/lionnus/edarunner/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
@@ -18,7 +18,8 @@ one SQLite database. From there you compare runs on the board, on your
 phone or in an exported snapshot.
 
 A project is a few TOML files: `edr.toml`, `tasks.toml`,
-`jobs/<batch>.toml` and a private `site.toml`. edarunner knows no EDA tool
+`jobs/<batch>.toml` in a directory where you run `edr`, and a
+`site.toml` that the lab shares. edarunner knows no EDA tool
 itself; your flow scripts stay as they are. [AGENTS.md](AGENTS.md) lets an
 agent set up a project and operate it.
 

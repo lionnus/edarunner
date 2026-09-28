@@ -36,14 +36,14 @@
 <text class="t" x="480" y="91" text-anchor="middle">Watcher</text>
 <path class="box" d="M580 70v32a80 6 0 0 0 160 0V70"/>
 <ellipse class="box" cx="660" cy="70" rx="80" ry="6"/>
-<text class="t" x="660" y="93" text-anchor="middle">Run database</text>
+<text class="t" x="660" y="93" text-anchor="middle">Project database</text>
 <rect class="box" x="760" y="64" width="160" height="44" rx="7"/>
 <text class="t" x="840" y="91" text-anchor="middle">Export</text>
 <path class="run" d="M270 79v14l11-7z"/>
 
 <!-- Project -->
 <rect class="frame" x="24" y="176" width="536" height="240" rx="10"/>
-<text class="h" x="40" y="200">PROJECT, IN GIT</text>
+<text class="h" x="40" y="200">YOUR PROJECT</text>
 <text class="m" x="544" y="200" text-anchor="end">edr.toml</text>
 <rect class="box" x="40" y="216" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="238">Each stage</text>

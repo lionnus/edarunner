@@ -1,4 +1,4 @@
-"""Views over the run database: area deltas, metrics per step, runtimes, host and run samples.
+"""Views over the project database: area deltas, metrics per step, runtimes, host and run samples.
 
 Each view returns plain rows for --json and a rich renderable for a person. A row
 keeps the source of its number: a file under data/results, or the table it came from.

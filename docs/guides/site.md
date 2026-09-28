@@ -9,14 +9,26 @@ host needs.
 
 ## The site file
 
-The site file, usually `~/.config/edarunner/site.toml`, lives on the
-head node. `site` in `edr.toml` names it, and one site file serves every
-project of a user or a lab. It is private to your site: it names your
-machines, your licence servers and your chat, so it stays out of any
-public repository. Keep it as a plain file, or in a repository of its
-own when several people share it; the
+The site file, `~/.config/edarunner/site.toml`, lives on the head node.
+`site` in `edr.toml` names it. It describes the machines, not a project,
+so one site file serves every project and every user of the same
+machines. It names your hosts, your licence servers and your chat, so it
+stays out of any public repository.
+
+Because it is shared, keep it in a repository that the lab owns. Each
+user clones that repository to `~/.config/edarunner/`, and a change to a
+host or a tool reaches everyone with a `git pull`:
+
+```sh
+git clone <the lab's site repository> ~/.config/edarunner
+```
+
+A single user may start with a plain file at that path and move it into
+a repository when a second person joins. The
 [edarunner-example](https://github.com/lionnus/edarunner-example)
-repository has a site template that a lab can copy once.
+repository has a `site/` directory in the shape of such a repository,
+which a lab copies once. Keep secrets such as a bot token out of the
+repository: list their files in its `.gitignore`.
 
 ```toml
 schema = 1

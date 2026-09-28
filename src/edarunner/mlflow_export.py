@@ -1,4 +1,4 @@
-"""The run database as a local MLflow tracking store, for the MLflow UI.
+"""The project database as a local MLflow tracking store, for the MLflow UI.
 
 One MLflow run per edarunner run, in one experiment per project. Needs the
 `mlflow` extra; the package imports nothing from here otherwise.

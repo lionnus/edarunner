@@ -1,3 +1,3 @@
-"""edarunner: run flows on hosts, keep a run database, watch, export."""
+"""edarunner: run flows on hosts, keep a project database, watch, export."""
 
 __version__ = "0.4.0"

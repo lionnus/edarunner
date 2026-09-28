@@ -932,7 +932,7 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
-    """Write a frozen snapshot of one design, or the run database into an MLflow store."""
+    """Write a frozen snapshot of one design, or the project database into an MLflow store."""
     if a.mlflow:
         if a.dry_run:
             n = len([r for r in c.db.runs() if a.design is None or r.get("src") == a.design])
@@ -1199,7 +1199,7 @@ def _read_commands() -> str:
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = _Parser(prog="edr", description="Run flows on hosts, keep a run database, watch, export.",
+    p = _Parser(prog="edr", description="Run flows on hosts, keep a project database, watch, export.",
                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=_d(f"""
         edr finds edr.toml in the current directory or a parent, so it works from
         anywhere below the project. Without one it refuses.
@@ -1432,9 +1432,10 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("handles", nargs="*", metavar="HANDLE", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")
     command("init", "write edr.toml and the watch unit here", """
-        Writes edr.toml and edr-watch.service into the current directory. --site
-        is the directory or the file of the site file; init does not write that
-        file. Refuses when edr.toml exists.
+        Writes edr.toml and edr-watch.service into the current directory, the
+        project directory where you run edr. --site is the directory or the
+        file of the site file; init does not write that file. Refuses when
+        edr.toml exists.
         """, write=True).add_argument("--site", required=True, metavar="DIR", help="the site directory, or a site.toml path")
     command("check", "load everything, probe the hosts, check the hooks", """
         Loads the project, the site and every batch under jobs/, imports every
@@ -1579,7 +1580,7 @@ def _parser() -> argparse.ArgumentParser:
         --with-logs. Refuses a DIR that exists and is not empty. docs/guides/results.md
         explains the layout.
 
-        --mlflow DIR writes the run database into a local MLflow tracking store
+        --mlflow DIR writes the project database into a local MLflow tracking store
         in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
         per run, of every design or of --design, with the parameters, the
         metrics at their step, the stage and step times, and the collected

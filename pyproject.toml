@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "edarunner"
 version = "0.4.0"
-description = "Run EDA flows on a pool of hosts, keep a database of every run, watch them, and export the results."
+description = "Run EDA flows on a pool of hosts, keep all runs in one database, watch them, and export the results."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"

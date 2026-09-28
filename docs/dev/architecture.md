@@ -36,8 +36,8 @@ report files and the numbers in them.
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the five parsers with the hierarchical area report, extraction |
 | `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |
-| `mlflow_export.py` | `edr export --mlflow`: the run database as a local MLflow tracking store; imports `mlflow` only when called |
-| `db.py` | the run database: the SQLite schema, upserts, queries, `board.json` |
+| `mlflow_export.py` | `edr export --mlflow`: the project database as a local MLflow tracking store; imports `mlflow` only when called |
+| `db.py` | the project database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
 | `notify/__init__.py` | the notifier interface, `make_notifiers`, and the plain text of an alert |

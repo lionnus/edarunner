@@ -72,7 +72,7 @@ Where things land:
 | `/tmp/edr-demo/<user>/edr/demo/<run_id>/` | the run tree; `log/` holds one file per stage and task |
 | `~/.edr/demo/demo/` | `RUN_DATE`, the specs, the heartbeats, the queues, the driver log |
 | `~/.edr/demo/bin/edr_driver-<hash>.py` | the driver, one copy per driver version |
-| `data/edr.db`, `data/results/`, `data/board/` | the run database, the collected files, `status.html` and `compare.html` |
+| `data/edr.db`, `data/results/`, `data/board/` | the project database, the collected files, `status.html` and `compare.html` |
 
 ## Try a failure
 

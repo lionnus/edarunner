@@ -1,4 +1,4 @@
-"""The run database: schema, upserts, queries, board.json."""
+"""The project database: schema, upserts, queries, board.json."""
 
 from __future__ import annotations
 

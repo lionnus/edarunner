@@ -15,40 +15,26 @@ helpers sit next to it, and `edr` writes the database, the collected
 results and the boards under `data/`. `edr` works from any directory
 below `edr.toml` and sees that project only.
 
-The directory can be anywhere, and it needs no repository of its own.
-The simplest place is inside the repository of the flow it drives, as
-an `edr/` directory next to the flow scripts, so a change to the flow
-and the change to its configuration go into one commit. In that case:
+Set the project up where you use it: a directory on the head node, in
+the project you work on, where you run `edr`. A paper project, for
+example, keeps `edr/` at its root, next to the checkouts of the flow, the
+result data and the paper. `source.repo` in `edr.toml` names the repository of the flow,
+and a path in `edr.toml` is relative to the file.
 
-- set `source.repo = ".."`, since a path in `edr.toml` is relative to the
-  file;
-- put `source.worktrees` outside the repository, such as
-  `"../../myflow-wt"`, so the checked-out clones do not land in your
-  working tree;
-- add `edr/data/` to the repository's `.gitignore`, and to
-  `[sync] exclude`, so a snapshot of a dirty tree does not copy the
-  database to the hosts;
-- set `project` in `edr.toml` to the name of the flow. `edr init` takes
-  the name of the directory, which would be `edr`, and the name appears
-  in the state directory, the run trees and every alert.
+Set `project` in `edr.toml` to a name that says what the project is.
+`edr init` takes the name of the directory, which may be only `edr`, and
+the name appears in the state directory, the run trees and every alert.
 
-Run `edr` from `edr/` or a directory below it, since it looks for
-`edr.toml` upwards from where you are.
-
-A directory of its own, next to the flow's repository, works just as
-well: `source.repo` then names that repository, and the directory can
-be a plain directory or a repository if you want to version the
-configuration apart from the flow.
-
-Commit `edr.toml`, `tasks.toml`, `jobs/`, `hooks/` and
-`edr-watch.service`. Keep `data/` and the checked-out clones out of git.
-The site file names your machines and belongs to the site, not to the
-project; [site.md](site.md) says where it lives.
+Whether the directory goes into git is your choice. To version it,
+commit `edr.toml`, `tasks.toml`, `jobs/`, `hooks/` and
+`edr-watch.service`, and keep `data/` and the checked-out clones out.
+The site file names your machines and is shared by every project of the
+lab, so it lives apart from the project; [site.md](site.md) says where.
 
 ## Create the project
 
 ```sh
-mkdir -p myflow/edr && cd myflow/edr
+mkdir -p mypaper/edr && cd mypaper/edr
 edr init --site ~/.config/edarunner
 ```
 
