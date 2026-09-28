@@ -1,16 +1,16 @@
 # Find out why a run failed
 
-A run ended `FAILED`, went `dead`, or sits at a gate. Why? This page
-shows where to look, in the order that usually finds the cause fastest,
-and lists the causes that come up most often.
+When a run ends `FAILED`, goes `dead` or waits at a gate, this page
+shows where to look, in the order that usually finds the cause fastest.
+It also lists the causes that come up most often.
 
-## Read the story of the run
+## Read the history of the run
 
 ```sh
 edr brief --run base@sweep1
 ```
 
-`edr brief --run` tells the story of one run in Markdown: its stages
+`edr brief --run` prints the history of one run in Markdown: its stages
 with their start, end and exit, the times of its steps, its events with
 the reason of every action, the last 20 lines of the current log, its
 metrics, and the one command that `edr status --triage` proposes for it.
@@ -128,7 +128,7 @@ the same signature, the group stops claiming tasks and the run shows
 ### A run is `hung`
 
 The heartbeat is fresh, but nothing has changed for `limits.hung_s`:
-not the step, the log, the tree size nor the CPU time. Read the log tail
+neither the step, the log, the tree size nor the CPU time. Read the log tail
 first. The watcher kills a hung run only when `kill_hung` is set, and
 `edr keep <handle> --ack` cancels that.
 
@@ -146,7 +146,7 @@ A stage with a `resume` command can continue from a step. `{checkpoint}`
 in that command takes the step name, so a flow with
 `FIRST_STAGE={checkpoint}` skips the steps before it. The watcher
 resumes a `dead` run this way once, from the last step of its heartbeat.
-By hand:
+To resume a run by hand:
 
 ```sh
 edr continue a@sweep1 --stage pnr --from cts

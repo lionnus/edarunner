@@ -1,9 +1,8 @@
 # Get the results out
 
-What did my runs produce, and how do I compare them? This page gets the
-numbers of a design out of the project database, compares runs on the
-terminal, the board or the phone, and hands a frozen snapshot to an
-analysis.
+This page shows how to get the numbers of a design out of the project
+database, how to compare runs on the terminal, the board or the phone,
+and how to hand a frozen snapshot to an analysis.
 
 ## The database
 
@@ -63,11 +62,11 @@ edr metrics --design 3f9a2c1 --csv > metrics.csv
 ```
 
 Each table holds one design. `--design` is the source tag exactly as
-`edr checkout` printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs that full tag.
-The text form shows label, design, stage, step, task, metric, value and
-unit; `--csv` writes the columns of `metrics.csv` below. Every row
-carries its source file, so you can check where a number came from
-before you put it in a table.
+`edr checkout` printed it, so a run on `3f9a2c1-dirty-7b21c0d9` needs
+that full tag. The text form shows label, design, stage, step, task,
+metric, value and unit; `--csv` writes the columns of `metrics.csv`
+below. Every row carries its source file, so you can check where a
+number came from before you put it in a table.
 
 ## Extract again
 
@@ -92,10 +91,10 @@ the counts.
 
 ## A number the flow does not print
 
-A metric has one of five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A
-number that comes from other numbers, such as an energy from a power and
-a window, needs a `python` hook. The hook gets the path of `file` and
-reads the other files itself:
+A metric has one of five parsers: `regex`, `csv`, `json`, `python` or
+`area_hier`. A number that comes from other numbers, such as an energy
+from a power and a window, needs a `python` hook. The hook gets the path
+of `file` and reads the other files itself:
 
 ```toml
 [metrics.energy_nj]
@@ -122,8 +121,8 @@ An exception in the hook gives a row with an empty value and the error
 in `source_file`. `examples/local-demo/hooks/energy.py` is this hook.
 
 `--run <handle> --over steps` prints one run along its steps, one column
-per metric. With `--metric`, the one metric, its change from the step
-before and the source file of each value:
+per metric. With `--metric`, it prints only that metric, with its change
+from the step before and the source file of each value:
 
 ```
 $ edr metrics --run base@g8 --over steps --metric wns_ns
@@ -242,15 +241,16 @@ Every watcher cycle writes `data/board/`:
 | `status.html` | a phone-width page: every run in board order, the last 50 events, the hosts, and a chart of the cores and RAM in use per host over the last day |
 | `compare.html` | the runs with their parameters as columns and a filter per column, a compare table of the final metrics with the difference to the first ticked run, the area delta of two runs, and four plots |
 
-`compare.html` is one self-contained page over the database's runs, parameters,
-metrics and the last area report of each run down to depth 3. A filter keeps
-the rows whose cell holds its text; `>n` and `<n` compare numbers. Its tables
-work as they are. The plots need Plotly: a metric over the steps with the step
-names, a scatter of any two columns, the power parts (`power__*` without
-`power__total`), and parallel coordinates over every shown run, with an axis
-per parameter that differs and one for the chosen metric. The page loads `data/board/plotly.min.js` when
-that file exists, else the CDN URL; the watcher downloads nothing, so put
-the file there yourself for a head node without internet.
+`compare.html` is one self-contained page over the database's runs,
+parameters, metrics and the last area report of each run down to depth 3. A
+filter keeps the rows whose cell holds its text; `>n` and `<n` compare
+numbers. The tables need nothing else, but the plots need Plotly. They show
+a metric over the steps with the step names, a scatter of any two columns,
+the power parts (`power__*` without `power__total`), and parallel
+coordinates over every shown run, with an axis per parameter that differs
+and one for the chosen metric. The page loads `data/board/plotly.min.js`
+when that file exists, else the CDN URL; the watcher downloads nothing, so
+put the file there yourself for a head node without internet.
 
 The pages are files. Open them in a browser, or serve the directory:
 
@@ -330,9 +330,9 @@ Those stay with `edr compare`, `edr runtime` and the board.
 
 ## An analysis reads snapshots
 
-An analysis should never read the live database.
-The database changes with every watcher cycle, and a number you quote
-must stay the number you read. So the analysis keeps one snapshot per
+An analysis should never read the live database, because the database
+changes with every watcher cycle and a number you quote must stay the
+number you read. Instead, the analysis keeps one snapshot per
 design under its own `data/`, pinned by the source tag. Every table and
 figure comes from `runs.csv` and `metrics.csv` of that snapshot:
 

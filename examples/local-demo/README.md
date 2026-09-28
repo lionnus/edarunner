@@ -51,7 +51,7 @@ edr launch demo               # 2 started, 0 queued, 0 with problems
 edr status --watch            # redraws every 5 s; Ctrl-C to leave
 ```
 
-Both runs end `done` within a minute. Then:
+Both runs end `done` within a minute. Then collect and read the results:
 
 ```sh
 edr watch --once              # collect the reports, extract the metrics, write data/board/
@@ -64,7 +64,7 @@ edr retire --batch demo --why "demo done"
 `<src>` is the short hash that `edr checkout` printed. `edr metrics` needs
 it, because one table holds one design.
 
-Where things land:
+The run puts its files in these places:
 
 | Path | Holds |
 |---|---|

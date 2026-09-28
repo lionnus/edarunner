@@ -6,7 +6,7 @@ the Actions UI.
 
 ## Run the tests
 
-Install [uv](https://docs.astral.sh/uv/), then in the checkout:
+Install [uv](https://docs.astral.sh/uv/), then run this in the checkout:
 
 ```sh
 uv venv .venv && uv pip install -e '.[dev]'
@@ -47,12 +47,12 @@ head node; it needs the ORFS tools, and CI runs it in a container.
 | Job | Runs |
 |---|---|
 | `tests` | `pytest` with coverage on Python 3.11 and 3.12. The run fails under 88 %. The 3.11 run uploads `coverage.svg`. |
-| `driver` | `tests/test_driver.py` in a `python:3.6` container with `--init`, the floor of the compute hosts. pytest runs under a Python 3.11 from uv, and `EDR_DRIVER_PYTHON=/usr/local/bin/python3.6` makes every driver the tests start, and `test_compiles_on_py36`, use the image's 3.6. |
-| `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. About 2 min, 1 min of it the image pull. |
+| `driver` | `tests/test_driver.py` in a `python:3.6` container with `--init`, since 3.6 is the oldest Python a compute host may have. pytest runs under a Python 3.11 from uv, and `EDR_DRIVER_PYTHON=/usr/local/bin/python3.6` makes every driver the tests start, and `test_compiles_on_py36`, use the image's 3.6. |
+| `openroad` | `examples/openroad-gcd/run.sh` in the `openroad/orfs` image: the GCD design through synth, floorplan and place under `edr`. It takes about 2 min, 1 min of which is the image pull. |
 | `condor` | `tools/harness/condor.sh` with `RUNTIME=docker`: the `htcondor/mini` image as a one-machine pool, and the local demo through the `condor` backend with `submit_via = ["docker", "exec", "-u", <user>, "edr-mini"]`, where the user has the uid of the runner. It asserts that two runs end `done`, that the concurrency limit `fc` of one runs them one after the other, and that `edr stop` ends a third run `KILLED`. |
 | `slurm` | `tools/harness/slurm.sh`: the `giovtorres/slurm-docker-cluster` compose setup with `Licenses=fc:1`, and the same demo and assertions through the `slurm` backend with `submit_via = ["docker", "exec", "slurmctld"]`. |
 | `docs` | `tools/gen_docs.py --check`: the pages under `docs/reference/` must equal what the code generates. |
-| `status` | after every other job, also after a failure: writes the outcome into the branch `ci-status`. |
+| `status` | runs after every other job, also after a failure, and writes the outcome into the branch `ci-status`. |
 
 ## The scheduler harness
 

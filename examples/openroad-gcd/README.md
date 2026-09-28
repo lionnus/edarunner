@@ -1,15 +1,17 @@
 # The OpenROAD GCD example
 
-A real open flow under `edr`: the GCD design of OpenROAD-flow-scripts (ORFS)
-on the nangate45 platform, through `synth`, `floorplan` and `place`, on the
-head node. CI runs it in the `openroad/orfs` image; the job `openroad` in
-`.github/workflows/ci.yml` shows the steps.
+This example runs a real open flow under `edr`. It takes the GCD design of
+OpenROAD-flow-scripts (ORFS) on the nangate45 platform through `synth`,
+`floorplan` and `place` on the head node. CI runs it in the
+`openroad/orfs` image; the job `openroad` in `.github/workflows/ci.yml`
+shows the steps.
 
 ## What it needs
 
-The ORFS tools. `ORFS` names the checkout with built tools; the default
-`/OpenROAD-flow-scripts` is the path in the image. On the head node: `edr`,
-`git`, `rsync`, and a `python3` for the driver.
+The example needs the ORFS tools. `ORFS` names the checkout with built
+tools; the default `/OpenROAD-flow-scripts` is the path in the image. The
+head node also needs `edr`, `git`, `rsync`, and a `python3` for the
+driver.
 
 The flow stops after placement. CTS in the image needs AVX-512, and a CI
 runner may lack it.
@@ -64,8 +66,8 @@ cd examples/openroad-gcd
 bash run.sh
 ```
 
-The three stages take about 30 s on two cores; the CI job takes about
-2 min, 1 min of it the image pull.
+The three stages take about 30 s on two cores. The CI job takes about
+2 min, and the image pull accounts for 1 min of that.
 
 `EDR` names the `edr` binary (default `edr` on `PATH`) and `CAP_S` the wait
 for the run in seconds (default 900). The script fails when the run does

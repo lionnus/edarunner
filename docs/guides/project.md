@@ -1,9 +1,8 @@
 # Set up a project
 
-How do I describe my flow to edarunner? This page answers that. After it
-you have an `edr.toml` with stages and metrics that `edr check`
-accepts. The hosts come from the site file, which
-[site.md](site.md) sets up.
+This page describes your flow to edarunner. By the end you have an
+`edr.toml` with stages and metrics that `edr check` accepts. The hosts
+come from the site file, which [site.md](site.md) sets up.
 
 ![The files of a project: what you write, what edr writes, and what lives outside](../diagrams/project-files.svg)
 
@@ -15,11 +14,11 @@ helpers sit next to it, and `edr` writes the database, the collected
 results and the boards under `data/`. `edr` works from any directory
 below `edr.toml` and sees that project only.
 
-Set the project up where you use it: a directory on the head node, in
-the project you work on, where you run `edr`. A paper project, for
-example, keeps `edr/` at its root, next to the checkouts of the flow, the
-result data and the paper. `source.repo` in `edr.toml` names the repository of the flow,
-and a path in `edr.toml` is relative to the file.
+Put the project on the head node, inside the work it belongs to, and
+run `edr` there. A paper project, for example, keeps `edr/` at its root,
+next to the checkouts of the flow, the result data and the paper.
+`source.repo` in `edr.toml` names the flow's repository, and every path
+in `edr.toml` is relative to the file.
 
 Set `project` in `edr.toml` to a name that says what the project is.
 `edr init` takes the name of the directory, which may be only `edr`, and
@@ -43,10 +42,11 @@ and `edr-watch.service`, the systemd unit for the watcher. `--site` is
 the site file or the directory that holds it. `edr init` does not write
 the site file itself.
 
-Edit `edr.toml`: the repository under `[source]`, one `[stages.<name>]`
-per command of the flow, and the `[metrics.<name>]` you want in the
-database. [reference/configuration.md](../reference/configuration.md)
-lists every key.
+Then edit `edr.toml`. Name the repository under `[source]`, add one
+`[stages.<name>]` table for each command of the flow, and add a
+`[metrics.<name>]` table for each number you want in the database.
+[reference/configuration.md](../reference/configuration.md) lists every
+key.
 
 ## Stages, steps and tasks
 
@@ -75,8 +75,8 @@ test = "GEMM_M64_N64"
 args = "M=64 N=64"
 ```
 
-The two examples below show the two shapes a flow usually takes. The
-names and paths are examples.
+A flow usually takes one of the two shapes below. Their names and paths
+are only examples.
 
 ### One tool session, many steps inside
 
@@ -205,7 +205,7 @@ environment of the driver, which on a site host is what ssh gives a
 command without a terminal, with no `TERM` variable. On the host `local`
 it is the environment of the `edr` process that started the driver, so a
 flow can work under `local` from your terminal and still fail on a site
-host. On top come the site `[env]`, the project `[env]`, and three
+host. On top of that it gets the site `[env]`, the project `[env]`, and three
 variables: `EDR_SRC`, the source tag of the batch, `EDR_RUN_ID`, the run
 id, and `EDR_TREE_ID`, the id of the tree the run writes in.
 

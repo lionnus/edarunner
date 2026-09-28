@@ -52,8 +52,9 @@ uv tool install /edarunner
 ```
 
 With ORFS installed on the machine, skip the container and set `ORFS` to
-your checkout. [examples/openroad-gcd/README.md](examples/openroad-gcd/README.md) shows the same run with
-Singularity. Then run the flow:
+your checkout.
+[examples/openroad-gcd/README.md](examples/openroad-gcd/README.md) shows
+the same run with Singularity. Then run the flow:
 
 ```sh
 cd examples/openroad-gcd
@@ -115,22 +116,24 @@ ok  host      cores            load      ram GB  mount       scratch GB         
 
 ## From your phone
 
-`edr watch` sends an alert to every channel you configure when a run
-dies, hangs, fails or runs over its budget. On Telegram the alert carries the next command and three buttons
-to keep, acknowledge or stop the run. ntfy and mail get the same alerts,
-with the commands written out. The bot also answers `/status`, `/hosts`,
-`/events`, `/tools` and `/digest`. A site can add its own commands, such
-as one that opens a Claude Code session in the project directory. Scripts
-and hooks send their own messages with `edr notify`. See
-[docs/guides/alerts.md](docs/guides/alerts.md) for the bot, ntfy and mail.
+`edr watch` sends an alert to every channel you configure when a run dies,
+hangs, fails or runs over its budget. On Telegram the alert carries the
+next command and three buttons to keep, acknowledge or stop the run. ntfy
+and mail get the same alerts, with the commands written out. The bot also
+answers `/status`, `/hosts`, `/events`, `/tools` and `/digest`. A site can
+add its own commands, such as one that opens a Claude Code session in the
+project directory. Scripts and hooks send their own messages with `edr
+notify`. See [docs/guides/alerts.md](docs/guides/alerts.md) for the bot,
+ntfy and mail.
 
 ## Operate it with an agent
 
 Every command takes `--json` and prints one object with the exit code,
 the data and the text a person would see. Every command that writes takes
 `--dry-run`. `edr stop` and `edr retire` refuse to act without `--why`, and
-the reason goes into the event log together with who acted. `edr status --triage`
-lists each run that needs attention with one proposed command.
+the reason goes into the event log together with the name of whoever
+acted. `edr status --triage` lists each run that needs attention with one
+proposed command.
 [AGENTS.md](AGENTS.md) is the operating guide for an agent. The example
 repository keeps a Claude Code setup next to the flow: a contract per
 directory, a session-start hook and a skill.
@@ -162,4 +165,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE).
+edarunner is licensed under Apache-2.0; see [LICENSE](LICENSE).

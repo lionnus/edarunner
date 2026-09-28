@@ -1,18 +1,18 @@
 # Agents
 
 This file explains how an agent operates a farm with edarunner. An agent
-here is a Claude session, a script or a cron job, but the rules hold just
-as well for a person in a hurry.
+here is a Claude session, a script or a cron job, and the same rules apply
+to a person.
 
 ## Start with edr brief
 
 Run `edr brief` first. It prints what the project is, its flow, the
 hosts and tools, the runs per batch, every run that needs a decision
 with the proposed command, and the last ten events. Before you act on a
-run you did not start, read its story with `edr brief --run <handle>`:
-its phases, events, log tail, metrics and the proposed command.
-`docs/guides/agents.md` shows the Claude Code hook that runs it at the start of
-every session.
+run you did not start, read its history with `edr brief --run <handle>`,
+which prints its phases, events, log tail, metrics and the proposed
+command. `docs/guides/agents.md` shows the Claude Code hook that runs
+`edr brief` at the start of every session.
 
 ## Only through edr
 
@@ -50,8 +50,8 @@ dead        a@demo                       stage:pnr
 `a@demo` is a handle. A handle names one run: `label@batch`, a run id
 prefix, or `#n` from the last board that `edr status` printed.
 
-`docs/reference/states.md` gives the proposed command per state. Check
-this before you run it:
+`docs/reference/states.md` gives the proposed command for each state.
+Before you run it, check the following:
 
 | State | Check before you run it |
 |---|---|
@@ -71,10 +71,10 @@ last phase after the driver dies.
 ## Dry run first
 
 Do a dry run before every write: `--dry-run` on `checkout`, `plan`,
-`launch`, `continue`, `keep`, `export`, `stop` and `retire`. Read every path in
-the output. A launch shows the run id, the host and the root of every job,
-and a retire shows every `rm -rf` target. Then run the command without the
-flag.
+`launch`, `continue`, `keep`, `export`, `stop` and `retire`. Read every
+path in the output. A launch shows the run id, the host and the root of
+every job, and a retire shows every `rm -rf` target. Then run the command
+without the flag.
 
 Confirm within one minute that the run made progress: `edr status
 <handle>` should show a phase past `setup`.
@@ -89,20 +89,18 @@ edr stop a@demo --after-task --why "hung: no progress since 14:02, log stops at 
 edr retire a@demo --why "superseded by a@demo2, results collected"
 ```
 
-The text goes into the event log together with who acted. `edr events --run
-<handle>` shows the history of a run; read it before you act on a run you
-did not start.
+The text goes into the event log together with the name of whoever
+acted, and `edr events --run <handle>` shows that log for one run.
 
 `edr notify "<text>"` sends one line through every notifier of the
 project; send it when a long task ends or needs a person.
 
 ## Read a number before you use it
 
-- `edr metrics --design <src>` gives the numbers of one source tag. Keep
-  numbers from different tags out of one table, and name the tag in every
-  caption.
-- Every metric row carries `source_file`. Check which file a number came
-  from before you put it in a table.
+`edr metrics --design <src>` gives the numbers of one source tag. Keep
+numbers from different tags out of one table, and name the tag in every
+caption. Every metric row carries `source_file`, so check which file a
+number came from before you put it in a table.
 
 ## What an agent never does
 
@@ -114,7 +112,7 @@ project; send it when a long task ends or needs a person.
   plain `stop`, then `--now`.
 - Never pass more than one handle to a stop, so that one mistake costs at
   most one run.
-- Never trust the board for a running count. `edr status --live` asks the
+- Never trust the board for a running count; `edr status --live` asks the
   hosts.
 - Never write under `<state_dir>`, a run tree or the driver copy by hand.
   `edr keep` and `edr stop --after-task` write the keep and stop files, and

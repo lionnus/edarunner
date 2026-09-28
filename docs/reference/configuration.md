@@ -9,7 +9,7 @@ to them, and `site.toml`, wherever `site` points, with the hosts, the tools and 
 hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
-  key path, so `cores = "16"` stops at load.
+  key path, so `cores = "16"` stops the load.
 - A key without a default is required.
 - A path is absolute or relative to the file that names it, and `~` expands.
 - A string may hold `{placeholders}`; the last section lists them. `${VAR}` belongs to the shell
@@ -38,7 +38,7 @@ hold for every file:
 
 ### [source]
 
-The git repository of the flow, and how `edr checkout` pins a version of it.
+`[source]` names the git repository of the flow and sets how `edr checkout` pins a version of it.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -51,7 +51,7 @@ The git repository of the flow, and how `edr checkout` pins a version of it.
 
 ### [sync]
 
-The copy of the checked-out tree to the host, by `rsync --delete` behind the guard.
+The checked-out tree goes to the host with `rsync --delete`, behind the guard.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -60,7 +60,7 @@ The copy of the checked-out tree to the host, by `rsync --delete` behind the gua
 
 ### [runtime]
 
-One command that prepares the run tree on the host, such as `uv sync --frozen` for a Python
+`setup` is one command that prepares the run tree on the host, such as `uv sync --frozen` for a Python
 environment. The driver runs it in the tree root after the sync and before the first stage, with
 the environment of the stages, and logs it to `log/setup.log`. A failure ends the run
 `FAILED:runtime` before any stage takes a tool seat.
@@ -72,7 +72,7 @@ the environment of the stages, and logs it to `log/setup.log`. A failure ends th
 
 ### [safety]
 
-The guard on every delete target; `docs/how-it-works.md` explains it.
+Every delete target passes this guard; `docs/how-it-works.md` explains it.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -81,8 +81,8 @@ The guard on every delete target; `docs/how-it-works.md` explains it.
 
 ### [limits]
 
-The clocks and floors of the driver and the watcher; `docs/how-it-works.md` says what each
-one does.
+These are the timeouts and thresholds of the driver and the watcher;
+`docs/how-it-works.md` says what each one does.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -175,7 +175,7 @@ takes tasks from the same pool; `docs/guides/run.md` explains the queue and shar
 
 #### needs
 
-What a stage, or a task with its own `needs`, needs before it starts.
+The resources a stage, or a task with its own `needs`, must have before it starts.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -214,7 +214,7 @@ hook that reads the input files itself.
 
 A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
 row per step directory found, under the stage that owns that step number. A file that does not
-parse gives a row with an empty value and the error in `source_file`, never a crash.
+parse gives a row with an empty value and the error in `source_file`; the extraction goes on.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -247,7 +247,7 @@ shell of a host may be `csh` or `tcsh`.
 
 ### [scheduler]
 
-What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
+`[scheduler]` decides what starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
 `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
 driver writes into its first heartbeat. `docs/guides/site.md` shows a Slurm site file
 and how each setting maps to HTCondor, Slurm and LSF.
@@ -277,7 +277,7 @@ this table is a `check` problem. A tool in `tools` must be declared under `[tool
 
 The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
 fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
-Below the first it is 🟢. Any other list stops at load with the key in the message. In `edr.toml`
+Below the first it is 🟢. Any other list stops the load with an error that names the key. In `edr.toml`
 the table replaces the site's keys for this project only.
 
 | Key | Meaning | Default |
@@ -289,12 +289,12 @@ the table replaces the site's keys for this project only.
 
 ### [tools.<name>]
 
-A tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
+A `[tools.<name>]` table declares one tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
 the probe on the host and reads the first line it prints, `free` or `free total`, and waits while
 `free`, less the seats other runs leased in the last `lease_s`, is below the seats the stage
 needs; then it leases its seats in `<state_dir>/leases/<tool>/`. A probe that fails or prints no number counts as
 unknown and lets the stage run. A hook that keeps a reserve for others subtracts it before it
-prints. A tool without a probe is present or not, with no gate. A name that no `[tools]` table
+prints. A tool without a probe has no gate; a host either has it or does not. A name that no `[tools]` table
 declares is an error where it appears. The core knows no licence manager;
 `examples/site/hooks/flexlm_free.sh` turns `lmutil lmstat` output into the `free total` line.
 
@@ -306,7 +306,8 @@ declares is an error where it appears. The core knows no licence manager;
 
 ### [telegram]
 
-The bot, the one chat it answers, and the custom commands; `docs/guides/alerts.md` explains the setup.
+`[telegram]` sets up the bot, the one chat it answers and the custom commands; `docs/guides/alerts.md`
+explains the setup.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -321,8 +322,8 @@ One table per custom bot command; `bot.md` lists the keys.
 
 ### [ntfy]
 
-An ntfy topic: one push message per alert, with a priority by alert kind; `docs/guides/alerts.md`
-explains the setup.
+Each alert goes to an ntfy topic as one push message, with a priority by alert kind;
+`docs/guides/alerts.md` explains the setup.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -332,7 +333,8 @@ explains the setup.
 
 ### [mail]
 
-An SMTP server: one mail per alert and per `edr notify`. The board is never mailed.
+Each alert and each `edr notify` goes out as one mail through an SMTP server. The board is never
+mailed.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -380,7 +382,7 @@ nothing.
 
 ### [[job]]
 
-One run of a batch. `check` and `plan` verify that an override key is an identifier, and that
+A job describes one run of a batch. `check` and `plan` verify that an override key is an identifier, and that
 a stage of the job uses `{overrides}` in `cmd`, `resume` or `prepare`. They do not know the
 flow's own variables, so a key the flow ignores passes.
 

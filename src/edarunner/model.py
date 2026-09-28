@@ -39,12 +39,12 @@ class Host:
 
 @dataclass
 class Tool:
-    """A tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
+    """A `[tools.<name>]` table declares one tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
     the probe on the host and reads the first line it prints, `free` or `free total`, and waits while
     `free`, less the seats other runs leased in the last `lease_s`, is below the seats the stage
     needs; then it leases its seats in `<state_dir>/leases/<tool>/`. A probe that fails or prints no number counts as
     unknown and lets the stage run. A hook that keeps a reserve for others subtracts it before it
-    prints. A tool without a probe is present or not, with no gate. A name that no `[tools]` table
+    prints. A tool without a probe has no gate; a host either has it or does not. A name that no `[tools]` table
     declares is an error where it appears. The core knows no licence manager;
     `examples/site/hooks/flexlm_free.sh` turns `lmutil lmstat` output into the `free total` line."""
 
@@ -90,7 +90,8 @@ class BotCommand:
 
 @dataclass
 class Telegram:
-    """The bot, the one chat it answers, and the custom commands; `docs/guides/alerts.md` explains the setup."""
+    """`[telegram]` sets up the bot, the one chat it answers and the custom commands; `docs/guides/alerts.md`
+    explains the setup."""
 
     chat_id: int = doc("the one chat the bot answers; a group id is negative")
     token_file: Path = doc("the bot token, mode 600", Path("~/.config/edarunner/telegram.token"))
@@ -103,8 +104,8 @@ class Telegram:
 
 @dataclass
 class Ntfy:
-    """An ntfy topic: one push message per alert, with a priority by alert kind; `docs/guides/alerts.md`
-    explains the setup."""
+    """Each alert goes to an ntfy topic as one push message, with a priority by alert kind;
+    `docs/guides/alerts.md` explains the setup."""
 
     topic: str = doc("the topic; anyone who knows the name can read it, so pick a long random one")
     url: str = doc("the ntfy server", "https://ntfy.sh")
@@ -113,7 +114,8 @@ class Ntfy:
 
 @dataclass
 class Mail:
-    """An SMTP server: one mail per alert and per `edr notify`. The board is never mailed."""
+    """Each alert and each `edr notify` goes out as one mail through an SMTP server. The board is never
+    mailed."""
 
     host: str = doc("the SMTP server")
     sender: str = doc("the From address", key="from")
@@ -128,7 +130,7 @@ class Mail:
 class Marks:
     """The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
     fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
-    Below the first it is 🟢. Any other list stops at load with the key in the message. In `edr.toml`
+    Below the first it is 🟢. Any other list stops the load with an error that names the key. In `edr.toml`
     the table replaces the site's keys for this project only."""
 
     cores: list[float] = doc("the load average over the cores", factory=lambda: [0.6, 0.8, 0.9])
@@ -144,7 +146,7 @@ BACKENDS = ("ssh", "local", *SCHEDULERS)
 
 @dataclass
 class Scheduler:
-    """What starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
+    """`[scheduler]` decides what starts and watches a driver. With `condor`, `slurm` or `lsf` the scheduler picks the host:
     `plan` probes no host, the run tree goes under `tree_root`, and the job's `host` is the name the
     driver writes into its first heartbeat. `docs/guides/site.md` shows a Slurm site file
     and how each setting maps to HTCondor, Slurm and LSF."""
@@ -191,7 +193,7 @@ class Site:
 
 @dataclass
 class Needs:
-    """What a stage, or a task with its own `needs`, needs before it starts."""
+    """The resources a stage, or a task with its own `needs`, must have before it starts."""
 
     cores: int = doc("the cores; `{cores}` in the stage strings", 1)
     disk_gb: float = doc("free space at the run tree, in GB; below it a task is skipped, and the run fails at "
@@ -285,7 +287,7 @@ class Metric:
 
     A metric row comes from a stage or a task that ended `done`. A `step = "*"` metric gives one
     row per step directory found, under the stage that owns that step number. A file that does not
-    parse gives a row with an empty value and the error in `source_file`, never a crash.
+    parse gives a row with an empty value and the error in `source_file`; the extraction goes on.
     """
 
     name: str
@@ -333,7 +335,7 @@ class Task:
 
 @dataclass
 class Source:
-    """The git repository of the flow, and how `edr checkout` pins a version of it."""
+    """`[source]` names the git repository of the flow and sets how `edr checkout` pins a version of it."""
 
     repo: Path = doc("the git repository of the flow")
     worktrees: Path = doc("where `edr checkout` puts a local clone per commit")
@@ -349,7 +351,7 @@ class Source:
 
 @dataclass
 class Sync:
-    """The copy of the checked-out tree to the host, by `rsync --delete` behind the guard."""
+    """The checked-out tree goes to the host with `rsync --delete`, behind the guard."""
 
     exclude: list[str] = doc("rsync exclude patterns for the copy of the tree; `.git` goes along unless "
                              "the list names it", factory=list)
@@ -358,7 +360,7 @@ class Sync:
 
 @dataclass
 class Runtime:
-    """One command that prepares the run tree on the host, such as `uv sync --frozen` for a Python
+    """`setup` is one command that prepares the run tree on the host, such as `uv sync --frozen` for a Python
     environment. The driver runs it in the tree root after the sync and before the first stage, with
     the environment of the stages, and logs it to `log/setup.log`. A failure ends the run
     `FAILED:runtime` before any stage takes a tool seat."""
@@ -371,7 +373,7 @@ class Runtime:
 
 @dataclass
 class Safety:
-    """The guard on every delete target; `docs/how-it-works.md` explains it."""
+    """Every delete target passes this guard; `docs/how-it-works.md` explains it."""
 
     marker: str = doc("a substring every delete target must hold", "/edr/")
     min_depth: int = doc("the smallest path depth of a delete target", 4)
@@ -379,8 +381,8 @@ class Safety:
 
 @dataclass
 class Limits:
-    """The clocks and floors of the driver and the watcher; `docs/how-it-works.md` says what each
-    one does."""
+    """These are the timeouts and thresholds of the driver and the watcher;
+    `docs/how-it-works.md` says what each one does."""
 
     stagger_s: int = doc("pause between two launches of one batch", 120)
     stale_s: int = doc("heartbeat age that marks a run `stale`", 600)
@@ -445,7 +447,7 @@ class Project:
 
 @dataclass
 class Job:
-    """One run of a batch. `check` and `plan` verify that an override key is an identifier, and that
+    """A job describes one run of a batch. `check` and `plan` verify that an override key is an identifier, and that
     a stage of the job uses `{overrides}` in `cmd`, `resume` or `prepare`. They do not know the
     flow's own variables, so a key the flow ignores passes.
 

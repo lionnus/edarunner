@@ -1,7 +1,7 @@
 # Contributing
 
-edarunner welcomes bug reports, questions and pull requests. Read this page
-before you open a pull request.
+Bug reports, questions and pull requests are welcome. Please read this
+page before you open a pull request.
 
 ## Report a bug or ask a question
 
@@ -44,18 +44,19 @@ CI measures the coverage and fails under 88 %:
 .venv/bin/python -m pytest -q --cov=edarunner --cov-fail-under=88
 ```
 
-`tests/test_driver.py::test_compiles_on_py36` skips unless
-`EDR_DRIVER_PYTHON`, or else `python3.6` on `PATH`, is a Python 3.6. CI runs the driver tests against
-the Python 3.6 of a `python:3.6` container, and the OpenROAD example
-`examples/openroad-gcd` in the `openroad/orfs` image.
+`tests/test_driver.py::test_compiles_on_py36` is skipped unless
+`EDR_DRIVER_PYTHON`, or else `python3.6` on `PATH`, is a Python 3.6. CI
+runs the driver tests against the Python 3.6 of a `python:3.6` container,
+and it runs the OpenROAD example `examples/openroad-gcd` in the
+`openroad/orfs` image.
 [docs/dev/testing.md](docs/dev/testing.md) describes each job.
 
-Add a test for a change to a module in `tests/test_<module>.py`.
+When you change a module, add a test for it in `tests/test_<module>.py`.
 
 ## Commit messages
 
-Write one line with a shortcode from
-[chipmoji](https://github.com/lionnus/chipmoji) first, and no body:
+A commit message is one line that starts with a shortcode from
+[chipmoji](https://github.com/lionnus/chipmoji), with no body:
 
 ```
 <shortcode> <scope>: <message>
