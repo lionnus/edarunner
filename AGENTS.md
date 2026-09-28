@@ -7,8 +7,9 @@ to a person.
 ## Start with edr brief
 
 Run `edr brief` first. It prints what the project is, its flow, the
-hosts and tools, the runs per batch, every run that needs a decision
-with the proposed command, and the last ten events. Before you act on a
+hosts and tools, the runs per batch with their source tags and how far
+each tag lags the tracking branch, every run that needs a decision with
+the proposed command, and the last ten events. Before you act on a
 run you did not start, read its history with `edr brief --run <handle>`,
 which prints its phases, events, log tail, metrics and the proposed
 command. `docs/guides/agents.md` shows the Claude Code hook that runs

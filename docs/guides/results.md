@@ -313,6 +313,9 @@ missing: early has pnr steps 8 to 9
   at step N, and a run without step N is named missing the same way.
 - compare.html shows each run at its step of record, and `missing` for
   a run without one.
+- `edr status --metric` shows each run at its step of record, and
+  `missing` for a run without one; see
+  [An overview of runs](#an-overview-of-runs).
 - The MLflow export logs the value at the step of record again as
   `record/<metric>`.
 - `metrics.csv` has a `record` column: 1 on the row at the step of
@@ -448,6 +451,39 @@ vars.netlist_stage  11            15
 metric     task     base@3f9a2c1  base@7c0d9e2  Δ base@7c0d9e2    Δ %
 energy_nj  k_small         412.7         446.1            33.4  +8.1%
 ```
+
+## An overview of runs
+
+`edr status --metric NAME` adds a column per metric to the board, so one
+table lists the runs with the numbers a report quotes. `--metric` is
+repeatable and takes a metric name or a canonical name, and `--source`
+(repeatable) keeps the runs of those source tags:
+
+```
+$ edr status --batch g8 --metric area_um2 --metric setup_violations
+#   label  source   host   state   phase       stage/step  age  fail/done  core-h          area_um2   setup_violations
+#1  early  3f9a2c1  host1  failed  FAILED:pnr  pnr/9        2d      0f/0d    11.2           missing    52 FAIL (pnr 9)
+#2  large  3f9a2c1  host2  done    done        pnr/11       1d      0f/0d    30.1   164808 (pnr 11)  208 FAIL (pnr 11)
+#3  small  3f9a2c1  host1  done    done        pnr/12       1d      0f/0d    13.4  51230.4 (pnr 12)         0 (pnr 12)
+missing: early@g8 has pnr steps 8 to 9
+```
+
+A cell holds the value of the run at the
+[step of record](#stage-of-record) of its metric, with FAIL when the
+value breaks the `pass` rule, and the stage and step it comes from. A
+metric without `record` shows the last step of each run. A run without
+a step of record shows `missing`, and a line under the board names the
+steps it has. A task group has one value per task, so its rows are left
+out; `edr metrics` lists them.
+
+`--csv` writes the same rows as CSV: `run_id`, `label`, `batch`,
+`source`, `host`, `state` and `phase`, then four columns per metric,
+such as `area_um2`, `area_um2_stage`, `area_um2_step` and
+`area_um2_verdict`, where the verdict is `pass`, `FAIL` or empty. The
+lines that name the missing runs go to stderr.
+`--json` adds `metrics`, one row per metric shaped like a row of
+`edr compare --json`, and `missing`. A canonical name that two metrics
+share is refused; name one of them.
 
 ## Runtime
 
