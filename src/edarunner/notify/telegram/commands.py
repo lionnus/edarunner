@@ -179,7 +179,7 @@ class Commands:
     def _handle(self, args: list[str]) -> tuple[str, str]:
         """(project, handle) of the first argument; ValueError when it is no handle or names no single run."""
         if not args or not HANDLE.match(args[0]):
-            raise ValueError("a handle is label@batch, project/label@batch, a run id prefix or #n")
+            raise ValueError("a handle is label@batch, label@source, project/label@batch, a run id prefix or #n")
         return self.router.resolve(args[0])
 
     def cmd_status(self, args: list[str]) -> Reply | str:

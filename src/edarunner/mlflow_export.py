@@ -28,9 +28,9 @@ def _key(text: str) -> str:
     return _KEY.sub("_", text)
 
 
-def export_mlflow(project: Project, db: Database, out: Path, source: str | None = None,
+def export_mlflow(project: Project, db: Database, out: Path, sources: list[str] | None = None,
                   max_bytes: int = MAX_ARTIFACT_BYTES) -> dict[str, Any]:
-    """Write every run (or the runs of `source`) into the store under `out`; a run already there is skipped."""
+    """Write every run (or the runs of `sources`) into the store under `out`; a run already there is skipped."""
     try:
         from mlflow.entities import Metric, Param, RunTag
         from mlflow.tracking import MlflowClient
@@ -48,7 +48,7 @@ def export_mlflow(project: Project, db: Database, out: Path, source: str | None 
     exp_id = exp.experiment_id if exp else client.create_experiment(project.project,
                                                                      artifact_location=(out / "artifacts").as_uri())
     done = {r.data.tags.get("edr.run_id") for r in client.search_runs([exp_id], max_results=50000)}
-    runs = [r for r in db.runs() if source is None or r.get("source") == source]
+    runs = [r for r in db.runs() if not sources or r.get("source") in sources]
     written, skipped = [], []
     for r in runs:
         if r["run_id"] in done:

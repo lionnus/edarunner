@@ -1,4 +1,4 @@
-"""A frozen snapshot of one source for a paper: manifest, two tables and the collected files."""
+"""A frozen snapshot of one or more sources for a paper: manifest, two tables and the collected files."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import __version__, collect
+from . import __version__, analysis, collect
 from .board import is_live
-from .db import Database
+from .db import Database, pick
 from .guards import Refuse
 from .model import Project
 
@@ -27,26 +27,30 @@ METRIC_COLUMNS = ["run_id", "label", "config", "source", "stage", "step", "task"
 def export(
     project: Project,
     db: Database,
-    source: str,
+    sources: list[str],
     out: Path,
     labels: list[str] | None = None,
     dry_run: bool = False,
     with_logs: bool = False,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv and the collected files of `source` to `out`.
+    """Write manifest.json, runs.csv, metrics.csv and the collected files of the runs of `sources` to `out`.
 
-    The files are copied verbatim; `log/` directories and `*.log` files only with `with_logs`.
+    The export holds the `pick` of each label and source. The manifest lists every exported run whose phase is
+    not done under `incomplete`, and the other runs of each label and source under `skipped`. The files of a run
+    go under its label, or under label@source when the runs come from more than one source. They are copied
+    verbatim; `log/` directories and `*.log` files only with `with_logs`.
     """
-    if not source:
+    if not sources or not all(sources):
         raise Refuse("empty source")
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise Refuse(f"'{out}' exists and is not empty")
-    runs = _select(db, source, labels)
+    runs, skipped = _select(db, sources, labels)
     if not runs:
-        raise Refuse(f"no run has the source '{source}'" + (f" and a label in {labels}" if labels else ""))
+        raise Refuse(f"no run has the source {' or '.join(map(repr, sources))}" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
     metrics = db.metrics(run_ids=ids)
+    names = analysis.names(runs)
 
     plan: list[tuple[str, Path | bytes]] = [
         ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r) for r in runs])),
@@ -58,19 +62,20 @@ def export(
             rel = src.relative_to(results)
             if not with_logs and ("log" in rel.parts[:-1] or rel.suffix == ".log"):
                 continue
-            plan.append((f"{r['label']}/{rel}", src))
+            plan.append((f"{names[r['run_id']]}/{rel}", src))
 
     manifest: dict[str, Any] = {
         "producer": f"edarunner {__version__}",
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "schema": 1,
+        "schema": 2,
         "project": project.project,
-        "source": source,
+        "sources": sources,
         "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "source", "host", "phase")},
                   "record": _record(project, db, r)} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics)},
         "files": [],
-        "incomplete": [r["run_id"] for r in runs if is_live(r) or (r.get("counts") or {}).get("failed")],
+        "incomplete": [_ident(r) for r in runs if r.get("phase") != "done"],
+        "skipped": [_ident(r) for r in skipped],
     }
     if dry_run:
         for rel, item in plan:
@@ -104,13 +109,19 @@ def _record(project: Project, db: Database, r: Row) -> dict[str, Any]:
             "stages": stages}
 
 
-def _select(db: Database, source: str, labels: list[str] | None) -> list[Row]:
-    """The newest run per label with the exact source tag `source`, in label order."""
-    newest: dict[str, Row] = {}
+def _select(db: Database, sources: list[str], labels: list[str] | None) -> tuple[list[Row], list[Row]]:
+    """The `pick` of each label and exact source tag in `sources`, in label and source order; and the other runs."""
+    groups: dict[tuple[str, str], list[Row]] = {}
     for r in db.runs():
-        if r.get("source") == source and (labels is None or r["label"] in labels):
-            newest[r["label"]] = r
-    return [newest[k] for k in sorted(newest)]
+        if r.get("source") in sources and (labels is None or r["label"] in labels):
+            groups.setdefault((r["label"], r["source"]), []).append(r)
+    picked = [pick(groups[k]) for k in sorted(groups)]
+    ids = {r["run_id"] for r in picked}
+    return picked, [r for k in sorted(groups) for r in groups[k] if r["run_id"] not in ids]
+
+
+def _ident(r: Row) -> Row:
+    return {k: r.get(k) for k in ("run_id", "label", "source", "phase")}
 
 
 def _run_row(r: Row) -> list[Any]:

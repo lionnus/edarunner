@@ -5,12 +5,16 @@ import os
 
 import pytest
 
+from edarunner import board
 from edarunner import db as db_mod
-from edarunner.db import Database
+from edarunner.db import Database, pick
 
 RUN_A = "20261002_1130_a_demo_gaaa111"
 RUN_B = "20261002_1130_b_nodw_demo_gaaa111"
 RUN_C = "20261003_0900_a_demo_gbbb222"
+DIRTY_TAG = "ccc333-dirty-0badc0de"
+CLEAN = "20261004_0800_x_demo_gccc333"
+DIRTY = f"20261004_0800_x_demo_g{DIRTY_TAG}"
 
 
 def _seed(db: Database) -> None:
@@ -102,6 +106,36 @@ def test_resolve(tmp_path):
             db.resolve("#1", None)
 
 
+def test_pick_takes_the_newest_done_run_by_start_time():
+    first = {"run_id": "20261001_0900_x_demo_gaaa111", "phase": "done", "started": 300}
+    later_id = {"run_id": "20261002_0900_x_demo_gaaa111", "phase": "done", "started": 200}
+    failed = {"run_id": "20261003_0900_x_demo_gaaa111", "phase": "FAILED:pnr", "started": 400}
+    assert pick([first, later_id, failed]) is first
+    assert pick([later_id, {**first, "started": 200}]) is later_id  # the run id breaks a tie
+    assert pick([failed, {**later_id, "phase": "STOPPED"}]) is failed  # nothing ended done: the newest run
+    assert pick([]) is None
+
+
+def test_label_at_batch_names_one_run_and_label_at_source_the_pick(tmp_path):
+    with Database(tmp_path / "edr.db") as db:
+        _seed(db)
+        # One label twice in one batch; the run ids sort against the start times.
+        for run_id, source, phase, started in ((CLEAN, "ccc333", "FAILED:pnr", 300), (DIRTY, DIRTY_TAG, "done", 200)):
+            db.upsert_run({"run_id": run_id, "batch": "twins", "label": "x", "config": "demo", "source": source,
+                           "phase": phase, "started": started})
+        with pytest.raises(KeyError, match="2 runs have label 'x' in batch 'twins'") as exc:
+            db.resolve("x@twins")
+        assert f"{CLEAN} (ccc333, FAILED:pnr)" in str(exc.value) and f"{DIRTY} ({DIRTY_TAG}, done)" in str(exc.value)
+        assert db.resolve(f"x@{DIRTY_TAG}") == DIRTY and db.resolve("x@ccc333") == CLEAN and db.resolve("a@aaa111") == RUN_A
+        runs = db.runs()
+        assert [db.resolve(board.handle(r, runs)) for r in runs] == [r["run_id"] for r in runs]
+        with pytest.raises(KeyError, match="no run has label 'x'"):
+            db.resolve("x@aaa111")
+        db.upsert_run({"run_id": "20261005_0900_y_demo_gddd444", "batch": "aaa111", "label": "y", "source": "ddd444"})
+        with pytest.raises(KeyError, match="'aaa111' is both a batch and a source"):
+            db.resolve("a@aaa111")
+
+
 def test_metrics_by_source(tmp_path):
     with Database(tmp_path / "edr.db") as db:
         _seed(db)
@@ -113,10 +147,11 @@ def test_metrics_by_source(tmp_path):
         assert not db.add_metric({"run_id": RUN_A, "stage": "synth", "step": 3, "name": "area_cell_um2", "value": 1.0})
         assert db.conn.execute("SELECT count(*) FROM metrics").fetchone()[0] == 4
 
-        rows = db.metrics(source="aaa111")
+        rows = db.metrics(sources=["aaa111"])
         assert [(r["run_id"], r["name"], r["value"], r["label"]) for r in rows] == [
             (RUN_A, "power_w", 0.25, "a"), (RUN_A, "area_cell_um2", 1000.0, "a"), (RUN_B, "area_cell_um2", 1010.0, "b_nodw")]
-        assert [r["value"] for r in db.metrics(source="bbb222")] == [2000.0]
+        assert [r["value"] for r in db.metrics(sources=["bbb222"])] == [2000.0]
+        assert len(db.metrics(sources=["aaa111", "bbb222"])) == 4 and db.metrics(sources=[]) == []
         assert [r["run_id"] for r in db.metrics(name="design__instance__area", step=3)] == [RUN_A, RUN_B, RUN_C]
         assert [r["run_id"] for r in db.metrics(stage="power")] == [RUN_A]
         assert [r["run_id"] for r in db.metrics(run_ids=[RUN_C])] == [RUN_C]

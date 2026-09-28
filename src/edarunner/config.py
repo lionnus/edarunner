@@ -111,7 +111,8 @@ PLACEHOLDERS = {
     "task_dir": ("the task directory", "the strings of a task group, `collect`, metric files"),
     "task.<key>": ("a key of the task table", "the strings of a task group, `collect`, metric files"),
     "step": ("the step number", "a metric `file` with `step = \"*\"`"),
-    "handle": ("the handle of the run, `label@batch`", "a bot command sent as a reply to an alert"),
+    "handle": ("the handle of the run, `label@batch`, or the shortest unique prefix of its run id when another run "
+               "has the same label and batch", "a bot command sent as a reply to an alert"),
     "run_root": ("the run tree", "a bot command sent as a reply to an alert"),
 }
 

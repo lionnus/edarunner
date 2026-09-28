@@ -218,7 +218,8 @@ def config_page() -> str:
 # the run states
 
 def states_page() -> str:
-    row = {"label": "<label>", "batch": "<batch>", "source": "<source>", "stage": "<stage>", "phase": "<phase>"}
+    row = {"label": "<label>", "batch": "<batch>", "source": "<source>", "stage": "<stage>", "phase": "<phase>",
+           "root": "<root>"}
     hb = {"stage": "<stage>", "step_name": "<step>"}
     rows = [[code(s), tgfmt.MARK.get(s, ""), st.test, "yes" if st.alert else "", st.action,
              code(board.triage_cmd(row, s, hb))] for s, st in watch.STATES.items()]
@@ -233,8 +234,9 @@ def states_page() -> str:
 def bot_page() -> str:
     out = [head("Telegram bot"), "The Telegram bot sends the alerts with their buttons, keeps one pinned board up to date "
            "and answers the commands below.\n\n", rest(tg) + "\n\n", "## Built-in commands\n\n",
-           "A handle is `label@batch`, a run id prefix, or `#n` from the last board; `project/label@batch` also names "
-           "the project. Without `[project]`, `/status` and `/events` answer for every project, and the other commands "
+           "A handle is `label@batch`, `label@source`, a run id prefix, or `#n` from the last board; "
+           "`project/label@batch` also names the project. Without `[project]`, `/status` and `/events` answer for every "
+           "project, and the other commands "
            "take the project of the alert they reply to, or the only one.\n\n"]
     groups: dict[str, list[tgc.Builtin]] = {}
     for b in tgc.BUILTINS.values():

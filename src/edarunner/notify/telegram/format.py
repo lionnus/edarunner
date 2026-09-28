@@ -134,15 +134,16 @@ def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | No
     return fit("\n".join(lines))
 
 
-def run_detail(row: Row, hb: dict, now: float) -> str:
-    """The state, stage, step, host, age, next command and the last log lines of one run."""
+def run_detail(row: Row, hb: dict, now: float, everyone: list[Row] | None = None) -> str:
+    """The state, stage, step, host, age, next command and the last log lines of one run; `everyone`, the runs of
+    the project, makes its handle name this run alone."""
     from edarunner.notify.alerts import log_lines
 
     state = runs.state_of(row)
     step = " ".join(str(v) for v in (hb.get("step") or row.get("step"), hb.get("step_name")) if v not in (None, ""))
     age = runs.hm(None if row.get("updated") is None else now - row["updated"])
-    cmd = runs.triage_cmd(row, state, hb)
-    lines = [f"{mark(state)} <code>{esc(runs.handle(row))}</code> {esc(state)}",
+    cmd = runs.triage_cmd(row, state, hb, everyone)
+    lines = [f"{mark(state)} <code>{esc(runs.handle(row, everyone))}</code> {esc(state)}",
              esc(f"stage {row.get('stage') or '-'}, step {step or '-'}"), esc(f"on {row.get('host') or '-'}, {age}")]
     lines += [f"<code>{esc(cmd)}</code>"] if cmd else []
     return "\n".join(lines + [pre("\n".join(log_lines(hb)) or "-")])

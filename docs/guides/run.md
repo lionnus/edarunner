@@ -73,9 +73,14 @@ edr status --triage           # every run not running, with one proposed command
 edr events --run base@sweep1  # the history of one run, with the reason of every action
 ```
 
-`base@sweep1` is a handle. A handle names one run as `label@batch`, as a
-prefix of the run id, or as `#n`, the row number on the last board that
-`edr status` printed. Every command that acts on one run takes a handle.
+`base@sweep1` is a handle. A handle names one run as `label@batch`, as
+`label@source`, as a prefix of the run id, or as `#n`, the row number on
+the last board that `edr status` printed. Every command that acts on one
+run takes a handle. A `label@batch` that names more than one run is
+refused with the list of its runs, and `label@source` takes the newest
+run of the label at that source tag that ended `done`;
+[results.md](results.md#which-run-a-command-takes) gives the rule. The
+board shows the source tag of each run next to its label.
 
 The board shows a phase and a state for each run. The phase is the
 driver's word for where the run is or how it ended; the state is the
@@ -260,6 +265,11 @@ stages = ["power"]
 tasks = ["softmax_197"]
 reuse = { label = "base", latest = true }
 ```
+
+With `label`, the job takes a run of that label at the `source` of its
+batch file: the newest by start time that ended `done`, else the newest
+one. A run whose tree is gone is refused, never replaced by an older
+tree. `run_id` names one run by its id or by any other handle.
 
 A task group takes its tasks from a queue in the state directory. Two
 drivers with the same queue share one pool, so a spec written by hand

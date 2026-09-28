@@ -278,8 +278,9 @@ When no run is live, the Running section says `nothing live`.
 ### Built-in commands
 
 [reference/bot.md](../reference/bot.md) lists every built-in command
-with its arguments. A handle is `label@batch`, a run id prefix, or `#n`
-from the last board; `project/label@batch` also names the project.
+with its arguments. A handle is `label@batch`, `label@source`, a run id
+prefix, or `#n` from the last board; `project/label@batch` also names the
+project.
 
 `/status <handle>` shows the mark, the handle and the state, then the
 stage and step, the host and the age, the proposed command in monospace,
