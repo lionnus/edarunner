@@ -11,6 +11,7 @@ from helpers_watch import NEW, NOW, Env, rid
 
 from edarunner import board, collect, config, launch, watch
 from edarunner.backend import Live
+from edarunner.hosts import Proc
 from helpers_backend import FakeBackend
 
 
@@ -201,17 +202,25 @@ def test_queued_runs_are_relaunched(env: Env, monkeypatch) -> None:
 def test_orphans_are_reported_and_killed_only_when_asked(env: Env) -> None:
     env.project.limits.grace_s = 0
     hb = env.heartbeat("a")
-    env.ssh.procs = [(99999, 120, 0.0, "sleep", "sleep 100"), (99998, 5, 0.0, "sleep", f"sleep 1 {hb['root']}")]
+    env.ssh.procs = [Proc(99999, 120, 0.0, "sleep", "sleep 100"), Proc(99998, 5, 0.0, "sleep", f"sleep 1 {hb['root']}")]
     states = env.cycle()
     assert states["orphan:local:99999"] == "orphan" and "orphan:local:99998" not in states
     assert env.events() == [("", "orphan")] and env.notifier.sent == [("orphan", "orphan:local:99999")]
-    env.ssh.procs = [(99999, 121, 0.0, "sleep", "sleep 100")]
+    env.ssh.procs = [Proc(99999, 121, 0.0, "sleep", "sleep 100")]
     env.cycle(NOW + 1)
     assert len(env.notifier.sent) == 1 and env.ssh.killed == []  # the age is not part of the alert text
     env.project.limits.kill_orphan = True
-    env.ssh.procs = [(99997, 130, 0.0, "sleep", "sleep 200")]
+    env.ssh.procs = [Proc(99997, 130, 0.0, "sleep", "sleep 200")]
     env.cycle(NOW + 1)
     assert env.ssh.killed == [("cmd", "kill -TERM 99997")] and ("", "kill") in env.events()
+
+
+def test_a_process_of_any_edarunner_run_is_no_orphan(env: Env) -> None:
+    env.ssh.procs = [Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/other/run", edr=True),
+                     Proc(502, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/other/r1/pnr"),
+                     Proc(503, 60, 99.0, "fc_shell", "fc_shell -f /scratch/x/edr/other/r1/main.tcl", "/home/me"),
+                     Proc(504, 60, 99.0, "fc_shell", "fc_shell", "/home/me")]
+    assert [k for k, s in env.cycle().items() if s == "orphan"] == ["orphan:local:504"]
 
 
 def test_dry_run_writes_nothing(env: Env, capsys) -> None:

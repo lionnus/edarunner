@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from edarunner.guards import Refuse
-from edarunner.hosts import HostError, HostProbe, Ssh, missing_tools, place, tool_versions
+from edarunner.hosts import HostError, HostProbe, Proc, Ssh, missing_tools, place, tool_versions
 from edarunner.model import Host, Job, Limits, Needs, Placement, Project, Safety, Site, Source, Stage, Sync, Tool
 from helpers_driver import DEMO
 
@@ -215,6 +215,16 @@ def test_tool_processes_local(ssh: Ssh) -> None:
     mine = [r for r in rows if r[0] == p.pid]
     assert mine and mine[0][3] == "sleep" and mine[0][4] == "sleep 31"
     assert isinstance(mine[0][1], int) and isinstance(mine[0][2], float)
+
+
+def test_tool_processes_reads_env_and_cwd_in_one_call(ssh: Ssh, monkeypatch) -> None:
+    out = ("501 60 99.0 fc_shell fc_shell -f main.tcl\n502 70 0.0 fc_shell fc_shell\n503 5 0.0 bash bash\n"
+           "@@\n/proc/501/environ\n/proc/503/environ\n@@\n/proc/501 /scratch/x/edr/p/r1\n/proc/502 /home/me\n")
+    calls = fake_run(monkeypatch, {"EDR_RUN_ID": (0, out, "")})
+    assert ssh.tool_processes("hostA", "^fc_shell$") == [
+        Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/p/r1", True),
+        Proc(502, 70, 0.0, "fc_shell", "fc_shell", "/home/me", False)]
+    assert len(calls) == 1
 
 
 def test_check_local_finds_every_tool_here(ssh: Ssh) -> None:

@@ -12,13 +12,14 @@ import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 
 from .guards import Refuse
 from .model import Job, Needs, Placement, Project, Site
 
 TIMEOUT_RC = 255
 # What the head node runs itself: the controller calls the first four, the `local` host the rest.
-HEAD_TOOLS = ("ssh", "rsync", "git", "python3", "nproc", "df", "ps", "awk", "stat", "readlink")
+HEAD_TOOLS = ("ssh", "rsync", "git", "python3", "nproc", "df", "ps", "awk", "stat", "readlink", "grep", "find")
 _SEP = "@@"
 _SIG_RE = re.compile(r"^[A-Z0-9]+$")
 
@@ -196,6 +197,26 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
     )
 
 
+class Proc(NamedTuple):
+    """One tool process: `edr` is True when its environment holds `EDR_RUN_ID`."""
+
+    pid: int
+    etimes: int
+    pcpu: float
+    comm: str
+    args: str
+    cwd: str = ""
+    edr: bool = False
+
+
+# grep and find skip the processes of other users: their environ and cwd are not readable.
+_PROCS_CMD = (
+    'ps -ww -u "$(id -un)" -o pid=,etimes=,pcpu=,comm=,args= || exit 1; '
+    f"echo {_SEP}; grep -lsz '^EDR_RUN_ID=' /proc/[0-9]*/environ; "
+    f"echo {_SEP}; find /proc -mindepth 2 -maxdepth 2 -name cwd -user \"$(id -un)\" -printf '%h %l\\n' 2>/dev/null; true"
+)
+
+
 class Ssh:
     """Runs short commands on a host with a timeout; `local` runs without ssh."""
 
@@ -264,16 +285,23 @@ class Ssh:
             raise HostError(f"{host}: rc {rc}: {err.strip()}")
         return rc == 0
 
-    def tool_processes(self, host: str, pattern: str) -> list[tuple[int, int, float, str, str]]:
-        """Our processes on `host` whose comm matches `pattern`: (pid, etimes_s, pcpu, comm, args)."""
-        out = self._run_ok(host, 'ps -ww -u "$(id -un)" -o pid=,etimes=,pcpu=,comm=,args=')
+    def tool_processes(self, host: str, pattern: str) -> list[Proc]:
+        """Our processes on `host` whose comm matches `pattern`, with their cwd and whether they carry `EDR_RUN_ID`.
+
+        One ssh call: ps, the environ files that hold `EDR_RUN_ID`, and the cwd links of our processes."""
+        out = self._run_ok(host, _PROCS_CMD)
+        listing, edr, cwds = (out.split(f"\n{_SEP}\n") + ["", ""])[:3]
+        with_env = {int(m) for m in re.findall(r"^/proc/(\d+)/environ$", edr, re.M)}
+        cwd = {int(m[0]): m[1] for m in re.findall(r"^/proc/(\d+) (.*)$", cwds, re.M)}
         rx = re.compile(pattern)
         rows = []
-        for line in out.splitlines():
+        for line in listing.splitlines():
             parts = line.split(None, 4)
             # A comm with a space misaligns the row; no tool name has one.
             if len(parts) == 5 and rx.search(parts[3]):
-                rows.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3], parts[4]))
+                pid = int(parts[0])
+                rows.append(Proc(pid, int(parts[1]), float(parts[2]), parts[3], parts[4], cwd.get(pid, ""),
+                                 pid in with_env))
         return rows
 
     def check_local(self) -> list[str]:

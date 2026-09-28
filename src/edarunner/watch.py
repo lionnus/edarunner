@@ -69,7 +69,8 @@ STATES = {
                        "`stop --now` on the newest run of that host, unless that run has `ack`", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, unless the run has a keep file", alert=True),
-    "orphan": State("a process of the current user that matches `tool_procs`, outside every live run tree",
+    "orphan": State("a process of the current user that matches `tool_procs`, without `EDR_RUN_ID` in its environment "
+                    "and without the safety marker in its cwd or command line",
                     "`SIGTERM`, only with `kill_orphan`", alert=True),
     "queued": State("no host fits the job, or the scheduler holds `max_jobs` runs of the project",
                     "a launch when a host fits or a job ends, one per batch per cycle"),
@@ -259,14 +260,14 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         rec["acted"] = True
 
 
-def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
-    """Our tool processes on every site host that no live run root owns."""
+def orphans(project: Project, ssh: Ssh) -> list[Row]:
+    """Our tool processes on every site host that no edarunner run owns.
+
+    A process is owned when its environment holds `EDR_RUN_ID`, the mark the driver gives every stage
+    command of any project, or when its cwd or command line holds the safety marker of run trees."""
     if not project.site.tool_procs:
         return []
-    roots: dict[str, list[str]] = {}
-    for r in db.runs():
-        if r.get("root") and r.get("phase") and board.is_live(r):
-            roots.setdefault(str(r.get("host")), []).append(r["root"])
+    marker = project.safety.marker
     out = []
     for host in project.site.hosts:
         try:
@@ -274,14 +275,10 @@ def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
         except HostError as e:
             log.warning("%s: %s", host, e)
             continue
-        pids = " ".join(str(p[0]) for p in procs)
-        _, cwds, _ = ssh.run(host, f'for p in {pids}; do echo "$p $(readlink /proc/$p/cwd)"; done') if pids else (0, "", "")
-        cwd = dict(line.split(" ", 1) for line in cwds.splitlines() if " " in line)
-        for pid, etimes, _, comm, args in procs:
-            own = roots.get(host, [])
-            if not any(r in args or cwd.get(str(pid), "").startswith(r) for r in own):
-                out.append({"key": f"orphan:{host}:{pid}", "run_id": "", "label": comm, "batch": host, "host": host,
-                            "pid": pid, "phase": args, "etimes": etimes})
+        for p in procs:
+            if not (p.edr or marker in p.cwd or marker in p.args):
+                out.append({"key": f"orphan:{host}:{p.pid}", "run_id": "", "label": p.comm, "batch": host, "host": host,
+                            "pid": p.pid, "phase": p.args, "etimes": p.etimes, "cwd": p.cwd})
     return out
 
 
@@ -533,7 +530,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
         if state == "dead":
             _resume(project, ssh, backend, db, run, hb, progress, now)
-    for o in [] if backend.name in SCHEDULERS else orphans(project, ssh, db):
+    for o in [] if backend.name in SCHEDULERS else orphans(project, ssh):
         states[o["key"]] = "orphan"
         if dry_run:
             print(f"{o['key']}: orphan {o['phase']} ({o['etimes']} s)")

@@ -92,10 +92,12 @@ Nothing is installed on a host. The driver is a single file that
 its own `python3`. Every host in `[hosts]` needs:
 
 - Linux with `/proc`. The probe reads `/proc/loadavg` and
-  `/proc/meminfo`, and the orphan check reads `/proc/<pid>/cwd`.
+  `/proc/meminfo`, and the orphan check reads `/proc/<pid>/cwd` and
+  `/proc/<pid>/environ`.
 - A POSIX `sh`. Every remote command runs under `sh -c`, so the login
   shell can be `tcsh` or `csh`.
-- GNU coreutils: `nproc`, `df -Pk`, `stat -c %s`, `readlink`, `nohup`.
+- GNU coreutils: `nproc`, `df -Pk`, `stat -c %s`, `readlink`, `nohup`,
+  and GNU `grep` and `find`.
 - procps-ng 3.3.10 or newer, for `ps -o etimes,pcpu,cputimes` and
   `ps -o pgid`.
 - util-linux `setsid`, because the driver starts in its own session.

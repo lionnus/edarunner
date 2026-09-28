@@ -9,7 +9,7 @@ from pathlib import Path
 from edarunner import watch
 from edarunner.config import load_project
 from edarunner.db import Database
-from edarunner.hosts import HostProbe, Ssh
+from edarunner.hosts import HostProbe, Proc, Ssh
 from edarunner.notify import Notifier
 from helpers_driver import DEMO
 
@@ -27,7 +27,7 @@ class FakeSsh(Ssh):
     def __init__(self, site) -> None:
         super().__init__(site)
         self.alive: dict[int, bool] = {}
-        self.procs: list[tuple] = []
+        self.procs: list[Proc] = []
         self.killed: list[tuple] = []
 
     def probe(self, host):
