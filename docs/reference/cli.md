@@ -576,14 +576,26 @@ exists is already launched; a batch name is used once.
 ## continue
 
 ```
-edr continue [--dry-run] [--json] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
+edr continue [--dry-run] [--json] [--stage S [S ...]] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
 ```
 
-Runs one more stage on the tree of an existing run, as a new run in the
-batch of that run with the label &lt;label&gt;.&lt;stage&gt;.
+Runs stages on the tree of an existing run, as one new run in the batch
+of that run. Without --stage it runs the stages the tree has left. Each
+run on the tree was launched with a list of stages, and the stages left
+are those after the last one that ended with exit 0, so a run that
+ended OVER_BUDGET or STOPPED at the end of a stage goes on with the next
+one. It refuses while a run on the tree has not ended. It also refuses
+when the first stage left started but did not end with exit 0; name the
+stages with --stage then, and a checkpoint with --from when the stage
+has a resume command, because a stage that runs from its start can
+delete the checkpoints it needs.
+
+--stage names the stages to run, in the order given. The new run gets
+the label &lt;label&gt;.&lt;stage&gt; for one stage and &lt;label&gt;.&lt;first&gt;-&lt;last&gt; for
+several, with .2, .3 and so on when the batch has that label already.
 --tasks names the tasks of a task group, --parallel its width, --on the
-host (default: the tree's host). --from fills {checkpoint} in the
-stage's resume command, and is refused when the stage has none.
+host (default: the tree's host). --from fills {checkpoint} in the resume
+command of the first stage, and is refused when that stage has none.
 
 --collect NAME instead copies the collect_on_request list NAME of every
 stage from the tree into data/results/&lt;run id&gt;/.
@@ -593,16 +605,17 @@ stage from the tree into data/results/&lt;run id&gt;/.
 | `handle` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json continue |
-| `--stage S` | the stage to run on the tree |
+| `--stage S ...` | the stages to run on the tree, in this order; default the stages the tree has left |
 | `--tasks ID ...` | the tasks of a task group; default the job's |
-| `--from CHECKPOINT` | resume the stage from this checkpoint |
+| `--from CHECKPOINT` | resume the first stage from this checkpoint |
 | `--on HOST` | the host; default auto |
 | `--parallel N` | tasks at once; default the stage's parallel |
 | `--collect NAME` | fetch a collect_on_request list instead |
 
 | Exit | Meaning |
 |---|---|
-| 1 | the plan has a problem, or --from names a stage without resume |
+| 1 | the plan has a problem, --from names a stage without resume, or without --stage the tree cannot go on by itself |
+| 2 | without --stage, no stage is left on the tree |
 | 3 | with --collect, a copy failed |
 
 ## track
@@ -784,7 +797,11 @@ batch and marks it RETIRED, so the watcher skips it. A live run gets the
 phase ABANDONED:&lt;why&gt;. --host H with --prune prunes every finished run
 of the project that has a tree on H, to free the scratch of a full host;
 the Free space button of a host_full alert runs it with every set the
-project declares.
+project declares. It skips a run whose tree has stages left, the ones
+edr continue would run, since those stages may need the files, and
+prints a line for each run it skips. A run that you name is pruned all
+the same, and retire prints the stages its tree has left above its rm
+lines.
 
 The logs and results survive a retire. The watcher has already copied
 log/ and the collect paths of every finished stage to
@@ -811,12 +828,12 @@ not collected unless you pass --uncollected.
 | `--batch B` | every run of the batch, then mark it RETIRED |
 | `--collect NAMES` | copy these collect_on_request lists, comma separated, to the head node first |
 | `--prune T` | remove the prune targets named T instead of the tree; comma separated |
-| `--host H` | with --prune: every finished run of the project with a tree on H |
+| `--host H` | with --prune: every finished run of the project with a tree on H and no stage left |
 | `--uncollected` | remove a tree whose results were never collected |
 
 | Exit | Meaning |
 |---|---|
-| 2 | the batch has no run, or no finished run has a tree on the host |
+| 2 | the batch has no run, or no finished run without stages left has a tree on the host |
 | 3 | an rm failed |
 
 ## notify

@@ -30,7 +30,7 @@ the stop of `superseded` for N hours; the full-host stop never waits for a keep.
 | `done` | ⚪ | the run ended `done` |  | none | `edr export --source <source> --out exports/<source>` |
 | `incomplete` | 🟠 | the run ended `INCOMPLETE`: a task failed or was skipped | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `failed` | 🔴 | the run ended `FAILED` | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
-| `stopped` | ⚫ | a stop file or `edr stop` ended the run, or `edr stop` marked a queued run |  | none | `edr retire <label>@<batch> --why '<phase>'` |
+| `stopped` | ⚫ | a stop file or `edr stop` ended the run, or `edr stop` marked a queued run | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `killed` | 🔴 | a signal ended the run | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `abandoned` | ⚫ | `edr retire` took a live run |  | none |  |
 | `retired` | ⚫ | `edr retire` took the run |  | none |  |

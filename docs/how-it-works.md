@@ -214,7 +214,7 @@ deletes a file:
 |---|---|---|
 | `needs.disk_gb` of the first stage | the driver at start | below it the run fails with exit 3 |
 | `needs.disk_gb` of a task | the driver before each claim | below it the task is `skipped` and counted |
-| `budget.hours`, `budget.disk_gb` | the driver while a command runs | the phase becomes `OVER_BUDGET:<stage>`; with `kill = true` the process group gets `SIGTERM`, else the command runs to its end; the run then stops with exit 9 |
+| `budget.hours`, `budget.disk_gb` | the driver while a command runs | the phase becomes `OVER_BUDGET:<stage>`; with `kill = true` the process group gets `SIGTERM`, else the command runs to its end; the run then stops with exit 9, and `edr continue` runs the stages left |
 | `budget` with `per = "task"` | the driver per task | only that task gets `SIGTERM` |
 | `retry` | the driver after a failure | when `retry.match` is in the last 80 lines of the log, the stage runs again after `retry.wait_s`, up to `retry.max` times, as `retry:<stage>:<n>` |
 | `host_free_min_gb` of the site, or of the host | the driver between stages and before each claim | nothing new starts and `host_full` is set; after `grace_s` the watcher that holds `serve.lock` stops the newest run on that host, of any of your projects |
@@ -384,6 +384,8 @@ the site file, and every argument from the phone must match its
 allowlist regex in full. The bot never kills a process and never runs
 `launch` or `rm`. Its one delete is the Free space button of a
 `host_full` alert, which runs `edr retire --host <host> --prune <names>`
+after a second tap. It starts new work only through the Continue button
+of a run that ended with stages left, which runs `edr continue <handle>`
 after a second tap (`notify/telegram/bot.py`,
 `notify/telegram/buttons.py`, `notify/telegram/custom.py`).
 [guides/alerts.md](guides/alerts.md) sets it up.
@@ -408,6 +410,17 @@ still alive after the wait, `edr stop` exits 3, and `--now` is the next
 step: `SIGTERM`, then `SIGKILL` after 30 seconds. A queued run that is
 stopped is marked `stopped` and never starts.
 
+A run that ended `STOPPED` after a one-command stage, or `OVER_BUDGET`
+after a stage that ran to its end, did not run the stages after that
+stage. The watcher sends one alert for it, and `edr continue <handle>`
+runs those stages as one new run on the same tree, from the stage after
+the last one that ended with exit 0 (`launch.stages_left`). It refuses
+while a run on the tree has not ended. It also refuses when that next
+stage started but did not end with exit 0, since the stage would start
+over and could delete the checkpoints its resume needs.
+[guides/run.md](guides/run.md#more-work-on-an-existing-tree) shows the
+commands.
+
 `edr keep <handle> --hours <n>` writes the keep file. The driver adds the
 hours to the budget of the running stage or task, and for as many hours
 the watcher neither kills the run as `hung` nor stops it as
@@ -430,7 +443,8 @@ which keeps the watcher and the board away from the batch. It then
 removes the batch's checked-out source unless a batch that is not
 retired uses the same source; that tree passes the guard too. `--host`
 with `--prune` removes the prune targets of every finished run of the
-project on one host, to free a full scratch disk.
+project on one host, to free a full scratch disk. It skips a run whose
+tree has stages left, since those stages may need the files.
 [guides/cleanup.md](guides/cleanup.md) covers retire, prune and the
 archive of large files.
 

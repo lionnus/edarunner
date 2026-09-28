@@ -63,11 +63,12 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board; `projec
 
 ## Alert buttons
 
-Only the alert of a live run has buttons. A run that is `hung`, `looping`, `over_budget` or
-`superseded` gets Stop, +6h, +12h and +24h. A run on a full host gets Stop, and Free space when
-the project declares prune targets; a keep does not hold off the full-host stop, since a full
-disk blocks every other user of the host. Each alert says in one line what its buttons do.
-Mail and ntfy show each button as a command line.
+A live run that is `hung`, `looping`, `over_budget` or `superseded` gets Stop, +6h, +12h and +24h.
+A live run on a full host gets Stop, and Free space when the project declares prune targets; a
+keep does not hold off the full-host stop, since a full disk blocks every other user of the
+host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages left on its
+tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show each
+button as a command line.
 
 | Button | callback_data | Effect |
 |---|---|---|
@@ -75,7 +76,8 @@ Mail and ntfy show each button as a command line.
 | +6h | `keep6:<project>` | 6 more hours on the budget of the running stage or task, and for 6 hours no kill as hung and no stop as superseded |
 | +12h | `keep12:<project>` | the same for 12 hours |
 | +24h | `keep24:<project>` | the same for 24 hours |
-| Free space | `free:<project>` | asks once more, then removes every prune target of the finished runs of the project on the full host |
+| Free space | `free:<project>` | asks once more, then removes the prune targets of the finished runs of the project on the full host; a run whose tree has stages left keeps them |
+| Continue | `continue:<project>` | asks once more, then runs the stages the tree of the run has left as one new run on that tree |
 
 ## Custom commands
 

@@ -78,6 +78,21 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert env.ssh.killed == [] and not list(env.project.state_dir.glob("*/*.stop"))
 
 
+def test_a_run_that_ended_at_the_end_of_a_stage_offers_the_stages_left(env: Env) -> None:
+    done = {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}
+    o = env.heartbeat("o", phase="OVER_BUDGET:pnr", exit=9, stage="pnr",
+                      stages={"synth": done, "pnr": {**done, "status": "over_budget"}})
+    s = env.heartbeat("s", phase="STOPPED", exit=10, stage="power", stages={n: done for n in ("synth", "pnr", "export", "power")})
+    for hb in (o, s):
+        spec = {"stages": [{"name": n} for n in ("synth", "pnr", "export", "power")]}
+        (env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json").write_text(json.dumps(spec))
+    assert env.cycle() == {rid("o"): "over_budget", rid("s"): "stopped"}
+    over, stopped = env.notifier.alerts[rid("o")], env.notifier.alerts[rid("s")]
+    assert [b[:2] for b in over.buttons] == [("Continue", "continue:demo")] and over.about.endswith("It did not run export and power.")
+    assert over.todo[0] == ("Run the stages left on the same tree:", "edr continue o@demo")
+    assert stopped.buttons == [] and stopped.about == "A stop ended the run in stage power."
+
+
 def keep(env: Env, hb: dict, hours: float, at: float = NOW) -> None:
     """The keep file of `hours` for the run of `hb`, written at `at`."""
     path = env.project.state_dir / "demo" / f"{hb['run_id']}.keep.json"

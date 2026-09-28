@@ -375,8 +375,18 @@ class Actions:
         return (f"{board.handle(row)}: " + _keep(self.c, row, hours, actor)
                 + ", and no automatic stop or kill for as long unless its host runs out of scratch")
 
+    def continue_run(self, handle: str, actor: str) -> str:
+        """Run the stages the tree of a run has left as one new run, as edr continue without --stage does."""
+        a = argparse.Namespace(**{**vars(self.c.a), "handle": handle, "stage": None, "tasks": None, "from_": None,
+                                  "on": None, "parallel": None, "collect": None, "dry_run": False})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cmd_continue(self.c, a, actor)
+        return out.getvalue().strip()
+
     def free_space(self, handle: str, actor: str) -> str:
-        """Remove every prune target of the finished runs of the project on the host of a run, as edr retire does."""
+        """Remove the prune targets of the finished runs of the project on the host of a run, as edr retire --host
+        does; a run whose tree has stages left keeps them."""
         row = self.c.resolve(handle)
         names = sorted({n for st in self.c.project.stages.values() for n in st.prune})
         if not names:
@@ -832,38 +842,49 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.NOTHING if all(any(p.startswith("already launched") for p in ps) for ps in problems) else Exit.REFUSED
 
 
-def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
-    """Run one stage on the tree of an existing run, or fetch a collect_on_request list."""
+def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
+    """Run stages on the tree of an existing run, by default the stages its tree has left, or fetch a
+    collect_on_request list."""
     row = c.resolve(a.handle)
-    project, run_id = c.project, row["run_id"]
+    project, run_id, h = c.project, row["run_id"], board.handle(row)
     if a.collect:
         res = collect.collect_on_request(project, c.ssh, c.db, row, a.collect, a.dry_run)
         if not a.dry_run:
             c.db.add_event("user", run_id, "collect", f"{a.collect}: {res.files} files, {len(res.failures)} failed")
         c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
         return Exit.HOSTS if res.failures else Exit.DONE
-    if not a.stage:
-        raise Refuse("continue needs --stage or --collect")
-    if a.stage not in project.stages:
-        raise Refuse(f"unknown stage {a.stage}")
+    stages = a.stage
+    if not stages:
+        stages, why = launch.stages_left(project, c.db, row)
+        if why:
+            raise Refuse(f"{h}: {why}")
+        if not stages:
+            c.emit(f"{h}: no stage left on its tree")
+            return Exit.NOTHING
+    if unknown := [s for s in stages if s not in project.stages]:
+        raise Refuse(f"unknown stage {unknown[0]}")
     try:
-        batch = config.load_batch(project, str(row["batch"]))
-        job = next((j for j in batch.jobs if j.label == row["label"]), None)
+        jobs = {j.label: j for j in config.load_batch(project, str(row["batch"])).jobs}
     except (ConfigError, OSError):
-        # An imported tree has no jobs file; the database row is the job.
-        batch, job = None, None
-    if job is None:
-        job = Job(label=str(row["label"]), config=str(row.get("config") or ""))
-        batch = Batch(batch=str(row["batch"]), source=str(row["source"] or ""), jobs=[job],
-                      path=project.root / "jobs" / f"{row['batch']}.toml")
-    job.reuse, job.stages, job.host = {"run_id": run_id}, [a.stage], a.on or "auto"
+        jobs = {}  # an imported tree has no jobs file; the database row is the job
+    # A continued run is <label>.<suffix> in the batch of the run it continues, and takes the job of that label.
+    label = str(row["label"])
+    while label not in jobs and "." in label:
+        label = label.rsplit(".", 1)[0]
+    job = jobs.get(label) or Job(label=str(row["label"]), config=str(row.get("config") or ""))
+    job.reuse, job.stages, job.host = {"run_id": run_id}, stages, a.on or "auto"
     if a.tasks:
         job.tasks = a.tasks
-    if a.parallel:
-        project.stages[a.stage].parallel = a.parallel
-    # The run joins the batch of the tree it continues; the stage in the label and the time keep its id apart.
-    job.label = f"{job.label}.{a.stage}"
-    batch.batch, batch.jobs = str(row["batch"]), [job]
+    for s in stages if a.parallel else []:
+        project.stages[s].parallel = a.parallel
+    # The run joins the batch of the tree it continues; its label and the time keep its id apart.
+    job.label = base = f"{row['label']}.{stages[0]}" + (f"-{stages[-1]}" if len(stages) > 1 else "")
+    taken, n = {r["label"] for r in c.db.runs(batch=str(row["batch"]))} if len(stages) > 1 else set(), 1
+    while job.label in taken:
+        n += 1
+        job.label = f"{base}.{n}"
+    batch = Batch(batch=str(row["batch"]), source=str(row["source"] or ""), jobs=[job],
+                  path=project.root / "jobs" / f"{row['batch']}.toml")
     state = project.state_dir
     (p,) = launch.plan(project, batch, c.ssh, c.db, date=time.strftime(launch.DATE_FMT), backend=c.backend,
                        reserve=not a.dry_run)
@@ -872,16 +893,16 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.REFUSED
     if a.from_:
         if not p.spec["stages"][0].get("resume"):
-            raise Refuse(f"stage {a.stage} has no resume command; --from needs one")
+            raise Refuse(f"stage {stages[0]} has no resume command; --from needs one")
         p.spec["start_at"]["checkpoint"] = a.from_
     driver = sync.publish_driver(state, launch.DRIVER_SRC, a.dry_run)
     spec_path = launch.write_spec(state, batch.batch, p, driver, a.dry_run)
-    c.emit(f"{p.run_id}: {a.stage} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
+    c.emit(f"{p.run_id}: {', '.join(stages)} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
            {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
     if a.dry_run:
         return Exit.DONE
     c.db.upsert_run({**launch.run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
-    c.db.add_event("user", p.run_id, "continue", f"{a.stage} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
+    c.db.add_event(actor, p.run_id, "continue", f"{' '.join(stages)} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
     launch.submit(c.backend, c.db, project, p.run_id, p.host, spec_path, driver)
     return Exit.DONE
 
@@ -1062,8 +1083,14 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
                 and r.get("state") != "retired"]
     else:
         rows = c.db.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
+    # The stages a tree has left need its files: --host skips such a run, and a named run is pruned all the same.
+    left = {r["run_id"]: launch.stages_left(project, c.db, r)[0] for r in rows} if a.prune else {}
+    for r in rows if a.host else []:
+        if left[r["run_id"]]:
+            print(f"{r['run_id']}: skipped, stages left on its tree: {', '.join(left[r['run_id']])}")
+    rows = [r for r in rows if not (a.host and left[r["run_id"]])]
     if a.host and not rows:
-        c.emit(f"no finished run with a tree on {a.host}")
+        c.emit(f"no finished run with a tree on {a.host} and no stage left")
         return Exit.NOTHING
     if a.batch and not rows and not (project.state_dir / a.batch).is_dir():
         c.emit(f"no runs in batch {a.batch}")
@@ -1095,6 +1122,8 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
     failed, done = 0, []
     for row, hb, host, root, targets in checked:
         run_id = row["run_id"]
+        if left.get(run_id) and targets:
+            print(f"{run_id}: stages left on its tree: {', '.join(left[run_id])}; they may need what the prune removes")
         for t in targets:
             print(f"{run_id}: rm -rf {t} on {host}{dry}")
             if a.dry_run:
@@ -1788,20 +1817,35 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--allow-dirty", action="store_true", help="launch a dirty snapshot source")
     s.add_argument("--show-spec", action="store_true", help="print the env, commands and collect paths of each run")
     s = command("continue", "more work on the tree of an existing run", """
-        Runs one more stage on the tree of an existing run, as a new run in the
-        batch of that run with the label <label>.<stage>.
+        Runs stages on the tree of an existing run, as one new run in the batch
+        of that run. Without --stage it runs the stages the tree has left. Each
+        run on the tree was launched with a list of stages, and the stages left
+        are those after the last one that ended with exit 0, so a run that
+        ended OVER_BUDGET or STOPPED at the end of a stage goes on with the next
+        one. It refuses while a run on the tree has not ended. It also refuses
+        when the first stage left started but did not end with exit 0; name the
+        stages with --stage then, and a checkpoint with --from when the stage
+        has a resume command, because a stage that runs from its start can
+        delete the checkpoints it needs.
+
+        --stage names the stages to run, in the order given. The new run gets
+        the label <label>.<stage> for one stage and <label>.<first>-<last> for
+        several, with .2, .3 and so on when the batch has that label already.
         --tasks names the tasks of a task group, --parallel its width, --on the
-        host (default: the tree's host). --from fills {checkpoint} in the
-        stage's resume command, and is refused when the stage has none.
+        host (default: the tree's host). --from fills {checkpoint} in the resume
+        command of the first stage, and is refused when that stage has none.
 
         --collect NAME instead copies the collect_on_request list NAME of every
         stage from the tree into data/results/<run id>/.
-        """, write=True, exits={Exit.REFUSED: "the plan has a problem, or --from names a stage without resume",
+        """, write=True, exits={Exit.REFUSED: "the plan has a problem, --from names a stage without resume, or "
+                                              "without --stage the tree cannot go on by itself",
+                                Exit.NOTHING: "without --stage, no stage is left on the tree",
                                 Exit.HOSTS: "with --collect, a copy failed"})
     s.add_argument("handle", help=HANDLE)
-    s.add_argument("--stage", metavar="S", help="the stage to run on the tree")
+    s.add_argument("--stage", nargs="+", metavar="S", help="the stages to run on the tree, in this order; default the "
+                                                           "stages the tree has left")
     s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
-    s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the stage from this checkpoint")
+    s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the first stage from this checkpoint")
     s.add_argument("--on", metavar="HOST", help="the host; default auto")
     s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
     s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
@@ -1913,7 +1957,11 @@ def _parser() -> argparse.ArgumentParser:
         phase ABANDONED:<why>. --host H with --prune prunes every finished run
         of the project that has a tree on H, to free the scratch of a full host;
         the Free space button of a host_full alert runs it with every set the
-        project declares.
+        project declares. It skips a run whose tree has stages left, the ones
+        edr continue would run, since those stages may need the files, and
+        prints a line for each run it skips. A run that you name is pruned all
+        the same, and retire prints the stages its tree has left above its rm
+        lines.
 
         The logs and results survive a retire. The watcher has already copied
         log/ and the collect paths of every finished stage to
@@ -1930,13 +1978,15 @@ def _parser() -> argparse.ArgumentParser:
         live run uses, a tree shared with a run whose results are not collected
         (retire them together with --batch), and a tree whose own results are
         not collected unless you pass --uncollected.
-        """, write=True, why=True, exits={Exit.NOTHING: "the batch has no run, or no finished run has a tree on the host",
+        """, write=True, why=True, exits={Exit.NOTHING: "the batch has no run, or no finished run without stages left "
+                                                        "has a tree on the host",
                                           Exit.HOSTS: "an rm failed"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch, then mark it RETIRED")
     s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
     s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree; comma separated")
-    s.add_argument("--host", metavar="H", help="with --prune: every finished run of the project with a tree on H")
+    s.add_argument("--host", metavar="H", help="with --prune: every finished run of the project with a tree on H and "
+                                               "no stage left")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
     s = command("notify", "send one message, the board or the digest through every notifier", """
         Sends one message through every notifier that user.toml configures. The

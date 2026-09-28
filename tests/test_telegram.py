@@ -616,10 +616,24 @@ def test_the_stop_button_asks_and_acts_on_the_second_tap(bot):
 
 def test_free_space_asks_and_prunes_the_finished_runs_on_the_host(bot):
     bot.router.replies[("demo", 5)] = "run1"
+    question = "Remove the prune targets of the finished runs on hostA whose trees have no stage left?"
     bot.handle_update(press("free:demo", "disk almost full on hostA"))
-    assert bot.api.of("editMessageText")[-1]["text"].endswith("\nRemove the prune targets of the finished runs on hostA?")
-    bot.handle_update(press("freeyes:demo", "disk almost full on hostA\nRemove the prune targets of the finished runs on hostA?"))
+    assert bot.api.of("editMessageText")[-1]["text"].endswith("\n" + question)
+    bot.handle_update(press("freeyes:demo", "disk almost full on hostA\n" + question))
     assert bot.router.calls[-1] == ("free_space", ("run1", "telegram"), {})
+
+
+def test_continue_asks_and_runs_the_stages_left_on_the_tree(bot):
+    bot.router.replies[("demo", 5)] = "run1"
+    alert = "over budget in a@demo"
+    bot.handle_update(press("continue:demo", alert))
+    edit = bot.api.of("editMessageText")[-1]
+    assert edit["text"] == alert + "\nRun the stages left on the tree of a@demo on hostA?"
+    assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == ["continueyes:demo", "continueno:demo"]
+    assert not any(c[0] == "continue_run" for c in bot.router.calls)
+    bot.handle_update(press("continueyes:demo", edit["text"]))
+    assert bot.router.calls[-1] == ("continue_run", ("run1", "telegram"), {})
+    assert bot.api.of("editMessageText")[-1]["text"] == alert + "\ncontinue_run ok"
 
 
 def test_the_reply_keyboard_sends_plain_words(bot):

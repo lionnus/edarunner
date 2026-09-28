@@ -1,10 +1,11 @@
-"""The inline buttons of an alert: their markup, the action of a press, and the question before a stop or a delete.
+"""The inline buttons of an alert: their markup, the action of a press, and the question before a stop, a delete or
+a continue.
 
 The `callback_data` of a button is `<action>:<project>`, and the run is the one of the alert: the
-project's `telegram` store maps the message id of each alert to its run. A destructive button
-asks first: the alert shows the question with two buttons, and only the second tap acts. The
-question and the buttons it replaced are kept in the store of the bot, so they survive a restart
-and expire after CONFIRM_S.
+project's `telegram` store maps the message id of each alert to its run. A button that stops,
+deletes or starts work asks first: the alert shows the question with two buttons, and only the
+second tap acts. The question and the buttons it replaced are kept in the store of the bot, so
+they survive a restart and expire after CONFIRM_S.
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ if TYPE_CHECKING:
     from edarunner.cli import Router
 
 CONFIRM_S = 600  # a question older than this restores the buttons and acts on nothing
-# The question of each destructive button and the label of its yes.
+# The question of each button that asks first, and the label of its yes.
 ASK = {"stop": ("Stop {handle} after its current task?", "Yes, stop"),
-       "free": ("Remove the prune targets of the finished runs on {host}?", "Yes, remove")}
+       "free": ("Remove the prune targets of the finished runs on {host} whose trees have no stage left?", "Yes, remove"),
+       "continue": ("Run the stages left on the tree of {handle} on {host}?", "Yes, continue")}
 KEEP = {"keep6": 6, "keep12": 12, "keep24": 24}
 
 
@@ -49,7 +51,7 @@ class Buttons:
         self.event = event
 
     def press(self, q: dict) -> Press:
-        """Act on one callback query; Stop and Free space ask first and act on the second tap."""
+        """Act on one callback query; Stop, Free space and Continue ask first and act on the second tap."""
         action, _, project = q.get("data", "").partition(":")
         m = q.get("message") or {}
         mid, text, keys = str(m.get("message_id")), m.get("text", ""), m.get("reply_markup")
@@ -83,6 +85,8 @@ class Buttons:
                     note = act.stop_after_task(run, "telegram", "stopped from a telegram button")
                 elif action == "freeyes":
                     note = act.free_space(run, "telegram")
+                elif action == "continueyes":
+                    note = act.continue_run(run, "telegram")
                 else:
                     return self._refused(q, "unknown button", text, keys)
         except Exception as e:  # a refused run is an answer, not a crash

@@ -189,18 +189,68 @@ later. Try `--after-task` first, then a plain `stop`, then `--now`;
 [how-it-works.md](../how-it-works.md#stop-and-keep) says what each one
 signals.
 
+A stage that passes `budget.hours` without `kill = true` runs to its
+end, and then the run ends `OVER_BUDGET:<stage>` without the stages
+after it. A keep written while the stage runs clears that mark, and the
+run goes on as usual. In the same way, `stop --after-task` during a
+one-command stage ends the run `STOPPED` once that stage is over. Either
+way the stages after it are left, and `edr continue <handle>` runs them.
+
 ## More work on an existing tree
 
-`edr continue <handle> --stage <S>` starts one stage on the tree of a
-run that ended: more tasks of a task group, a stage the job skipped, or
-a resume. The new run joins the batch of the old one, so
-`retire --batch` takes both. It has its own id and heartbeat, with the
-time of the call as its date and the label `<label>.<stage>`, and it
-keeps `{tree_id}` of the original run, so the flow keeps writing into the
-same directory. `--tasks` names the tasks, `--parallel` the width, and
+`edr continue <handle>` runs the stages that the tree of a run has left,
+as one new run on the same tree:
+
+```sh
+edr continue base@sweep1 --dry-run   # the stages left, the run id, the host and the root
+edr continue base@sweep1
+```
+
+Every run is launched with the stages of its job. The tree of a run
+holds every run with the same root, including the runs that `continue`
+started, and the stages left are those after the last one that ended
+with exit 0, in the order of `edr.toml`. The newest record of a stage
+counts (`launch.stages_left`). Say the pnr stage of `base` went
+over its budget: the call above runs export and power. If that new run
+goes over its budget in export, `edr continue base@sweep1` runs power
+alone.
+
+`continue` refuses to guess in two cases. While a run on the tree has
+not ended, such as a continue that is still running, a second call
+starts nothing. And when the first stage left started but did not end
+with exit 0, because it failed, was killed or was stopped halfway, a new
+run would start that stage from its first step. A flow that sets up its
+library in that first step deletes the checkpoints that a resume needs,
+so name the stages yourself, with a checkpoint:
+
+```sh
+edr continue base@sweep1 --stage pnr export power --from cts
+```
+
+`--stage` takes one or more stages and runs them in the order given, and
+`--from` fills `{checkpoint}` in the resume command of the first one.
+When no stage is left, `continue` says so and exits 2. A task group that
+stopped taking tasks, after a stop or at its budget, still ends with
+exit 0, so `continue` counts it as done; run its other tasks with
+`--stage <group> --tasks <id>...`.
+
+The new run joins the batch of the old one, so `retire --batch` takes
+both. It has its own id and heartbeat, with the time of the call as its
+date, and it keeps `{tree_id}` of the original run, so the flow keeps
+writing into the same directory. Its label is `<label>.<stage>` for one
+stage, such as `base.power`, and `<label>.<first>-<last>` for several,
+such as `base.export-power`; when the batch has that label already, the
+next one is `base.export-power.2`. The new run takes the job of the run
+it continues, with its tasks, vars and overrides, also when `continue`
+made that run. `--tasks` names the tasks, `--parallel` the width, and
 `--on` another host when the tree is reachable there.
 
-A job in a batch file does the same through `reuse`:
+On the phone, the alert of a run that ended `OVER_BUDGET` or `STOPPED`
+with stages left has a Continue button that does the same;
+[alerts.md](alerts.md#alerts) shows it.
+
+A job in a batch file runs stages on the tree of an earlier run through
+`reuse`:
 
 ```toml
 [[job]]

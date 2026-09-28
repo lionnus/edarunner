@@ -133,6 +133,11 @@ def test_plan_reports_problems(env) -> None:
     project.stages["export"].cmd = "true"
     _, b = launch.plan(project, batch, ssh, db, date=DATE)
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
+    db.upsert_run({"run_id": f"{DATE}_b_nodw_demo_gOLD", "batch": "old", "label": "b_nodw", "host": "local",
+                   "root": "/x/edr/old", "source": "OLD"})
+    batch.jobs[1].reuse = {"label": "b_nodw", "latest": True}
+    _, b = launch.plan(project, batch, ssh, db, date=DATE)
+    assert b.problems == []  # the earlier stages of the reused tree took the overrides
 
 
 def test_plan_needs_the_tools_of_the_host(env, tmp_path: Path) -> None:

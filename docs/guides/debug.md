@@ -105,7 +105,8 @@ of the first stage at the start. `host_full` means the free space fell
 below `host_free_min_gb` of the site or of the host while runs were
 going; after `grace_s` the watcher stops the newest run on that host,
 and a keep does not hold that stop off. `edr retire --host <host>
---prune <name>` removes the prune targets of your finished runs there.
+--prune <name>` removes the prune targets of your finished runs there,
+except the runs whose trees have stages left.
 `edr hosts` shows the scratch of each host and how much your trees
 hold.
 
@@ -114,8 +115,10 @@ hold.
 `OVER_BUDGET:<stage>` means the stage took longer than `budget.hours`
 or its tree grew past `budget.disk_gb`. When the stage only needs more
 time, `edr keep <handle> --hours <n>` extends the budget of the running
-stage before the limit hits. Raise the budget in `edr.toml` for the next
-batch.
+stage before the limit hits. A stage without `kill = true` runs to its
+end, but the stages after it do not run; `edr continue <handle>` runs
+them on the same tree once the run has ended. Raise the budget in
+`edr.toml` for the next batch.
 
 ### A task group ends `INCOMPLETE`
 

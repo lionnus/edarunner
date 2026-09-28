@@ -236,11 +236,38 @@ def _fresh(job: Job) -> bool:
     return not job.reuse or bool(job.reuse.get("restore"))
 
 
+def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[list[str], str]:
+    """The stages the tree of `run` has left, and why `edr continue` without `--stage` does not run them, or "".
+
+    The tree holds every run with the root of `run`. Its stages are those that the specs of these runs list, in
+    the order of edr.toml, and the newest row of a stage says whether it ended with exit 0. The stages left
+    follow the last stage that did. A run without a spec, such as an imported one, adds no stage.
+    """
+    runs = [r for r in db.runs() if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
+    names = {n for r in runs for n in collect.spec_stages(collect.load_spec(project, r)) or []}
+    rows = sorted((s for r in runs for s in db.stage_runs(r["run_id"]) if not s["task"]),
+                  key=lambda s: (s["started"] or 0, s["ended"] or 0))
+    last = {s["stage"]: s for s in rows}
+    order = [n for n in project.stages if n in names]
+    ok = [i for i, n in enumerate(order) if n in last and last[n]["exit"] == 0]
+    left = order[ok[-1] + 1:] if ok else order
+    if live := [board.handle(r) for r in runs if board.is_live(r)]:
+        return left, f"{live[0]} on the same tree has not ended"
+    if not left or left[0] not in last:
+        return left, ""
+    first, s = left[0], last[left[0]]
+    ended = s["status"] + ("" if s["exit"] is None else f", exit {s['exit']}")
+    hint = (f", and a checkpoint with --from, since {first} can delete the checkpoints it needs when it runs from its "
+            "start" if project.stages[first].resume else "")
+    return left, f"stage {first} did not end with exit 0 ({ended}); name the stages with --stage{hint}"
+
+
 def _check_overrides(project: Project, job: Job, names: list[str]) -> list[str]:
     bad = [k for k in job.overrides if not _ID_RE.match(k)]
     problems = [f"override key {k!r} is not a KEY=VALUE name" for k in bad]
     texts = [getattr(project.stages[n], key) for n in names for key in ("cmd", "resume", "prepare")]
-    if job.overrides and not any("{overrides}" in t for t in texts):
+    # A job with reuse takes the build tag of the reused run, whose stages used the overrides.
+    if job.overrides and not job.reuse and not any("{overrides}" in t for t in texts):
         problems.append("overrides given, but no stage of the job uses {overrides}")
     return problems
 

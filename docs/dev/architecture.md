@@ -33,7 +33,7 @@ report files and the numbers in them.
 | `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe and the census call, placement with the disk floor, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
-| `launch.py` | spec rendering, `plan`, `launch`, `stop` |
+| `launch.py` | spec rendering, `plan`, `launch`, `stop`, and the stages a tree has left, which `continue`, the Continue button and the prune of a host read |
 | `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`; `[scheduler] backend` picks one of these or a scheduler backend |
 | `schedulers.py` | the HTCondor, Slurm and LSF backends: the submit file, the state query, the stop |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
