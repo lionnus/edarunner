@@ -196,8 +196,11 @@ def _ts(t: float | None) -> str:
     return "-" if not t else time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
 
 
-def _stage_step(row: Row) -> str:
+def _stage_step(row: Row, totals: dict[str, int] | None = None) -> str:
+    """`stage/step`; `stage, starting` for a live stage with steps before its first step."""
     stage = _s(row.get("stage"))
+    if stage and row.get("step") is None and is_live(row) and stage in (totals or {}):
+        return f"{stage}, starting"
     return "-" if not stage else stage if row.get("step") is None else f"{stage}/{row['step']}"
 
 
@@ -214,7 +217,7 @@ def table(head: list[str], body: list[list[Any]], styles: dict[str, str] | None 
 
 # text boards
 
-def narrow(rows: list[Row], width: int = 48, now: float | None = None) -> str:
+def narrow(rows: list[Row], width: int = 48, now: float | None = None, totals: dict[str, int] | None = None) -> str:
     """Two lines per live run, dead first, in `width` columns. For a phone."""
     now = now or time.time()
     ordered = order(rows)
@@ -227,16 +230,16 @@ def narrow(rows: list[Row], width: int = 48, now: float | None = None) -> str:
         st = state_of(r)
         lines.append(f"{'#' + str(n):>3} {_SHORT.get(st, st)[:5]:<5} {_s(r.get('label'))[:14]:<14} "
                      f"{_s(r.get('host'))[:8]:<8} {_s(r.get('phase'))[:14]}"[:width])
-        lines.append(f"    {_s(r.get('batch'))[-12:]:<12} {hm(_age_s(r, now)):>4} ago {_stage_step(r)[:10]:<10} "
+        lines.append(f"    {_s(r.get('batch'))[-12:]:<12} {hm(_age_s(r, now)):>4} ago {_stage_step(r, totals)[:10]:<10} "
                      f"{_fd(r)}"[:width])
     if not live:
         lines.append("nothing live")
     return "\n".join(lines)
 
 
-def narrow_text(rows: list[Row], width: int = 48, now: float | None = None) -> Text:
+def narrow_text(rows: list[Row], width: int = 48, now: float | None = None, totals: dict[str, int] | None = None) -> Text:
     """The narrow board with the state of each run in its colour."""
-    text = Text(narrow(rows, width, now))
+    text = Text(narrow(rows, width, now, totals))
     for m in re.finditer(r"(?m)^ *#\d+ (\S+)", text.plain):
         state = next((s for s in STYLE if _SHORT.get(s, s)[:5] == m.group(1)), None)
         if state:
@@ -283,10 +286,10 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
     return f"edr retire {h} --why {shlex.quote(str(row.get('phase') or '<why>'))}"
 
 
-def wide(rows: list[Row], now: float | None = None) -> Table | str:
-    """One line per run, every state, in board order."""
+def wide(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None) -> Table | str:
+    """One line per run, every state, in board order; `totals` holds the stages with steps."""
     now = now or time.time()
-    body = [[f"#{n}", r.get("label"), r.get("host"), state_text(state_of(r)), r.get("phase"), _stage_step(r),
+    body = [[f"#{n}", r.get("label"), r.get("host"), state_text(state_of(r)), r.get("phase"), _stage_step(r, totals),
              hm(_age_s(r, now)), _fd(r), f"{cost(r, now):.1f}"] for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"

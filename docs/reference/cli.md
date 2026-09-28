@@ -129,7 +129,8 @@ edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--dige
 Without a handle, status prints the board: one line per run of every
 batch that is not retired, live runs first and dead ones on top. The columns are the row
 number, label, host, state, phase, stage/step, heartbeat age, failed and
-done task counts, and the core hours so far. The state of a live run
+done task counts, and the core hours so far. A live stage with steps
+shows &lt;stage&gt;, starting until its first step. The state of a live run
 follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.

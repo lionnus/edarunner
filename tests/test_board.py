@@ -55,6 +55,15 @@ def test_wide_all_states():
     assert board.wide([]) == "no runs"
 
 
+def test_a_stage_with_steps_is_starting_before_its_first_step():
+    fresh = [board_row("run1", "c", "stage:pnr", "running", stage="pnr", step=None),
+             board_row("fail", "b", "INCOMPLETE:1f0s", "running", stage="pnr", step=None)]
+    cells = [ln.split()[5:7] for ln in board.plain(board.wide(fresh, now=NOW, totals={"pnr": 13})).splitlines()[2:]]
+    assert cells[0] == ["pnr,", "starting"] and cells[1][0] == "pnr"
+    assert "pnr, start" in board.narrow(fresh, now=NOW, totals={"pnr": 13})
+    assert "starting" not in board.plain(board.wide(fresh, now=NOW))
+
+
 def test_narrow_text_colours_the_state():
     text = board.narrow_text(board_rows(), now=NOW)
     assert text.plain == board.narrow(board_rows(), now=NOW)
