@@ -25,11 +25,12 @@ overrides = { DW = 0 }
 vars = { netlist_step = 11 }
 ```
 
-`source` is the tag that `edr checkout` prints, the short hash of the
-commit. A job is one run: a label, an optional configuration name that
-the flow understands, optional overrides that reach the command as
-`KEY=VALUE` tokens through `{overrides}`, and optional `stages`, `tasks`
-and `host` entries. The `vars` table holds any other value the flow
+`source` is the tag that `edr checkout` prints: the short hash of the
+commit, followed by `-n<short hash>` for each nested repository. A job
+is one run: a label, an optional configuration name that the flow
+understands, optional overrides that reach the command as `KEY=VALUE`
+tokens through `{overrides}`, and optional `stages`, `tasks` and `host`
+entries. The `vars` table holds any other value the flow
 needs, and each key becomes a placeholder `{vars.<name>}` for the stage
 strings, `[env]` and `collect`.
 
@@ -55,7 +56,9 @@ When the batch names a clean source that is not checked out yet, `plan`
 and `launch` check it out themselves and print a `checkout <source> <path>`
 line. A tree with uncommitted changes, an untracked file or a change in
 a nested repository included, needs `edr checkout --dirty <dir>` first,
-and `launch --allow-dirty`.
+and `launch --allow-dirty`. A batch whose source is a ref, such as
+`origin/main`, takes the tag of the commits at the time of the plan, so a
+new commit in a nested repository gives a new tag and a fresh clone.
 
 Read every path of the dry run before the real launch. Within a minute
 of the launch, `edr status` should show each run past the `setup`
