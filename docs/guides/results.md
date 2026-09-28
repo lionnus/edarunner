@@ -99,7 +99,9 @@ more than once to read several tags in one table. The text form shows
 label, source, stage, step, task, metric, value and unit; `--csv` writes
 the columns of `metrics.csv` below. Every row carries its source tag and
 its source file, so you can check where a number came from before you
-put it in a table.
+put it in a table. A value that breaks the `pass` rule of its metric
+shows FAIL next to it; see
+[Reports with several blocks](#reports-with-several-blocks).
 
 ## Extract again
 
@@ -121,6 +123,105 @@ differs, or when it is missing its area rows, and `extract` replaces it.
 A failed row is a file that did not parse. Rows that the new extraction
 no longer finds are left in place. Every run gets an `extract` event with
 the counts.
+
+## Reports with several blocks
+
+Many reports hold one block per scenario and path group: a `report_qor`
+of Fusion Compiler or PrimeTime, or several OpenSTA checks written to one
+file. A regex runs with `re.MULTILINE` over the whole file, and group 1
+is the value. By default the first match wins, as with `re.search`, so a
+regex that is not tied to one block reads whatever block comes first.
+
+`examples/local-demo` writes such a report. Its hold scenario comes
+first, and a hold block has no setup slack:
+
+```
+Scenario           'func_fast'
+Timing Path Group  'reg2reg'
+----------------------------------------
+Worst Hold Violation:           -0.001
+No. of Hold Violations:              1
+----------------------------------------
+
+Scenario           'func_slow'
+Timing Path Group  'in2reg'
+----------------------------------------
+Critical Path Slack:              0.01
+No. of Violating Paths:              0
+----------------------------------------
+
+Scenario           'func_slow'
+Timing Path Group  'reg2reg'
+----------------------------------------
+Critical Path Slack:             -0.05
+No. of Violating Paths:              5
+----------------------------------------
+```
+
+The regex `Timing Path Group\s+'reg2reg'[\s\S]*?Critical Path Slack:\s+(\S+)`
+looks right, but its first match starts at the hold block of `reg2reg`,
+finds no slack there and runs on into the next block. It reads 0.01, the
+slack of `in2reg`, and the extraction reports no failure. Start the regex
+at the header of the block you mean, so that it names the scenario and
+the path group:
+
+```toml
+[metrics.wns_reg2reg_ns]
+stage = ["synth", "pnr"]
+step = "*"
+file = "reports/{step}/qor.rpt"
+regex = '''^Scenario\s+'func_slow'\nTiming Path Group\s+'reg2reg'\n(?:.*\n)*?Critical Path Slack:\s+(\S+)'''
+unit = "ns"
+canonical = "timing__setup__ws"
+```
+
+`reduce` reads every match instead of the first one and makes one value
+of them: `first`, `last`, `min`, `max` or `sum`. A regex tied to the
+setup scenario alone matches once per path group, so `reduce = "min"`
+gives the worst setup slack over all groups. The demo's `wns_ns` works
+this way.
+
+The row of a regex value names its line: `source_file` is `path:line`,
+such as `reports/5/qor.rpt:18`. For `min` and `max` it is the line of the
+value that was taken, and for `sum` the line of the first match. Open the
+report at that line to see which block a number came from.
+
+A `pass` rule turns a number into a verdict. It is an operator, `==`,
+`!=`, `<`, `<=`, `>` or `>=`, and a number:
+
+```toml
+[metrics.setup_violations]
+stage = ["synth", "pnr"]
+step = "*"
+file = "reports/{step}/qor.rpt"
+regex = '''^Scenario\s+'func_slow'\n(?:.*\n)*?No\. of Violating Paths:\s+(\d+)'''
+reduce = "sum"
+pass = "== 0"
+unit = "paths"
+```
+
+`edr metrics` and `edr compare` print FAIL next to a value that breaks
+its rule, and their `--json` rows carry a `verdict` of `pass` or `FAIL`.
+Put the rule on the violation count, not on the slack: a report can
+print a slack of -0.000 while paths still fail.
+
+Check a new metric with `--over steps` before you quote it.
+`edr metrics --run <handle> --over steps` prints one run along its steps,
+one column per metric, and a `verdict` column when a metric has a pass
+rule. A step fails when one of its values breaks its rule. With
+`--metric`, it prints only that metric, with its change from the step
+before and the source of each value, so you can check at every step that
+the value came from the block you meant:
+
+```
+$ edr metrics --run base@g8 --over steps --metric wns_ns
+stage   step  name              wns_ns       Δ  source
+pnr        8  synth-init-opto   -0.011       -  flow/runs/<run>/reports/8/qor.rpt:64
+pnr        9  synth-final-opto  -0.013  -0.002  flow/runs/<run>/reports/9/qor.rpt:64
+pnr       10  cts               -0.024  -0.011  flow/runs/<run>/reports/10/qor.rpt:64
+pnr       11  route             -0.071  -0.047  flow/runs/<run>/reports/11/qor.rpt:64
+pnr       12  route-opt         -0.035   0.036  flow/runs/<run>/reports/12/qor.rpt:64
+```
 
 ## A number the flow does not print
 
@@ -152,20 +253,6 @@ def energy_nj(path):
 
 An exception in the hook gives a row with an empty value and the error
 in `source_file`. `examples/local-demo/hooks/energy.py` is this hook.
-
-`--run <handle> --over steps` prints one run along its steps, one column
-per metric. With `--metric`, it prints only that metric, with its change
-from the step before and the source file of each value:
-
-```
-$ edr metrics --run base@g8 --over steps --metric wns_ns
-stage   step  name              wns_ns       Δ  source
-pnr        8  synth-init-opto    0.001       -  flow/runs/<run>/reports/8/qor.rpt
-pnr        9  synth-final-opto   0.001       0  flow/runs/<run>/reports/9/qor.rpt
-pnr       10  cts                    0  -0.001  flow/runs/<run>/reports/10/qor.rpt
-pnr       11  route             -0.056  -0.056  flow/runs/<run>/reports/11/qor.rpt
-pnr       12  route-opt          0.003   0.059  flow/runs/<run>/reports/12/qor.rpt
-```
 
 ## Hierarchical area
 
@@ -209,8 +296,10 @@ base: pnr step 12, flow/runs/<run>/reports/12/area_hier.rpt
 `edr compare A B` without `--area` prints one row per stage, step, task
 and metric, the value of each run, and the delta and the percent of each
 run to the first. A percent across a sign change, such as a slack from
-+1 ps to -1 ps, is left out. `--metric` (repeatable), `--stage` and
-`--step` narrow the rows; `--json` keeps the source file of every value.
++1 ps to -1 ps, is left out. A value that breaks the `pass` rule of its
+metric shows FAIL next to it. `--metric` (repeatable), `--stage` and
+`--step` narrow the rows; `--json` keeps the source file and the verdict
+of every value.
 
 ```
 $ edr compare base@g8 lanes16@g7 --stage pnr --metric wns_ns --metric cells

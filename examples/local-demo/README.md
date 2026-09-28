@@ -17,8 +17,12 @@ run with real tools, take `examples/openroad-gcd` instead.
 The steps are `setup`, `analyze`, `elaborate` and `synth` (stage `synth`),
 then `cts` and `route` (stage `pnr`), then `export`. `FIRST_STAGE` makes a
 resume, and `LAST_STAGE` an early end. The numbers are made up: an area of
-`1000 + 10.5 * step` um2, a slack of `-0.0<step>` ns, a power of 0.250 W
-and a window of 3400 ns, so the energy is 850 nJ.
+`1000 + 10.5 * step` um2, a power of 0.250 W and a window of 3400 ns, so
+the energy is 850 nJ. `qor.rpt` has one block per scenario and path
+group, as a `report_qor` has: a hold block first, then the setup groups
+`in2reg` and `reg2reg`. At each step the worst setup slack is
+`-0.0<step>` ns, and `<step>` setup paths fail, so every step after the
+first fails the `pass` rule of `setup_violations`.
 
 Two switches make failures:
 
@@ -30,7 +34,7 @@ Two switches make failures:
 
 | File | Holds |
 |---|---|
-| `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; five metrics; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
+| `edr.toml` | the stages `synth`, `pnr`, `export` and the task group `power`; six metrics, two of them tied to the setup scenario of `qor.rpt`; short limits (heartbeat 5 s, stale 30 s, dead 90 s) |
 | `site.toml` | one host, `local`, with the tool `demo` in version `1.0`; the scratch `/tmp/edr-demo`; the tool `demo` with 10 seats and its probe |
 | `hooks/energy.py` | the metric hook of `energy_nj`: the power times the window of one task |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
@@ -56,6 +60,7 @@ Both runs end `done` within a minute. Then collect and read the results:
 ```sh
 edr watch --once              # collect the reports, extract the metrics, write data/board/
 edr status a@demo             # the stages, the metrics and the log tail of one run
+edr metrics --run b_nodw@demo --over steps   # the steps of b_nodw and the verdict of each
 edr metrics --source <source> --csv
 edr export --source <source> --out data/exports/<source>
 edr retire --batch demo --why "demo done"
