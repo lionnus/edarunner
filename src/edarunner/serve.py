@@ -144,14 +144,11 @@ class Supervisor:
                 p or SimpleNamespace(project=name, root=home.owner(name)), errors[name], watched=False))  # type: ignore[arg-type]
             return
         assert p is not None
-        lock = p.state_dir / "watch.lock"
         if now < c.wait_until:
             return
-        fd = home.lock(lock)
-        if fd is None:
-            c.note = f"watched by pid {home.holder(lock)}"
+        if pid := home.holder(p.state_dir / "watch.lock"):
+            c.note = f"watched by pid {pid}"
             return
-        os.close(fd)
         c.note, c.started = "", now
         c.proc = subprocess.Popen(_watch(p), cwd=p.root, stdin=subprocess.DEVNULL)
 

@@ -740,15 +740,20 @@ def test_projects_and_the_board_of_every_project(demo: Path, capsys, tmp_path: P
     with Database(beta / "data" / "edr.db") as db:
         db.upsert_run({"run_id": f"{DATE}_q_demo_gabc1234", "batch": "demo", "label": "q", "state": "queued"})
     monkeypatch.chdir(tmp_path)
-    config.save_json(config.load_project(demo).state_dir / "watch.json", {"ts": time.time(), "cycle": 1, "pid": 4711})
+    state = config.load_project(demo).state_dir
+    # The fresh watch.json of a watcher that is gone names no watcher; the process that holds watch.lock does.
+    config.save_json(state / "watch.json", {"ts": time.time(), "cycle": 1, "pid": 4711})
+    assert "pid 4711" not in edr(capsys, "projects")[1]
+    fd = home.lock(state / "watch.lock")
     code, out, _ = edr(capsys, "--json", "projects")
     rows = {r["project"]: r for r in json.loads(out)["data"]}
     assert code == 0 and (rows["demo"]["watcher"], rows["demo"]["live"], rows["beta"]["watcher"], rows["beta"]["live"]) == (
-        4711, 1, None, 0)
+        str(os.getpid()), 1, None, 0)
     assert rows["demo"]["root"] == str(demo.resolve()) and rows["beta"]["note"] == ""
     (beta / "edr.toml").write_text((beta / "edr.toml").read_text() + "\nbogus = 1\n")
     code, out, _ = edr(capsys, "projects")
-    assert code == 0 and "unknown key 'metrics.energy_nj.bogus'" in out and "pid 4711" in out
+    os.close(fd)
+    assert code == 0 and "unknown key 'metrics.energy_nj.bogus'" in out and f"pid {os.getpid()}" in out
     (beta / "edr.toml").write_text((beta / "edr.toml").read_text().replace("\nbogus = 1\n", ""))
     code, out, _ = edr(capsys, "--json", "status", "--all")
     runs = json.loads(out)["data"]["runs"]

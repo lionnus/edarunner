@@ -597,9 +597,7 @@ def cmd_projects(c: Ctx, a: argparse.Namespace) -> int:
         except ConfigError as e:
             row["note"] = str(e)
             continue
-        w = config.load_json(p.state_dir / "watch.json")
-        if w and now - float(w.get("ts") or 0) <= 3 * p.limits.heartbeat_s:
-            row["watcher"] = w.get("pid")
+        row["watcher"] = home.holder(p.state_dir / "watch.lock")
         row["live"] = len(census.live_runs([p], now))
     body = [[r["project"], r["root"], f"pid {r['watcher']}" if r["watcher"] else "-", r["live"], r["note"]] for r in rows]
     c.emit(board.table(["project", "directory", "watcher", "live", "note"], body, styles={"project": "bold"},
@@ -1232,7 +1230,7 @@ def cmd_serve(c: Ctx, a: argparse.Namespace) -> int:
 
 def _serve_plan(c: Ctx) -> int:
     """What edr serve would watch: every registered project, whether it loads, and who watches it now."""
-    rows, now = [], time.time()
+    rows = []
     for name, path in sorted((p.name, home.owner(p.name)) for p in (home.root() / "projects").glob("*")):
         if path is None:
             continue
@@ -1241,12 +1239,11 @@ def _serve_plan(c: Ctx) -> int:
         except ConfigError as e:
             rows.append({"project": name, "root": str(path), "action": f"no watcher until it loads: {e}"})
             continue
-        w = config.load_json(project.state_dir / "watch.json")
-        fresh = w and now - float(w.get("ts") or 0) <= 3 * project.limits.heartbeat_s
+        pid = home.holder(project.state_dir / "watch.lock")
         rows.append({"project": name, "root": str(path),
-                     "action": f"none, pid {w.get('pid')} watches it" if fresh else "start edr watch --served"})
-    s = config.load_json(home.root() / "serve.json")
-    head = f"pid {s.get('pid')} serves now. " if s and now - float(s.get("ts") or 0) <= 3 * serve.CYCLE_S else ""
+                     "action": f"none, pid {pid} watches it" if pid else "start edr watch --served"})
+    pid = home.holder(home.root() / "serve.lock")
+    head = f"pid {pid} serves now. " if pid else ""
     body = [[r["project"], r["root"], r["action"]] for r in rows]
     c.emit(Group(Text(head + "A supervisor would do this (dry):"), board.table(["project", "directory", "watcher"], body))
            if rows else head + "No project is registered (dry).", rows)
@@ -1629,9 +1626,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="only the mark (column ok), host, free cores, free scratch and your runs, in 48 columns")
     command("projects", "every registered project, its watcher and its live runs", """
         Prints one row per project of the registry ~/.edr/projects/: its
-        directory, the pid of its watcher when watch.json is younger than
-        three cycles, its live runs, and a note when its files do not load or
-        the link names no project. It needs no project directory.
+        directory, the pid of the watcher that holds its watch.lock, its live
+        runs, and a note when its files do not load or the link names no
+        project. It needs no project directory.
         """, exits={Exit.NOTHING: "no project is registered"})
     command("tools", "every site tool: free seats and hosts", """
         Prints one row per tool of the site file. free and total are the seats the

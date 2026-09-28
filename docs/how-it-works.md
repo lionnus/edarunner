@@ -249,7 +249,10 @@ from the host. `edr status --live` asks the hosts directly
 
 `edr watch` runs a cycle every `heartbeat_s` seconds (`watch.cycle`).
 One watcher runs per project: it holds `<state_dir>/watch.lock`, and a
-second one exits 2 and names the pid of the first. The watcher reloads
+second one exits 2 and names the pid of the first. `edr projects`,
+`edr serve --dry-run` and the supervisor take the holder of that lock as
+the watcher of the project. The lock gives the same answer on every host
+that shares the state directory, which a pid does not. The watcher reloads
 the project files at the start of each cycle, so an edit takes effect
 without a restart. A file that does not load gets one alert per error
 text, and the watcher goes on with the last config that loaded: it

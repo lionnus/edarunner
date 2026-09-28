@@ -247,9 +247,9 @@ edr projects [--json]
 ```
 
 Prints one row per project of the registry ~/.edr/projects/: its
-directory, the pid of its watcher when watch.json is younger than
-three cycles, its live runs, and a note when its files do not load or
-the link names no project. It needs no project directory.
+directory, the pid of the watcher that holds its watch.lock, its live
+runs, and a note when its files do not load or the link names no
+project. It needs no project directory.
 
 | Flag | Meaning |
 |---|---|

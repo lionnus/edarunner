@@ -111,12 +111,22 @@ def held(path: Path) -> Iterator[None]:
         os.close(fd)
 
 
-def holder(path: Path) -> str:
-    """The pid in a lock file, or `?`."""
+def holder(path: Path) -> str | None:
+    """The pid in the lock file `path` while a process holds its flock, else None.
+
+    Unlike a test of the pid, the flock test is valid on every host that shares the file."""
     try:
-        return path.read_text().strip() or "?"
+        fd = os.open(path, os.O_RDONLY)
     except OSError:
-        return "?"
+        return None
+    try:
+        # ponytail: the test holds a shared lock for an instant, and a watcher that starts then exits 2; retry in edr watch if it happens.
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return os.read(fd, 64).decode(errors="replace").strip() or "?"
+    finally:
+        os.close(fd)
+    return None
 
 
 class Store:

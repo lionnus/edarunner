@@ -170,9 +170,14 @@ def test_the_unit_runs_a_pinned_copy_of_a_checkout(two, capsys, monkeypatch) -> 
 
 
 def test_dry_run_lists_what_the_supervisor_would_do(two, capsys) -> None:
-    config.save_json(two["beta"].state_dir / "watch.json", {"ts": __import__("time").time(), "cycle": 1, "pid": 42})
+    # A fresh watch.json of a watcher that is gone does not count; the holder of the lock does.
+    config.save_json(two["alpha"].state_dir / "watch.json", {"ts": __import__("time").time(), "cycle": 1, "pid": 42})
+    fds = [home.lock(two["beta"].state_dir / "watch.lock"), home.lock(home.root() / "serve.lock")]
     code, out, _ = edr(capsys, "serve", "--dry-run")
-    assert code == 0 and "start edr watch --served" in out and "none, pid 42 watches it" in out
+    for fd in fds:
+        os.close(fd)
+    assert code == 0 and "start edr watch --served" in out and f"none, pid {os.getpid()} watches it" in out
+    assert out.startswith(f"pid {os.getpid()} serves now.") and "pid 42" not in out
     assert not (home.root() / "serve.json").exists()
 
 
