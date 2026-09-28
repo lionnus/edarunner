@@ -58,6 +58,12 @@ def find(project: Project, source: str) -> Path:
     raise CheckoutError(f"'{source}' is not checked out; run: edr checkout {source}")
 
 
+def nested_heads(project: Project, tree: Path) -> dict[str, str]:
+    """The short hash of the HEAD of each nested repository that `tree` holds."""
+    return {n: runid.git("rev-parse", "--short", "HEAD", cwd=tree / n)
+            for n in project.source.nested if (tree / n / ".git").exists()}
+
+
 def ensure(project: Project, source: str, dry_run: bool = False) -> CheckoutResult | None:
     """Check out a clean source that is not checked out yet; None when it is. A dirty tag is refused."""
     try:
@@ -125,18 +131,17 @@ def _nested(src: Path, dst: Path, dry_run: bool) -> str:
 
 
 def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
-    """A clone at the HEAD of `tree` with the files of `tree` copied over it, so git on the copy sees the changes."""
-    source = runid.source_tag(tree)
+    """A clone at the HEAD of `tree` with the files of `tree` copied over it, so git on the copy sees the changes.
+
+    `source.diff` and `source.json` go into the clone and into `data/sources/<tag>/`, which `retire` keeps.
+    """
+    source = runid.source_tag(tree, project.source.nested)
     if "-dirty-" not in source:
         # A clean tree pins its commit; a snapshot would collide with that clone.
         return _pinned(project, source, dry_run)
     path = project.source.worktrees / source
     base = source.split("-dirty-")[0]
-    nested = {
-        n: runid.git("rev-parse", "--short", "HEAD", cwd=tree / n)
-        for n in project.source.nested
-        if (tree / n / ".git").exists()
-    }
+    nested = nested_heads(project, tree)
     excludes = [a for e in [".git", *project.sync.exclude] for a in ("--exclude", e)]
     cmd = ["rsync", "-a", *excludes, f"{tree}/", f"{path}/"]
     fresh = not (path / ".git").exists()
@@ -153,9 +158,10 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     if r.returncode:
         raise CheckoutError(f"{' '.join(cmd)}: {r.stdout.strip()}")
     # rsync adds and changes files; a file the tree deleted goes here, one path at a time.
-    for rel in runid.git("ls-files", "--deleted", "-z", cwd=tree).split("\0"):
-        if rel and (path / rel).is_file():
-            (path / rel).unlink()
+    for sub in ["", *nested]:
+        for rel in runid.git("ls-files", "--deleted", "-z", cwd=tree / sub).split("\0"):
+            if rel and (path / sub / rel).is_file():
+                (path / sub / rel).unlink()
     meta = {
         "source": source,
         "base": base,
@@ -164,6 +170,9 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
         "origin": str(tree),
         "created": int(time.time()),
     }
-    (path / "source.diff").write_text(runid.diff(tree) + "\n")
-    (path / "source.json").write_text(json.dumps(meta, indent=1) + "\n")
+    text = runid.diff(tree, project.source.nested) + "\n"
+    for d in (path, project.data / "sources" / source):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "source.diff").write_text(text)
+        (d / "source.json").write_text(json.dumps(meta, indent=1) + "\n")
     return CheckoutResult(path, source, nested, True)

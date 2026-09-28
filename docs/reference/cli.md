@@ -394,6 +394,11 @@ from more than one source; then a line above the table names the
 sources, and --json sets mixed_sources. Two runs with the same name
 get a prefix of their run ids after it.
 
+Above the table, one line per parameter whose value differs between
+the runs gives the value of each run: the config, the build tag, an
+override, vars.&lt;name&gt; or nested.&lt;name&gt;, as the launch or the import
+recorded it. --json lists them under parameters.
+
 | Flag | Meaning |
 |---|---|
 | `HANDLE ...` | label@batch, label@source, a run id prefix, or #n from the last board |
@@ -525,9 +530,12 @@ it at the HEAD the repository copy has. A local clone shares the git
 objects of the repository by hard links. It prints &lt;source&gt; &lt;path&gt;.
 
 --dirty DIR clones the HEAD of a working tree and copies its files over
-the clone, with the diff in source.diff; the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt;
-and is printed with (dirty). A clean tree under --dirty is checked out as a
-clone.
+the clone. The diff holds the changes to tracked files, the untracked
+files that git does not ignore, and the same for each source.nested
+repository; the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt; of its sha256 and is printed
+with (dirty). source.diff and source.json go into the clone and into
+data/sources/&lt;tag&gt;/, which retire keeps. A clean tree under --dirty is
+checked out as a clone.
 
 | Flag | Meaning |
 |---|---|
@@ -758,14 +766,15 @@ edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--
 ```
 
 Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-metrics.csv and the collected files of one run per label and source,
-the newest run by start time that ended done, else the newest run.
---source matches the source tag exactly and may be given more than
-once. The manifest lists the exported runs whose phase is not done
-under incomplete, and the other runs of each label and source under
-skipped. log/ and *.log stay out unless you pass --with-logs. It
-refuses a DIR that exists and is not empty. docs/guides/results.md
-explains the layout.
+metrics.csv, parameters.csv and the collected files of one run per
+label and source, the newest run by start time that ended done, else
+the newest run. --source matches the source tag exactly and may be
+given more than once. The manifest lists the exported runs whose phase
+is not done under incomplete, the other runs of each label and source
+under skipped, and each dirty source under dirty_sources, whose diff
+goes to sources/&lt;tag&gt;/source.diff. log/ and *.log stay out unless you
+pass --with-logs. It refuses a DIR that exists and is not empty.
+docs/guides/results.md explains the layout.
 
 --mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run

@@ -472,3 +472,20 @@ def host_history_view(rows: list[Row]) -> RenderableType:
     return Group(board.table(["host", "from", "to", "cores (peak/last)", "RAM GB", "scratch GB", "GPUs"], body,
                              styles={"host": "bold", "from": "dim", "to": "dim"}),
                  Text("each line spans the window left to right, from 0 to the host's total", style="dim"))
+
+
+# parameters
+
+def parameters_differ(db: Database, runs: list[Row]) -> list[Row]:
+    """The parameters whose value differs between `runs`, by key: {key, value: {run id: value}}; a run without the
+    key has None. The source is left out, since `names` puts it into the name of each run when it differs."""
+    have = {r["run_id"]: {p["key"]: p["value"] for p in db.parameters(r["run_id"])} for r in runs}
+    keys = sorted({k for v in have.values() for k in v} - {"source"})
+    return [{"key": k, "value": {i: v.get(k) for i, v in have.items()}} for k in keys
+            if len({v.get(k) for v in have.values()}) > 1]
+
+
+def parameters_view(runs: list[Row], rows: list[Row]) -> RenderableType:
+    """One line per parameter that differs, with the value of each run, and a blank line under it."""
+    return Group(board.table(["parameter", *names(runs).values()], [[p["key"], *p["value"].values()] for p in rows],
+                             styles={"parameter": "bold"}), Text(""))

@@ -144,6 +144,9 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
 
 def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
+    # jobs/demo.toml gives b_nodw DW = "0" and no vars; the parameters follow the spec the run was launched with.
+    config.save_json(env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json",
+                     {"overrides": {"DW": "1"}, "vars": {"netlist_stage": 15}, "record": {"nested": {"sub": "fed4321"}}})
     root = Path(hb["root"])
     for n in range(4):
         (root / "reports" / str(n)).mkdir(parents=True)
@@ -160,8 +163,9 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     by = {(r["stage"], r["step"], r["name"]): r["value"] for r in rows}
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
     assert len(by) == 12 and all(v is not None for v in by.values())
-    params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM parameters WHERE run_id=?", (run_id,))}
-    assert params == {"config": "demo", "DW": "0", "source": "gabc1234"}
+    assert [(p["key"], p["value"], p["origin"]) for p in env.db.parameters(run_id)] == [
+        ("DW", "1", "spec"), ("config", "demo", "spec"), ("nested.sub", "fed4321", "checkout"),
+        ("source", "gabc1234", "checkout"), ("vars.netlist_stage", "15", "spec")]
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 12

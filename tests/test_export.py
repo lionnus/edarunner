@@ -80,13 +80,14 @@ def test_export_one_source(world, tmp_path):
     # The spec of RUN_A names the versions; RUN_B has no spec, so they are empty.
     assert record == {"host": "local", "started": 100, "ended": 200, "edarunner": "9.9", "driver_sha256": "ab12",
                       "tools": {"fc": "V-2023.12"}, "stages": [{"stage": "synth", "task": "", "attempt": 1,
-                                                                 "status": "done", "started": 100, "ended": 150}]}
+                                                                 "status": "done", "started": 100, "ended": 150}],
+                      "commands": []}
     assert manifest["runs"][1]["record"]["tools"] == {} and manifest["runs"][1]["record"]["ended"] is None
     assert manifest["sources"] == ["aaa111"] and manifest["project"] == "demo"
     assert manifest["schema"] == 2 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [{"run_id": RUN_B, "label": "b_nodw", "source": "aaa111", "phase": "stage:pnr"}]
     assert manifest["skipped"] == [{"run_id": RUN_A_OLD, "label": "a", "source": "aaa111", "phase": "done"}]
-    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2}
+    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0} and manifest["dirty_sources"] == []
     assert json.loads((out / "manifest.json").read_text()) == manifest
 
     runs = _read_csv(out / "runs.csv")
@@ -142,7 +143,7 @@ def test_dry_run_writes_nothing(world, tmp_path, capsys):
     manifest = export.export(project, db, ["aaa111"], out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
-    assert paths == ["runs.csv", "metrics.csv", "a/reports/3/area.rpt", "a/sim/power/reports/power.csv",
+    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "a/reports/3/area.rpt", "a/sim/power/reports/power.csv",
                      "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
     real = export.export(project, db, ["aaa111"], out)
@@ -155,7 +156,7 @@ def test_with_logs_copies_the_logs(world, tmp_path):
     manifest = export.export(project, db, ["aaa111"], out, labels=["a"], with_logs=True)
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
-    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "a/log/synth.log",
+    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "a/log/synth.log",
                                                        "a/reports/3/area.rpt", "a/reports/3/run.log",
                                                        "a/sim/power/reports/power.csv"]
 
@@ -177,3 +178,41 @@ def test_an_export_of_two_sources_holds_one_run_per_label_and_source(world, tmp_
     assert [r["run_id"] for r in both["incomplete"]] == [CLEAN]
     assert (tmp_path / "both" / f"x@{DIRTY_TAG}" / "reports" / "area.rpt").read_text() == f"{DIRTY_TAG}\n"
     assert (tmp_path / "both" / "x@ccc333" / "reports" / "area.rpt").read_text() == "ccc333\n"
+
+
+def test_parameters_run_columns_commands_and_the_diff_of_a_dirty_source(world, tmp_path):
+    project, db = world
+    db.upsert_run({"run_id": DIRTY, "batch": "old", "label": "x", "config": "demo", "source": DIRTY_TAG, "dirty": 1,
+                   "host": "local", "phase": "done", "started": 200, "updated": 250, "tree_id": DIRTY})
+    db.mark_batch_retired("old")
+    db.set_parameters(DIRTY, {"config": "demo", "vars.netlist_stage": 15}, "spec")
+    db.set_parameters(DIRTY, {"source": DIRTY_TAG, "nested.sub": "fed4321"}, "checkout")
+    config.save_json(project.state_dir / "old" / f"{DIRTY}.spec.json", {"stages": [
+        {"name": "synth", "cmd": "make synth"},
+        {"name": "power", "tasks": [{"id": "k_small", "cmd": "make power NETLIST=out/15 TCK=1000"}]}]})
+    kept = project.data / "sources" / DIRTY_TAG
+    config.save_json(kept / "source.json", {"source": DIRTY_TAG, "base": "ccc333", "nested": {"sub": "fed4321"}})
+    (kept / "source.diff").write_text("diff --git a/x b/x\n")
+    out = tmp_path / "both"
+    manifest = export.export(project, db, ["aaa111", DIRTY_TAG], out)
+
+    assert manifest["dirty_sources"] == [{"source": DIRTY_TAG, "base": "ccc333", "nested": {"sub": "fed4321"},
+                                          "diff_sha256": hashlib.sha256(b"diff --git a/x b/x\n").hexdigest()}]
+    assert (out / "sources" / DIRTY_TAG / "source.diff").read_text() == "diff --git a/x b/x\n"
+    assert f"sources/{DIRTY_TAG}/source.diff" in [f["path"] for f in manifest["files"]]
+    record = next(r["record"] for r in manifest["runs"] if r["run_id"] == DIRTY)
+    assert record["commands"] == [{"stage": "synth", "task": "", "cmd": "make synth"},
+                                  {"stage": "power", "task": "k_small", "cmd": "make power NETLIST=out/15 TCK=1000"}]
+    runs = {r["run_id"]: r for r in _read_csv(out / "runs.csv")}
+    assert [runs[DIRTY][k] for k in ("batch", "dirty", "tree_id", "retired")] == ["old", "1", DIRTY, "1"]
+    assert [runs[RUN_A][k] for k in ("batch", "dirty", "tree_id", "retired")] == ["demo", "", "", "0"]
+    params = _read_csv(out / "parameters.csv")
+    assert list(params[0]) == export.PARAMETER_COLUMNS and manifest["tables"]["parameters.csv"] == 4
+    assert [(p["run_id"], p["label"], p["source"], p["key"], p["value"], p["origin"]) for p in params] == [
+        (DIRTY, "x", DIRTY_TAG, "config", "demo", "spec"), (DIRTY, "x", DIRTY_TAG, "nested.sub", "fed4321", "checkout"),
+        (DIRTY, "x", DIRTY_TAG, "source", DIRTY_TAG, "checkout"), (DIRTY, "x", DIRTY_TAG, "vars.netlist_stage", "15", "spec")]
+    # A dirty source whose diff was never kept is listed with its base and without a sha256.
+    db.upsert_run({"run_id": "20261005_0800_y_demo_gddd444-dirty", "batch": "old", "label": "y", "source": "ddd444-dirty",
+                   "phase": "done"})
+    lost = export.export(project, db, ["ddd444-dirty"], tmp_path / "lost")["dirty_sources"]
+    assert lost == [{"source": "ddd444-dirty", "base": "ddd444", "nested": {}, "diff_sha256": None}]

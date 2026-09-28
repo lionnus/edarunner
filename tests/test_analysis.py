@@ -441,3 +441,27 @@ def test_mlflow_export_writes_one_run_per_run(demo: Path, capsys, tmp_path: Path
     code, out, _ = edr(capsys, "--json", "export", "--mlflow", str(tmp_path / "ml"))
     assert json.loads(out)["data"]["skipped"] == [a, b]
     assert edr(capsys, "export", "--source", "abc1234")[0] == 1
+
+
+def test_compare_prints_the_parameters_that_differ(demo: Path, capsys) -> None:
+    a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
+    with Database(demo / "data" / "edr.db") as db:
+        for run, netlist, source in ((a, 11, "abc1234"), (b, 15, "def5678")):
+            db.set_parameters(run, {"config": "demo", "vars.netlist_stage": netlist}, "spec")
+            db.set_parameters(run, {"source": source}, "checkout")  # never a line: the run names carry the source
+        db.set_parameters(b, {"TCK": "1000"}, "spec")
+    for run in (a, b):
+        _metric(demo, run, "energy_nj", 3, 412.7 if run == a else 446.1)
+    code, out, _ = edr(capsys, "compare", a, b)
+    lines = [ln.split() for ln in out.splitlines()]
+    # One line per parameter that differs, a run without the key shows -, then a blank line and the metrics.
+    assert code == 0 and lines[0] == ["parameter", "a", "b"]
+    assert lines[2:5] == [["TCK", "-", "1000"], ["vars.netlist_stage", "11", "15"], []]
+    assert lines[5][:2] == ["metric", "task"] and lines[7][-2:] == ["33.4", "+8.1%"]
+    data = json.loads(edr(capsys, "--json", "compare", a, b)[1])["data"]
+    assert data["parameters"] == [{"key": "TCK", "value": {a: None, b: "1000"}},
+                                  {"key": "vars.netlist_stage", "value": {a: "11", b: "15"}}]
+    with Database(demo / "data" / "edr.db") as db:
+        db.set_parameters(a, {"TCK": "1000", "vars.netlist_stage": "15"}, "spec")
+    code, out, _ = edr(capsys, "compare", a, b, "--metric", "energy_nj")
+    assert code == 0 and out.split()[:2] == ["metric", "task"]

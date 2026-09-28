@@ -395,8 +395,9 @@ class Source:
     repo: Path = doc("the git repository of the flow")
     worktrees: Path = doc("where `edr checkout` puts a local clone per commit")
     ref: str = doc("the ref `edr checkout` takes without an argument", "HEAD")
-    nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has",
-                            factory=list)
+    nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has; a run "
+                            "records the commit of each as the parameter `nested.<name>`, and their changes count in "
+                            "a dirty tag", factory=list)
     run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows",
                       "{date}_{label}_{build_tag}_g{source}")
     build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)` or from "

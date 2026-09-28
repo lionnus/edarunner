@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT,
   started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT, tree_id TEXT, handle TEXT, cores INTEGER);
 CREATE TABLE IF NOT EXISTS stage_runs(run_id TEXT, stage TEXT, task TEXT, attempt INTEGER, started INTEGER, ended INTEGER,
   status TEXT, exit INTEGER, signature TEXT, log TEXT, PRIMARY KEY(run_id, stage, task, attempt));
-CREATE TABLE IF NOT EXISTS parameters(run_id TEXT, key TEXT, value TEXT, source TEXT, PRIMARY KEY(run_id, key));
+CREATE TABLE IF NOT EXISTS parameters(run_id TEXT, key TEXT, value TEXT, origin TEXT, PRIMARY KEY(run_id, key, origin));
 CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task TEXT, name TEXT, canonical TEXT, value REAL, unit TEXT,
   source_file TEXT, extracted_at INTEGER, PRIMARY KEY(run_id, stage, step, task, name));
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
@@ -169,11 +169,12 @@ class Database:
         """Insert a stage or task row, or update it. `task` defaults to '' and `attempt` to 1."""
         self._upsert("stage_runs", {"task": "", "attempt": 1, **row})
 
-    def set_parameters(self, run_id: str, parameters: dict[str, Any], source: str) -> None:
-        """Write the resolved configuration of a run. A key already present is replaced."""
+    def set_parameters(self, run_id: str, parameters: dict[str, Any], origin: str) -> None:
+        """Write parameters of a run as text under one origin, such as `spec`, `checkout` or `import`. A key already
+        present under that origin is replaced."""
         self.conn.executemany(
-            "INSERT OR REPLACE INTO parameters(run_id, key, value, source) VALUES(?, ?, ?, ?)",
-            [(run_id, k, v if isinstance(v, str) else json.dumps(v), source) for k, v in parameters.items()],
+            "INSERT OR REPLACE INTO parameters(run_id, key, value, origin) VALUES(?, ?, ?, ?)",
+            [(run_id, k, v if isinstance(v, str) else json.dumps(v), origin) for k, v in parameters.items()],
         )
         self.conn.commit()
 
@@ -281,9 +282,9 @@ class Database:
         return self._rows("SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))
 
     def parameters(self, run_id: str | None = None) -> list[Row]:
-        """The parameter rows of one run, or of every run."""
+        """The parameter rows of one run, or of every run, by run, key and origin."""
         where, args = (" WHERE run_id=?", (run_id,)) if run_id else ("", ())
-        return self._rows("SELECT run_id, key, value, source FROM parameters" + where, args)
+        return self._rows("SELECT run_id, key, value, origin FROM parameters" + where + " ORDER BY run_id, key, origin", args)
 
     def _rows(self, sql: str, args: tuple | list = ()) -> list[Row]:
         return [dict(r) for r in self.conn.execute(sql, args)]

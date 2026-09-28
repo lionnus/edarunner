@@ -45,7 +45,7 @@ rules hold for every file:
 | `repo` | the git repository of the flow | required |
 | `worktrees` | where `edr checkout` puts a local clone per commit | required |
 | `ref` | the ref `edr checkout` takes without an argument | `"HEAD"` |
-| `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has | `[]` |
+| `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has; a run records the commit of each as the parameter `nested.<name>`, and their changes count in a dirty tag | `[]` |
 | `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{source}"` |
 | `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)` or from `(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each override, such as `base_FREQ500` | `""` |
 

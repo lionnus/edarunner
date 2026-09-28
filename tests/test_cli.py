@@ -577,7 +577,7 @@ def test_two_runs_of_a_label_in_one_batch_are_named_apart(demo: Path, capsys, tm
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--source", "abc1234", "--source", dirty_tag, "--labels", "a", "--out", str(exp))
     manifest = json.loads((exp / "manifest.json").read_text())
-    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 2 files\n"
+    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 3 files\n"
     assert [r["run_id"] for r in manifest["runs"]] == [clean, dirty] and manifest["sources"] == ["abc1234", dirty_tag]
 
 

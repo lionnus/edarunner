@@ -26,7 +26,7 @@ from helpers_backend import FakeBackend
 from helpers_driver import DEMO, wait_for
 
 DATE = "20260926_1200"
-SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "vars", "host", "root", "state_file",
+SPEC_KEYS = {"schema", "run_id", "batch", "project", "label", "config", "vars", "overrides", "host", "root", "state_file",
              "queue_dir", "shell", "env", "limits", "start_at", "stages"}
 
 
@@ -109,6 +109,7 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     left = [s for s in strings(spec) if "{" in s.replace("{checkpoint}", "").replace("{task_dir}", "")]
     assert left == []
     assert " DW=0" in b.spec["stages"][0]["cmd"] and b.spec["stages"][0]["cmd"].endswith("DW=0")
+    assert (a.spec["vars"], a.spec["overrides"], b.spec["overrides"]) == ({"netlist_stage": "11"}, {}, {"DW": "0"})
 
 
 def test_plan_takes_the_probes_of_the_caller(env, tmp_path: Path, monkeypatch) -> None:
@@ -251,6 +252,7 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     assert Path(spec["driver"]).parent == tmp_path / "state" / "bin" and Path(spec["driver"]).is_file()
     assert [s["name"] for s in spec["stages"]] == ["synth"]
     assert spec["record"]["edarunner"] == edarunner.__version__ and len(spec["record"]["driver_sha256"]) == 64
+    assert spec["record"]["nested"] == {}  # the demo names no nested repository
     assert (tmp_path / ".edr" / "leases" / "demo").is_dir()
     assert (Path(row["root"]) / "flow" / "flow.sh").exists()
     assert db.run(run_id)["state"] == "running" and db.batches()[0]["batch"] == "demo"
