@@ -40,8 +40,7 @@ from .db import Database, network_fs
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh, floor, probe_all
 from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
-from .notify import make_notifiers, untag
-from .notify.digest import Digest
+from .notify import digest, make_notifiers, untag
 from .notify.telegram import format as tgfmt
 from .notify.telegram.bot import REPLY_DAYS
 
@@ -423,11 +422,6 @@ class Actions:
         """One line per tool."""
         return tgfmt.tools(_tool_rows(self.c))
 
-    def digest_text(self) -> str:
-        """The daily digest now, as Telegram HTML."""
-        self.c.refresh()
-        return Digest(self.c.project, self.c.db).text(time.time())
-
     def log_tail(self, handle: str, n: int) -> tuple[str, bytes]:
         """The last `n` lines of the log of the running or last stage, fetched from the host: (file name, bytes)."""
         row = self.c.resolve(handle)
@@ -487,7 +481,7 @@ def cmd_brief(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
     """The board, one run with its stages, metrics and log tail, or the daily digest."""
     if a.digest:
-        text = Actions(c).digest_text()
+        text = _digest(census.projects() if a.all else {c.project.project: c.project})
         c.emit(untag(text), {"digest": text})
         return Exit.DONE
     if a.handle:
@@ -755,6 +749,10 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
             problems.append(f"hook {spec}: {e}")
     if not launch.DRIVER_SRC.is_file():
         problems.append(f"driver missing: {launch.DRIVER_SRC}")
+    try:
+        config.load_user()
+    except ConfigError as e:
+        problems.append(str(e))
     batches: list[Batch] = []
     for f in sorted((project.root / "jobs").glob("*.toml")):
         try:
@@ -1280,15 +1278,15 @@ def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
     if a.board:
         title, html = "board", Actions(c).status_text()
     elif a.digest:
-        title, html = "digest", Actions(c).digest_text()
+        title, html = "digest", _digest({**census.projects(), c.project.project: c.project})
     else:
         title, html = "note", tgfmt.esc(a.text)
     if a.dry_run:
         c.emit(tgfmt.head(c.project.project, title) + "\n" + html + "\n(dry)", {"sent": 0, "text": untag(html)})
         return Exit.DONE
-    notifiers = make_notifiers(c.project.site, c.project, c.db, Actions(c))
+    notifiers = make_notifiers(config.load_user(), c.project.site, c.project, c.db)
     if not notifiers:
-        raise Refuse("no notifier is configured; see docs/guides/alerts.md")
+        raise Refuse(f"no notifier is configured in {config.DEFAULT_USER}; see docs/guides/alerts.md")
     sent = sum(n.post(title, html, a.silent) for n in notifiers)
     c.emit(f"sent to {sent} of {len(notifiers)} notifiers", {"sent": sent, "text": untag(html)})
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
@@ -1298,8 +1296,14 @@ def _notifiers(c: Ctx, served: bool = False) -> list:
     """The channels of the project; unless it is served, the bot polls once the watcher holds serve.lock."""
     project = c.project
     # The bot polls in its own thread.
-    return make_notifiers(project.site, project, Database(project.data / "edr.db", threads=True),
+    return make_notifiers(config.load_user(), project.site, project, Database(project.data / "edr.db", threads=True),
                           None if served else Router(c.a))
+
+
+def _digest(found: dict[str, Project]) -> str:
+    """The digest of `found` since the last daily one, as Telegram HTML; it moves nothing."""
+    now = time.time()
+    return digest.text(found, digest.since(home.Store().get_store("digest", {}), now), now)
 
 
 class Router:
@@ -1326,14 +1330,15 @@ class Router:
         finally:
             c.close()
 
-    def pick(self, args: list[str], run: tuple[str, str] | None) -> tuple[str, list[str]]:
-        """The project a command names in its first argument, else the one of the alert it replies to, else the only
-        one; and the arguments that remain. Refuse lists the projects when none of these gives one."""
+    def pick(self, args: list[str], here: str | None) -> tuple[str, list[str]]:
+        """The project a command names in its first argument, else `here`, the project of the alert it replies to or
+        of its topic, else the only one; and the arguments that remain. Refuse lists the projects when none of these
+        gives one."""
         names = self.names()
         if args and args[0] in names:
             return args[0], args[1:]
-        if run:
-            return run[0], args
+        if here:
+            return here, args
         if len(names) == 1:
             return names[0], args
         raise Refuse("name a project first: " + ", ".join(names) if names else "no registered project")
@@ -1344,7 +1349,7 @@ class Router:
             project, _, h = handle.partition("/")
             return project, h
         if handle.startswith("#"):
-            board_ = serve.Store().get_store("last_board", [])
+            board_ = home.Store().get_store("last_board", [])
             n = int(handle[1:]) if handle[1:].isdigit() else 0
             if not 1 <= n <= len(board_):
                 raise Refuse(f"{handle}: the last board has {len(board_)} runs")
@@ -1370,6 +1375,14 @@ class Router:
     def replied(self, msg_id: int) -> tuple[str, str] | None:
         """(project, run id) of the alert `msg_id` of any project."""
         return next(((n, r) for n in self.names() if (r := self.run_of(n, msg_id))), None)
+
+    def topic_of(self, thread: int) -> str | None:
+        """The project whose forum topic is `thread`."""
+        for name in self.names():
+            with self.actions(name) as act:
+                if act.c.db.get_store("telegram", {}).get("topic") == thread:
+                    return name
+        return None
 
     def board_text(self) -> str:
         """The board of every project, the one the supervisor pins."""
@@ -1411,12 +1424,8 @@ class Router:
         return tgfmt.tools(rows.values())
 
     def digest_text(self) -> str:
-        """The digest of every project, one after the other."""
-        out = []
-        for name in self.names():
-            with self.actions(name) as act:
-                out.append(f"<b>{tgfmt.esc(name)}</b>\n" + act.digest_text())
-        return tgfmt.fit("\n\n".join(out)) or "<i>no project</i>"
+        """The digest of every project."""
+        return _digest(census.projects())
 
 
 # --- parser and main
@@ -1573,7 +1582,8 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s seconds; Ctrl-C ends it")
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
-    s.add_argument("--digest", action="store_true", help="the daily digest that the watcher sends, as plain text")
+    s.add_argument("--digest", action="store_true", help="the daily digest of this project, or with --all of every "
+                                                         "project, as plain text")
     s.add_argument("--all", action="store_true", help="the runs of every registered project, with a project column")
     s = command("events", "the last events", """
         Prints the last N events, oldest first, with the time, the actor (user,
@@ -1715,8 +1725,8 @@ def _parser() -> argparse.ArgumentParser:
         already exists. edr serve watches the project once it is registered.
         """, write=True).add_argument("--site", required=True, metavar="DIR", help="the site directory, or a site.toml path")
     command("check", "load everything, probe the hosts, check the hooks", """
-        Loads the project, the site and every batch under jobs/, imports every
-        hook, checks the driver file, probes every host once, names every tool
+        Loads the project, the site, user.toml and every batch under jobs/,
+        imports every hook, checks the driver file, probes every host once, names every tool
         the head node lacks, and plans every batch with those probes. It prints
         one problem: line per fault, or an ok: line with the counts.
         """, exits={Exit.REFUSED: "a problem was found"})
@@ -1931,16 +1941,16 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--host", metavar="H", help="with --prune: every finished run of the project with a tree on H")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
     s = command("notify", "send one message, the board or the digest through every notifier", """
-        Sends one message through every notifier that the site configures. The
+        Sends one message through every notifier that user.toml configures. The
         message starts with a header line with the project name, like every
         message of the bot, and TEXT follows as plain text. --board sends the
-        board of edr status and --digest the daily digest instead, so a cron
-        line can mail either.
+        board of edr status and --digest the digest of every registered project
+        instead, so a cron line can mail either.
         """, write=True, exits={Exit.REFUSED: "no notifier is configured, a send failed, or not exactly one "
                                               "of TEXT, --board and --digest"})
     s.add_argument("text", nargs="?", help="the message, as plain text")
     s.add_argument("--board", action="store_true", help="send the board of edr status")
-    s.add_argument("--digest", action="store_true", help="send the daily digest now; the watcher still sends its own")
+    s.add_argument("--digest", action="store_true", help="send the digest of every project now; the daily one still comes")
     s.add_argument("--silent", action="store_true", help="send without a sound on the phone")
     s = command("watch", "the watcher", """
         Runs the watcher loop: one cycle every heartbeat_s seconds. --once runs one cycle.

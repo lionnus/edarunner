@@ -7,10 +7,15 @@ board, the buttons on an alert, the commands and your own commands.
 
 ## Channels
 
-Each channel is a table in the site file, and `edr watch` sends every
-alert to every channel it finds there.
-[reference/configuration.md](../reference/configuration.md) lists the
-keys.
+Each channel is a table in your user file,
+`~/.config/edarunner/user.toml`, and edarunner sends every alert to
+every channel it finds there. The user file lies next to the site file
+and stays out of git: the site file describes the machines of a lab,
+and the user file names your chat, your ntfy topic and your mail
+address, so each user of one site file gets alerts of their own. Add
+`user.toml` and the secret files to the `.gitignore` of the site
+repository. [reference/configuration.md](../reference/configuration.md)
+lists the keys.
 
 | Channel | Alerts | Buttons | Board | Commands |
 |---|---|---|---|---|
@@ -35,7 +40,7 @@ other message is `<project>: <kind>`.
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
-| `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |
+| `digest` | the supervisor once a day at `digest_at` of the user file, for every project in one message, and `edr notify --digest` | one message | one low push | one mail |
 | `board` | the supervisor every minute, or a watcher without a supervisor every cycle | one pinned message, edited in place | none | none |
 | `board` on request | `edr notify --board` | one new message | one low push | one mail |
 | `note` | `edr notify TEXT` | one message | one push, the lowest priority with `--silent` | one mail |
@@ -55,7 +60,7 @@ every channel on request:
 
 ```sh
 edr notify --board            # the board of edr status
-edr notify --digest           # the digest now; the watcher still sends its own
+edr notify --digest           # the digest of every project now; the daily one still comes
 ```
 
 A cron line mails the board every morning:
@@ -87,7 +92,7 @@ outbound HTTPS, so it needs no open port and no webhook.
 
    The bot does not start when the file is missing or when the group or
    others can read it. `edr serve` logs the reason.
-3. Add the section to `site.toml`:
+3. Add the section to `~/.config/edarunner/user.toml`:
 
    ```toml
    [telegram]
@@ -118,12 +123,12 @@ the `from.id` of a message; a bot such as @userinfobot shows it.
 The bot obeys one `chat_id`, and one `user_id` when it is set. Every
 other chat or user gets no answer, and the first message from it
 records one `rejected` event: in the journal of `edr serve`, or in the
-events of the project of a watcher without a supervisor. The token is the one
-secret; it lives in a file with mode 600, and the bot refuses any other
-mode.
+events of the project of a watcher without a supervisor. The token is
+the one secret; it lives in a file with mode 600, and the bot refuses
+any other mode.
 
 The bot never runs a shell string or free text. A custom command is an
-argv list from the site file on the head node, and every argument from
+argv list from the site file or the user file, and every argument from
 the phone must match its allowlist regex in full. The bot never kills a
 process, and never runs `launch` or `rm`. `/stop` and the Stop button
 write the `after-task` stop file, `/keep` and the +6h, +12h and +24h
@@ -295,8 +300,10 @@ the program a narrow format, or the phone wraps the lines.
 
 ### Custom commands
 
-Everything beyond the built-in list comes from `[telegram.commands.*]`
-in `site.toml`, one table per command:
+Everything beyond the built-in list comes from `[telegram.commands.*]`,
+one table per command: in `site.toml` for everyone of the lab, or in
+`user.toml` for you alone. A command of `user.toml` replaces the one of
+the same name in `site.toml`.
 
 ```toml
 [telegram.commands.survey]
@@ -424,35 +431,34 @@ A command acts on every project, or names one as its first word:
 
 ### Topics
 
-A Telegram group with Topics on is a forum: each topic is a thread with
-its own id. `topic_id` in `[telegram]` of the site file puts every
-message of the bot into one thread: the alerts, the board, the replies
-and the pinned board. The bot then obeys a command or a button press
-only when it comes from that thread.
+A Telegram group with Topics on is a forum: each topic is a thread of
+its own. With `topics = true` in `[telegram]` of `user.toml`, each
+project gets a topic with its name, which the watcher of the project
+makes the first time it sends. The topic holds the alerts of the
+project, and the pinned board of a watcher that runs without a
+supervisor. The global board and the digest of `edr serve` stay in the
+main thread. A command in the topic of a project acts on that project:
+`/status` there shows its board and `/events` its events. The bot
+answers every command in the thread it came from.
 
 To set it up:
 
 1. Make a group and turn on Topics in the group settings.
-2. Add the bot and make it an admin with the right to pin messages. An
-   admin bot also receives the plain words of the reply keyboard.
-3. Make one topic for the bot.
-4. Start `edr serve` without `topic_id` and send `/status` in the topic.
-   The bot prints the id of the topic to stderr:
-
-   ```
-   telegram: a message came from topic 17 of chat -1001234; set topic_id = 17 in [telegram]
-   ```
-
-5. Put the id into `[telegram]` of the site file and restart `edr serve`:
+2. Add the bot and make it an admin with the rights to pin messages and
+   to manage topics. An admin bot also receives the plain words of the
+   reply keyboard.
+3. Set `topics = true` and restart `edr serve`:
 
    ```toml
    [telegram]
    chat_id = -1001234
-   topic_id = 17
+   topics = true
    ```
 
-Without `topic_id`, the bot answers a command in the thread it came
-from, and it sends its alerts and its board to the main thread.
+The watcher of a project keeps the id of its topic in the `store` table
+of the project database, under `telegram`. A topic that you delete is
+made again with the next message. Without the right to manage topics,
+the bot logs a warning and sends to the main thread.
 
 ## What each alert says
 
@@ -760,11 +766,12 @@ url = "https://ntfy.sh"                             # the default
 token_file = "~/.config/edarunner/ntfy.token"       # for a protected topic only
 ```
 
-Subscribe to the topic in the ntfy app. Anyone who knows the name of a
-topic on a public server can read it, so use a long random name, or a
-protected topic with a token. A dead, failed or killed run, a full host
-and a stale watcher come with the urgent priority. The daily digest and
-the board come with a low one, and `edr notify --silent` with the lowest.
+The table goes into `user.toml`. Subscribe to the topic in the ntfy
+app. Anyone who knows the name of a topic on a public server can read
+it, so use a long random name, or a protected topic with a token. A
+dead, failed or killed run, a full host and a stale watcher come with
+the urgent priority. The daily digest and the board come with a low
+one, and `edr notify --silent` with the lowest.
 
 ## Mail
 
@@ -778,50 +785,53 @@ starttls = true                                     # the default
 password_file = "~/.config/edarunner/smtp.password" # without it there is no login
 ```
 
-The login name is `user`, or the `from` address when `user` is not set. A
-mail goes out per alert, per daily digest and per `edr notify`. The
-watcher never mails the board. Send it with `edr notify --board`, or as
-plain text with `edr notify "$(edr status)"`.
+The table goes into `user.toml`. The login name is `user`, or the
+`from` address when `user` is not set. A mail goes out per alert, per
+daily digest and per `edr notify`. The watcher never mails the board.
+Send it with `edr notify --board`, or as plain text with
+`edr notify "$(edr status)"`.
 
 ## The daily digest
 
-With `digest_at = "08:00"` in `[limits]` of `edr.toml`, the watcher
-sends one message a day, at its first cycle after 08:00 local time. The
-message has five parts:
+With `digest_at = "08:00"` in `user.toml`, the supervisor sends one
+message a day for every registered project, at its first cycle after
+08:00 local time. A watcher without a supervisor that holds
+`~/.edr/serve.lock` sends it in the same way. The message starts with
+the time of the last digest. Each project with a run that ended since
+then, or with a live run, gets a block with the parts that have a run:
 
-- the runs that ended since the last digest, with their states;
-- the live runs, with the stage and the time since the start;
-- the queued runs;
-- the three hosts with the least free scratch, as used of total;
-- the open alerts: live runs in an alert state without a keep that
-  still holds.
+- ended: the runs that ended since the last digest, with their states;
+- live: the live runs, with the stage and the time since the start;
+- queued: the queued runs;
+- open alerts: live runs in an alert state without a keep that still
+  holds.
+
+Any other project gets one line:
 
 ```
-demo: digest
-Ended since 14.01 03:00
-⚪ a@demo done
+edr: digest
+since 14.01 08:00
 
-Live
+demo
+ended
+⚪ a@demo done
+live
 🔴 h@demo synth, 2h
 🟢 c@demo synth, 2h
-
-Queued
+queued
 🔵 q@demo
-
-Least free scratch
-local scratch 50/100 GB
-hostA scratch 900/1000 GB
-
-Open alerts
+open alerts
 🔴 h@demo hung
+
+power nothing ended, nothing live
 ```
 
-The host figures come from `data/board/board.json` of the last cycle,
-so the digest runs no probe. The day and the time of the last digest
-live in the database's `store` table under `digest`; the first digest covers
-the last 24 hours. `/digest` sends the same text at any time, and
-`edr status --digest` prints it on the terminal. Neither moves the start
-of the next digest.
+The digest reads the database of each project and probes nothing. The
+day and the time of the last digest live in `~/.edr/store.json` under
+`digest`; the first digest covers the last 24 hours. `/digest` sends
+the same text at any time, `edr status --digest` prints the block of
+the current project on the terminal, and `edr status --digest --all`
+the whole digest. None of them moves the start of the next digest.
 
 ## edr notify
 
@@ -834,7 +844,7 @@ edr notify "session myflow: the sweep is done"
 edr notify --silent "session myflow: waiting for input"
 edr notify --dry-run "test"       # prints the message, sends nothing
 edr notify --board                # the board as a new message
-edr notify --digest               # the daily digest now
+edr notify --digest               # the digest of every project now
 ```
 
 It sends through every channel that is on, so ntfy and mail get the

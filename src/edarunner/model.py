@@ -61,7 +61,9 @@ class Tool:
 
 @dataclass
 class BotCommand:
-    """Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
+    """Each `[telegram.commands.<name>]` table defines one custom command of the bot: in `site.toml` for
+    everyone of the lab, in `user.toml` for you alone. A command of `user.toml` replaces the one of
+    the same name in `site.toml`.
 
     Every string renders `{project}`, `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`.
     Here `{root}` and `{project_root}` both give the project directory, not a run tree. A command sent
@@ -91,16 +93,17 @@ class BotCommand:
 
 @dataclass
 class Telegram:
-    """`[telegram]` sets up the bot, the one chat it answers and the custom commands; `docs/guides/alerts.md`
-    explains the setup."""
+    """`[telegram]` sets up the bot, the one chat it answers and your own custom commands;
+    `docs/guides/alerts.md` explains the setup."""
 
     chat_id: int = doc("the one chat the bot answers; a group id is negative")
     token_file: Path = doc("the bot token, mode 600", Path("~/.config/edarunner/telegram.token"))
     commands: dict[str, BotCommand] = field(default_factory=dict)
     user_id: int | None = doc("the one user whose messages and buttons the bot obeys", None,
                               shown="unset; the chat is the only gate")
-    topic_id: int | None = doc("the forum topic of every message; a command from another topic is ignored", None,
-                               shown="unset; the main thread")
+    topics: bool = doc("one forum topic per project, which the bot makes the first time the project sends; the chat "
+                       "must be a forum group and the bot an admin that may manage topics. Without that right the "
+                       "messages go to the main thread", False)
 
 
 @dataclass
@@ -154,8 +157,22 @@ class Scheduler:
 
 
 @dataclass
+class User:
+    """`~/.config/edarunner/user.toml` holds what belongs to one person: the chat of the bot, the ntfy
+    topic, the mail, the time of the daily digest and your own bot commands. It lies next to the site
+    file and stays out of git, so each user of a site file has a chat of their own. Without the file
+    edarunner sends nothing."""
+
+    path: Path
+    digest_at: str = doc("the local time, `HH:MM`, of the daily digest of every registered project; empty is off", "")
+    telegram: Telegram | None = None
+    ntfy: Ntfy | None = None
+    mail: Mail | None = None
+
+
+@dataclass
 class Site:
-    """`site.toml` holds the hosts, the tools and the bot of a site; `site` in `edr.toml` names it,
+    """`site.toml` holds the hosts, the tools and the bot commands of a site; `site` in `edr.toml` names it,
     and `docs/guides/site.md` sets it up. Every project and every user of the machines shares it,
     usually as a clone of the lab's site repository at `~/.config/edarunner/`. Every remote command runs through `sh -c`, so the login
     shell of a host may be `csh` or `tcsh`."""
@@ -175,9 +192,7 @@ class Site:
     scheduler: Scheduler = field(default_factory=Scheduler)
     hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
-    telegram: Telegram | None = None
-    ntfy: Ntfy | None = None
-    mail: Mail | None = None
+    commands: dict[str, BotCommand] = field(default_factory=dict)
 
 
 @dataclass
@@ -384,7 +399,6 @@ class Limits:
     lease_s: int = doc("time a seat lease counts against other runs; the tool holds the seat by then", 600)
     kill_hung: bool = doc("the watcher kills a hung run after `grace_s`", False)
     kill_orphan: bool = doc("the watcher kills an orphan tool process after `grace_s`", False)
-    digest_at: str = doc("the local time, `HH:MM`, of the daily digest; empty is off", "")
 
 
 @dataclass

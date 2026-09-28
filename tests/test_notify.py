@@ -13,11 +13,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from helpers_telegram import FakeApi, FakeDatabase, make_project, make_site
+from helpers_telegram import FakeApi, FakeDatabase, make_project, make_site, make_user
 
 from edarunner import cli, config
 from edarunner.config import ConfigError
-from edarunner.model import Mail, Ntfy
+from edarunner.model import Mail, Ntfy, User
 from edarunner.notify import make_notifiers, untag
 from edarunner.notify.alerts import Alert, button
 from edarunner.notify.mail import MailNotifier
@@ -110,42 +110,63 @@ def test_mail_logs_in_with_the_password_file(tmp_path):
 
 
 def test_make_notifiers_builds_every_channel_with_a_private_secret(tmp_path):
-    site = SimpleNamespace(telegram=None, ntfy=Ntfy(topic="t"), mail=Mail(host="h", sender="f", to=["t"]))
-    kinds = [type(n) for n in make_notifiers(site, PROJECT, None, None)]
+    user = User(path=tmp_path / "user.toml", ntfy=Ntfy(topic="t"), mail=Mail(host="h", sender="f", to=["t"]))
+    kinds = [type(n) for n in make_notifiers(user, None, PROJECT, None)]
     assert kinds == [NtfyNotifier, MailNotifier]
-    site.ntfy.token_file = secret(tmp_path, "t", 0o644)
-    site.mail.password_file = tmp_path / "absent"
-    assert make_notifiers(site, PROJECT, None, None) == []
+    user.ntfy.token_file = secret(tmp_path, "t", 0o644)
+    user.mail.password_file = tmp_path / "absent"
+    assert make_notifiers(user, None, PROJECT, None) == []
 
 
-def demo_site(tmp_path: Path, extra: str) -> Path:
+def demo_user(tmp_path: Path, monkeypatch, text: str) -> Path:
+    """A copy of the demo with HOME at tmp_path, whose user.toml holds `text`."""
     root = tmp_path / "demo"
     shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("repo", "wt", "data"))
-    site = root / "site.toml"
-    site.write_text(site.read_text() + extra)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(root)
+    user = Path(config.DEFAULT_USER).expanduser()
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(text)
     return root
 
 
-def test_site_tables_load(tmp_path):
-    root = demo_site(tmp_path, '\n[ntfy]\ntopic = "edr-x"\ntoken_file = "ntfy.token"\n'
-                               '\n[mail]\nhost = "smtp.example.org"\nfrom = "edr@example.org"\nto = ["a@example.org"]\n')
-    site = config.load_project(root).site
-    assert site.ntfy == Ntfy(topic="edr-x", url="https://ntfy.sh", token_file=root / "ntfy.token")
-    assert site.mail.sender == "edr@example.org" and site.mail.port == 587 and site.mail.starttls
+def test_the_user_file_holds_the_channels_and_the_site_file_the_bot_commands(tmp_path, monkeypatch):
+    root = demo_user(tmp_path, monkeypatch, 'digest_at = "08:00"\n[ntfy]\ntopic = "edr-x"\ntoken_file = "ntfy.token"\n'
+                                            '\n[mail]\nhost = "smtp.example.org"\nfrom = "edr@example.org"\nto = ["a@example.org"]\n'
+                                            '\n[telegram]\nchat_id = 5\ntopics = true\n')
+    user, path = config.load_user(), Path(config.DEFAULT_USER).expanduser()
+    assert user.ntfy == Ntfy(topic="edr-x", url="https://ntfy.sh", token_file=path.parent / "ntfy.token")
+    assert user.mail.sender == "edr@example.org" and user.mail.port == 587 and user.mail.starttls
+    assert user.digest_at == "08:00" and user.telegram.topics and user.telegram.token_file == path.parent / "telegram.token"
     for bad, match in (('[mail]\nhost = "h"\nto = ["a"]\n', "missing key 'mail.from'"),
                        ('[mail]\nhost = "h"\nfrom = "f"\nto = "a"\n', "mail.to must be list, not str"),
-                       ('[ntfy]\ntopic = "t"\npriority = 5\n', "unknown key 'ntfy.priority'")):
-        (root / "site.toml").write_text((DEMO / "site.toml").read_text() + "\n" + bad)
+                       ('[ntfy]\ntopic = "t"\npriority = 5\n', "unknown key 'ntfy.priority'"),
+                       ('digest_at = "8:00"\n', "digest_at must be HH:MM or empty"),
+                       ('[telegram]\ntopic_id = 17\nchat_id = 5\n', "unknown key 'telegram.topic_id'")):
+        path.write_text(bad)
         with pytest.raises(ConfigError, match=match):
+            config.load_user()
+    path.unlink()
+    assert config.load_user() == User(path=path)  # no file, no channel
+    site = root / "site.toml"
+    site.write_text(site.read_text() + '\n[telegram.commands.x]\nhelp = "x"\nrun = ["true"]\n')
+    assert list(config.load_project(root).site.commands) == ["x"]
+    for table in ('[ntfy]\ntopic = "t"', '[mail]\nhost = "h"', "[telegram]\nchat_id = 5"):
+        site.write_text((DEMO / "site.toml").read_text() + "\n" + table + "\n")
+        with pytest.raises(ConfigError, match="unknown key '(ntfy|mail|telegram.chat_id)'"):
             config.load_project(root)
+
+
+def test_two_users_of_one_site_file_have_their_own_chats(tmp_path, monkeypatch):
+    for name, chat in (("ann", 1), ("bob", 2)):
+        demo_user(tmp_path / name, monkeypatch, f"[telegram]\nchat_id = {chat}\n")
+        assert config.load_user().telegram.chat_id == chat
 
 
 def test_edr_notify_reaches_ntfy_and_mail(ntfy_server, tmp_path, monkeypatch, capsys):
     url, got = ntfy_server
-    root = demo_site(tmp_path, f'\n[ntfy]\ntopic = "edr-x"\nurl = "{url}"\n'
-                               '\n[mail]\nhost = "h"\nfrom = "f@example.org"\nto = ["t@example.org"]\n')
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.chdir(root)
+    demo_user(tmp_path, monkeypatch, f'[ntfy]\ntopic = "edr-x"\nurl = "{url}"\n'
+                                     '\n[mail]\nhost = "h"\nfrom = "f@example.org"\nto = ["t@example.org"]\n')
     with mock.patch("smtplib.SMTP") as smtp:
         assert cli.main(["notify", "build done"]) == 0
         mail = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
@@ -156,10 +177,8 @@ def test_edr_notify_reaches_ntfy_and_mail(ntfy_server, tmp_path, monkeypatch, ca
 @pytest.mark.parametrize("flag,title", [("--board", "demo: board"), ("--digest", "demo: digest")])
 def test_edr_notify_sends_the_board_or_the_digest(flag, title, ntfy_server, tmp_path, monkeypatch, capsys):
     url, got = ntfy_server
-    root = demo_site(tmp_path, f'\n[ntfy]\ntopic = "edr-x"\nurl = "{url}"\n'
-                               '\n[mail]\nhost = "h"\nfrom = "f@example.org"\nto = ["t@example.org"]\n')
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.chdir(root)
+    demo_user(tmp_path, monkeypatch, f'[ntfy]\ntopic = "edr-x"\nurl = "{url}"\n'
+                                     '\n[mail]\nhost = "h"\nfrom = "f@example.org"\nto = ["t@example.org"]\n')
     with mock.patch("smtplib.SMTP") as smtp:
         assert cli.main(["notify", flag]) == 0
         mail = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
@@ -205,7 +224,8 @@ KINDS = {
 
 def telegram_got(tmp_path, monkeypatch, call):
     """(title, text lines, buttons) of the one message the bot sends; a button is (label, callback_data)."""
-    bot = TelegramBot(make_site(tmp_path), make_project(tmp_path), FakeDatabase(), None, str(tmp_path / "telegram.token"))
+    bot = TelegramBot(make_user(tmp_path).telegram, make_site(), make_project(tmp_path), FakeDatabase(), None,
+                      str(tmp_path / "telegram.token"))
     bot.api = FakeApi()
     call(bot)
     [sent] = bot.api.of("sendMessage")

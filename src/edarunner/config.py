@@ -1,8 +1,9 @@
-"""Load and validate the four TOML files, and read and write the JSON state files.
+"""Load and validate the five TOML files, and read and write the JSON state files.
 
 `edr.toml` and `tasks.toml` live in the project directory, one `jobs/<batch>.toml` per batch next
-to them, and `site.toml`, wherever `site` points, with the hosts, the tools and the bot. These rules
-hold for every file:
+to them, `site.toml`, wherever `site` points, with the hosts, the tools and the lab's bot
+commands, and `user.toml` in `~/.config/edarunner/`, with your chat and the digest time. These
+rules hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
   key path, so `cores = "16"` stops the load.
@@ -13,7 +14,7 @@ hold for every file:
 - A hook is `<file>:<function>`, with `<file>` relative to the project directory; a leading
   `python:` is optional.
 
-`edr check` loads all four, imports every hook, probes the hosts and plans every batch under
+`edr check` loads all five, imports every hook, probes the hosts and plans every batch under
 `jobs/`, so a wrong file stops there.
 """
 
@@ -58,11 +59,13 @@ from .model import (
     Task,
     Telegram,
     Tool,
+    User,
 )
 
 T = TypeVar("T")
 PathLike = str | os.PathLike[str]
 DEFAULT_SITE = "~/.config/edarunner/site.toml"  # the site file of `edr hosts` outside a project
+DEFAULT_USER = "~/.config/edarunner/user.toml"
 
 # `${VAR}` belongs to the shell, so a `$` before the brace is not a placeholder.
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
@@ -71,7 +74,7 @@ _PROJECT_KEYS = {
     "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "host_free_min_gb", "hosts", "tools", "nfs_export",
-              "telegram", "ntfy", "mail", "scheduler"}
+              "telegram", "scheduler"}
 _EXTRACTORS = ("regex", "csv", "json", "python", "area_hier")
 
 
@@ -302,12 +305,8 @@ def load_site(path: PathLike) -> Site:
     tools = {n: _build(Tool, t, file, f"tools.{n}", name=n)
              for n, t in _table(raw.get("tools", {}), None, file, "tools").items()}
     hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
-    telegram = _telegram(raw["telegram"], file) if "telegram" in raw else None
+    commands = _commands(_table(raw.get("telegram", {}), {"commands"}, file, "telegram"), file)
     given = {k: raw[k] for k in ("env", "tool_procs", "host_free_min_gb", "nfs_export") if k in raw}
-    if "ntfy" in raw:
-        given["ntfy"] = _channel(Ntfy, raw["ntfy"], file, "ntfy", "token_file")
-    if "mail" in raw:
-        given["mail"] = _channel(Mail, raw["mail"], file, "mail", "password_file")
     given.update({f"ssh_{k}": v for k, v in ssh.items()})
     sched = _build(Scheduler, raw.get("scheduler", {}), file, "scheduler")
     if sched.backend not in BACKENDS:
@@ -321,7 +320,22 @@ def load_site(path: PathLike) -> Site:
     for key, value in given.items():
         if not _typed(value, hints[key]):
             raise ConfigError(f"{file}: {key.replace('ssh_', 'ssh.', 1)} must be {_type_name(hints[key])}, not {type(value).__name__}")
-    return Site(path=file, scratch=_need(raw, "scratch", file, ""), hosts=hosts, tools=tools, telegram=telegram, **given)
+    return Site(path=file, scratch=_need(raw, "scratch", file, ""), hosts=hosts, tools=tools, commands=commands, **given)
+
+
+def load_user(path: PathLike = DEFAULT_USER) -> User:
+    """Load user.toml; a missing file is a user without channels."""
+    file = Path(os.path.abspath(Path(path).expanduser()))
+    if not file.exists():
+        return User(path=file)
+    raw = _table(_read(file), {"schema", "digest_at", "telegram", "ntfy", "mail"}, file, "")
+    _schema(raw, file)
+    at = raw.get("digest_at", "")
+    if not isinstance(at, str) or at and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at):
+        raise ConfigError(f"{file}: digest_at must be HH:MM or empty, not {at!r}")
+    return User(path=file, digest_at=at, telegram=_telegram(raw["telegram"], file) if "telegram" in raw else None,
+                ntfy=_channel(Ntfy, raw["ntfy"], file, "ntfy", "token_file") if "ntfy" in raw else None,
+                mail=_channel(Mail, raw["mail"], file, "mail", "password_file") if "mail" in raw else None)
 
 
 def _channel(cls: type[T], raw: object, file: Path, at: str, secret: str) -> T:
@@ -356,16 +370,20 @@ def _check_tools(names: Mapping[str, object], tools: dict[str, Tool], file: Path
 
 
 def _telegram(raw: object, file: Path) -> Telegram:
-    """The [telegram] table of `file`."""
+    """The [telegram] table of user.toml."""
     tg = dict(_table(raw, {f.name for f in fields(Telegram)}, file, "telegram"))
     if not isinstance(tg.get("token_file", ""), str):
         raise ConfigError(f"{file}: telegram.token_file must be str, not {type(tg['token_file']).__name__}")
     tg["token_file"] = _path(str(tg.get("token_file") or _default(Telegram, "token_file")), file)
-    if "commands" in tg:
-        tg["commands"] = {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
-                          for n, t in _table(tg["commands"], None, file, "telegram.commands").items()}
+    tg["commands"] = _commands(tg, file)
     _need(tg, "chat_id", file, "telegram")
     return _build(Telegram, tg, file, "telegram")
+
+
+def _commands(tg: Mapping[str, Any], file: Path) -> dict[str, BotCommand]:
+    """The custom bot commands of the [telegram] table `tg`."""
+    return {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
+            for n, t in _table(tg.get("commands", {}), None, file, "telegram.commands").items()}
 
 
 # --- edr.toml and tasks.toml
@@ -406,7 +424,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         sync=_build(Sync, raw.get("sync", {}), file, "sync"),
         runtime=_build(Runtime, raw.get("runtime", {}), file, "runtime"),
         safety=_build(Safety, raw.get("safety", {}), file, "safety"),
-        limits=_limits(raw.get("limits", {}), file),
+        limits=_build(Limits, raw.get("limits", {}), file, "limits"),
         placement=_build(Placement, raw.get("placement", {}), file, "placement"),
         stages=stages,
         metrics=metrics,
@@ -414,13 +432,6 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         tasks=tasks,
         task_resolver=resolver,
     )
-
-
-def _limits(raw: object, file: Path) -> Limits:
-    limits = _build(Limits, raw, file, "limits")
-    if limits.digest_at and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", limits.digest_at):
-        raise ConfigError(f"{file}: limits.digest_at must be HH:MM or empty, not {limits.digest_at!r}")
-    return limits
 
 
 def _stage(name: str, raw: object, file: Path) -> Stage:

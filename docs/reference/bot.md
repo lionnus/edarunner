@@ -10,6 +10,11 @@ Telegram takes one poller per token. Its router finds the project of every comma
 press. Long polling runs over outbound HTTPS only; one chat id is obeyed, and one user id when
 `user_id` is set.
 
+With `topics = true` in `user.toml`, each watcher sends into the forum topic of its project and
+makes the topic the first time; the topic id lives in the database of the project. The
+supervisor sends the global board and the digest to the main thread. A command in the topic of a
+project acts on that project.
+
 ## Built-in commands
 
 A handle is `label@batch`, a run id prefix, or `#n` from the last board; `project/label@batch` also names the project. Without `[project]`, `/status` and `/events` answer for every project, and the other commands take the project of the alert they reply to, or the only one.
@@ -74,7 +79,9 @@ Mail and ntfy show each button as a command line.
 
 ## Custom commands
 
-Each `[telegram.commands.<name>]` table in `site.toml` defines one custom command of the bot.
+Each `[telegram.commands.<name>]` table defines one custom command of the bot: in `site.toml` for
+everyone of the lab, in `user.toml` for you alone. A command of `user.toml` replaces the one of
+the same name in `site.toml`.
 
 Every string renders `{project}`, `{site_dir}`, `{user}`, and one `{<name>}` per entry of `args`.
 Here `{root}` and `{project_root}` both give the project directory, not a run tree. A command sent

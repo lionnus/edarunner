@@ -15,7 +15,7 @@ import re
 from typing import TYPE_CHECKING
 
 from edarunner.db import Database
-from edarunner.model import Project, Site
+from edarunner.model import Project, Site, User
 
 if TYPE_CHECKING:
     from edarunner.cli import Router
@@ -69,20 +69,22 @@ def _private(path: object, channel: str) -> str | None:
     return None
 
 
-def make_notifiers(site: Site, project: Project, db: Database, router: Router | None = None) -> list[Notifier]:
-    """Build every configured channel. A channel without its secret is skipped; `router` lets the bot take commands."""
+def make_notifiers(user: User, site: Site | None, project: Project, db: Database, router: Router | None = None,
+                   topic: bool = True) -> list[Notifier]:
+    """Build every channel of the user file. A channel without its secret is skipped. `site` adds its bot commands,
+    `router` lets the bot take commands, and `topic` sends into the forum topic of `project`."""
     out: list[Notifier] = []
-    tg = site.telegram
+    tg = user.telegram
     if tg is not None and (token_file := _private(tg.token_file, "telegram")):
         from edarunner.notify.telegram import TelegramBot
 
-        out.append(TelegramBot(site, project, db, router, token_file))
-    nt = getattr(site, "ntfy", None)
+        out.append(TelegramBot(tg, site, project, db, router, token_file, topic))
+    nt = user.ntfy
     if nt is not None and (nt.token_file is None or _private(nt.token_file, "ntfy")):
         from edarunner.notify.ntfy import NtfyNotifier
 
         out.append(NtfyNotifier(project, nt))
-    mail = getattr(site, "mail", None)
+    mail = user.mail
     if mail is not None and (mail.password_file is None or _private(mail.password_file, "mail")):
         from edarunner.notify.mail import MailNotifier
 

@@ -415,19 +415,19 @@ def test_the_router_finds_the_project_and_the_run_of_a_press_or_a_command(demo: 
     assert router.names() == ["beta", "demo"] and router.resolve("demo/b_nodw@demo") == ("demo", "b_nodw@demo")
     with pytest.raises(Refuse, match="more than one project has it: beta/b_nodw@demo, demo/b_nodw@demo"):
         router.resolve("b_nodw@demo")
-    assert router.pick(["beta", "x"], None) == ("beta", ["x"]) and router.pick(["x"], ("demo", b)) == ("demo", ["x"])
+    assert router.pick(["beta", "x"], None) == ("beta", ["x"]) and router.pick(["x"], "demo") == ("demo", ["x"])
     with pytest.raises(Refuse, match="name a project first: beta, demo"):
         router.pick(["x"], None)
     project = config.load_project(demo)
-    site = replace(project.site, telegram=Telegram(token_file=token, chat_id=42))
+    tg = Telegram(token_file=token, chat_id=42)
     with Database(project.data / "edr.db") as db:
-        sender = TelegramBot(site, project, db, None, str(token))
+        sender = TelegramBot(tg, project.site, project, db, None, str(token))
         sender.api.call = lambda method, params, files=None: {"message_id": 7}
         alert = watch.alerts.run_alert(project, db.run(b), "hung", ["hung: x"], json.loads((bdir(demo) / f"{b}.json").read_text()),
                                        time.time())
         sender.send(alert)  # the watcher of demo remembers the run of message 7
     assert router.run_of("demo", 7) == b and router.replied(7) == ("demo", b) and router.run_of("beta", 7) is None
-    bot = TelegramBot(site, project, serve.Store(), router, str(token))
+    bot = TelegramBot(tg, project.site, project, home.Store(), router, str(token))
     bot.api.call = lambda method, params, files=None: {}
     press = {"id": "q", "from": {"id": 7}, "data": "keep6:demo", "message": {"message_id": 7, "chat": {"id": 42}, "text": "x"}}
     bot.handle_update({"update_id": 1, "callback_query": press})
@@ -1031,12 +1031,18 @@ def test_log_tail_fetches_the_last_lines_from_the_host(demo: Path) -> None:
         acts.log_tail("a@demo", 3)
 
 
-def test_status_digest_prints_the_digest_as_text(demo: Path, capsys) -> None:
+def test_status_digest_prints_the_digest_as_text(demo: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     seed(demo, "a", "done")
     code, out, _ = edr(capsys, "status", "--digest")
-    assert code == 0 and out.startswith("Ended since ") and "⚪ a@demo done" in out and "<" not in out
+    assert code == 0 and out.startswith("since ") and "demo\nended\n⚪ a@demo done" in out and "<" not in out
     code, out, _ = edr(capsys, "--json", "status", "--digest")
     assert code == 0 and "<code>a@demo</code>" in json.loads(out)["data"]["digest"]
+    monkeypatch.chdir(tmp_path)
+    assert edr(capsys, "status", "--digest", "--all")[1] .startswith("since ")  # no project registered yet
+    monkeypatch.chdir(demo)
+    assert edr(capsys, "register")[0] == 0
+    monkeypatch.chdir(tmp_path)
+    assert "⚪ a@demo done" in edr(capsys, "status", "--digest", "--all")[1]
 
 
 # track

@@ -41,7 +41,9 @@ moves it). The head node never needs a connection to a running driver;
 it reads the files.
 
 An alert leaves the head node over outbound HTTPS or SMTP, to Telegram,
-ntfy or mail. None of them is required.
+ntfy or mail. None of them is required. The channels are yours, not the
+lab's, so they live in `~/.config/edarunner/user.toml` next to the site
+file.
 
 ## One run, from start to end
 
@@ -284,12 +286,11 @@ does this, in order:
    when its stage has a `resume` command and no process group of the run
    is still alive on the host (`watch._resume`).
 7. A queued job starts when a host now fits it, one per batch per cycle.
-8. It writes `data/board/`, edits the pinned Telegram board, sends the
-   daily digest when it is due, and writes `<state_dir>/watch.json`,
-   the watcher's own heartbeat that the supervisor and `edr watch --check`
-   read. The host
-   probes of the boards come from the census when it is younger than two
-   cycles, and from a probe of its own otherwise.
+8. It writes `data/board/`, edits the pinned Telegram board, and writes
+   `<state_dir>/watch.json`, the watcher's own heartbeat that the
+   supervisor and `edr watch --check` read. The host probes of the
+   boards come from the census when it is younger than two cycles, and
+   from a probe of its own otherwise.
 
 The watcher never downloads anything, never resumes a run twice and
 never reads a retired batch. The read commands such as `edr status`
@@ -336,6 +337,8 @@ and does the work after each of its cycles:
 5. It sends one alert per host whose clock is more than 60 s off the
    head node's, and drops the reservations of runs that wrote their first
    heartbeat or are older than 30 minutes.
+6. Once a day, from `digest_at` of the user file on, it sends one digest
+   of every registered project (`notify/digest.py`).
 
 A watcher that does not hold the lock runs its own cycle only and tries
 again at the next cycle, so the role moves on when its holder stops. A

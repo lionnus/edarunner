@@ -1,22 +1,19 @@
-"""The daily digest on a fixed db, and its place in the watcher cycle."""
+"""The digest of every project on a fixed database, and when it is due."""
 
 from __future__ import annotations
 
-import json
 import os
 import time
+from dataclasses import replace
 
 from helpers_watch import NOW, Env, rid
 
-from edarunner import watch
-from edarunner.notify import untag
-from edarunner.notify.digest import Digest
+from edarunner.notify import digest
 
 
 def fill(e: Env) -> None:
-    """Five runs, one of them before the last digest, a keep file that holds, and four host probes."""
+    """Six runs, one of them before the start of the digest, and a keep file that holds."""
     db = e.db
-    db.set_store("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
     alert = {"state": "hung", "msgs": {"hung": {"text": "no progress", "ids": ["1"]}}}
     db.set_store("notified", {rid("h"): alert, rid("k"): alert, rid("c"): {"state": "running"}})
     rows = [("a", "done", None, NOW - 600), ("f", "FAILED:3", None, NOW - 2 * 86400),
@@ -30,60 +27,41 @@ def fill(e: Env) -> None:
     keep = e.project.state_dir / "demo" / f"{rid('k')}.keep.json"
     keep.write_text('{"hours": 1}')
     os.utime(keep, (NOW, NOW))  # a keep that holds closes the alert of its run
-    hosts = {"hostA": {"host": "hostA", "free_gb": 100.0, "total_gb": 1000.0},
-             "hostB": {"host": "hostB", "free_gb": 900.0, "total_gb": 1000.0},
-             "hostC": {"host": "hostC", "error": "timeout"},
-             "hostD": {"host": "hostD", "free_gb": 500.0, "total_gb": 1000.0},
-             "local": {"host": "local", "free_gb": 50.0, "total_gb": 100.0}}
-    (e.project.data / "board").mkdir(parents=True)
-    (e.project.data / "board" / "board.json").write_text(json.dumps({"hosts": hosts}))
 
 
-def test_digest_text_on_a_fixed_database(env: Env) -> None:
+def test_the_digest_of_every_project_on_a_fixed_database(env: Env, tmp_path) -> None:
     fill(env)
-    since = time.strftime("%d.%m %H:%M", time.localtime(NOW - 5 * 3600))
-    assert Digest(env.project, env.db).text(NOW) == "\n".join([
-        f"<b>Ended since {since}</b>",
-        "⚪ <code>a@demo</code> done",
+    start = NOW - 5 * 3600
+    quiet = replace(env.project, project="quiet", data=tmp_path / "quiet")
+    broken = replace(env.project, project="broken", data=tmp_path / "broken")
+    broken.data.mkdir()
+    (broken.data / "edr.db").write_text("not a database")
+    assert digest.text({"demo": env.project, "quiet": quiet, "broken": broken}, start, NOW).splitlines() == [
+        f"<i>since {time.strftime('%d.%m %H:%M', time.localtime(start))}</i>",
         "",
-        "<b>Live</b>",
+        "<b>broken</b> <i>no digest: file is not a database</i>",
+        "",
+        "<b>demo</b>",
+        "<i>ended</i>",
+        "⚪ <code>a@demo</code> done",
+        "<i>live</i>",
         "🔴 <code>h@demo</code> synth, 2h",
         "🔴 <code>k@demo</code> synth, 2h",
         "🟢 <code>c@demo</code> synth, 2h",
-        "",
-        "<b>Queued</b>",
+        "<i>queued</i>",
         "🔵 <code>q@demo</code>",
-        "",
-        "<b>Least free scratch</b>",
-        "<b>local</b> scratch 50/100 GB",
-        "<b>hostA</b> scratch 900/1000 GB",
-        "<b>hostD</b> scratch 500/1000 GB",
-        "",
-        "<b>Open alerts</b>",
+        "<i>open alerts</i>",
         "🔴 <code>h@demo</code> hung",
-    ])
+        "",
+        "<b>quiet</b> <i>nothing ended, nothing live</i>",
+    ]
+    assert not quiet.data.exists()  # the digest opens no database that is not there
 
 
-def test_an_empty_digest_says_none(env: Env) -> None:
-    text = Digest(env.project, env.db).text(NOW)
-    assert text.count("<i>none</i>") == 5 and untag(text).startswith("Ended since ")
-
-
-def test_the_digest_is_due_once_a_day_from_its_hour(env: Env) -> None:
-    d = Digest(env.project, env.db)
+def test_the_digest_is_due_once_a_day_from_its_hour() -> None:
     at = time.strftime("%H:%M", time.localtime(NOW))
-    assert not d.due(NOW)
-    env.project.limits.digest_at = at
-    assert d.due(NOW) and not d.due(NOW - 60)
-    d.mark_sent(NOW)
-    assert not d.due(NOW + 60) and d.due(NOW + 86400)
-    assert env.db.get_store("digest")["ts"] == NOW
-
-
-def test_the_cycle_sends_the_digest_once(env: Env) -> None:
-    posts: list[tuple[str, str]] = []
-    env.notifier.post = lambda title, html, silent=False: posts.append((title, html)) or True
-    env.project.limits.digest_at = time.strftime("%H:%M", time.localtime(NOW))
-    watch.cycle(env.project, env.ssh, env.db, [env.notifier], now=NOW)
-    watch.cycle(env.project, env.ssh, env.db, [env.notifier], now=NOW + 60)
-    assert [t for t, _ in posts] == ["digest"] and posts[0][1].startswith("<b>Ended since ")
+    assert not digest.due("", {}, NOW)
+    assert digest.due(at, {}, NOW) and not digest.due(at, {}, NOW - 60)
+    sent = {"day": time.strftime("%Y-%m-%d", time.localtime(NOW)), "ts": NOW}
+    assert not digest.due(at, sent, NOW + 60) and digest.due(at, sent, NOW + 86400)
+    assert digest.since(sent, NOW + 60) == NOW and digest.since({}, NOW) == NOW - digest.DAY_S

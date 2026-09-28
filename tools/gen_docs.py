@@ -55,8 +55,12 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [scheduler]", [model.Scheduler], ""),
     ("### [hosts.<name>]", [model.Host], ""),
     ("### [tools.<name>]", [model.Tool], ""),
+    ("### [telegram.commands.<name>]", [], "One table per bot command of the lab; `bot.md` lists the keys. `[telegram]` "
+                                          "in `site.toml` takes no other key."),
+    ("## user.toml", [(model.User, ["digest_at"])], ""),
     ("### [telegram]", [model.Telegram], ""),
-    ("### [telegram.commands.<name>]", [], "One table per custom bot command; `bot.md` lists the keys."),
+    ("### [telegram.commands.<name>]", [], "One table per bot command of your own; it replaces the one of the same "
+                                          "name in `site.toml`."),
     ("### [ntfy]", [model.Ntfy], ""),
     ("### [mail]", [model.Mail], ""),
     ("## tasks.toml", [model.Task, (model.Project, ["task_resolver"])], ""),
@@ -195,8 +199,8 @@ def fields_table(*parts: Part) -> str:
 
 
 def config_page() -> str:
-    out = [head("Configuration"), "This page lists every key of the four TOML files that configure a project, "
-           "and the placeholders their strings can hold.\n\n", rest(config) + "\n\n"]
+    out = [head("Configuration"), "This page lists every key of the five TOML files that configure a project and "
+           "its user, and the placeholders their strings can hold.\n\n", rest(config) + "\n\n"]
     for heading, parts, prose in CONFIG:
         out.append(f"{heading}\n\n")
         first = parts[0] if parts else None
@@ -248,7 +252,7 @@ def bot_page() -> str:
 
 def index_page() -> str:
     rows = [["[cli.md](cli.md)", "every command with its flags, description and exit codes", "the argparse definitions in `src/edarunner/cli.py`"],
-            ["[configuration.md](configuration.md)", "every key of the four TOML files, and the placeholders",
+            ["[configuration.md](configuration.md)", "every key of the five TOML files, and the placeholders",
              "the dataclasses in `src/edarunner/model.py`, `PLACEHOLDERS` in `src/edarunner/config.py`"],
             ["[states.md](states.md)", "every run state: test, action, mark, proposed command",
              "`STATES` in `src/edarunner/watch.py`, `MARK` in `src/edarunner/notify/telegram/format.py`, `triage_cmd` in `src/edarunner/board.py`"],

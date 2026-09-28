@@ -1,4 +1,5 @@
-"""A recording Telegram API, a fake router over two projects, a fake database, and the site and project of the bot tests."""
+"""A recording Telegram API, a fake router over two projects, a fake database, and the user, site and project of the
+bot tests."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from edarunner.guards import Refuse
-from edarunner.model import BotCommand, Host, Site, Telegram
+from edarunner.model import BotCommand, Host, Site, Telegram, User
 from edarunner.notify.telegram.api import BotApi
 from helpers_driver import DEMO
 
@@ -30,6 +31,8 @@ class FakeApi(BotApi):
         if method in ("sendMessage", "sendDocument"):
             self.n += 1
             return {"message_id": self.n}
+        if method == "createForumTopic":
+            return {"message_thread_id": 699 + len(self.of(method))}
         return {}
 
     def of(self, method: str) -> list[dict]:
@@ -82,11 +85,11 @@ class FakeRouter:
             raise Refuse(f"no registered project {name}")
         yield self.acts[name]
 
-    def pick(self, args: list[str], run):
+    def pick(self, args: list[str], here):
         if args and args[0] in self.acts:
             return args[0], args[1:]
-        if run or len(self.acts) == 1:
-            return (run or ("demo",))[0], args
+        if here or len(self.acts) == 1:
+            return here or "demo", args
         raise Refuse("name a project first: " + ", ".join(self.acts))
 
     def resolve(self, handle: str) -> tuple[str, str]:
@@ -102,6 +105,9 @@ class FakeRouter:
 
     def replied(self, msg_id: int):
         return next(((p, r) for (p, m), r in self.replies.items() if m == msg_id), None)
+
+    def topic_of(self, thread: int):
+        return {700: "demo", 701: "other"}.get(thread)
 
     def __getattr__(self, name: str):
         def f(*a, **k):
@@ -140,13 +146,18 @@ COMMANDS = {
 }
 
 
-def make_site(tmp_path: Path, chat_id: int = CHAT, mode: int = 0o600, user_id: int | None = None) -> Site:
+def make_site() -> Site:
+    return Site(path=DEMO / "site.toml", scratch=["/tmp/edr-demo"], env={}, ssh_options=[], ssh_timeout_s=20,
+                tool_procs="^(sleep)$", hosts={"local": Host("local", 4, 8)}, commands=dict(COMMANDS))
+
+
+def make_user(tmp_path: Path, chat_id: int = CHAT, mode: int = 0o600, user_id: int | None = None,
+              topics: bool = False) -> User:
     token = tmp_path / "telegram.token"
     token.write_text("123:ABC\n")
     token.chmod(mode)
-    return Site(path=DEMO / "site.toml", scratch=["/tmp/edr-demo"], env={}, ssh_options=[], ssh_timeout_s=20,
-                tool_procs="^(sleep)$", hosts={"local": Host("local", 4, 8)},
-                telegram=Telegram(token_file=token, chat_id=chat_id, commands=dict(COMMANDS), user_id=user_id))
+    return User(path=tmp_path / "user.toml",
+                telegram=Telegram(token_file=token, chat_id=chat_id, user_id=user_id, topics=topics))
 
 
 def make_project(tmp_path: Path) -> SimpleNamespace:

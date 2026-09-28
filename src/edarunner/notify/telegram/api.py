@@ -95,6 +95,10 @@ class BotApi:
                                        "parse_mode": "HTML"}, files={"document": (name, data)})
         return int(r["message_id"])
 
+    def create_topic(self, chat_id: int, name: str) -> int:
+        """Make a forum topic called `name`; return its thread id."""
+        return int(self.call("createForumTopic", {"chat_id": chat_id, "name": name})["message_thread_id"])
+
     def set_reaction(self, chat_id: int, msg_id: int, emoji: str) -> None:
         """Put one emoji reaction on a message, in place of the bot's earlier one."""
         self.call("setMessageReaction", {"chat_id": chat_id, "message_id": msg_id,

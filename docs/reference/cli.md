@@ -166,7 +166,7 @@ the project in the first column; it needs no project directory.
 | `--watch` | redraw every heartbeat_s seconds; Ctrl-C ends it |
 | `--live` | ask each host whether the driver exists; a gone driver shows dead |
 | `--triage` | every run not running, with one proposed command |
-| `--digest` | the daily digest that the watcher sends, as plain text |
+| `--digest` | the daily digest of this project, or with --all of every project, as plain text |
 | `--all` | the runs of every registered project, with a project column |
 
 | Exit | Meaning |
@@ -433,8 +433,8 @@ already exists. edr serve watches the project once it is registered.
 edr check [--json]
 ```
 
-Loads the project, the site and every batch under jobs/, imports every
-hook, checks the driver file, probes every host once, names every tool
+Loads the project, the site, user.toml and every batch under jobs/,
+imports every hook, checks the driver file, probes every host once, names every tool
 the head node lacks, and plans every batch with those probes. It prints
 one problem: line per fault, or an ok: line with the counts.
 
@@ -824,11 +824,11 @@ not collected unless you pass --uncollected.
 edr notify [--dry-run] [--json] [--board] [--digest] [--silent] [text]
 ```
 
-Sends one message through every notifier that the site configures. The
+Sends one message through every notifier that user.toml configures. The
 message starts with a header line with the project name, like every
 message of the bot, and TEXT follows as plain text. --board sends the
-board of edr status and --digest the daily digest instead, so a cron
-line can mail either.
+board of edr status and --digest the digest of every registered project
+instead, so a cron line can mail either.
 
 | Flag | Meaning |
 |---|---|
@@ -836,7 +836,7 @@ line can mail either.
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json notify |
 | `--board` | send the board of edr status |
-| `--digest` | send the daily digest now; the watcher still sends its own |
+| `--digest` | send the digest of every project now; the daily one still comes |
 | `--silent` | send without a sound on the phone |
 
 | Exit | Meaning |
