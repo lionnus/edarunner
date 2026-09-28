@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The stand-in flow: flow.sh <stage> <run_id> <config> [FIRST_STAGE=x] [LAST_STAGE=y] [NETLIST_STAGE=n] [KEY=VALUE ...]
-# Each step sleeps one second and writes reports/<n>/area.rpt and qor.rpt.
+# Each step sleeps one second and writes reports/<n>/area.rpt and qor.rpt;
+# step n has a setup slack of -0.0n ns and n failing setup paths.
 # The config "fail_licence" fails once at step 2 with a licence line in the
 # log, then succeeds on the retry (a marker file remembers the first try).
 set -uo pipefail
@@ -21,7 +22,29 @@ for ((n=lo; n<=hi; n++)); do
   sleep 1
   mkdir -p "reports/$n"
   awk -v n="$n" 'BEGIN { printf "i_top %.1f\n", 1000 + n * 10.5 }' > "reports/$n/area.rpt"
-  printf 'Critical Path Slack: %s\n' "-0.0$n" > "reports/$n/qor.rpt"
+  # One block per scenario and path group, as a report_qor has: the hold scenario first.
+  cat > "reports/$n/qor.rpt" <<EOF
+Scenario           'func_fast'
+Timing Path Group  'reg2reg'
+----------------------------------------
+Worst Hold Violation:           -0.001
+No. of Hold Violations:              1
+----------------------------------------
+
+Scenario           'func_slow'
+Timing Path Group  'in2reg'
+----------------------------------------
+Critical Path Slack:              0.01
+No. of Violating Paths:              0
+----------------------------------------
+
+Scenario           'func_slow'
+Timing Path Group  'reg2reg'
+----------------------------------------
+Critical Path Slack:             -0.0$n
+No. of Violating Paths:              $n
+----------------------------------------
+EOF
   if [ "$name" = export ]; then mkdir -p "out/$netlist" && echo "module top; endmodule" > "out/$netlist/netlist.v"; fi
 done
 echo "[$(date +%T)] $stage done"

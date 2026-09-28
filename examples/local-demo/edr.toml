@@ -78,13 +78,28 @@ regex = '^i_top\s+(\S+)'
 unit = "um2"
 canonical = "design__instance__area"
 
+# qor.rpt has one block per scenario and path group, the hold scenario
+# func_fast first. Each match starts at a block of the setup scenario
+# func_slow, and `reduce` keeps the worst slack of its path groups.
 [metrics.wns_ns]
 stage = ["synth", "pnr"]
 step = "*"
 file = "reports/{step}/qor.rpt"
-regex = 'Critical Path Slack:\s+(-?[0-9.]+)'
+regex = '''^Scenario\s+'func_slow'\n(?:.*\n)*?Critical Path Slack:\s+(\S+)'''
+reduce = "min"
 unit = "ns"
 canonical = "timing__setup__ws"
+
+# A slack can print as -0.000 while paths still fail, so the pass rule
+# sits on the count of failing setup paths.
+[metrics.setup_violations]
+stage = ["synth", "pnr"]
+step = "*"
+file = "reports/{step}/qor.rpt"
+regex = '''^Scenario\s+'func_slow'\n(?:.*\n)*?No\. of Violating Paths:\s+(\d+)'''
+reduce = "sum"
+pass = "== 0"
+unit = "paths"
 
 [metrics.power_w]
 stage = "power"

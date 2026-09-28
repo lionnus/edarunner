@@ -343,8 +343,8 @@ def _final_metrics(c: Ctx, rows: list[Row]) -> dict[str, dict[str, tuple[int, An
 
 
 def _metrics_table(rows: list[Row]) -> Table | str:
-    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
-             m.get("unit")] for m in rows]
+    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m.get("task") or "", m["name"],
+             analysis.mark(m["value"], m.get("verdict")), m.get("unit")] for m in rows]
     return board.table(["label", "source", "stage", "step", "task", "metric", "value", "unit"], body,
                        styles={"label": "bold", "source": "dim"}, right=("step", "value")) if rows else "no metrics"
 
@@ -663,6 +663,8 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
+        for m in rows:
+            m["verdict"] = analysis.verdict(c.project, m)
         c.emit(_metrics_table(rows), rows)
     return Exit.DONE if rows else Exit.NOTHING
 
@@ -1693,12 +1695,15 @@ def _parser() -> argparse.ArgumentParser:
         is the source tag exactly as edr checkout printed it, -dirty-...
         included, and may be given more than once; --run takes one run
         instead. --csv writes the columns of metrics.csv
-        (docs/guides/results.md) to stdout.
+        (docs/guides/results.md) to stdout. A value that breaks the pass
+        rule of its metric shows FAIL next to it, and --json gives each row
+        a verdict: pass, FAIL or null.
 
         --run with --over steps prints the metrics along the steps of that run:
-        one row per step with its name, one column per metric. With --metric,
-        it prints that one metric, its change from the step before and its
-        source file.
+        one row per step with its name, one column per metric, and a verdict
+        column when a metric has a pass rule: FAIL when a value of that step
+        breaks its rule. With --metric, it prints that one metric, its change
+        from the step before and its source file.
 
         --instance or --depth prints the area rows of an area_hier metric
         instead: label, source, stage, step, instance, depth, area with the
@@ -1738,8 +1743,10 @@ def _parser() -> argparse.ArgumentParser:
     s = command("compare", "two or more runs side by side", """
         Puts two or more runs side by side. Without --area, it prints one row
         per stage, step, task and metric: the step name, the value of each run, and the
-        percent of each run to the first. --metric (repeatable), --stage and
-        --step narrow the rows; --json keeps the source file of every value.
+        percent of each run to the first. A value that breaks the pass rule of
+        its metric shows FAIL next to it. --metric (repeatable), --stage and
+        --step narrow the rows; --json keeps the source file and the verdict
+        of every value.
 
         --area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
         column per run, and the delta and the percent of each run to the

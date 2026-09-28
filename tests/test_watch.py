@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from helpers_results import demo_qor
 from helpers_watch import NEW, NOW, Env, rid
 
 from edarunner import board, census, collect, config, launch, watch
@@ -147,7 +148,7 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     for n in range(4):
         (root / "reports" / str(n)).mkdir(parents=True)
         (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n * 10.5}\n")
-        (root / "reports" / str(n) / "qor.rpt").write_text(f"Critical Path Slack: -0.0{n}\n")
+        (root / "reports" / str(n) / "qor.rpt").write_text(demo_qor(n))
     calls: list[str] = []
     real = collect.collect_run
     monkeypatch.setattr(collect, "collect_run", lambda *a, **k: calls.append(a[3]["run_id"]) or real(*a, **k))
@@ -158,12 +159,12 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     rows = env.db.metrics(run_ids=[run_id])
     by = {(r["stage"], r["step"], r["name"]): r["value"] for r in rows}
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
-    assert len(by) == 8 and all(v is not None for v in by.values())
+    assert len(by) == 12 and all(v is not None for v in by.values())
     params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM parameters WHERE run_id=?", (run_id,))}
     assert params == {"config": "demo", "DW": "0", "source": "gabc1234"}
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
-    assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 8
+    assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 12
 
 
 def test_without_step_runs_only_a_done_stage_keeps_its_steps(env: Env) -> None:
@@ -193,12 +194,12 @@ def test_a_stage_that_did_not_exit_0_keeps_the_steps_it_finished(env: Env, phase
     for n in range(6):  # step 3 runs or broke off; a copied tree adds the pnr reports 4 and 5 of another run
         (root / "reports" / str(n)).mkdir(parents=True)
         (root / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
-        (root / "reports" / str(n) / "qor.rpt").write_text(f"Critical Path Slack: -0.0{n}\n")
+        (root / "reports" / str(n) / "qor.rpt").write_text(demo_qor(n))
     env.cycle()
     rows = env.db.metrics(run_ids=[hb["run_id"]])
     assert sorted({(r["stage"], r["step"]) for r in rows}) == [("synth", 0), ("synth", 1), ("synth", 2)]
     assert [e["text"] for e in env.db.events() if e["kind"] == "metrics"] == [
-        "6 new: area_cell_um2, wns_ns at synth 0, 1, 2"]
+        "9 new: area_cell_um2, setup_violations, wns_ns at synth 0, 1, 2"]
 
 
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:

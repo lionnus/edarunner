@@ -298,12 +298,15 @@ task, name, value and unit. --source or --run is required. --source
 is the source tag exactly as edr checkout printed it, -dirty-...
 included, and may be given more than once; --run takes one run
 instead. --csv writes the columns of metrics.csv
-(docs/guides/results.md) to stdout.
+(docs/guides/results.md) to stdout. A value that breaks the pass
+rule of its metric shows FAIL next to it, and --json gives each row
+a verdict: pass, FAIL or null.
 
 --run with --over steps prints the metrics along the steps of that run:
-one row per step with its name, one column per metric. With --metric,
-it prints that one metric, its change from the step before and its
-source file.
+one row per step with its name, one column per metric, and a verdict
+column when a metric has a pass rule: FAIL when a value of that step
+breaks its rule. With --metric, it prints that one metric, its change
+from the step before and its source file.
 
 --instance or --depth prints the area rows of an area_hier metric
 instead: label, source, stage, step, instance, depth, area with the
@@ -369,8 +372,10 @@ edr compare [--json] [--area] [--metric NAME] [--depth N] [--instance PATH] [--s
 
 Puts two or more runs side by side. Without --area, it prints one row
 per stage, step, task and metric: the step name, the value of each run, and the
-percent of each run to the first. --metric (repeatable), --stage and
---step narrow the rows; --json keeps the source file of every value.
+percent of each run to the first. A value that breaks the pass rule of
+its metric shows FAIL next to it. --metric (repeatable), --stage and
+--step narrow the rows; --json keeps the source file and the verdict
+of every value.
 
 --area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
 column per run, and the delta and the percent of each run to the

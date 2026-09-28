@@ -205,6 +205,32 @@ def test_metrics_over_the_steps_of_one_run(demo: Path, capsys) -> None:
     assert edr(capsys, "metrics")[0] == 1
 
 
+def test_a_pass_rule_marks_a_failing_value(demo: Path, capsys) -> None:
+    # The demo's setup_violations has pass = "== 0".
+    a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
+    for run, fails in ((a, (3, 0)), (b, (0, 0))):
+        for step, n in zip((2, 3), fails):
+            _metric(demo, run, "setup_violations", step, n)
+            _metric(demo, run, "wns_ns", step, -0.1 if n else 0.1)
+    code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--metric", "setup_violations")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and ["a", "abc1234", "synth", "2", "setup_violations", "3.0", "FAIL", "ns"] in lines
+    assert ["a", "abc1234", "synth", "3", "setup_violations", "0.0", "ns"] in lines
+    code, out, _ = edr(capsys, "--json", "metrics", "--source", "abc1234", "--step", "2")
+    assert {(m["label"], m["name"], m["verdict"]) for m in json.loads(out)["data"]} == {
+        ("a", "setup_violations", "FAIL"), ("b", "setup_violations", "pass"), ("a", "wns_ns", None), ("b", "wns_ns", None)}
+    code, out, _ = edr(capsys, "compare", a, b, "--metric", "setup_violations")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and ["synth", "2", "elaborate", "setup_violations", "3", "FAIL", "0", "-3", "-100.0%"] in lines
+    assert ["synth", "3", "synth", "setup_violations", "0", "0", "0", "-"] in lines
+    code, out, _ = edr(capsys, "metrics", "--run", a, "--over", "steps")
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and lines[0] == ["stage", "step", "name", "setup_violations", "wns_ns", "verdict"]
+    assert lines[2:] == [["synth", "2", "elaborate", "3", "FAIL", "-0.1", "FAIL"], ["synth", "3", "synth", "0", "0.1", "pass"]]
+    code, out, _ = edr(capsys, "metrics", "--run", a, "--over", "steps", "--metric", "wns_ns")
+    assert code == 0 and "verdict" not in out
+
+
 def test_runtime_of_one_run_and_of_a_batch(demo: Path, capsys) -> None:
     a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
     t0 = 1_790_000_000

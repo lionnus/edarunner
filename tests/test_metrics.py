@@ -7,6 +7,9 @@ import shutil
 import tomllib
 from pathlib import Path
 
+import pytest
+from helpers_results import QOR, demo_qor
+
 from edarunner.metrics import extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
 from helpers_driver import DEMO
@@ -33,6 +36,8 @@ def demo_project(root: Path) -> Project:
             step=None if "step" not in m else str(m["step"]),
             file=m.get("file", ""),
             regex=m.get("regex", ""),
+            reduce=m.get("reduce", "first"),
+            pass_=m.get("pass", ""),
             csv=m.get("csv"),
             json=m.get("json", ""),
             python=m.get("python", ""),
@@ -61,7 +66,7 @@ def results_tree(results: Path) -> Path:
         d = run / "reports" / str(n)
         d.mkdir(parents=True)
         (d / "area.rpt").write_text(f"i_top {1000 + n * 10.5:.1f}\n")
-        (d / "qor.rpt").write_text(f"Critical Path Slack: -0.0{n}\n")
+        (d / "qor.rpt").write_text(demo_qor(n))
     for test in ("GEMM_M64_N64", "SOFTMAX_R197"):
         p = run / "simulation" / "tests" / "demo" / test / "power"
         (p / "reports").mkdir(parents=True)
@@ -81,8 +86,11 @@ def test_demo_metrics(tmp_path):
     area = by_name(rows, "area_cell_um2", "synth")
     assert [(r["step"], r["value"]) for r in area] == [(0, 1000.0), (1, 1010.5), (2, 1021.0), (3, 1031.5)]
     assert area[0]["task"] == "" and area[0]["unit"] == "um2" and area[0]["canonical"] == "design__instance__area"
-    assert area[0]["source_file"] == "reports/0/area.rpt"
-    assert [r["value"] for r in by_name(rows, "wns_ns", "pnr")] == [-0.04, -0.05]
+    assert area[0]["source_file"] == "reports/0/area.rpt:1"
+    assert [(r["value"], r["source_file"]) for r in by_name(rows, "wns_ns", "pnr")] == [
+        (-0.04, "reports/4/qor.rpt:18"), (-0.05, "reports/5/qor.rpt:18")]
+    assert [(r["value"], r["source_file"]) for r in by_name(rows, "setup_violations", "pnr")] == [
+        (4.0, "reports/4/qor.rpt:12"), (5.0, "reports/5/qor.rpt:12")]
     assert [r["step"] for r in by_name(rows, "area_cell_um2", "pnr")] == [4, 5]
     assert {r["task"]: r["value"] for r in by_name(rows, "power_w")} == {"k_small": 0.25, "k_big": 0.25}
     power = by_name(rows, "power_w")[0]
@@ -93,7 +101,7 @@ def test_demo_metrics(tmp_path):
     assert {r["task"]: r["value"] for r in energy} == {"k_small": 850.0, "k_big": 850.0}
     assert energy[0]["stage"] == "power" and energy[0]["step"] is None
     assert energy[0]["unit"] == "nJ" and energy[0]["canonical"] == "energy"
-    assert len(rows) == 8 + 4 + 2 + 2 + 2
+    assert len(rows) == 6 * 3 + 2 + 2 + 2
 
 
 def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
@@ -166,3 +174,30 @@ def test_a_metric_file_follows_the_placeholder_rules_of_the_stage_strings(tmp_pa
     rows = extract(project, RUN, tmp_path / "results", {})
     assert [(r["name"], r["value"]) for r in rows] == [("shell", 7.0), ("bad", None)]
     assert rows[1]["source_file"] == "unknown placeholder {nope} in '{nope}/area.rpt'"
+
+
+def test_a_regex_reads_one_block_of_a_report_and_names_its_line(tmp_path):
+    (tmp_path / "results" / RUN_ID).mkdir(parents=True)
+    (tmp_path / "results" / RUN_ID / "qor.rpt").write_text(QOR)
+    setup = r"^Scenario\s+'func_slow'\n(?:.*\n)*?"
+    project = demo_project(tmp_path)
+    project.metrics = {name: Metric(name=name, stage=["synth"], file="qor.rpt", regex=regex, **kw) for name, regex, kw in (
+        # The hold block of reg2reg has no setup slack, so a lazy regex runs on into the next block.
+        ("lazy", r"Timing Path Group\s+'reg2reg'[\s\S]*?Critical Path Slack:\s+(\S+)", {}),
+        ("reg2reg", r"^Scenario\s+'func_slow'\nTiming Path Group\s+'reg2reg'\n(?:.*\n)*?Critical Path Slack:\s+(\S+)", {}),
+        *((how, setup + r"Critical Path Slack:\s+(\S+)", {"reduce": how}) for how in ("first", "last", "min", "max")),
+        ("fails", setup + r"No\. of Violating Paths:\s+(\d+)", {"reduce": "sum"}),
+        ("none", r"^Scenario\s+'func_typ'\n(?:.*\n)*?Critical Path Slack:\s+(\S+)", {"reduce": "min"}),
+    )}
+    rows = {r["name"]: (r["value"], r["source_file"]) for r in extract(project, RUN, tmp_path / "results", {})}
+    assert rows == {"lazy": (0.004, "qor.rpt:11"), "reg2reg": (-0.031, "qor.rpt:25"), "first": (0.004, "qor.rpt:11"),
+                    "last": (-0.031, "qor.rpt:25"), "min": (-0.087, "qor.rpt:18"), "max": (0.004, "qor.rpt:11"),
+                    "fails": (253.0, "qor.rpt:12"), "none": (None, rows["none"][1])}
+    assert rows["none"][1].startswith("qor.rpt: no match")
+
+
+@pytest.mark.parametrize("rule, value, verdict", [
+    ("== 0", 0.0, "pass"), ("== 0", 3.0, "FAIL"), ("!= 0", 0.0, "FAIL"), ("<= -0.01", -0.02, "pass"),
+    (">= 0", -0.001, "FAIL"), ("< 1e3", 999.0, "pass"), ("> 5", 5.0, "FAIL"), ("== 0", None, None), ("", 1.0, None)])
+def test_a_pass_rule_gives_the_verdict(rule, value, verdict):
+    assert Metric(name="m", pass_=rule).verdict(value) == verdict

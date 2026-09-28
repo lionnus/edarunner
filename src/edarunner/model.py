@@ -6,6 +6,7 @@ carries the meaning of its key and the default the loader applies; the reference
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Callable
 from dataclasses import MISSING, dataclass, field
 from pathlib import Path
@@ -296,11 +297,28 @@ class Stage:
         return self.foreach == "tasks"
 
 
+_OPS = {"==": operator.eq, "!=": operator.ne, "<=": operator.le, ">=": operator.ge, "<": operator.lt, ">": operator.gt}
+
+
+def pass_rule(rule: str) -> tuple[Callable[[float, float], bool], float]:
+    """The operator and the number of a `pass` rule such as `== 0`; ValueError for any other text."""
+    rule = rule.strip()
+    op = next((o for o in _OPS if rule.startswith(o)), None)
+    if op is None:
+        raise ValueError(f"{rule!r} starts with none of {', '.join(_OPS)}")
+    return _OPS[op], float(rule[len(op):])
+
+
 @dataclass
 class Metric:
     """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A number
     the flow does not print, such as an energy from a power and a window, comes from a `python`
     hook that reads the input files itself.
+
+    A regex runs with `re.MULTILINE` over the whole file, group 1 of each match is a value, and
+    `reduce` picks one of them, the first by default. In a report with one block per scenario and path
+    group, such as a `report_qor`, start the regex at the header of its block, or the first match may
+    come from another block. The row's `source_file` is then `path:line` of the value.
 
     A metric row comes from a task that ended `done` or from a stage that exited 0 (done, or over
     budget without a kill). Any other stage gives the rows of the numbered steps that the run has
@@ -316,7 +334,9 @@ class Metric:
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
     file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
                     shown="required")
-    regex: str = doc("a regex; group 1 is the value", "", shown="one of the five")
+    regex: str = doc("a regex; group 1 of each match is a value", "", shown="one of the five")
+    reduce: str = doc("how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum "
+                      "names the line of its first value", "first")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
                                         "`where`", None, shown="one of the five")
     json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
@@ -330,6 +350,16 @@ class Metric:
                          "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
                          "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "
                          "empty when the schema has no name", "")
+    pass_: str = doc("a rule the value must meet: `==`, `!=`, `<`, `<=`, `>` or `>=` and a number, such as "
+                     "`\"== 0\"`; `edr metrics`, `edr compare` and `--over steps` print FAIL next to a value that "
+                     "breaks it", "", key="pass", shown="unset")
+
+    def verdict(self, value: float | None) -> str | None:
+        """`FAIL` when `value` breaks the `pass` rule, `pass` when it meets it; None without a rule or a value."""
+        if not self.pass_ or value is None:
+            return None
+        op, limit = pass_rule(self.pass_)
+        return "pass" if op(value, limit) else "FAIL"
 
 
 @dataclass

@@ -262,3 +262,21 @@ def test_pattern_resolver(tmp_path):
     assert config.resolve_task(p, "k_small").fields["kernel"] == "gemm"
     with pytest.raises(ConfigError, match="unknown task 'gemm_x'"):
         config.resolve_task(p, "gemm_x")
+
+
+def test_metric_reduce_and_pass_rule(tmp_path):
+    root = demo_copy(tmp_path)
+    p = config.load_project(root)
+    assert (p.metrics["wns_ns"].reduce, p.metrics["setup_violations"].reduce) == ("min", "sum")
+    assert (p.metrics["setup_violations"].pass_, p.metrics["area_cell_um2"].pass_) == ("== 0", "")
+    toml = root / "edr.toml"
+    text = toml.read_text()
+    for old, new, match in (('reduce = "min"', 'reduce = "mean"', "wns_ns.reduce needs regex and is one of first, last"),
+                            ('json = "window_ns"', 'json = "window_ns"\nreduce = "max"', "window_ns.reduce needs regex"),
+                            ('pass = "== 0"', 'pass = "0"', 'setup_violations.pass is an operator and a number'),
+                            ('pass = "== 0"', 'pass = "== none"', "pass is an operator and a number"),
+                            ('pass = "== 0"', "pass = 0", "pass is an operator and a number"),
+                            ('pass = "== 0"', 'pass_ = "== 0"', "unknown key 'metrics.setup_violations.pass_'")):
+        toml.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)
