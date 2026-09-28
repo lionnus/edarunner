@@ -319,7 +319,7 @@ the first error:
 ```
 $ edr extract base@g8
 20260902_0221_base_demo_g3f9a2c1: 0 new, 2 changed, 30 unchanged, 1 failed, 4 removed
-  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: power.csv has no WHOLE row
+  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_N512/power/phases.json: power.csv has no WHOLE row
 ```
 
 A row counts as changed when its value, canonical name, unit or source
@@ -562,7 +562,7 @@ views print `failed:` and the error in place of the value:
 ```
 $ edr metrics --source 3f9a2c1 --stage power --metric power_w
 label  source   stage  step  task     metric                                                                                                   value  unit
-base   3f9a2c1  power     -  k_big    power_w  failed: simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE'}  W
+base   3f9a2c1  power     -  k_big    power_w  failed: simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv: no row matches {'phase': 'WHOLE'}  W
 base   3f9a2c1  power     -  k_small  power_w                                                                                                   0.25  W
 ```
 
@@ -1316,8 +1316,8 @@ the same id. Write the fields it ran with into a file in the form of
 # ran.toml: k_big ran with a limit that tasks.toml no longer gives
 [tasks.k_big]
 kernel = "softmax"
-test = "SOFTMAX_R197"
-args = "ROWS=197 LIMIT=-4.0"
+test = "SOFTMAX_N512"
+args = "N=512 LIMIT=-4.0"
 ```
 
 ```sh
@@ -1339,7 +1339,7 @@ runs it reads, and `edr check` about every such task of the database,
 with the fields that differ and the runs of each set:
 
 ```
-warning: task k_big ran with 2 sets of fields: args="ROWS=197 LIMIT=-4.0" in base@imported; args="ROWS=197" in a@sweep1
+warning: task k_big ran with 2 sets of fields: args="N=512 LIMIT=-4.0" in base@imported; args="N=512" in a@sweep1
 ```
 
 The line names up to five runs of each set; `edr extract --json` lists

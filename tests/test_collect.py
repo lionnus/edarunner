@@ -15,7 +15,7 @@ from edarunner.hosts import Ssh
 from helpers_driver import DEMO
 
 RUN_ID = "20260926_1200_a_demo_gabc1234"
-TESTS = ("GEMM_M64_N64", "SOFTMAX_R197")
+TESTS = ("GEMM_M64_N64", "SOFTMAX_N512")
 
 
 def write(path: Path, text: str = "x\n") -> None:
@@ -110,7 +110,7 @@ def test_dry_run_writes_nothing(env) -> None:
     hb = heartbeat(run, "done", "power", {"k_small": "done", "k_big": "failed"})
     r = collect.collect_run(project, ssh, db, run, hb, dry_run=True)
     assert r.failures == [] and r.files == 17
-    assert "simulation/tests/demo/SOFTMAX_R197/power/phases.json" in r.copied
+    assert "simulation/tests/demo/SOFTMAX_N512/power/phases.json" in r.copied
     assert not (project.data / "results").exists()
     assert artifacts(db) == []
 

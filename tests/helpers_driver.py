@@ -21,7 +21,7 @@ PROGRESS = "ls reports 2>/dev/null | grep -cE '^[0-9]+$'"
 TOOL = {"name": "demo", "seats": 1, "probe": ["bash", "{root}/flow/seats.sh"]}
 TASKS = {
     "k_small": {"kernel": "gemm", "test": "GEMM_M64_N64", "args": "M=64 N=64"},
-    "k_big": {"kernel": "softmax", "test": "SOFTMAX_R197", "args": "ROWS=197", "budget": {"hours": 2}},
+    "k_big": {"kernel": "softmax", "test": "SOFTMAX_N512", "args": "N=512", "budget": {"hours": 2}},
     "k_bad": {"kernel": "bad", "test": "BAD", "args": ""},
 }
 LIMITS = {"host_free_min_gb": 0.1, "streak": 2, "heartbeat_s": 1, "gate_max_s": 30}

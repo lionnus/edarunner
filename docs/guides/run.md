@@ -275,7 +275,7 @@ A job in a batch file runs stages on the tree of an earlier run through
 label = "base"
 config = "base"
 stages = ["power"]
-tasks = ["softmax_197"]
+tasks = ["k_big"]
 reuse = { label = "base", latest = true }
 ```
 

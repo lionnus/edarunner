@@ -69,4 +69,4 @@ TRACE_0,u_lane_0,0.1500
 POWER_NO_BLK = "".join(ln + "\n" for ln in POWER.splitlines() if "u_blk_b" not in ln)
 
 # The cycle counts of a bench suite, one row per test.
-SUITE = "name,cycles\nGEMM_M64_N64,4100\nSOFTMAX_R197,9800\n"
+SUITE = "name,cycles\nGEMM_M64_N64,4100\nSOFTMAX_N512,9800\n"

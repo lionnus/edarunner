@@ -39,7 +39,7 @@ def test_demo_end_to_end():
     assert p.metrics["area_cell_um2"].stage == ["synth", "pnr"] and p.metrics["area_cell_um2"].step == "*"
     assert p.metrics["power_w"].stage == ["power"] and p.metrics["power_w"].csv["column"] == "total_w"
     assert p.metrics["energy_nj"].stage == ["power"] and p.metrics["energy_nj"].python == "hooks/energy.py:energy_nj"
-    assert p.tasks["k_big"].fields == {"kernel": "softmax", "test": "SOFTMAX_R197", "args": "ROWS=197"}
+    assert p.tasks["k_big"].fields == {"kernel": "softmax", "test": "SOFTMAX_N512", "args": "N=512"}
     assert p.tasks["k_big"].budget.hours == 2 and p.tasks["k_small"].budget is None
     assert p.task_resolver == ""
     assert p.site.hosts["local"].cores == 4 and p.site.hosts["local"].scratch is None

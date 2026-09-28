@@ -714,7 +714,7 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
         (results / "reports" / str(n)).mkdir(parents=True)
         (results / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
         (results / "reports" / str(n) / "qor.rpt").write_text(demo_qor(n))
-    for test, whole in (("GEMM_M64_N64", "WHOLE,0.250\n"), ("SOFTMAX_R197", "")):
+    for test, whole in (("GEMM_M64_N64", "WHOLE,0.250\n"), ("SOFTMAX_N512", "")):
         power = results / "simulation" / "tests" / "demo" / test / "power"
         (power / "reports").mkdir(parents=True)
         (power / "reports" / "power.csv").write_text("phase,total_w\n" + whole)
@@ -729,8 +729,8 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
                 ("power", None, "k_gone", "window_ns", 3400.0, "ns", "", "simulation/tests/demo/GEMM_M64_N64/power/phases.json")):
             db.add_metric({"run_id": a, "stage": stage, "step": step, "task": task, "name": name, "value": value,
                            "unit": unit, "canonical": canonical, "source_file": source})
-    failures = ("  power_w: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches "
-                "{'phase': 'WHOLE'}\n  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: "
+    failures = ("  power_w: 1 failed: simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv: no row matches "
+                "{'phase': 'WHOLE'}\n  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_N512/power/phases.json: "
                 "power.csv has no WHOLE row\n")
     # pnr owns steps 4 and 5, so its row at step 3 goes; the file of step 1 is gone, so its row stays. The run has
     # passed no pnr step and k_gone is no task, so the extraction reads neither: their values stay, a failure goes.
@@ -738,7 +738,7 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
     assert code == 0 and out == f"{a}: 9 new, 1 changed, 0 unchanged, 2 failed, 2 removed, 1 kept without a file (dry)\n" + failures
     code, out, _ = edr(capsys, "--json", "extract", "a@demo")
     assert json.loads(out)["data"][0]["failures"]["power_w"] == {
-        "count": 1, "first": "simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE'}"}
+        "count": 1, "first": "simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv: no row matches {'phase': 'WHOLE'}"}
     with Database(demo / "data" / "edr.db") as db:
         rows = {(m["stage"], m["step"], m["task"], m["name"]): (m["value"], m["source_file"]) for m in db.metrics()}
         assert db.events()[-1]["text"] == ("9 new, 1 changed, 0 unchanged, 2 failed, 2 removed, 1 kept without a file; "
@@ -748,7 +748,7 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
     assert rows[("synth", 1, "", "area_cell_um2")] == (1001.0, "reports/1/area.rpt:1") and len(rows) == 15
     assert rows[("pnr", 4, "", "area_cell_um2")][0] == 1004.0 and rows[("power", None, "k_gone", "window_ns")][0] == 3400.0
     out = edr(capsys, "metrics", "--source", "abc1234")[1]
-    assert "failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: power.csv has no WHOLE row" in out
+    assert "failed: simulation/tests/demo/SOFTMAX_N512/power/phases.json: power.csv has no WHOLE row" in out
     toml = demo / "edr.toml"
     text = toml.read_text()
     toml.write_text(text[:text.index("# A slack can print")] + text[text.index("[metrics.power_w]"):])
@@ -792,7 +792,7 @@ def test_extract_reads_parameters_from_the_files_and_flags_runs_that_contradict_
         (results / "log" / "synth.log").write_text(f"step 0 setup\nset ENABLE_X 1; set LANES {lanes};\n{'.' * 40}\nset EXTRA 1;\n")
         (results / "reports").mkdir()
         (results / "reports" / "build.rpt").write_text(f"built at 12:00\ncommit: {design}\n")
-    for test in ("GEMM_M64_N64", "SOFTMAX_R197"):  # k_small and k_big ran one test under two names
+    for test in ("GEMM_M64_N64", "SOFTMAX_N512"):  # k_small and k_big ran one test under two names
         power = demo / "data" / "results" / c / "simulation" / "tests" / "demo" / test / "power"
         (power / "reports").mkdir(parents=True)
         (power / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.25\n")
@@ -1486,7 +1486,7 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
     src = tmp_path / "legacy" / run_id
     tests = src / "simulation" / "tests" / "demo"
     # k_small parses; power.csv of k_big has no WHOLE row; k_bad has no file at all.
-    for test, text in (("GEMM_M64_N64", "phase,total_w\nWHOLE,0.250\n"), ("SOFTMAX_R197", "phase,total_w\n")):
+    for test, text in (("GEMM_M64_N64", "phase,total_w\nWHOLE,0.250\n"), ("SOFTMAX_N512", "phase,total_w\n")):
         (tests / test / "power" / "reports").mkdir(parents=True)
         (tests / test / "power" / "reports" / "power.csv").write_text(text)
         (tests / test / "power" / "phases.json").write_text('{"window_ns": 3400}')
@@ -1504,7 +1504,7 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
     spec = json.loads((bdir(demo, "legacy") / f"{run_id}.spec.json").read_text())
     assert spec["vars"] == {"netlist_stage": "11"} and not any("cmd" in st for st in spec["stages"])
     assert [(t["id"], t["dir"]) for st in spec["stages"] for t in st["tasks"]] == [
-        ("k_small", "simulation/tests/demo/GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_R197"),
+        ("k_small", "simulation/tests/demo/GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_N512"),
         ("k_bad", "simulation/tests/demo/BAD")]
     with Database(demo / "data" / "edr.db") as db:
         row = db.run(run_id)
@@ -1533,7 +1533,7 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
         assert (db.run("20260830_0902_ref3_demo_gdef5678")["dirty"], db.run("20260830_0901_ref2_demo_gabc1234-dirty")[
             "started"], db.run("20260830_0901_ref2_demo_gabc1234-dirty")["updated"]) == (0, None, None)
     # Once its files are fixed, a later extract reads every task of the spec, also the one without a row.
-    (tests / "SOFTMAX_R197" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
+    (tests / "SOFTMAX_N512" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
     (tests / "BAD" / "power" / "reports").mkdir(parents=True)
     (tests / "BAD" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.125\n")
     assert edr(capsys, "extract", "ref@legacy")[0] == 0
@@ -1549,7 +1549,7 @@ def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(dem
         (src / "simulation" / "tests" / "demo" / test / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
     # k_big ran under an older test name and with a limit that tasks.toml no longer gives; k_gone did not run.
     ran = tmp_path / "ran.toml"
-    ran.write_text('[tasks.k_big]\nkernel = "softmax"\ntest = "SOFTMAX_OLD"\nargs = "ROWS=197 LIMIT=-4.0"\n\n'
+    ran.write_text('[tasks.k_big]\nkernel = "softmax"\ntest = "SOFTMAX_OLD"\nargs = "N=512 LIMIT=-4.0"\n\n'
                    '[tasks.k_gone]\nkernel = "x"\n')
     old, new = "20260830_0900_ref_demo_gabc1234", "20260830_0901_ref2_demo_gabc1234"
     base = ["import", "--config", "demo", "--source", "abc1234", "--results", str(src), "--batch", "legacy"]
@@ -1562,7 +1562,7 @@ def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(dem
         ("k_small", "simulation/tests/demo/GEMM_M64_N64", "GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_OLD", "SOFTMAX_OLD")]
     with Database(demo / "data" / "edr.db") as db:
         assert [(f["task"], f["key"], f["value"], f["origin"]) for f in db.task_fields([old])] == [
-            ("k_big", "args", "ROWS=197 LIMIT=-4.0", "import"), ("k_big", "kernel", "softmax", "import"),
+            ("k_big", "args", "N=512 LIMIT=-4.0", "import"), ("k_big", "kernel", "softmax", "import"),
             ("k_big", "test", "SOFTMAX_OLD", "import"), ("k_small", "args", "M=64 N=64", "resolver"),
             ("k_small", "kernel", "gemm", "resolver"), ("k_small", "test", "GEMM_M64_N64", "resolver")]
         # The numbers of k_big come from the directory of the test it ran as.
@@ -1571,8 +1571,8 @@ def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(dem
     assert code == 0 and "warning" not in out
     # A second run of k_big with the fields that tasks.toml gives today: one task id, two sets of fields.
     assert edr(capsys, *base, "--run-id", new, "--label", "ref2", "--tasks", "k_big")[0] == 0
-    warning = ('task k_big ran with 2 sets of fields: args="ROWS=197 LIMIT=-4.0" test="SOFTMAX_OLD" in ref@legacy; '
-               'args="ROWS=197" test="SOFTMAX_R197" in ref2@legacy')
+    warning = ('task k_big ran with 2 sets of fields: args="N=512 LIMIT=-4.0" test="SOFTMAX_OLD" in ref@legacy; '
+               'args="N=512" test="SOFTMAX_N512" in ref2@legacy')
     code, out, _ = edr(capsys, "extract", "ref2@legacy", "--dry-run")
     assert code == 0 and out.splitlines()[-1] == f"warning: {warning}"
     code, out, _ = edr(capsys, "--json", "extract", "ref2@legacy", "--dry-run")

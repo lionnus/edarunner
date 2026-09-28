@@ -67,7 +67,7 @@ def results_tree(results: Path) -> Path:
         d.mkdir(parents=True)
         (d / "area.rpt").write_text(f"i_top {1000 + n * 10.5:.1f}\n")
         (d / "qor.rpt").write_text(demo_qor(n))
-    for test in ("GEMM_M64_N64", "SOFTMAX_R197"):
+    for test in ("GEMM_M64_N64", "SOFTMAX_N512"):
         p = run / "simulation" / "tests" / "demo" / test / "power"
         (p / "reports").mkdir(parents=True)
         (p / "reports" / "power.csv").write_text("phase,total_w\nPHASE_A,0.100\nPHASE_B,0.150\nWHOLE,0.250\n")
@@ -108,7 +108,7 @@ def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
     run = results_tree(tmp_path / "results")
     (run / "reports" / "2" / "qor.rpt").unlink()
     (run / "reports" / "1" / "area.rpt").write_text("garbage\n")
-    (run / "simulation/tests/demo/SOFTMAX_R197/power/phases.json").unlink()
+    (run / "simulation/tests/demo/SOFTMAX_N512/power/phases.json").unlink()
     (run / "simulation/tests/demo/GEMM_M64_N64/power/reports/power.csv").write_text("phase,total_w\nPHASE_A,0.1\n")
     rows = extract(demo_project(tmp_path), RUN, tmp_path / "results", demo_tasks())
     assert [r["step"] for r in by_name(rows, "wns_ns", "synth")] == [0, 1, 3]
@@ -124,7 +124,7 @@ def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
 
 def test_scale_multiplies_each_value_at_extraction(tmp_path):
     run = results_tree(tmp_path / "results")
-    for test in ("GEMM_M64_N64", "SOFTMAX_R197"):
+    for test in ("GEMM_M64_N64", "SOFTMAX_N512"):
         (run / "simulation/tests/demo" / test / "power/phases.json").write_text(json.dumps({"window_dur": 48213000000}))
     (run / "reports" / "3" / "area_hier.rpt").write_text(area_hier(1234.5))
     project = demo_project(tmp_path)
@@ -236,7 +236,7 @@ def test_an_optional_metric_a_hook_without_a_number_and_a_where_with_placeholder
     run = results_tree(tmp_path / "results")
     tests = run / "simulation" / "tests" / "demo"
     (tests / "GEMM_M64_N64" / "power" / "reports" / "power.csv").write_text(POWER)
-    (tests / "SOFTMAX_R197" / "power" / "reports" / "power.csv").write_text(POWER_NO_BLK)
+    (tests / "SOFTMAX_N512" / "power" / "reports" / "power.csv").write_text(POWER_NO_BLK)
     (tests / "GEMM_M64_N64" / "power" / "phases.json").write_text(json.dumps({"window_ns": 3400, "trace": {"cycles": 2}}))
     (run / "bench.csv").write_text(SUITE)
     project = demo_project(tmp_path)
@@ -259,7 +259,7 @@ def test_an_optional_metric_a_hook_without_a_number_and_a_where_with_placeholder
         ("cycles", "k_small"): 4100.0, ("cycles", "k_big"): 9800.0, ("trace_cycles", "k_small"): 2.0,
         ("trace_opt", "k_small"): 2.0}
     assert by_name(rows, "blk_w")[1]["source_file"] == (
-        "simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE', 'instance': 'u_blk_b'}")
+        "simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv: no row matches {'phase': 'WHOLE', 'instance': 'u_blk_b'}")
     assert by_name(rows, "cycles")[0]["source_file"] == "bench.csv"
 
 
