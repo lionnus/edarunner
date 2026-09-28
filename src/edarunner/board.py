@@ -134,6 +134,12 @@ def is_live(row: Row) -> bool:
     return not str(row.get("phase") or "").startswith(TERMINAL)
 
 
+def live_per_host(rows: list[Row]) -> Counter:
+    """The runs per host whose driver started and has not ended."""
+    return Counter(r.get("host") for r in rows if r.get("phase") and is_live(r)
+                   and r.get("state") not in ("queued", "retired", "abandoned"))
+
+
 def state_of(row: Row) -> str:
     """The watcher's `state` for a live run; the phase class, lower case, for a finished one."""
     if is_live(row):

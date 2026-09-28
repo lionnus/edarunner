@@ -190,7 +190,7 @@ of the host's list, and its space free of total, with a bar of the used
 part; GPUs idle of total, where idle means under 5 % utilisation and
 under 5 % memory in use; GPU memory free of total, summed over the GPUs;
 processes that match tool_procs, split into yours and other users';
-and your edr drivers.
+and the live runs of this project on the host, from the database.
 
 A mark tells how full a resource is. It is 🟢 below the first threshold
 of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from

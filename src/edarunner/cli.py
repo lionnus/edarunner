@@ -523,6 +523,9 @@ def cmd_hosts(c: Ctx, a: argparse.Namespace) -> int:
         c.emit(analysis.host_history_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
     rows = _mark_hosts(c, _probe_rows(c))
+    runs = board.live_per_host(c.rows())
+    for r in rows:
+        r["our_runs"] = runs[r["host"]]
     if a.narrow:
         # A long cell, such as an error, folds inside its column instead of widening the table.
         c.console.width = 48
@@ -1309,7 +1312,7 @@ def _parser() -> argparse.ArgumentParser:
         part; GPUs idle of total, where idle means under 5 % utilisation and
         under 5 % memory in use; GPU memory free of total, summed over the GPUs;
         processes that match tool_procs, split into yours and other users';
-        and your edr drivers.
+        and the live runs of this project on the host, from the database.
 
         A mark tells how full a resource is. It is 🟢 below the first threshold
         of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from

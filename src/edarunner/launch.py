@@ -341,7 +341,7 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
     else:
         errors = {h: "no probe of the host" for h in names if h not in probes}
     auto = [j for j in jobs if j.host == "auto" and _fresh(j)]
-    placed = hosts.place(project, auto, probes, {h: p.our_runs for h, p in probes.items()}) if auto else {}
+    placed = hosts.place(project, auto, probes, board.live_per_host(db.runs())) if auto else {}
     return [_plan_job(project, batch, j, db, date, probes, errors, placed) for j in jobs]
 
 

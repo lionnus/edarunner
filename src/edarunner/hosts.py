@@ -39,7 +39,6 @@ class HostProbe:
     free_gb: float
     our_tool_procs: int = 0
     other_tool_procs: int = 0
-    our_runs: int = 0
     cores: int = 0
     load: float = 0.0
     total_ram_gb: float = 0.0
@@ -136,8 +135,6 @@ def _probe_cmd(dirs: list[str]) -> str:
         f"echo {_SEP}; for d in {quoted}; do "
         '[ -w "$d" ] && df -Pk "$d" | awk -v d="$d" \'NR==2{print d, $2, $4}\'; done; '
         f"echo {_SEP}; ps -eo user:32=,comm=; "
-        # The bracket keeps this shell and the grep out of the count.
-        f"echo {_SEP}; ps -eww -o user:32=,args= | grep '[e]dr_driver.py'; "
         f"echo {_SEP}; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi "
         "--query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null; true"
     )
@@ -160,12 +157,12 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
             sections.append([])
         elif line.strip():
             sections[-1].append(line)
-    if len(sections) != 5 or len(sections[0]) != 5:
+    if len(sections) != 4 or len(sections[0]) != 5:
         raise HostError(f"{host}: unreadable probe output: {out[:200]!r}")
     me, ncpu, load, ram_kb, mem_kb = (s.strip() for s in sections[0])
     scratch = [(int(free), int(total), d) for d, total, free in (ln.rsplit(None, 2) for ln in sections[1])]
     free_kb, total_kb, mount = max(scratch) if scratch else (0, 0, "")
-    gpus = _gpus(sections[4])
+    gpus = _gpus(sections[3])
     rx = re.compile(tool_procs) if tool_procs else None
     ours = others = 0
     for line in sections[2]:
@@ -175,7 +172,6 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
                 ours += 1
             else:
                 others += 1
-    runs = sum(1 for ln in sections[3] if ln.split(None, 1)[0] == me)
     return HostProbe(
         host=host,
         # A load above the core count leaves no core free, not a negative count.
@@ -185,7 +181,6 @@ def _parse_probe(host: str, out: str, tool_procs: str) -> HostProbe:
         free_gb=round(free_kb / 2**20, 1),
         our_tool_procs=ours,
         other_tool_procs=others,
-        our_runs=runs,
         cores=int(ncpu),
         load=float(load),
         total_ram_gb=round(int(ram_kb) / 2**20, 1),

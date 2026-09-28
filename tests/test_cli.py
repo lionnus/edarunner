@@ -520,7 +520,12 @@ def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None
     assert code == 0 and head.split() == ["ok", "host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
     assert row.split()[1] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
-    assert code == 0 and json.loads(out)["data"][0]["host"] == "local"
+    assert code == 0 and json.loads(out)["data"][0]["host"] == "local" and json.loads(out)["data"][0]["our_runs"] == 0
+    with Database(demo / "data" / "edr.db") as db:
+        for label, phase, state in (("a", "stage:synth", "running"), ("b", "done", None), ("c", None, "queued")):
+            db.upsert_run({"run_id": f"20260926_1200_{label}", "batch": "demo", "label": label, "host": "local",
+                           "phase": phase, "state": state})
+    assert json.loads(edr(capsys, "--json", "hosts")[1])["data"][0]["our_runs"] == 1
     code, out, _ = edr(capsys, "tools")
     assert code == 0 and out.splitlines()[0].split() == ["tool", "free", "total", "hosts", "note"]
     assert out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"]
@@ -546,8 +551,8 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     site = demo / "site.toml"
     site.write_text(site.read_text() + "\n[hosts.hostA]\ncores = 64\nram_gb = 256\n\n[hosts.hostB]\ncores = 32\nram_gb = 128\n")
     probes = {
-        "local": HostProbe("local", 7.8, 35.0, "/tmp/x", 15.5, 3, 0, 0, cores=8, load=0.2, total_ram_gb=62.3, total_gb=15.6),
-        "hostA": HostProbe("hostA", 12.5, 120.0, "/scratch", 800.0, 4, 2, 3, cores=64, load=51.5, total_ram_gb=256.0,
+        "local": HostProbe("local", 7.8, 35.0, "/tmp/x", 15.5, 3, 0, cores=8, load=0.2, total_ram_gb=62.3, total_gb=15.6),
+        "hostA": HostProbe("hostA", 12.5, 120.0, "/scratch", 800.0, 4, 2, cores=64, load=51.5, total_ram_gb=256.0,
                            total_gb=2000.0, gpus=4, gpus_idle=1, gpu_used_gb=30.0, gpu_total_gb=320.0),
     }
 
@@ -563,7 +568,7 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
     assert [ln.split()[:2] for ln in lines[2:]] == [["⚫", "hostB"], ["🟠", "hostA"], ["🟢", "local"]]
     a = next(ln for ln in lines if " hostA " in ln)
     assert a.split() == ["🟠", "hostA", "🟠", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "🟢", "120/256", "/scratch", "🟢",
-                         "800/2000", "\u2588" * 5 + "\u2591" * 3, "🟡", "1/4", "290/320", "4/2", "3"]
+                         "800/2000", "\u2588" * 5 + "\u2591" * 3, "🟡", "1/4", "290/320", "4/2", "0"]
     local = next(ln for ln in lines if " local " in ln)
     assert local.split() == ["🟢", "local", "🟢", "0/8", "\u2591" * 8, "0.2", "🟢", "35/62.3", "/tmp/x", "🟢", "15.5/15.6",
                              "\u2591" * 8, "-", "-", "3/0", "0"]
