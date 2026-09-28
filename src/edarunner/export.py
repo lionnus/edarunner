@@ -1,4 +1,4 @@
-"""A frozen snapshot of one or more sources for a paper: manifest, four tables, the diff of each dirty source and the
+"""A frozen snapshot of one or more sources for a paper: manifest, five tables, the diff of each dirty source and the
 collected files."""
 
 from __future__ import annotations
@@ -24,8 +24,9 @@ Row = dict[str, Any]
 RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "phase", "started", "ended", "batch", "dirty",
                "tree_id", "retired"]
 PARAMETER_COLUMNS = ["run_id", "label", "source", "key", "value", "origin"]
-METRIC_COLUMNS = ["run_id", "label", "config", "source", "stage", "step", "task", "metric", "canonical", "value", "unit", "source_file",
-                  "record"]
+TASK_FIELD_COLUMNS = ["run_id", "label", "source", "task", "key", "value", "origin"]
+METRIC_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "stage", "step", "task", "metric", "canonical", "value",
+                  "unit", "source_file", "record"]
 INSTANCE_COLUMNS = ["run_id", "label", "source", "stage", "step", "task", "metric", "part", "instance", "depth", "value", "local",
                     "cells", "unit"]
 
@@ -39,8 +40,8 @@ def export(
     dry_run: bool = False,
     with_logs: bool = False,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, instances.csv and the collected files of the runs of
-    `sources` to `out`.
+    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, task_fields.csv, instances.csv and the collected
+    files of the runs of `sources` to `out`.
 
     The export holds the `pick` of each label and source. The manifest lists every exported run whose phase is
     not done under `incomplete`, and the other runs of each label and source under `skipped`. The files of a run
@@ -62,6 +63,8 @@ def export(
     retired = {b["batch"] for b in db.batches() if b.get("retired")}
     params = [[r["run_id"], r["label"], r["source"], p["key"], p["value"], p["origin"]]
               for r in runs for p in db.parameters(r["run_id"])]
+    fields = [[r["run_id"], r["label"], r["source"], f["task"], f["key"], f["value"], f["origin"]]
+              for r in runs for f in db.task_fields([r["run_id"]])]
     dirty = [_dirty_source(project, s) for s in sources if "-dirty" in s]
     instances = [[i["name" if k == "metric" else k] for k in INSTANCE_COLUMNS] for i in db.instances(run_ids=ids)]
 
@@ -69,6 +72,7 @@ def export(
         ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired) for r in runs])),
         ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics])),
         ("parameters.csv", to_csv(PARAMETER_COLUMNS, params)),
+        ("task_fields.csv", to_csv(TASK_FIELD_COLUMNS, fields)),
         ("instances.csv", to_csv(INSTANCE_COLUMNS, instances)),
     ]
     plan += [(f"sources/{d['source']}/source.diff", project.data / "sources" / d["source"] / "source.diff")
@@ -84,13 +88,13 @@ def export(
     manifest: dict[str, Any] = {
         "producer": f"edarunner {__version__}",
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "schema": 2,
+        "schema": 3,
         "project": project.project,
         "sources": sources,
         "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "source", "host", "phase")},
                   "record": _record(project, db, r)} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics), "parameters.csv": len(params),
-                   "instances.csv": len(instances)},
+                   "task_fields.csv": len(fields), "instances.csv": len(instances)},
         "ge_um2": project.ge_um2 or None,
         "dirty_sources": dirty,
         "files": [],
@@ -167,8 +171,7 @@ def _run_row(r: Row, retired: set[str]) -> list[Any]:
 def metric_row(m: Row) -> list[Any]:
     """One metrics.csv row in the order of METRIC_COLUMNS; `record` is 1 at the step of record, 0 at the other steps of
     a metric with `record`, and empty for a metric without it."""
-    return [m["run_id"], m.get("label"), m.get("config"), m.get("source"), m.get("stage"), m.get("step"), m.get("task"),
-            m.get("name"), m.get("canonical"), m.get("value"), m.get("unit"), m.get("source_file"), m.get("record")]
+    return [m.get("name" if k == "metric" else k) for k in METRIC_COLUMNS]
 
 
 def to_csv(head: list[str], rows: list[list[Any]]) -> bytes:

@@ -104,6 +104,7 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     small, big = power["tasks"]
     assert small["dir"] == f"{root}/simulation/tests/demo/GEMM_M64_N64"
     assert small["cmd"] == f"DEMO_CONFIG=demo bash {root}/flow/kernel.sh gemm GEMM_M64_N64 M=64 N=64"
+    assert small["fields"] == {"kernel": "gemm", "test": "GEMM_M64_N64", "args": "M=64 N=64"}
     assert small["needs"] == {"cores": 1, "disk_gb": 0.05} and small["budget"] == {"hours": 1, "per": "task"}
     assert big["budget"] == {"hours": 2, "per": "task"} and "tools" not in small and "tools" not in big
     left = [s for s in strings(spec) if "{" in s.replace("{checkpoint}", "").replace("{task_dir}", "")]

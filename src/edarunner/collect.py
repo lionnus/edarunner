@@ -56,6 +56,11 @@ def spec_task_dirs(spec: dict, root: str) -> dict[str, str]:
     return out
 
 
+def spec_task_fields(spec: dict) -> dict[str, dict[str, str]]:
+    """Task id -> the fields the task ran with, from the spec's task groups; a task without them is left out."""
+    return {str(t["id"]): t["fields"] for st in spec.get("stages") or [] for t in st.get("tasks") or [] if "fields" in t}
+
+
 def stage_state(project: Project, heartbeat: dict, only: list[str] | None = None) -> tuple[list[str], str | None]:
     """The finished stages of a run in project order, and the running one (None when terminal).
 

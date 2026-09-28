@@ -415,7 +415,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         _check_stage(stage, stages, site, file)
     metrics = {n: _metric(n, t, stages, file)
                for n, t in _table(raw.get("metrics", {}), None, file, "metrics").items()}
-    tasks, resolver = _load_tasks(root / "tasks.toml", site)
+    tasks, resolver = load_tasks(root / "tasks.toml", site) if (root / "tasks.toml").exists() else (
+        {}, _default(Project, "task_resolver"))
     ge_um2 = raw.get("ge_um2", _default(Project, "ge_um2"))
     if "ge_um2" in raw and not (type(ge_um2) in (int, float) and ge_um2 > 0):
         raise ConfigError(f"{file}: ge_um2 is the area of one gate equivalent in um2, a number above 0")
@@ -525,9 +526,8 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
     return _build(Metric, raw, file, at, name=name, pass_=rule)
 
 
-def _load_tasks(file: Path, site: Site) -> tuple[dict[str, Task], str]:
-    if not file.exists():
-        return {}, _default(Project, "task_resolver")
+def load_tasks(file: Path, site: Site) -> tuple[dict[str, Task], str]:
+    """The `[tasks.<id>]` tables and the `[pattern]` resolver of a file in the form of tasks.toml."""
     raw = _table(_read(file), {"tasks", "pattern"}, file, "")
     tasks = {i: _task(i, t, site, file, f"tasks.{i}")
              for i, t in _table(raw.get("tasks", {}), None, file, "tasks").items()}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -323,6 +323,22 @@ def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
     assert {(r["stage"], r["task"], r["name"]) for r in rows} == {
         ("power", "k_new", "power_w"), ("power", "k_new", "window_ns"), ("power", "k_new", "energy_nj")}
     assert (hb["run_id"], "collect") not in env.events() and (hb["run_id"], "extract") not in env.events()
+
+
+def test_a_task_keeps_the_fields_it_ran_with(env: Env) -> None:
+    # tasks.toml gives k_small the test GEMM_M64_N64 today; the run's spec says it ran as OLD_TEST.
+    hb = env.heartbeat("d", phase="done", exit=0, stage="power", tasks={"k_small": {"phase": "done"}})
+    task_dir = Path(hb["root"]) / "sim" / "k_small"
+    (task_dir / "power").mkdir(parents=True)
+    (task_dir / "power" / "OLD_TEST.csv").write_text("phase,total_w\nWHOLE,0.5\n")
+    fields = {"kernel": "gemm", "test": "OLD_TEST", "args": "M=8"}
+    config.save_json(env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json", {"stages": [
+        {"name": "power", "tasks": [{"id": "k_small", "dir": str(task_dir), "fields": fields}]}]})
+    env.project.metrics["power_w"] = replace(env.project.metrics["power_w"], file="{task_dir}/power/{task.test}.csv")
+    env.cycle()
+    assert [(m["task"], m["value"]) for m in env.db.metrics(run_ids=[hb["run_id"]], name="power_w")] == [("k_small", 0.5)]
+    assert [(f["task"], f["key"], f["value"], f["origin"]) for f in env.db.task_fields()] == [
+        ("k_small", "args", "M=8", "spec"), ("k_small", "kernel", "gemm", "spec"), ("k_small", "test", "OLD_TEST", "spec")]
 
 
 def test_run_forever_goes_on_with_the_last_good_config(env: Env, monkeypatch) -> None:

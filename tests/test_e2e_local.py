@@ -96,10 +96,10 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert code == 0 and "nothing live" in out
     code, out, _ = edr(capsys, "metrics", "--source", source, "--csv")
     lines = out.splitlines()
-    assert code == 0 and lines[0].startswith("run_id,label,config,source,stage,step,task,metric")
+    assert code == 0 and lines[0].startswith("run_id,label,config,build_tag,source,host,stage,step,task,metric")
     assert any(",power,,k_small,energy_nj,,850.0,nJ," in ln for ln in lines)
-    assert any(f"{ids['b_nodw']},b_nodw,demo,{source},pnr,5,,area_cell_um2,design__instance__area,1052.5,um2,reports/5/area.rpt:1,1"
-               == ln for ln in lines)
+    assert any(f"{ids['b_nodw']},b_nodw,demo,demo_DW0,{source},local,pnr,5,,area_cell_um2,design__instance__area,1052.5,um2,"
+               "reports/5/area.rpt:1,1" == ln for ln in lines)
     # The area of record is the deepest pnr step from route on, step 5, in both runs.
     code, out, _ = edr(capsys, "compare", "a@demo", "b_nodw@demo", "--metric", "area_cell_um2")
     row = next(ln.split() for ln in out.splitlines() if ln.startswith("area_cell_um2"))
@@ -112,7 +112,12 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     assert lines[-1] == ["pnr", "5", "route", "1052.5", "5", "FAIL", "-0.05", "FAIL"]
     with Database(demo / "data" / "edr.db") as db:
         params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM parameters")}
+        fields = [(f["run_id"], f["task"], f["key"], f["value"], f["origin"]) for f in db.task_fields()]
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "source", source) in params
+    # The launched run records the fields each task ran with; b_nodw has no task.
+    assert fields == [(ids["a"], t, k, v, "spec") for t, f in (("k_big", {"args": "ROWS=197", "kernel": "softmax", "test": "SOFTMAX_R197"}),
+                                                                ("k_small", {"args": "M=64 N=64", "kernel": "gemm", "test": "GEMM_M64_N64"}))
+                      for k, v in f.items()]
     code, out, _ = edr(capsys, "--json", "compare", "a@demo", "b_nodw@demo")
     assert {p["key"]: list(p["value"].values()) for p in json.loads(out)["data"]["parameters"]} == {
         "DW": [None, "0"], "build_tag": ["demo", "demo_DW0"], "vars.netlist_stage": ["11", None]}
@@ -122,6 +127,8 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     manifest = json.loads((exp / "manifest.json").read_text())
     assert code == 0 and {r["label"] for r in manifest["runs"]} == {"a", "b_nodw"} and manifest["incomplete"] == []
     assert (exp / "a" / "reports" / "6" / "area.rpt").is_file() and (exp / "runs.csv").is_file() and manifest["sources"] == [source]
+    assert manifest["tables"]["task_fields.csv"] == 6 and f"{ids['a']},a,{source},k_small,test,GEMM_M64_N64,spec" in (
+        exp / "task_fields.csv").read_text()
     code, out, _ = edr(capsys, "stop", "a@demo", "--after-task", "--why", "test")
     assert code == 2 and "already done" in out
 

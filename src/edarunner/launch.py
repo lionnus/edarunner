@@ -124,7 +124,7 @@ def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, obj
     needs.pop("ram_gb")  # the scheduler's, not the driver's
     v = {**values, **{f"task.{k}": x for k, x in task.fields.items()}, "cores": needs["cores"]}
     v["task_dir"] = os.path.normpath(os.path.join(str(values["root"]), config.render(stage.task_dir, v)))
-    out = {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"],
+    out = {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"], "fields": task.fields,
            "needs": needs, "budget": _budget(stage.budget, task.budget)}
     if task.needs and task.needs.tools:
         out["tools"] = _tools(project, tools, v)

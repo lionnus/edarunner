@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT,
 CREATE TABLE IF NOT EXISTS stage_runs(run_id TEXT, stage TEXT, task TEXT, attempt INTEGER, started INTEGER, ended INTEGER,
   status TEXT, exit INTEGER, signature TEXT, log TEXT, PRIMARY KEY(run_id, stage, task, attempt));
 CREATE TABLE IF NOT EXISTS parameters(run_id TEXT, key TEXT, value TEXT, origin TEXT, PRIMARY KEY(run_id, key, origin));
+CREATE TABLE IF NOT EXISTS task_fields(run_id TEXT, task TEXT, key TEXT, value TEXT, origin TEXT, PRIMARY KEY(run_id, task, key));
 CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task TEXT, name TEXT, canonical TEXT, value REAL, unit TEXT,
   source_file TEXT, extracted_at INTEGER, PRIMARY KEY(run_id, stage, step, task, name));
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
@@ -193,6 +194,14 @@ class Database:
         )
         self.conn.commit()
 
+    def set_task_fields(self, run_id: str, rows: list[tuple[str, str, str, str]]) -> None:
+        """Replace the task fields of a run with `rows` of (task, key, value, origin); the origin is `spec`, `resolver`
+        or `import`."""
+        self.conn.execute("DELETE FROM task_fields WHERE run_id=?", (run_id,))
+        self.conn.executemany("INSERT INTO task_fields(run_id, task, key, value, origin) VALUES(?, ?, ?, ?, ?)",
+                              [(run_id, *r) for r in rows])
+        self.conn.commit()
+
     def add_metric(self, row: Row, replace: bool = False) -> bool:
         """Insert one metric, and its `instances` into the instances table; the caller commits. Returns True when the
         row went in or took the new value.
@@ -310,6 +319,12 @@ class Database:
         where, args = (" WHERE run_id=?", (run_id,)) if run_id else ("", ())
         return self._rows("SELECT run_id, key, value, origin FROM parameters" + where + " ORDER BY run_id, key, origin", args)
 
+    def task_fields(self, run_ids: list[str] | None = None) -> list[Row]:
+        """The task field rows of the runs, or of every run, by run, task and key."""
+        where, args = ["1"], []
+        _within(where, args, ("run_id", run_ids))
+        return self._rows(f"SELECT * FROM task_fields WHERE {' AND '.join(where)} ORDER BY run_id, task, key", args)
+
     def _rows(self, sql: str, args: tuple | list = ()) -> list[Row]:
         return [dict(r) for r in self.conn.execute(sql, args)]
 
@@ -388,7 +403,7 @@ class Database:
         name: str | None = None,
         run_ids: list[str] | None = None,
     ) -> list[Row]:
-        """Metric rows joined with the run's label, config and source. `name` matches name or canonical."""
+        """Metric rows joined with the run's label, config, build tag, source and host. `name` matches name or canonical."""
         where, args = ["1"], []
         for cond, val in (("m.stage=?", stage), ("m.step=?", step)):
             if val is not None:
@@ -399,7 +414,7 @@ class Database:
             args += [name, name]
         _within(where, args, ("r.source", sources), ("m.run_id", run_ids))
         return self._rows(
-            "SELECT m.*, r.label, r.config, r.source FROM metrics m JOIN runs r ON r.run_id=m.run_id "
+            "SELECT m.*, r.label, r.config, r.build_tag, r.source, r.host FROM metrics m JOIN runs r ON r.run_id=m.run_id "
             f"WHERE {' AND '.join(where)} ORDER BY m.run_id, m.stage, m.step, m.task, m.name",
             args,
         )

@@ -600,3 +600,14 @@ def test_compare_prints_the_parameters_that_differ(demo: Path, capsys) -> None:
         db.set_parameters(a, {"TCK": "1000", "vars.netlist_stage": "15"}, "spec")
     code, out, _ = edr(capsys, "compare", a, b, "--metric", "energy_nj")
     assert code == 0 and out.split()[:2] == ["metric", "task"]
+
+
+def test_a_task_id_with_two_sets_of_fields_names_the_fields_that_differ_and_the_runs() -> None:
+    rows = [{"run_id": f"r{i}", "task": "k_a", "key": "args", "value": "N=8"} for i in range(7)]
+    rows += [{"run_id": f"r{i}", "task": "k_a", "key": "kernel", "value": "gemm"} for i in range(8)]
+    rows += [{"run_id": "r7", "task": "k_a", "key": "limit", "value": "-4.0"}, {"run_id": "r7", "task": "k_b", "key": "args", "value": "N=8"},
+             {"run_id": "r0", "task": "k_b", "key": "args", "value": "N=8"}]
+    (clash,) = analysis.field_clashes(rows)
+    assert clash["task"] == "k_a" and [s["runs"] for s in clash["sets"]] == [[f"r{i}" for i in range(7)], ["r7"]]
+    assert analysis.clash_text(clash, {"r7": "b@x"}) == (
+        'task k_a ran with 2 sets of fields: args="N=8" limit unset in r0, r1, r2, r3, r4 and 2 more; args unset limit="-4.0" in b@x')
