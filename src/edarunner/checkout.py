@@ -143,7 +143,8 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     base = source.split("-dirty-")[0]
     nested = nested_heads(project, tree)
     excludes = [a for e in [".git", *project.sync.exclude] for a in ("--exclude", e)]
-    cmd = ["rsync", "-a", *excludes, f"{tree}/", f"{path}/"]
+    # An edit of the same size, made in the second the clone wrote the file, passes rsync's size and mtime check.
+    cmd = ["rsync", "-a", "--checksum", *excludes, f"{tree}/", f"{path}/"]
     fresh = not (path / ".git").exists()
     if fresh and not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,14 +155,17 @@ def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
     if dry_run:
         print(f"dry: {' '.join(cmd)}")
         return CheckoutResult(path, source, nested, True)
+    # rsync adds and changes files; each file the diff deletes goes first, so a file of the tree can replace its
+    # directory. A file that `git rm --cached` left in the tree stays.
+    for sub in ["", *nested]:
+        diff = ["--no-optional-locks", "diff", "--name-only", "--no-renames", "--diff-filter=D", "-z", "HEAD"]
+        for rel in runid.git(*diff, cwd=tree / sub).split("\0"):
+            dst = path / sub / rel
+            if rel and not os.path.lexists(tree / sub / rel) and (dst.is_symlink() or dst.is_file()):
+                dst.unlink()
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     if r.returncode:
         raise CheckoutError(f"{' '.join(cmd)}: {r.stdout.strip()}")
-    # rsync adds and changes files; a file the tree deleted goes here, one path at a time.
-    for sub in ["", *nested]:
-        for rel in runid.git("ls-files", "--deleted", "-z", cwd=tree / sub).split("\0"):
-            if rel and (path / sub / rel).is_file():
-                (path / sub / rel).unlink()
     meta = {
         "source": source,
         "base": base,
