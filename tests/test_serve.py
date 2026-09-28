@@ -161,8 +161,12 @@ def test_the_unit_runs_a_pinned_copy_of_a_checkout(two, capsys, monkeypatch) -> 
     exe = next(ln for ln in out.splitlines() if ln.startswith("ExecStart=")).split("=", 1)[1]
     assert exe.endswith("/edr serve") and not exe.startswith(str(repo)) and f"of {repo}" in out
     monkeypatch.setattr(serve.importlib.metadata, "distribution", lambda name: type("D", (), {"read_text": lambda s, f: None})())
-    cmd, exe, what = serve.pinned()
-    assert cmd == [] and what.startswith("edarunner ")
+    monkeypatch.setattr(serve.shutil, "which", lambda name: "/checkout/.venv/bin/edr")
+    monkeypatch.setattr(serve.sys, "argv", ["/home/me/.local/bin/edr", "serve", "--unit"])
+    cmd, exe, what = serve.pinned()  # the installed copy that runs, not the checkout first on PATH
+    assert cmd == [] and exe == "/home/me/.local/bin/edr" and what.startswith("edarunner ")
+    monkeypatch.setattr(serve.sys, "argv", ["/x/cli.py"])
+    assert serve.pinned()[1] == "/checkout/.venv/bin/edr"
 
 
 def test_dry_run_lists_what_the_supervisor_would_do(two, capsys) -> None:

@@ -267,7 +267,8 @@ def pinned() -> tuple[list[str], str, str]:
     except importlib.metadata.PackageNotFoundError:
         url = {}
     if not (url.get("dir_info") or {}).get("editable"):
-        exe = shutil.which("edr") or os.path.abspath(sys.argv[0])
+        # The edr that runs now: the first edr on PATH may be a checkout.
+        exe = os.path.abspath(sys.argv[0]) if Path(sys.argv[0]).name == "edr" else shutil.which("edr") or sys.argv[0]
         return [], exe, f"edarunner {__version__} in {Path(exe).parent}"
     repo = url["url"].removeprefix("file://")
     commit = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
