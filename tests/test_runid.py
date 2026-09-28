@@ -2,6 +2,7 @@
 to tmp_path."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -141,11 +142,46 @@ def test_the_spec_records_the_nested_commits_of_the_checkout(project, tmp_path):
     assert plans[0].spec["record"]["nested"] == a.nested and not spec.exists()
 
 
-def test_snapshot_drops_a_file_the_tree_deleted(project):
+def test_snapshot_copies_a_same_size_edit_made_in_the_second_of_the_clone(project, monkeypatch):
+    # The edit is 0.2 s into a second and the checkout of the clone 0.7 s; rsync compares whole seconds.
+    edit, checked_out = 1_700_000_000_200_000_000, 1_700_000_000_700_000_000
     repo = project.source.repo
-    (repo / "README").unlink()
+    edited = {"README": "demO\n", "sub/secret.txt": "43\n"}
+    for rel, text in edited.items():
+        (repo / rel).write_text(text)
+        os.utime(repo / rel, ns=(edit, edit))
+    clone = checkout._clone
+
+    def clone_in_the_same_second(src, dst, commit, dry_run):
+        clone(src, dst, commit, dry_run)
+        for f in (dst / "README", dst / "secret.txt"):
+            if f.exists():
+                os.utime(f, ns=(checked_out, checked_out))
+
+    monkeypatch.setattr(checkout, "_clone", clone_in_the_same_second)
     a = checkout.checkout(project, dirty_dir=repo)
-    assert not (a.path / "README").exists() and (a.path / "flow").is_dir()
+    assert {rel: (a.path / rel).read_text() for rel in edited} == edited
+
+
+def test_snapshot_drops_every_file_the_diff_deletes(project):
+    repo = project.source.repo
+    (repo / "lib").symlink_to("flow")
+    (repo / "doc").mkdir()
+    (repo / "doc" / "a.txt").write_text("a\n")
+    git("add", "lib", "doc", cwd=repo)
+    git("commit", "-q", "-m", "link and doc", cwd=repo)
+    (repo / "README").unlink()
+    (repo / "lib").unlink()
+    git("rm", "-q", "flow/seats.sh", cwd=repo)
+    git("mv", "flow/kernel.sh", "flow/moved.sh", cwd=repo)
+    git("rm", "-q", "--cached", "flow/flow.sh", cwd=repo)
+    (repo / "sub" / "secret.txt").unlink()
+    shutil.rmtree(repo / "doc")
+    (repo / "doc").write_text("a file now\n")
+    a = checkout.checkout(project, dirty_dir=repo)
+    assert not [p for p in ("README", "lib", "flow/seats.sh", "flow/kernel.sh", "sub/secret.txt") if os.path.lexists(a.path / p)]
+    assert (a.path / "flow" / "moved.sh").is_file() and (a.path / "flow" / "flow.sh").is_file()
+    assert (a.path / "doc").read_text() == "a file now\n"
     assert "D README" in [ln.strip() for ln in git("status", "--porcelain", cwd=a.path).splitlines()]
 
 
