@@ -19,7 +19,7 @@ lists the keys.
 
 | Channel | Alerts | Buttons | Board | Commands |
 |---|---|---|---|---|
-| Telegram | one message per alert, edited in place | Stop and +6h, +12h, +24h; Stop and Free space on a full host | one pinned message | yes |
+| Telegram | one message per alert, edited in place | Stop and +6h, +12h, +24h; Stop and Free space on a full host; Continue on a run that ended with stages left | one pinned message | yes |
 | ntfy | one push per alert, priority by kind | a copy button and a line per command | on request | no |
 | mail | one mail per alert | a line per command | on request | no |
 
@@ -35,7 +35,7 @@ other message is `<project>: <kind>`.
 
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
-| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, and one on a full host Stop and Free space | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
+| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed`, `stopped` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, one on a full host Stop and Free space, and a run that ended `OVER_BUDGET` or `STOPPED` with stages left Continue | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
 | alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
@@ -132,11 +132,11 @@ argv list from the site file or the user file, and every argument from
 the phone must match its allowlist regex in full. The bot never kills a
 process, and never runs `launch` or `rm`. `/stop` and the Stop button
 write the `after-task` stop file, `/keep` and the +6h, +12h and +24h
-buttons write the keep file, and the Free space button runs
-`edr retire --host <host> --prune <names>`, each through the same code
-as the command line. Every action goes into the events of its project
-with the actor `telegram`, and a refusal goes where a `rejected` event
-goes.
+buttons write the keep file, the Free space button runs
+`edr retire --host <host> --prune <names>`, and the Continue button runs
+`edr continue <handle>`, each through the same code as the command
+line. Every action goes into the events of its project with the actor
+`telegram`, and a refusal goes where a `rejected` event goes.
 
 ### Replies on the phone
 
@@ -171,26 +171,32 @@ four parts:
 - what to do: the command to run next in monospace, and what edarunner
   does by itself.
 
-[What each alert says](#what-each-alert-says) shows every kind. Only
-the alert of a run that is still live carries buttons:
+[What each alert says](#what-each-alert-says) shows every kind. The
+alert of a live run carries the buttons that stop it or give it time,
+and the alert of a run that ended with stages left carries Continue:
 
 | Alert | Buttons |
 |---|---|
-| `hung`, `looping`, `over_budget`, `superseded` | Stop, +6h, +12h, +24h |
+| `hung`, `looping`, `over_budget`, `superseded`, while the run lives | Stop, +6h, +12h, +24h |
 | `host_full` | Stop, and Free space when the project declares prune targets |
+| `over_budget` or `stopped` of a run that ended with stages left on its tree | Continue |
 
 | Button | Action |
 |---|---|
 | Stop | asks once more, then `edr stop <handle> --after-task` |
 | +6h, +12h, +24h | `edr keep <handle> --hours 6`, 12 or 24: that many more hours on the budget of the running stage or task, and for as long the watcher neither kills the run as `hung` nor stops it as `superseded` |
-| Free space | asks once more, then `edr retire --host <host> --prune <names>` with every prune name of the project: it removes the prune targets of the finished runs of the project on the full host |
+| Free space | asks once more, then `edr retire --host <host> --prune <names>` with every prune name of the project: it removes the prune targets of the finished runs of the project on the full host, except those of a run whose tree has stages left |
+| Continue | asks once more, then `edr continue <handle>`: it runs the stages left on the tree of the run as one new run, on the same host |
 
 A keep never holds off the stop of a full host. A full scratch disk
 blocks every other user of the host, so after `grace_s` the watcher
 stops the newest run there unless the disk gets back above the floor.
 An `over_budget` alert of a stage with `kill = true` gets no buttons,
-since the driver has sent `SIGTERM` to the stage already. Each alert
-says in one line what its buttons do.
+since the driver has sent `SIGTERM` to the stage already. Such a stage
+did not end with exit 0, so its run gets no Continue either: the stage
+would start over, and `edr continue` needs `--stage` and a checkpoint
+with `--from` for it. Each alert says in one line what its buttons do;
+the line of Continue names the stages, the host and the tree.
 
 The `callback_data` of a button names the action and the project, such
 as `keep6:demo`, and the run is the one of the alert: the watcher that
@@ -200,10 +206,10 @@ bot answers every press, appends the result to the alert text, and
 keeps the buttons. Each press records one event in the database of the
 project, the event of that action, with the actor `telegram`.
 
-Stop and Free space act only on a second tap. The first tap adds a
-question to the alert, such as `Stop b_nodw@demo after its current
-task?`, and shows two buttons, `Yes, stop` and `No`. `No` restores the
-buttons of the alert. A question older than 10 minutes is stale: a tap
+Stop, Free space and Continue act only on a second tap. The first tap
+adds a question to the alert, such as `Stop b_nodw@demo after its
+current task?`, and shows two buttons, `Yes, stop` and `No`. `No`
+restores the buttons of the alert. A question older than 10 minutes is stale: a tap
 on its yes then restores the buttons and does nothing. The bot keeps
 each open question on disk, so it survives a restart.
 
@@ -546,6 +552,26 @@ edr stop b_nodw@demo --why over-budget
 [Stop]  [+6h]  [+12h]  [+24h]
 ```
 
+When the stage has run to its end, the run ends `OVER_BUDGET` and the
+same message changes. The buttons of the live run go, and a run whose
+tree has stages left gets Continue:
+
+```
+🔴 demo: over budget in b_nodw@demo
+Stage synth went past its budget of 1 h and 1 GB. The run ended OVER_BUDGET. It did not run pnr.
+
+stage: synth, step 3 elaborate
+host: hostA
+
+Information: elaborating top
+
+Run the stages left on the same tree:
+edr continue b_nodw@demo
+Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/20260926_1200_b_nodw_demo_DW0_gabc1234. On Telegram it asks once more.
+
+[Continue]
+```
+
 `host_full`: the free scratch of a host is below its floor, `host_free_min_gb` of the site or of the host.
 
 ```
@@ -559,7 +585,7 @@ Information: elaborating top
 
 Free scratch on the host, or stop this run:
 edr stop b_nodw@demo --after-task --why host-full
-Stop ends the run after its current task, and Free space removes the prune targets netlist of the finished runs of demo on hostA. On Telegram both ask once more.
+Stop ends the run after its current task, and Free space removes the prune targets netlist of the finished runs of demo on hostA whose trees have no stage left. On Telegram both ask once more.
 
 [Stop]  [Free space]
 ```
@@ -638,6 +664,27 @@ Information: elaborating top
 
 See the last stage and the log tail:
 edr status b_nodw@demo
+```
+
+`stopped`: a stop file ended the run, after `edr stop --after-task` or
+the Stop button, or after the stop of a `superseded` run. A run that
+stopped at the end of a stage with stages left gets Continue; any other
+gets the command that shows its last stage and log tail.
+
+```
+⚫ demo: stopped run b_nodw@demo
+A stop ended the run in stage synth. It did not run pnr.
+
+stage: synth, step 3 elaborate
+host: hostA
+
+Information: elaborating top
+
+Run the stages left on the same tree:
+edr continue b_nodw@demo
+Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/20260926_1200_b_nodw_demo_DW0_gabc1234. On Telegram it asks once more.
+
+[Continue]
 ```
 
 `orphan`: a tool process of yours that no live run owns. The watcher

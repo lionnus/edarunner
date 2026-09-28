@@ -82,7 +82,7 @@ STATES = {
     "done": State("the run ended `done`", "none"),
     "incomplete": State("the run ended `INCOMPLETE`: a task failed or was skipped", "none", alert=True),
     "failed": State("the run ended `FAILED`", "none", alert=True),
-    "stopped": State("a stop file or `edr stop` ended the run, or `edr stop` marked a queued run", "none"),
+    "stopped": State("a stop file or `edr stop` ended the run, or `edr stop` marked a queued run", "none", alert=True),
     "killed": State("a signal ended the run", "none", alert=True),
     "abandoned": State("`edr retire` took a live run", "none"),
     "retired": State("`edr retire` took the run", "none"),
@@ -228,8 +228,10 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     if state in _NOTIFY:
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
+            ended = state in ("over_budget", "stopped") and not board.is_live(run)
+            left, why = launch.stages_left(project, db, run) if ended else ([], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now)
+            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left)
             ids = [n.send(alert) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:

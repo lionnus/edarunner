@@ -380,7 +380,8 @@ a stage of the job uses `{overrides}` in `cmd`, `resume` or `prepare`. They do n
 flow's own variables, so a key the flow ignores passes.
 
 A job with `reuse` runs on the host and the tree of the reused run, and takes its build tag and
-`{tree_id}`; a glob in `label` is an error. With `restore`, the job takes the source tag, the
+`{tree_id}`; a glob in `label` is an error. Its stages need not use `{overrides}`, since the
+stages of the reused run did. With `restore`, the job takes the source tag, the
 build tag and `{tree_id}` of the reused run but is placed like a new job, so it runs after the
 tree was retired; `docs/guides/cleanup.md` shows the rerun. A task group in a job without `tasks` is a
 plan problem.

@@ -1,4 +1,4 @@
-"""The text of the orphan, dead, hung, over_budget and held alerts, exactly as each channel sends it."""
+"""The text of the orphan, dead, hung, over_budget, stopped and held alerts, exactly as each channel sends it."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ RUN = {"run_id": "20260926_1200_b_demo_gabc1234", "label": "b", "batch": "demo",
        "step": 3, "phase": "stage:synth", "handle": "slurm:4711"}
 HB = {"host": "hostA", "stage": "synth", "step": 3, "step_name": "elaborate", "driver_pid": 4711, "updated": NOW - 3000,
       "phase": "stage:synth", "last_log": "Information: elaborating top\n", "over_budget": "synth"}
+ENDED = {**RUN, "phase": "OVER_BUDGET:synth", "root": "/scratch/user/edr/demo/b"}
 ORPHAN = {"key": "orphan:hostA:4711", "host": "hostA", "pid": 4711, "label": "fc_shell", "etimes": 12000,
           "cwd": "/home/me/work", "phase": "fc_shell -f /home/me/work/run.tcl -x " + "y" * 120}
 ALERTS = {
@@ -33,6 +34,10 @@ ALERTS = {
     "dead": alerts.run_alert(PROJECT, RUN, "dead", ["heartbeat older than 2700 s, driver 4711 gone on hostA"], HB, NOW),
     "hung": alerts.run_alert(PROJECT, RUN, "hung", ["hung: no progress since 14.01 03:00"], HB, NOW),
     "over_budget": alerts.run_alert(PROJECT, RUN, "over_budget", ["over_budget: stage synth"], HB, NOW),
+    "over_budget, ended": alerts.run_alert(PROJECT, ENDED, "over_budget", [], {**HB, "phase": "OVER_BUDGET:synth", "exit": 9},
+                                           NOW, ["pnr", "export"]),
+    "stopped": alerts.run_alert(PROJECT, {**ENDED, "phase": "STOPPED"}, "stopped", [], {**HB, "phase": "STOPPED", "exit": 10},
+                                NOW, ["pnr"]),
     "held": alerts.run_alert(PROJECT, RUN, "held", ["held by the scheduler"], {}, NOW),
 }
 
@@ -202,6 +207,58 @@ EXPECTED = {
         '+12h: edr keep b@demo --hours 12\n'
         '+24h: edr keep b@demo --hours 24\n',
     ),
+    'over_budget, ended': (
+        '🔴 <b>demo: over budget in</b> <code>b@demo</code>\n'
+        'Stage synth went past its budget of 1 h and 1 GB. The run ended OVER_BUDGET. It did not run pnr and export.\n'
+        '\n'
+        'stage: synth, step 3 elaborate\n'
+        'host: hostA\n'
+        '\n'
+        '<pre>Information: elaborating top</pre>\n'
+        '\n'
+        'Run the stages left on the same tree:\n'
+        '<code>edr continue b@demo</code>\n'
+        'Continue runs pnr and export as one new run on hostA, in the tree /scratch/user/edr/demo/b. On Telegram it asks once more.',
+        '🔴 demo: over budget in b@demo\n'
+        'Stage synth went past its budget of 1 h and 1 GB. The run ended OVER_BUDGET. It did not run pnr and export.\n'
+        '\n'
+        'stage: synth, step 3 elaborate\n'
+        'host: hostA\n'
+        '\n'
+        '    Information: elaborating top\n'
+        '\n'
+        'Run the stages left on the same tree:\n'
+        '    edr continue b@demo\n'
+        'Continue runs pnr and export as one new run on hostA, in the tree /scratch/user/edr/demo/b. On Telegram it asks once more.\n'
+        '\n'
+        'Continue: edr continue b@demo\n',
+    ),
+    'stopped': (
+        '⚫ <b>demo: stopped run</b> <code>b@demo</code>\n'
+        'A stop ended the run in stage synth. It did not run pnr.\n'
+        '\n'
+        'stage: synth, step 3 elaborate\n'
+        'host: hostA\n'
+        '\n'
+        '<pre>Information: elaborating top</pre>\n'
+        '\n'
+        'Run the stages left on the same tree:\n'
+        '<code>edr continue b@demo</code>\n'
+        'Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/b. On Telegram it asks once more.',
+        '⚫ demo: stopped run b@demo\n'
+        'A stop ended the run in stage synth. It did not run pnr.\n'
+        '\n'
+        'stage: synth, step 3 elaborate\n'
+        'host: hostA\n'
+        '\n'
+        '    Information: elaborating top\n'
+        '\n'
+        'Run the stages left on the same tree:\n'
+        '    edr continue b@demo\n'
+        'Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/b. On Telegram it asks once more.\n'
+        '\n'
+        'Continue: edr continue b@demo\n',
+    ),
     'held': (
         '🟠 <b>demo: scheduler holds</b> <code>b@demo</code>\n'
         'The scheduler holds the job, and it starts only after someone releases it.\n'
@@ -234,7 +291,7 @@ def test_an_alert_stays_under_the_message_limit(tmp_path, monkeypatch):
     assert len(telegram(a, tmp_path)) <= alerts.LIMIT + 2 and len(ntfy(a, monkeypatch)) <= alerts.LIMIT + 100
 
 
-def test_buttons_only_on_a_live_run_and_free_space_only_with_prune_targets():
+def test_which_alert_gets_which_buttons():
     hung = alerts.run_alert(PROJECT, RUN, "hung", ["hung: no progress"], HB, NOW)
     assert [b[1] for b in hung.buttons] == ["stop:demo", "keep6:demo", "keep12:demo", "keep24:demo"]
     full = alerts.run_alert(PROJECT, RUN, "host_full", ["host_full: hostA below 1 GB free"], HB, NOW)
@@ -248,6 +305,10 @@ def test_buttons_only_on_a_live_run_and_free_space_only_with_prune_targets():
     for project, state, hb in ((PROJECT, "over_budget", {**HB, "phase": "OVER_BUDGET:synth", "exit": 9}),
                                (killing, "over_budget", HB), (PROJECT, "dead", HB), (PROJECT, "failed", {"phase": "FAILED:synth"})):
         assert alerts.run_alert(project, RUN, state, [], hb, NOW).buttons == [], state
+    assert [(b[0], b[1]) for b in ALERTS["over_budget, ended"].buttons] == [("Continue", "continue:demo")]
+    assert [(b[0], b[1]) for b in ALERTS["stopped"].buttons] == [("Continue", "continue:demo")]
+    assert alerts.run_alert(PROJECT, ENDED, "stopped", [], {**HB, "phase": "STOPPED"}, NOW).todo == [
+        ("See the last stage and the log tail:", "edr status b@demo")]
 
 
 def test_an_alert_shows_the_last_four_log_lines_cut_to_a_phone():

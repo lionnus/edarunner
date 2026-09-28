@@ -51,6 +51,22 @@ def beat(root: Path, run_id: str, **fields) -> None:
     path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
 
 
+DEMO_STAGES = ("synth", "pnr", "export", "power")
+
+
+def ran(demo: Path, run_id: str, phase: str, stages: dict[str, tuple[str, int | None]], names: tuple[str, ...] = DEMO_STAGES,
+        t0: int = 100, tree: str = "") -> None:
+    """A seeded run launched with the stages `names`, whose heartbeat has ended `stages` as (status, exit); `tree` is
+    the root of the run when it works on the tree of another."""
+    (bdir(demo) / f"{run_id}.spec.json").write_text(json.dumps({"stages": [{"name": n} for n in names]}))
+    path = bdir(demo) / f"{run_id}.json"
+    hb = json.loads(path.read_text())
+    hb.update(phase=phase, stage=list(stages)[-1], root=tree or hb["root"], stages={
+        n: {"status": s, "attempt": 1, "started": t0 + i, "ended": t0 + i + 1, "exit": e} for i, (n, (s, e)) in
+        enumerate(stages.items())})
+    path.write_text(json.dumps(hb))
+
+
 # init and check
 
 
@@ -638,7 +654,7 @@ def test_hosts_show_the_room_and_your_runs_where_a_run_can_start_first(demo: Pat
 def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     with_vars(demo, a)
-    assert edr(capsys, "continue", "a@demo")[0] == 1
+    assert edr(capsys, "continue", "a@demo")[0] == 2  # a spec without stages leaves none
     assert edr(capsys, "continue", "a@demo", "--stage", "nope")[0] == 1
     code, _, err = edr(capsys, "continue", "a@demo", "--stage", "export", "--on", "local", "--from", "cts", "--dry-run")
     assert code == 1 and "no resume" in err  # export has no resume command
@@ -658,6 +674,106 @@ def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
     assert code == 3
     with Database(demo / "data" / "edr.db") as db:
         assert [e["kind"] for e in db.events()] == ["collect", "collect"]
+
+
+def stages_of(out: str) -> tuple[str, list[str]]:
+    data = json.loads(out)["data"]
+    return data["run_id"], [s["name"] for s in data["spec"]["stages"]]
+
+
+def test_continue_without_stage_runs_what_the_tree_has_left(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    b = seed(demo, "b_nodw", "STOPPED")
+    ran(demo, b, "STOPPED", {"synth": ("done", 0)}, names=("synth", "pnr"))
+    edr(capsys, "status")
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--dry-run")
+    run_id, stages = stages_of(out)
+    assert code == 0 and stages == ["export", "power"] and re.fullmatch(r"\d{8}_\d{4}_a\.export-power_demo_gabc1234", run_id)
+    assert json.loads(out)["data"]["spec"]["start_at"] == {"stage": "export", "checkpoint": None}
+    code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
+    assert code == 0 and stages_of(out)[1] == ["pnr"] and "_b_nodw.pnr_demo_DW0_g" in stages_of(out)[0]
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "power", "export", "--dry-run")
+    run_id, stages = stages_of(out)
+    assert code == 0 and stages == ["power", "export"] and "_a.power-export_demo_g" in run_id
+
+
+def test_continue_follows_the_tree_across_its_runs(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    root = json.loads((bdir(demo) / f"{a}.json").read_text())["root"]
+    x = seed(demo, "a.export-power", "stage:export", date="20260926_1300")
+    ran(demo, x, "stage:export", {"export": ("running", None)}, names=("export", "power"), t0=200, tree=root)
+    edr(capsys, "status")
+    code, _, err = edr(capsys, "continue", "a@demo")
+    assert code == 1 and "a.export-power@demo on the same tree has not ended" in err
+    ran(demo, x, "OVER_BUDGET:export", {"export": ("over_budget", 0)}, names=("export", "power"), t0=200)
+    edr(capsys, "status")
+    # Both runs of the tree leave power; the second takes the tasks of the job a through its label.
+    for handle, label in (("a@demo", "a.power"), ("a.export-power@demo", "a.export-power.power")):
+        code, out, _ = edr(capsys, "--json", "continue", handle, "--dry-run")
+        data = json.loads(out)["data"]
+        assert code == 0 and data["root"] == root and f"_{label}_demo_g" in data["run_id"]
+        assert [(s["name"], [t["id"] for t in s["tasks"]]) for s in data["spec"]["stages"]] == [("power", ["k_small", "k_big"])]
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "export", "power", "--dry-run")
+    assert code == 0 and "_a.export-power.2_demo_g" in stages_of(out)[0]
+
+
+def test_continue_without_stage_refuses_a_stage_that_did_not_end_with_exit_0(demo: Path, capsys) -> None:
+    c = seed(demo, "c", "FAILED:pnr")
+    ran(demo, c, "FAILED:pnr", {"synth": ("done", 0), "pnr": ("failed", 1)})
+    d = seed(demo, "d", "FAILED:export")
+    ran(demo, d, "FAILED:export", {"synth": ("done", 0), "pnr": ("done", 0), "export": ("failed", 2)})
+    e = seed(demo, "e", "done")
+    ran(demo, e, "done", {n: ("done", 0) for n in DEMO_STAGES})
+    edr(capsys, "status")
+    code, _, err = edr(capsys, "continue", "c@demo", "--dry-run")
+    assert code == 1 and "c@demo: stage pnr did not end with exit 0 (failed, exit 1); name the stages with --stage, " \
+                         "and a checkpoint with --from" in err
+    code, _, err = edr(capsys, "continue", "d@demo", "--dry-run")
+    assert code == 1 and err.rstrip().endswith("stage export did not end with exit 0 (failed, exit 2); name the stages "
+                                               "with --stage")  # export has no resume command
+    code, out, _ = edr(capsys, "continue", "e@demo")
+    assert code == 2 and out == "e@demo: no stage left on its tree\n"
+    with Database(demo / "data" / "edr.db") as db:
+        assert db.events() == []
+
+
+def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monkeypatch) -> None:
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    edr(capsys, "status")
+    submitted = []
+    monkeypatch.setattr(launch, "submit", lambda *args: submitted.append(args[3]))
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    root = json.loads((bdir(demo) / f"{a}.json").read_text())["root"]
+    note = acts.continue_run("a@demo", "telegram")
+    assert note == f"{submitted[0]}: export, power on local {root}" and "_a.export-power_" in submitted[0]
+    with pytest.raises(Refuse, match="a.export-power@demo on the same tree has not ended"):
+        acts.continue_run("a@demo", "telegram")  # a second tap starts no second run on the tree
+    with Database(demo / "data" / "edr.db") as db:
+        assert [(e["actor"], e["run_id"], e["kind"], e["text"]) for e in db.events()] == [
+            ("telegram", submitted[0], "continue", f"export power on {a}")]
+    assert len(submitted) == 1
+
+
+def test_a_host_prune_skips_a_tree_with_stages_left(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    edr(capsys, "status")
+    roots = {a: Path(json.loads((bdir(demo) / f"{a}.json").read_text())["root"])}
+    code, out, _ = edr(capsys, "retire", "--host", "local", "--prune", "netlist", "--why", "full")
+    assert code == 2 and out == (f"{a}: skipped, stages left on its tree: export, power\n"
+                                 "no finished run with a tree on local and no stage left\n")
+    d = seed(demo, "d", "done")
+    ran(demo, d, "done", {n: ("done", 0) for n in DEMO_STAGES})
+    edr(capsys, "status")
+    roots[d] = Path(json.loads((bdir(demo) / f"{d}.json").read_text())["root"])
+    code, out, _ = edr(capsys, "retire", "--host", "local", "--prune", "netlist", "--why", "full")
+    assert code == 0 and f"{a}: skipped" in out and (roots[a] / "out").is_dir() and not (roots[d] / "out").exists()
+    code, out, _ = edr(capsys, "retire", "a@demo", "--prune", "netlist", "--why", "x", "--dry-run")
+    assert code == 0 and out.startswith(f"{a}: stages left on its tree: export, power; they may need what the prune "
+                                        f"removes\n{a}: rm -rf {roots[a]}/out on local (dry)")
 
 
 def test_watch_check_dry_and_once(demo: Path, capsys) -> None:

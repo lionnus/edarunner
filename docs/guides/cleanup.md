@@ -51,7 +51,9 @@ prune = { lib = ["flow/runs/{tree_id}/out/library"] }
 
 This frees the space of a large library or build directory while the
 reports and the checkpoints stay, so `edr continue` can still build on
-the tree.
+the tree. When the tree has stages left, the ones `edr continue` would
+run, `retire` prints them above the `rm` lines, since they may need what
+the prune removes.
 
 ## Free a full host
 
@@ -64,8 +66,12 @@ edr retire --host hostA --prune lib --why "hostA full"
 
 It takes every run on `hostA` that has ended, has a tree and is not
 retired, and removes the paths of each `--prune` name; several names go
-apart by commas. The live runs keep their trees. The Free space button
-of a `host_full` alert runs this command with every prune name of the
+apart by commas. The live runs keep their trees. A run whose tree has
+stages left keeps its files too, and `retire` prints a `skipped` line
+for it: a run that ended `OVER_BUDGET` or `STOPPED` before its export
+stage would lose the library that export needs. Prune such a run by its
+handle when you no longer want those stages. The Free space button of a
+`host_full` alert runs this command with every prune name of the
 project, after a second tap.
 
 ## Retire a batch

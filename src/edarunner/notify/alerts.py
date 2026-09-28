@@ -36,7 +36,10 @@ BUTTONS = {
     "keep12": ("+12h", "edr keep {handle} --hours 12", "the same for 12 hours"),
     "keep24": ("+24h", "edr keep {handle} --hours 24", "the same for 24 hours"),
     "free": ("Free space", "edr retire --host {host} --prune {prune} --why host-full",
-             "asks once more, then removes every prune target of the finished runs of the project on the full host"),
+             "asks once more, then removes the prune targets of the finished runs of the project on the full host; a "
+             "run whose tree has stages left keeps them"),
+    "continue": ("Continue", "edr continue {handle}", "asks once more, then runs the stages the tree of the run has "
+                                                     "left as one new run on that tree"),
 }
 
 
@@ -113,14 +116,17 @@ def _after(project: Project) -> str:
     return f"{board.hm(project.limits.grace_s)} after this alert"
 
 
-def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: dict, now: float) -> Alert:
-    """The alert of a run in `state`; `reasons` are what `watch.classify` found.
+def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: dict, now: float,
+              left: list[str] | None = None) -> Alert:
+    """The alert of a run in `state`; `reasons` are what `watch.classify` found, and `left` the stages that
+    `edr continue` runs next on the tree of a run that ended.
 
-    Only the alert of a live run has buttons. A run that is `hung`, `looping`, `over_budget` or
-    `superseded` gets Stop, +6h, +12h and +24h. A run on a full host gets Stop, and Free space when
-    the project declares prune targets; a keep does not hold off the full-host stop, since a full
-    disk blocks every other user of the host. Each alert says in one line what its buttons do.
-    Mail and ntfy show each button as a command line."""
+    A live run that is `hung`, `looping`, `over_budget` or `superseded` gets Stop, +6h, +12h and +24h.
+    A live run on a full host gets Stop, and Free space when the project declares prune targets; a
+    keep does not hold off the full-host stop, since a full disk blocks every other user of the
+    host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages left on its
+    tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show each
+    button as a command line."""
     h, lim = board.handle(run), project.limits
     host = str(hb.get("host") or run.get("host") or "-")
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
@@ -206,6 +212,17 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         by = hb.get("killed_by") or run.get("killed_by")
         a.about = "A signal ended the run" + (f" ({by})" if by else "") + ", so its last stage did not finish."
         a.todo = [status]
+    elif state == "stopped":
+        a.title = "stopped run"
+        a.about = f"A stop ended the run in stage {hb.get('stage') or run.get('stage') or '-'}."
+        a.todo = [status]
+    if left:
+        stages, root = board.join(left), str(hb.get("root") or run.get("root") or "-")
+        a.about += f" It did not run {stages}."
+        a.todo = [("Run the stages left on the same tree:", f"edr continue {h}"),
+                  (f"Continue runs {stages} as one new run on {host}, in the tree {root}. On Telegram it asks once "
+                   "more.", None)]
+        a.buttons = [button("continue", project.project, handle=h)]
     if board.is_live(hb) and more:
         a.buttons = [button(x, project.project, handle=h, why=state) for x in ("stop", "keep6", "keep12", "keep24")]
         a.todo.append((KEEP_LINE, None))
@@ -216,7 +233,8 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
             a.buttons.append(button("free", project.project, host=host, prune=",".join(prune)))
         stop = "Stop ends the run after its current task"
         a.todo.append((f"{stop}, and Free space removes the prune targets {', '.join(prune)} of the finished runs of "
-                       f"{project.project} on {host}. On Telegram both ask once more." if prune else
+                       f"{project.project} on {host} whose trees have no stage left. On Telegram both ask once more."
+                       if prune else
                        f"{stop}; on Telegram it asks once more.", None))
     return a
 

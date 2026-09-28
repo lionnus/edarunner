@@ -211,6 +211,11 @@ def handle(row: Row) -> str:
     return f"{_s(row.get('label'))}@{_s(row.get('batch'))}"
 
 
+def join(items: list[str]) -> str:
+    """`a`, `a and b`, `a, b and c`."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+
 def cols(head: list[str], body: list[list[Any]], width: int = 40) -> str:
     """Plain columns in `width`: the first left-aligned and cut to fit, the rest right-aligned. None prints as '-'."""
     rows = [head] + [["-" if c is None else _s(c) for c in r] for r in body]

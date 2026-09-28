@@ -37,12 +37,8 @@ def _when(ts: float | None) -> str:
     return time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "an unknown time"
 
 
-def _join(items: list[str]) -> str:
-    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
-
-
 def _code(items: list[str]) -> str:
-    return _join([f"`{i}`" for i in items])
+    return board.join([f"`{i}`" for i in items])
 
 
 def _count(n: int, one: str, many: str | None = None) -> str:
@@ -156,7 +152,7 @@ def _stage_line(s: Row) -> str:
         parts.append(f"keeps {_code(s['on_request'])} for `edr continue --collect`")
     if s["tools"]:
         parts.append(f"needs {'the tool' if len(s['tools']) == 1 else 'the tools'} {_code(s['tools'])}")
-    return f"- `{s['stage']}` {_join(parts)}."
+    return f"- `{s['stage']}` {board.join(parts)}."
 
 
 def _host_line(h: Row) -> str:
@@ -189,7 +185,7 @@ def _tool_line(t: Row) -> str:
 
 
 def _states(counts: dict[str, int]) -> str:
-    return _join([f"{n} {s}" for s, n in sorted(counts.items(), key=lambda kv: board.RANK.get(kv[0], 7))])
+    return board.join([f"{n} {s}" for s, n in sorted(counts.items(), key=lambda kv: board.RANK.get(kv[0], 7))])
 
 
 def _event_line(e: Row) -> str:
@@ -257,7 +253,7 @@ def project_text(d: Row, now: float | None = None) -> str:
                 by_cmd.setdefault(r["command"], []).append(r)
             out += ["These runs need a decision; the triage proposes one command for each:", ""]
             for cmd, rs in by_cmd.items():
-                who = _join([f"`{r['handle']}` ({r['state']})" for r in rs])
+                who = board.join([f"`{r['handle']}` ({r['state']})" for r in rs])
                 out.append(f"- {who}: `{cmd}`")
             out += ["", "`docs/reference/states.md` says what to check before you run a proposed command.", ""]
     if d["events"]:
@@ -265,7 +261,7 @@ def project_text(d: Row, now: float | None = None) -> str:
                 *(_event_line(e) for e in d["events"]), ""]
     out += ["## Read more", ""]
     local = [f"`{p}`" for p in d["read"]]
-    out.append((f"This project keeps its own notes in {_join(local)}. " if local else "")
+    out.append((f"This project keeps its own notes in {board.join(local)}. " if local else "")
                + f"The edarunner documentation is at {d['docs']}, and `edr brief --run <handle>` prints the "
                  "history of one run.")
     return "\n".join(out).rstrip() + "\n"
