@@ -194,6 +194,16 @@ def orphan_alert(project: Project, o: Row) -> Alert:
           else "edarunner never kills it, since kill_orphan is off.", None)])
 
 
+def config_alert(project: Project, error: str) -> Alert:
+    """The alert of an edr.toml, tasks.toml or site file that stopped loading; the watcher keeps the last good one."""
+    return Alert(
+        "config", project.project, "config does not load", "",
+        "The watcher goes on with the last config that loaded. It reads the heartbeats, sends the alerts and "
+        "collects the results, but it resumes and launches nothing until the file loads again.",
+        [("project", str(project.root))], cut(error),
+        [("See every problem of the project files:", "edr check")])
+
+
 def watch_alert(project: Project, age: float | None, pid: object) -> Alert:
     """The alert of a watcher that has not finished a cycle for `age` seconds; None for no watch.json."""
     return Alert(

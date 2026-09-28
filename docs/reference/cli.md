@@ -827,7 +827,10 @@ docs/how-it-works.md explains the cycle.
 
 A watcher holds &lt;state_dir&gt;/watch.lock while it runs, so a second
 watcher of the project, the loop or --once, exits 2 and names the pid
-of the first.
+of the first. When edr.toml stops loading, the watcher sends one alert
+per error text and goes on with the last config that loaded: it reads
+the heartbeats, alerts and collects, but resumes and launches nothing
+until the file loads again.
 
 | Flag | Meaning |
 |---|---|

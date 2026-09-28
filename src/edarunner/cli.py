@@ -1719,7 +1719,10 @@ def _parser() -> argparse.ArgumentParser:
 
         A watcher holds <state_dir>/watch.lock while it runs, so a second
         watcher of the project, the loop or --once, exits 2 and names the pid
-        of the first.
+        of the first. When edr.toml stops loading, the watcher sends one alert
+        per error text and goes on with the last config that loaded: it reads
+        the heartbeats, alerts and collects, but resumes and launches nothing
+        until the file loads again.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
                                               "with --check, watch.json is older than three cycles",
                                 Exit.NOTHING: "another process watches the project"})

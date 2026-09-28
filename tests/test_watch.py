@@ -308,28 +308,47 @@ def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
     assert (hb["run_id"], "collect") not in env.events() and (hb["run_id"], "extract") not in env.events()
 
 
-def test_run_forever_reloads_the_project_each_cycle(env: Env, monkeypatch) -> None:
-    calls: list[str] = []
+def test_run_forever_goes_on_with_the_last_good_config(env: Env, monkeypatch) -> None:
+    calls: list = []
+    errors = iter(["", "edited mid-way", "edited mid-way", "", "edited again"])
 
     def load(root):
         calls.append("load")
-        if calls.count("load") == 2:
-            raise config.ConfigError("edited mid-way")
+        if error := next(errors):
+            raise config.ConfigError(error)
         return env.project
 
     def sleep(_s):
-        if calls.count("load") >= 3:
+        if calls.count("load") >= 5:
             raise KeyboardInterrupt
 
     monkeypatch.setattr(config, "load_project", load)
-    monkeypatch.setattr(watch, "cycle", lambda *a, **k: calls.append("cycle"))
+    monkeypatch.setattr(watch, "cycle", lambda *a, start=True, **k: calls.append(start))
     monkeypatch.setattr(watch.time, "sleep", sleep)
     env.notifier.project = None
     env.notifier.stop = lambda: None
     with pytest.raises(KeyboardInterrupt):
         watch.run_forever(env.project, env.ssh, env.db, [env.notifier])
-    assert calls == ["load", "cycle", "load", "load", "cycle"]
+    assert calls == ["load", True, "load", False, "load", False, "load", True, "load", False]
+    assert env.notifier.sent == [("config", "demo"), ("config", "demo")]
+    alert = env.notifier.alerts["demo"]
+    assert (alert.title, alert.code, alert.todo[0][1]) == ("config does not load", "edited again", "edr check")
     assert env.notifier.project is env.project
+
+
+def test_a_cycle_that_may_not_start_resumes_and_launches_nothing(env: Env, monkeypatch) -> None:
+    hb = env.heartbeat("c", age=200, step=2, step_name="elaborate")
+    (env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json").write_text(json.dumps({
+        "run_id": hb["run_id"], "driver": "/x/bin/edr_driver-0badc0de.py",
+        "stages": [{"name": "synth", "cmd": "x", "resume": "x FIRST_STAGE={checkpoint}"}]}))
+    env.db.upsert_run({"run_id": rid("q"), "batch": "demo", "label": "a", "state": "queued"})
+    launches: list = []
+    monkeypatch.setattr(launch, "launch", lambda *a, **k: launches.append(a) or [])
+    fake = FakeBackend()
+    assert env.cycle(backend=fake, start=False)[hb["run_id"]] == "dead"
+    assert fake.requests == [] and launches == [] and ("dead", hb["run_id"]) in env.notifier.sent
+    env.cycle(NOW + 1, backend=fake)
+    assert len(fake.requests) == 1 and len(launches) == 1
 
 
 def test_run_forever_once_returns_1_when_the_cycle_failed(env: Env, monkeypatch) -> None:
