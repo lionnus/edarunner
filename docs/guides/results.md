@@ -16,6 +16,7 @@ batch, every number and every action.
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
 | `parameters` | key and origin of a run | the parameters of the run as text, each with its origin; [Run identity](#run-identity) lists them |
 | `task_fields` | key of a task of a run | the fields the task ran with, as text, each with its origin; [Tasks as data](#tasks-as-data) lists them |
+| `flags` | flag of a run | run, task, check and text, rewritten at each extraction; [Parameters and checks](#parameters-and-checks) explains them |
 | `metrics` | number | run, stage, step, task, name, canonical name, value after `scale`, unit, the source file or the error of a failed row, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
@@ -97,7 +98,8 @@ the rows: in `--json` and in the `canonical` column of `metrics.csv`.
 
 The identity of a number is the source tag of its run, the diff of a
 dirty tag, the commit of each nested repository, and the parameters of
-the run. Give the tag next to every number you publish.
+the run: its vars and overrides, and the values read from its own files.
+Give the tag next to every number you publish.
 
 The source tag is the short hash of the commit that `edr checkout`
 pinned. A tree with changes gets `<hash>-dirty-<8 hex>`, where the hex
@@ -119,6 +121,7 @@ The `parameters` table holds one row per run, key and origin:
 | `spec` | `config`, `build_tag`, each override under its own name, and `vars.<name>` for each var of the job | the watcher at the first collect of the run |
 | `checkout` | `source`, and `nested.<name>` with the commit of each nested repository | the watcher at the first collect of the run |
 | `import` | `config`, `build_tag`, `source`, and each `--param KEY=VALUE` | `edr import` |
+| `extract` | every key that a `[parameters.<name>]` table reads from the run's files | each extraction: the watcher's collect, `edr extract` and `edr import`; see [Parameters and checks](#parameters-and-checks) |
 
 The watcher reads the overrides, the vars and the nested commits from the
 run's spec, which `launch` wrote, and never from the batch file. An edit
@@ -128,8 +131,117 @@ and an export carries these commands in the `record` of each run, so a
 netlist path or a clock period that the command line sets stays visible.
 `edr compare` prints the parameters that differ between the runs it
 compares; [Compare runs side by side](#compare-runs-side-by-side) shows
-the block. The fields of each task of a run belong to its identity as
-well; [Tasks as data](#tasks-as-data) describes them.
+the block. That block, compare.html and the MLflow export show one value
+per key, and a key with an `extract` row shows the value read from the
+run's files, since the run was built with it. The fields of each task of
+a run belong to its identity as well; [Tasks as data](#tasks-as-data)
+describes them.
+
+## Parameters and checks
+
+The parameters that a run declares say what it should be: the overrides
+and vars of its job, and the source tag of its checkout. What the flow
+ran with is in the run's own files: the knob line a stage writes at the
+head of its log, a JSON file of settings, or a report that names the
+commit the flow built. A `[parameters.<name>]` table reads such values,
+and the checks compare them with what the run claims to be.
+
+```toml
+# The tool's command line at the head of the stage log:
+#   set ENABLE_X 1; set LANES 8; ...
+[parameters.knobs]
+stage = "pnr"
+file = "log/pnr.log"
+regex = 'set (?P<key>\w+) (?P<value>[^;]+);'
+head_bytes = 65536
+
+# The commit that the flow built, as its build report names it.
+[parameters.source]
+stage = "pnr"
+file = "reports/build.rpt"
+regex = '^commit:\s*(\S+)'
+```
+
+A table names a stage, a file under the collected results, and one of
+three parsers:
+
+| Parser | Keys it gives |
+|---|---|
+| `regex` | the key `<name>` with group 1 of the first match; with the named groups `key` and `value`, a key for every match, and the first match of a key wins |
+| `json` | every key of a flat object at a dotted path of a JSON file; `json = ""` takes the whole file |
+| `python` | the dict that a hook returns; the hook gets the path of the file |
+
+`head_bytes` limits a `regex` to the start of the file. A stage log can
+be large, and it can hold a later command line, for example from a
+resume, while the knob line at its head is the one that built the run.
+
+Each value goes into the `parameters` table as text, with the origin
+`extract`. The watcher reads the tables at every collect, and `edr
+extract` and `edr import` at every extraction; the new values replace
+the ones from before. A table reads the files of every stage in the
+run's spec, or of every stage for a run without a heartbeat such as an
+import, as soon as the file is there, so a stage that failed or still
+runs has its parameters too. A file that does not parse gives the flag
+`parameters.<name>` with the error, and a missing file gives nothing.
+When two tables give the same key, the first table wins.
+
+Every extraction of a run then rewrites its flags. A flag is a row of
+the `flags` table: the run, a task or none, the check, and a text. Three
+checks are built in:
+
+| Check | Flags |
+|---|---|
+| `declared_vs_observed` | a key whose extracted value differs from its value under another origin, such as an override of the job or the source tag of the checkout; `1` and `1.0` count as equal |
+| `same_parameters` | two runs with different labels at one source whose extracted parameters are all equal, so one of them is not the build its label names; a run that continues another on its tree, with the same `tree_id`, is not compared with it |
+| `same_results` | two tasks of one run with equal values in every metric that `[checks] same_results` lists, so the flow ran one test under two names |
+
+`same_parameters` compares a run with every other run of its source, so
+an extraction rewrites the `same_parameters` flags of all the runs at
+that source.
+
+```toml
+[checks]
+same_results = ["window_ns", "power_w"]
+python = "hooks/checks.py:check"
+```
+
+The `python` hook holds the project's own rules. It gets the run's row,
+its parameter rows (`key`, `value`, `origin`) and its metric rows
+(`stage`, `step`, `task`, `name`, `value`, `unit`, `source_file`), and
+returns a `(task, check, text)` for each flag, with the task `""` for
+the whole run. This one flags a power window that ended at the cap of
+the simulation instead of at the end of the kernel:
+
+```python
+# hooks/checks.py
+CAP_NS = 5000.0  # the longest window the flow records
+
+
+def check(run, parameters, rows):
+    return [(m["task"], "capped_window", f"the window is the cap of {CAP_NS:g} ns")
+            for m in rows if m["name"] == "window_ns" and m["value"] == CAP_NS]
+```
+
+A hook that raises an exception gives the flag `checks.python` with the
+error, so a broken rule shows up instead of passing in silence.
+
+`edr extract` prints the flags of each run under its counts:
+
+```
+$ edr extract lanes4@sweep1
+20260902_0221_lanes4_demo_g3f9a2c1: 6 new, 0 changed, 0 unchanged, 0 failed, 0 removed, 14 parameters, 3 flags
+  flag declared_vs_observed: ENABLE_X is 1 in the run's files and 0 by spec
+  flag same_results k_big: window_ns and power_w equal those of k_small
+  flag same_results k_small: window_ns and power_w equal those of k_big
+```
+
+`edr status <handle>` shows the flags under the identity of the run,
+`edr brief` lists every flagged run with a count per check, and `edr
+brief --run <handle>` lists each flag. An export writes `flags.csv`,
+lists the flags in its manifest, and names the checks that flag a run in
+the `flags` column of `runs.csv`. A flag hides no number from any view:
+read the run's files before you use its numbers, then fix the job or the
+flow so that the next run is clean.
 
 ## Which run a command takes
 
@@ -856,16 +968,18 @@ exports/3f9a2c1/
   parameters.csv
   task_fields.csv
   instances.csv
+  flags.csv
   sources/<tag>/source.diff   the diff of each dirty source
   <label>/...                 the collected files of that run
 ```
 
 | File | Holds |
 |---|---|
-| `manifest.json` | `producer`, `created`, `schema` (3), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
-| `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended,batch,dirty,tree_id,retired`; `retired` is 1 for a run that was retired, or whose batch was |
+| `manifest.json` | `producer`, `created`, `schema` (3), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `flags` with the rows of `flags.csv`, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
+| `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended,batch,dirty,tree_id,retired,flags`; `retired` is 1 for a run that was retired, or whose batch was, and `flags` names the checks that flag the run, separated by spaces |
 | `parameters.csv` | `run_id,label,source,key,value,origin`, the rows of the `parameters` table for each exported run |
 | `task_fields.csv` | `run_id,label,source,task,key,value,origin`, the rows of the `task_fields` table for each exported run |
+| `flags.csv` | `run_id,label,source,task,check,text`, the rows of the `flags` table for each exported run; [Parameters and checks](#parameters-and-checks) explains them |
 | `sources/<tag>/source.diff` | the copy of `data/sources/<tag>/source.diff` for each dirty source |
 | `metrics.csv` | `run_id,label,config,build_tag,source,host,stage,step,task,metric,canonical,value,unit,source_file,record`; `build_tag` and `host` are those of the run, and `record` marks the [step of record](#stage-of-record) |
 | `instances.csv` | `run_id,label,source,stage,step,task,metric,part,instance,depth,value,local,cells,unit`, the rows of the `instances` table for each exported run; join it to `metrics.csv` on run, stage, step, task and metric to keep the step of record |
@@ -882,7 +996,8 @@ exports/3f9a2c1-both: 3 runs (1 not done), 1 skipped, 14 files
 ```
 
 Read `incomplete` before you use a number of the export: a run listed
-there failed, stopped or has not ended.
+there failed, stopped or has not ended. Read `flags` as well: a run listed
+there may not be the build its label names.
 
 A run's `record` holds what made it, as far as edarunner knows it: the
 host, the start and end, the edarunner version and the sha256 of the
