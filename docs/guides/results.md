@@ -60,10 +60,12 @@ same label at a clean and at a dirty source tag. Wherever edarunner takes
 one run of a label, it takes it by one rule. Among the runs of that label
 at one source tag, it takes the newest run by start time that ended
 `done`; when none ended `done`, it takes the newest run. The run id
-breaks a tie. `db.pick` holds the rule, and three places use it:
+breaks a tie. `db.pick` holds the rule, and four places use it:
 
 - the handle `label@source`, such as `base@3f9a2c1`;
 - `edr export`, which holds one run per label and source;
+- `edr coverage`, which checks a demand list against one run per label
+  and source ([Coverage of a demand list](#coverage-of-a-demand-list));
 - `reuse = { label = "base", latest = true }` in a batch file, which
   looks only at the runs of the batch's source.
 
@@ -576,3 +578,61 @@ netlist, belongs to `data/results/` on the head node, not to a snapshot.
 Leave it out of `collect`, name it under `collect_on_request`, and fetch
 it with `edr continue <handle> --collect <name>` or `edr retire --collect`
 when you need it; [cleanup.md](cleanup.md#keep-the-large-files) shows both.
+
+## Coverage of a demand list
+
+An analysis that sums over many tests, such as the energy of a model
+over its kernels, needs a run for each test. When one has none, a script
+falls back to an estimate or leaves the test out, and nothing warns.
+Write the tests that the analysis charges into a demand list, a CSV file
+with one row per test, and check it with `edr coverage`:
+
+```
+build_tag,stage,task,source
+cfg_a,bench,k_small,7c0d9e2
+cfg_a,power,k_small,3f9a2c1
+cfg_a,power,k_big,3f9a2c1
+cfg_a,power,k_wide,3f9a2c1
+```
+
+A row names a `label` or a `build_tag`, or both, a `stage` and a `task`,
+and it may pin a `source`. An empty task means the numbers of the stage
+itself, and an empty source means any source. Other columns are ignored,
+so the analysis can keep its own columns in the file.
+
+```
+$ edr coverage demand.csv
+build_tag  stage  task     source   status     runs
+───────────────────────────────────────────────────────────
+cfg_a      bench  k_small  7c0d9e2  held       rtl@7c0d9e2
+cfg_a      power  k_small  3f9a2c1  held       base@3f9a2c1
+cfg_a      power  k_big    3f9a2c1  elsewhere  base@7c0d9e2
+cfg_a      power  k_wide   3f9a2c1  missing
+2 of 4 rows held
+```
+
+For each label and source, `edr coverage` looks at one run, the one that
+`label@source` names by the rule of
+[Which run a command takes](#which-run-a-command-takes). A row gets the
+first status of this table that fits:
+
+| Status | The row |
+|---|---|
+| `held` | has a value in the run at its source |
+| `running` | has no value yet, and the run at its source has not ended |
+| `failed` | has no value, and the run at its source ended in a phase other than `done` |
+| `elsewhere` | has a value only in runs at other sources |
+| `missing` | has a value in no run |
+
+The runs column names the runs behind the status as `label@source`, with
+the phase when it is not `done`. The command exits 1 when a row is not
+held, so a Makefile rule can stop before it builds a table on a gap.
+`--json` gives each row with its status and runs.
+
+A build tag matches every run of one build: the backend runs, the runs
+that continue them, and a bench suite imported with
+`edr import --build-tag` and the same tag. One demand list by build tag
+then covers the RTL cycle counts and the energies of each test. A label
+matches that label only. A run that `edr continue` starts on a tree has
+the label `<label>.<stage>`, so a demand by label misses it and a demand
+by build tag finds it.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import csv
 import functools
 import io
 import json
@@ -36,7 +37,7 @@ from rich.text import Text
 from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, runid, serve, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
-from .db import Database, network_fs
+from .db import Database, network_fs, pick
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh, floor, probe_all
 from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
@@ -65,7 +66,7 @@ def _since(text: str) -> int:
 _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
-                            "notify", "plan"})
+                            "notify", "plan", "coverage"})
 
 
 class Ctx:
@@ -1050,6 +1051,47 @@ def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.DONE
 
 
+def cmd_coverage(c: Ctx, a: argparse.Namespace) -> int:
+    """For each row of a demand list, whether the `pick` of a label at the row's source holds a value at its stage and
+    task; else whether that run is running or failed, or a run at another source holds it."""
+    try:
+        with open(a.demand, newline="", encoding="utf-8-sig") as fh:
+            reader = csv.DictReader(fh, skipinitialspace=True)
+            demand = list(reader)
+    except OSError as e:
+        raise Refuse(f"{a.demand}: {e.strerror}") from None
+    head = reader.fieldnames or []
+    keys = [k for k in ("label", "build_tag") if k in head]
+    if not keys or not {"stage", "task"} <= set(head):
+        raise Refuse(f"{a.demand}: the header needs label or build_tag, stage and task")
+    bad = [n for n, d in enumerate(demand, 2) if not d["stage"] or not any(d[k] for k in keys)]
+    if bad or not demand:
+        raise Refuse(f"{a.demand}: " + (f"line {bad[0]} needs a stage, and a label or a build_tag" if bad else "no row"))
+    groups: dict[tuple[str, str], list[Row]] = {}
+    for r in c.db.runs():
+        groups.setdefault((r["label"], r["source"]), []).append(r)
+    picks = [pick(g) for g in groups.values()]
+    held = {(m["run_id"], m["stage"], m["task"]) for stage in {d["stage"] for d in demand}
+            for m in c.db.metrics(stage=stage) if m["value"] is not None}
+    out = []
+    for d in demand:
+        task, source = d["task"] or "", d.get("source") or ""
+        mine = [p for p in picks if all(p.get(k) == d[k] for k in keys if d[k])]
+        here = [p for p in mine if p["source"] == source or not source]
+        has = [p for p in mine if (p["run_id"], d["stage"], task) in held]
+        status, runs = next(((s, rs) for s, rs in (
+            ("held", [p for p in has if p in here]), ("running", [p for p in here if board.is_live(p)]),
+            ("failed", [p for p in here if p.get("phase") != "done"]), ("elsewhere", has)) if rs), ("missing", []))
+        out.append({**{k: d[k] or "" for k in keys}, "stage": d["stage"], "task": task, "source": source,
+                    "status": status, "runs": [{k: p.get(k) for k in ("run_id", "label", "source", "phase")} for p in runs]})
+    cols = [*keys, "stage", "task", "source", "status"]
+    body = [[*(r[k] for k in cols), ", ".join(f"{p['label']}@{p['source']}" + ("" if p["phase"] == "done" else f" {str(p['phase'])[:40]}")
+                                              for p in r["runs"])] for r in out]
+    gaps = sum(r["status"] != "held" for r in out)
+    c.emit(Group(board.table([*cols, "runs"], body), Text(f"{len(out) - gaps} of {len(out)} rows held")), out)
+    return Exit.REFUSED if gaps else Exit.DONE
+
+
 def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
     """Stop one run through the driver, or the stop file with --after-task."""
     row = c.target(a.handle)
@@ -1969,6 +2011,28 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--mlflow", metavar="DIR", help="write an MLflow tracking store in DIR instead")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")
     s.add_argument("--with-logs", dest="with_logs", action="store_true", help="also copy log/ directories and *.log files")
+    command("coverage", "whether a run holds each test of a demand list", """
+        Reads DEMAND.csv, the list of tests an analysis needs, and says for
+        each row whether a run holds it. The header names the columns label or
+        build_tag, stage and task, and optionally source; other columns are
+        ignored. A row matches the runs with its label, its build tag, or both.
+        An empty task means the numbers of the stage itself, and an empty
+        source means any source.
+
+        For each label and source, coverage takes one run, the one that
+        label@source names: the newest run by start time that ended done, else
+        the newest run. A row is held when that run at the row's source has a
+        value at the row's stage and task. Otherwise the status is the first of
+        these that fits: running when that run has not ended, failed when it
+        ended in a phase other than done, elsewhere when a run at another source
+        holds the row, and else missing. The runs column names the runs behind
+        the status as label@source, with the phase when it is not done.
+
+        A build tag matches every run of one build: the backend runs, the runs
+        that continue them, and a bench suite imported with the same build tag.
+        --json gives each row with its status and runs.
+        """, exits={Exit.REFUSED: "a row is not held, or DEMAND.csv is unreadable or incomplete"}).add_argument(
+        "demand", metavar="DEMAND.csv", help="the demand list: label or build_tag, stage, task, and an optional source")
     s = command("stop", "stop one run", """
         Stops one run through the pids the driver recorded, never through a
         session name or a process pattern. Without a flag, it sends SIGTERM to
