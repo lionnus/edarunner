@@ -178,8 +178,9 @@ appended to `log/<stage>.log` in the run tree (`Driver.spawn`). Since
 every stage has its own session and process group, a signal to a tool's
 group never reaches your shell. While the command runs, the driver runs
 the stage's `progress` command every 5 seconds and takes the first
-number it prints as the current step, so the board can say `pnr 4/13`
-inside a single tool session.
+number it prints as the step that runs now, so the board can say
+`pnr 4/13` inside a single tool session. The first time it sees a step
+number is the start time of that step in `step_runs`.
 
 A stage whose `needs.tools` names a tool with a probe waits at a gate
 first, with the phase `gate:<stage>`. The driver runs the probe, takes
@@ -275,11 +276,15 @@ does this, in order:
    holds off both for its hours (`watch._act`, `config.kept`).
 4. For every stage and task that ended, it copies `log/` and the stage's
    `collect` paths from the run tree into `data/results/<run_id>/` on
-   the head node, plus the step directories of a running stage that are
-   older than 10 minutes (`collect.py`).
-5. It reads each metric from the collected files of the stages and tasks
-   that ended `done`, and writes the rows to the database with the file
-   each number came from. It also records the run's configuration, build
+   the head node. Of a running stage with steps, it copies each numbered
+   directory under the `collect` paths below the step that runs now, as
+   soon as the step number moves on (`collect.py`).
+5. It reads each metric from the collected files of the tasks that
+   ended `done` and the stages that exited 0. From any other stage, it
+   reads the steps that the run has passed: `step_runs` holds the step
+   and a later one. It writes the rows to the database with the file each
+   number came from, and one `metrics` event per run that counts the new
+   rows and names them. It also records the run's configuration, build
    tag, source tag and overrides once (`watch.extract_run`,
    `metrics.py`).
 6. A `dead` run is resumed once, from the last step in its heartbeat,

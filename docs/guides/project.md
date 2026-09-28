@@ -63,10 +63,12 @@ budget, a retry rule or a stop of your own.
 
 A step is a point inside a stage that the flow passes, such as
 `floorplan` or `cts` inside one tool session. The `progress` command
-prints the current step number, and `steps` names the steps. With steps,
-`edr` shows the step on the board, extracts a metric per step, and can
-resume a stage from a step through `{checkpoint}` in its `resume`
-command.
+prints the number of the step that runs now, and `steps` names the
+steps. With steps, `edr` shows the step on the board, extracts a metric
+per step, and can resume a stage from a step through `{checkpoint}` in
+its `resume` command. The watcher copies and reads a step as soon as the
+run starts the next one, so the numbers of a finished step stay even
+when the stage later fails, stops or runs over its budget.
 
 A stage with `foreach = "tasks"` is a task group. Its command runs once
 per task of the job, `parallel` at a time, each in its own directory with
@@ -101,7 +103,7 @@ cmd = "make -C flow pnr RUN={tree_id} CONFIG={config} MAX_CORES={cores} {overrid
 resume = "make -C flow pnr RUN={tree_id} CONFIG={config} MAX_CORES={cores} FIRST_STAGE={checkpoint} {overrides}"
 steps = ["setup", "analyze", "elaborate", "constraints", "synth-map", "floorplan", "pg",
          "synth-logic-opto", "synth-init-opto", "synth-final-opto", "cts", "route", "route-opt"]
-progress = "ls flow/runs/{tree_id}/reports 2>/dev/null | grep -cE '^[0-9]+$'"
+progress = "find flow/runs/{tree_id}/reports -mindepth 2 -maxdepth 2 -type f 2>/dev/null | awk -F/ '$(NF-1) ~ /^[0-9]+$/ { print $(NF-1) }' | sort -n | tail -1"
 needs = { cores = 16, disk_gb = 70, tools = ["pnr"] }
 budget = { hours = 14, disk_gb = 150 }
 retry = { match = "licen[cs]e", wait_s = 900, max = 3 }
@@ -119,6 +121,15 @@ needs = { cores = 4, disk_gb = 60, tools = { sim = 1 } }
 budget = { hours = 8, disk_gb = 400, per = "task" }
 collect = ["{task_dir}/power/"]
 ```
+
+The tool creates the report directory of a step when the step starts,
+and it leaves empty directories for the steps after the last one it
+runs. `progress` therefore prints the highest numbered directory that is
+not empty. A count of the directories would name the next step: every
+step would start one step early on the board and in `step_runs`, and a
+resume would start from the wrong checkpoint. A count is right for a
+flow that creates the directory of a step as the step ends, such as
+`examples/local-demo`.
 
 A job that lists `stages = ["power"]` with `reuse` runs the kernels on
 the netlist of an earlier run, and sets `vars = { netlist_step = 11 }` to
@@ -150,8 +161,9 @@ collect = ["reports/", "logs/"]
 ## Metrics
 
 A metric names a file in the run tree and a way to read one number out
-of it. The watcher reads it once the file has been collected from a
-stage that ended `done`:
+of it. The watcher reads it once the file has been collected, from a
+task that ended `done`, a stage that exited 0, or a step that the run
+has passed:
 
 ```toml
 [metrics.area_synth_um2]
