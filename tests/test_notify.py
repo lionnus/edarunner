@@ -18,7 +18,7 @@ from helpers_telegram import FakeApi, FakeDatabase, make_project, make_site, mak
 from edarunner import cli, config
 from edarunner.config import ConfigError
 from edarunner.model import Mail, Ntfy, User
-from edarunner.notify import make_notifiers, untag
+from edarunner.notify import make_notifiers, untag, wanted
 from edarunner.notify.alerts import Alert, button
 from edarunner.notify.mail import MailNotifier
 from edarunner.notify.ntfy import NtfyNotifier
@@ -110,9 +110,12 @@ def test_mail_logs_in_with_the_password_file(tmp_path):
 
 
 def test_make_notifiers_builds_every_channel_with_a_private_secret(tmp_path):
-    user = User(path=tmp_path / "user.toml", ntfy=Ntfy(topic="t"), mail=Mail(host="h", sender="f", to=["t"]))
-    kinds = [type(n) for n in make_notifiers(user, None, PROJECT, None)]
-    assert kinds == [NtfyNotifier, MailNotifier]
+    user = User(path=tmp_path / "user.toml", ntfy=Ntfy(topic="t"), mail=Mail(host="h", sender="f", to=["t"]),
+                alerts=["done"])
+    made = make_notifiers(user, None, PROJECT, None)
+    assert [type(n) for n in made] == [NtfyNotifier, MailNotifier] and all(n.kinds == {"done"} for n in made)
+    # Every channel gets every alert; an opt-in kind goes only where the one list of the user file asks for it.
+    assert wanted(made, "dead") == wanted(made, "done") == made and wanted(made, "metrics") == []
     user.ntfy.token_file = secret(tmp_path, "t", 0o644)
     user.mail.password_file = tmp_path / "absent"
     assert make_notifiers(user, None, PROJECT, None) == []

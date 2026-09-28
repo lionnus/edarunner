@@ -73,13 +73,14 @@ def export_mlflow(project: Project, db: Database, out: Path, sources: list[str] 
                 metrics.append(Metric(f"record/{key}", *at))
         rt = analysis.runtime(project, db, r)
         ts = started or 0
+        # An open time is a lower bound, not a runtime.
         for s in rt["stages"]:
-            if s["wall_s"] is not None:
+            if s["wall_s"] is not None and not s["open"]:
                 metrics.append(Metric(_key(f"runtime_s/{s['stage']}"), float(s["wall_s"]), ts, int(s["attempt"])))
         for s in rt["steps"]:
-            if s["wall_s"] is not None:
+            if s["wall_s"] is not None and not s["open"]:
                 metrics.append(Metric("runtime_s/step", float(s["wall_s"]), ts, int(s["step"])))
-        if rt["total_s"] is not None:
+        if rt["total_s"] is not None and not rt["open"]:
             metrics.append(Metric("runtime_s/total", float(rt["total_s"]), ts, 0))
         for i in range(0, len(metrics), 900):  # log_batch takes 1000 entries at most
             client.log_batch(rid, metrics=metrics[i:i + 900],

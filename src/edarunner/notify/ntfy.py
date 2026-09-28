@@ -15,8 +15,8 @@ from edarunner.notify import Button, Notifier, alerts, button_cmds, untag
 log = logging.getLogger(__name__)
 
 # ntfy priorities: 5 urgent, 4 high, 3 default, 2 low, 1 min. An alert kind not listed is high.
-PRIORITY = {"dead": 5, "failed": 5, "killed": 5, "host_full": 5, "watch": 5, "superseded": 3, "note": 3, "digest": 2,
-            "board": 2}
+PRIORITY = {"dead": 5, "failed": 5, "killed": 5, "host_full": 5, "watch": 5, "superseded": 3, "note": 3, "done": 3,
+            "digest": 2, "board": 2, "metrics": 2}
 MAX_ACTIONS = 3  # the ntfy limit per message
 
 

@@ -21,8 +21,8 @@ from .backend import Backend, Live, make_backend, run_handle
 from .db import Database
 from .guards import Refuse
 from .hosts import HostError, Ssh
-from .model import SCHEDULERS, Project, Task
-from .notify import Notifier, alerts
+from .model import OPT_IN, SCHEDULERS, Project, Task
+from .notify import Notifier, alerts, wanted
 from .notify.telegram import format as tgfmt
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,8 @@ class State:
     where the run is or how it ended. A live run gets its state from the heartbeat and the database;
     a finished run from its phase.
     Every change of state writes an event. A state that alerts sends one alert per run and reason,
-    and a new reason edits that alert in place. A keep of N hours holds off the kill of `hung` and
+    and a new reason edits that alert in place. A run that ends `done` alerts only a user who asks
+    for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
     the stop of `superseded` for N hours; the full-host stop never waits for a keep.
     The triage proposes no retire for a run without a tree, such as one imported with `--results`,
     since a retire would only mark its row. When another run has the same label and batch, the
@@ -231,14 +232,14 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         if not (rec.get("state") is None and state == "running"):
             db.add_event("watch", run_id, state, text)
         rec.update(state=state, since=now, acted=False)
-    if state in _NOTIFY:
+    if state in _NOTIFY or state in OPT_IN:
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
             left, why = launch.stages_left(project, db, run) if ended else ([], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
             alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs())
-            ids = [n.send(alert) for n in notifiers]
+            ids = [n.send(alert) for n in wanted(notifiers, state)]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
@@ -262,17 +263,18 @@ def _parameters(run: Row, spec: dict) -> dict[str, dict[str, Any]]:
                          **{f"nested.{k}": v for k, v in nested.items()}}}
 
 
-def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> None:
+def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> str:
+    """Collect and extract one run; the text of the `metrics` event when rows arrived, else ""."""
     spec = collect.load_spec(project, run)
     if spec.get("collect") is False:  # edr track without --collect
-        return
+        return ""
     only = collect.spec_stages(spec)
     finished, running = collect.stage_state(project, hb, only)
     tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items() if e.get("phase") in ("done", "failed")}
     key = [finished, sorted(tasks), hb.get("step") if running else None, board.is_live(hb)]
     rec = progress.setdefault(run["run_id"], {})
     if rec.get("collected") == key or not (finished or tasks or running):
-        return
+        return ""
     rec["collected"] = key
     _pulse(project)
     res = collect.collect_run(project, ssh, db, run, hb, host=host)
@@ -283,8 +285,9 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     rows = extract_run(project, db, run, hb, spec, tasks)
     with db.conn:  # one commit for the rows of the run
         new = [r for r in rows if db.add_metric(r)]
-    if new:
-        db.add_event("watch", run["run_id"], "metrics", _added(new))
+    text = _added(new) if new else ""
+    if text:
+        db.add_event("watch", run["run_id"], "metrics", text)
     if not rec.get("params"):
         for origin, params in _parameters(run, spec).items():
             db.set_parameters(run["run_id"], params, origin)
@@ -292,6 +295,7 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
                                            for k, v in f.items()])
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, len(new))
+    return text
 
 
 def _added(rows: list[dict]) -> str:
@@ -497,7 +501,11 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
             continue
         db.upsert_run({"run_id": hb["run_id"], "state": state})
         actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
-        _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
+        added = _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
+        if added and (want := wanted(notifiers, "metrics")):
+            alert = alerts.metrics_alert(run, added, db.runs())
+            for n in want:
+                n.send(alert)
         if state == "dead" and start:
             _resume(project, ssh, backend, db, run, hb, progress, now)
     if dry_run:

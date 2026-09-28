@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -450,14 +452,18 @@ def test_runtime_of_one_run_and_of_a_batch(demo: Path, capsys) -> None:
                                  "ended": t0 + 900 * k})
             db.upsert_stage_run({"run_id": run, "stage": "power", "task": "k1", "status": "done",
                                  "started": t0 + 600 * k, "ended": t0 + 700 * k})
-        db.set_step_times(a, {"synth": {"1": t0 + 60, "0": t0, "2": t0 + 180}})
-    # pnr writes its steps into its log; group 1 is the time, the count starts at the stage's first step, 4.
+        # A progress command that counts report directories sees each pnr step one step early.
+        db.set_step_times(a, {"synth": {"1": t0 + 60, "0": t0, "2": t0 + 180}, "pnr": {"4": t0 + 990, "5": t0 + 1000}})
+    # pnr writes one log per step; group 1 is the time, and the directory gives the step.
     toml = demo / "edr.toml"
-    toml.write_text(toml.read_text().replace('[stages.pnr]\n', '[stages.pnr]\nstep_log = { file = "log/pnr.log", '
+    toml.write_text(toml.read_text().replace('[stages.pnr]\n', '[stages.pnr]\nstep_log = { file = "reports/{step}/*.log", '
                                              "regex = 'START (\\d+)' }\n"))
-    log = demo / "data" / "results" / a / "log"
-    log.mkdir(parents=True)
-    (log / "pnr.log").write_text(f"x\nSTART {t0 + 1000}\ny\nSTART {t0 + 1300}\nSTART {t0 + 1500}\n")
+    reports = demo / "data" / "results" / a / "reports"
+    for step, name, start, mtime in ((4, "cts", 1000, 1290), (5, "route", 1300, 1500), (6, "late", 9000, 9100)):
+        (reports / str(step)).mkdir(parents=True)
+        log = reports / str(step) / f"{name}.log"
+        log.write_text(f"x\nSTART {t0 + start}\ny\nSTART {t0 + start + 50}\n")
+        os.utime(log, (t0 + mtime, t0 + mtime))
     code, out, _ = edr(capsys, "runtime", a)
     lines = [ln.split() for ln in out.splitlines()]
 
@@ -467,8 +473,10 @@ def test_runtime_of_one_run_and_of_a_batch(demo: Path, capsys) -> None:
     assert code == 0 and ["synth", "-", "attempt", "1,", "done", *at(0), "10m", "stage_runs"] in lines
     assert ["synth", "0", "setup", *at(0), "1m", "step_runs"] in lines
     assert ["synth", "2", "elaborate", *at(180), "7m", "step_runs"] in lines  # ends with the stage
-    assert ["pnr", "4", "cts", *at(1000), "5m", "log/pnr.log:2"] in lines
-    assert ["pnr", "5", "route", *at(1300), "3m", "log/pnr.log:4"] in lines  # the next line ends it
+    assert ["pnr", "4", "cts", *at(1000), "5m", "reports/4/cts.log:2"] in lines  # the next step ends it
+    # Step 6 lies past the steps of pnr, so the mtime of its own file ends the last step of pnr.
+    assert ["pnr", "5", "route", *at(1300), "3m", "reports/5/route.log:2"] in lines
+    assert not [ln for ln in lines if ln[:2] == ["pnr", "6"]]
     assert ["power", "-", "1", "tasks,", "longest", "k1", "1m", "-", "1m", "stage_runs"] in lines
     assert lines[-1] == ["total", "-", "-", "-", "15m", "-"]
     code, out, _ = edr(capsys, "--json", "runtime", "--batch", "demo")
@@ -477,6 +485,41 @@ def test_runtime_of_one_run_and_of_a_batch(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "runtime", a, b)
     assert [ln.split()[-3:] for ln in out.splitlines()[2:]] == [["10m", "5m", "15m"], ["20m", "10m", "30m"]]
     assert edr(capsys, "runtime")[0] == 1
+
+
+def test_runtime_marks_an_open_step_and_counts_a_live_stage_up_to_now(demo: Path, capsys) -> None:
+    t0 = 1_790_000_000
+    live, dead = seed(demo, "live", "stage:pnr"), seed(demo, "dead", "stage:pnr", state="dead", updated=t0 + 2000)
+    imported = seed(demo, "imp", "done", tree=False, updated=t0 + 9000)
+    with Database(demo / "data" / "edr.db") as db:
+        for run in (live, dead):
+            db.upsert_stage_run({"run_id": run, "stage": "synth", "status": "done", "started": t0, "ended": t0 + 600})
+            db.upsert_stage_run({"run_id": run, "stage": "pnr", "status": "running", "started": t0 + 600})
+            db.set_step_times(run, {"pnr": {"4": t0 + 600, "5": t0 + 1200}})
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text().replace('[stages.pnr]\n', '[stages.pnr]\nstep_log = { file = "log/pnr.log", '
+                                             "regex = 'START (\\d+)' }\n"))
+    # One log for the whole run: the lines count from the first step of pnr, 4, and a later stage writes step 6.
+    log = demo / "data" / "results" / imported / "log"
+    log.mkdir(parents=True)
+    (log / "pnr.log").write_text(f"START {t0 + 1000}\nSTART {t0 + 1300}\nSTART {t0 + 8000}\n")
+    project = config.load_project(demo)
+    with Database(demo / "data" / "edr.db") as db:
+        rt = analysis.runtime(project, db, db.run(live), now=t0 + 3000)
+        assert [(s["stage"], s["wall_s"], s["open"]) for s in rt["stages"]] == [("synth", 600, False), ("pnr", 2400, True)]
+        assert [(s["step"], s["wall_s"], s["open"]) for s in rt["steps"]] == [(4, 600, False), (5, 1800, True)]
+        assert (rt["total_s"], rt["open"]) == (3000, ["pnr 5 route"])
+        rt = analysis.runtime(project, db, db.run(dead), now=t0 + 3000)  # a dead driver ends at its last heartbeat
+        assert [(s["step"], s["wall_s"], s["open"]) for s in rt["steps"]] == [(4, 600, False), (5, 800, False)]
+        assert (rt["total_s"], rt["open"]) == (2000, [])
+    # The line of step 6 ends no step of pnr, and step 5 is not the last start of its file: it stays open.
+    code, out, _ = edr(capsys, "runtime", imported)
+    lines = [ln.split() for ln in out.splitlines()]
+    assert code == 0 and ["pnr", "5", "route,", "open", *board._ts(t0 + 1300).split(), "-", "log/pnr.log:2"] in lines
+    assert lines[-1] == ["total", "-", "at", "least,", "open:", "pnr", "5", "route", "-", "5m", "-"]
+    code, out, _ = edr(capsys, "runtime", imported, dead)
+    assert [ln.split()[3:] for ln in out.splitlines()[2:]] == [["-", "5m", "5m", "pnr", "5", "route"],
+                                                                ["10m", "23m", "33m", "-"]]
 
 
 def test_ingest_keeps_the_step_times_and_a_resume_replaces_one(tmp_path: Path) -> None:
@@ -506,8 +549,6 @@ def _probe(load: float, free_ram: float) -> dict:
 
 
 def test_host_samples_history_and_the_status_chart(demo: Path, capsys) -> None:
-    import time
-
     now = int(time.time())
     with Database(demo / "data" / "edr.db") as db:
         db.add_host_samples(now - 40 * 86400, {"h1": _probe(1, 60)})
@@ -525,6 +566,38 @@ def test_host_samples_history_and_the_status_chart(demo: Path, capsys) -> None:
     html = board.status_html([], [], {}, now, samples)
     assert html.count("<polyline") == 2 and "hosts, last day" in html and "<b>h1</b>" in html
     assert "hosts, last day" not in board.status_html([], [], {}, now, [])
+
+
+def test_host_history_over_the_window_of_a_batch_with_its_own_use(demo: Path, capsys) -> None:
+    t0 = int(time.time()) - 7200
+    a = seed(demo, "a", "stage:pnr", host="h1", started=t0)  # it lives, so the window runs to now
+    b = seed(demo, "b", "done", host="h1", started=t0 + 600, updated=t0 + 3000)
+    seed(demo, "c", "done", batch="other", host="h2", started=t0, updated=t0 + 3600)
+    with Database(demo / "data" / "edr.db") as db:
+        for k in range(-2, 9):  # every ten minutes, from before the batch on
+            db.add_host_samples(t0 + 600 * k, {"h1": _probe(4, 32), "h2": _probe(2, 48)})
+        # A cycle keeps the heartbeats before the host probes, so the last sample of a live run comes first.
+        for run, times, cpu in ((a, [*range(t0, t0 + 4800, 600), t0 + 4790], 200.0),
+                                (b, range(t0 + 600, t0 + 3001, 600), 300.0)):
+            for ts in times:
+                db.add_run_sample({"run_id": run, "updated": ts, "cpu_pct": cpu, "rss_gb": 2.0, "tree_gb": 1.2})
+    code, out, _ = edr(capsys, "--json", "hosts", "--history", "--batch", "demo")
+    (h1,) = json.loads(out)["data"]  # h2 ran no run of the batch
+    assert code == 0 and (h1["host"], h1["first"], h1["last"]) == ("h1", t0, t0 + 4800)
+    use = h1["batch"]
+    assert (use["batch"], use["runs"], use["source"]) == ("demo", 2, "run_samples")
+    # b counts up to the host sample of its last heartbeat, and a up to the last host sample.
+    assert [v for _, v in use["cores_used"]] == [2, 5, 5, 5, 5, 5, 2, 2, 2]
+    assert [v for _, v in use["tree_gb"]] == [1.2, 2.4, 2.4, 2.4, 2.4, 2.4, 1.2, 1.2, 1.2]
+    code, out, _ = edr(capsys, "hosts", "--batch", "demo")
+    host, own = [ln for ln in out.splitlines() if ln.startswith(("h1", "  demo"))]
+    assert "4/4 of 8" in host and "5/2 of 8" in own and "4/2 of 64" in own and "2/1 of 100" in own
+    assert "an indented line is the batch's own use" in out
+    # An ended batch ends at the last heartbeat of its runs; a run without samples draws no line of its own.
+    (h2,) = json.loads(edr(capsys, "--json", "hosts", "--history", "--batch", "other")[1])["data"]
+    assert (h2["host"], h2["first"], h2["last"]) == ("h2", t0, t0 + 3600) and "batch" not in h2
+    code, _, err = edr(capsys, "hosts", "--history", "--batch", "nosuch")
+    assert code == 1 and "no run of batch nosuch has started" in err
 
 
 def test_ingest_keeps_one_sample_per_heartbeat_and_the_detail_shows_them(demo: Path, capsys) -> None:

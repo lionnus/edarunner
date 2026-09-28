@@ -6,7 +6,9 @@ keeps the source of its number: a file under data/results, or the table it came 
 
 from __future__ import annotations
 
+import bisect
 import re
+import time
 from collections import Counter
 from fnmatch import fnmatchcase
 from typing import Any
@@ -18,7 +20,7 @@ from . import board, config
 from .config import ConfigError
 from .db import Database
 from .guards import Refuse
-from .metrics import owned_steps, parse_instances, source_path
+from .metrics import find_files, owned_steps, parse_instances, source_path
 from .model import Project
 
 Row = dict[str, Any]
@@ -402,55 +404,84 @@ def dur(seconds: float | None) -> str | None:
 
 
 def _log_steps(project: Project, run: Row, stage: str, first: int) -> list[Row]:
-    """Step starts from the stage's step_log in the collected files; the source is file:line."""
+    """Step starts from the stage's step_log in the collected files; the source is file:line.
+
+    With `{step}` in the file, each file is the log of one step, and its first match starts that step. In one log of
+    several steps, the matches count on from `first`, unless group 2 names the step. The last match of a file gets
+    `end`, the mtime of the file."""
     spec = project.stages[stage].step_log
     values = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
     try:
-        rel = config.render(spec["file"], values)
+        rel = config.render(spec["file"], {**values, "step": "{step}"})
     except ConfigError:
         return []
-    path = project.data / "results" / str(run["run_id"]) / rel
-    if not path.is_file():
-        return []
+    run_dir = project.data / "results" / str(run["run_id"])
+    per_step = "{step}" in rel
     rx, out, n = re.compile(spec["regex"]), [], first
-    for i, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
-        m = rx.search(line)
-        if not m:
-            continue
-        step = int(m.group(2)) if rx.groups >= 2 and m.group(2) is not None else n
-        n = step + 1
-        out.append({"stage": stage, "step": step, "started": int(float(m.group(1))), "source": f"{rel}:{i}"})
-    # The next line of the log ends a step, even one of a later stage of the same log.
-    for s, nxt in zip(out, out[1:]):
-        s["end"] = nxt["started"]
+    for step, path in find_files(rel, run_dir, "*" if per_step else None):
+        found = []
+        with path.open(errors="replace") as fh:
+            for i, line in enumerate(fh, 1):
+                if m := rx.search(line):
+                    k = int(m.group(2)) if rx.groups >= 2 and m.group(2) is not None else step if per_step else n
+                    n = k + 1
+                    found.append({"stage": stage, "step": k, "started": int(float(m.group(1))),
+                                  "source": f"{path.relative_to(run_dir)}:{i}"})
+                    if per_step:
+                        break
+        if found:
+            found[-1]["end"] = int(path.stat().st_mtime)
+        out += found
     return out
 
 
-def runtime(project: Project, db: Database, run: Row) -> Row:
-    """Stage, step and task times of one run, from stage_runs, step_runs and the step_log files."""
+def _wall(started: float | None, end: float | None) -> float | None:
+    return end - started if started and end and end >= started else None
+
+
+def runtime(project: Project, db: Database, run: Row, now: float | None = None) -> Row:
+    """Stage, step and task times of one run, from stage_runs, step_runs and the step_log files.
+
+    A step starts at its line in the stage's step_log, else when the driver first saw its number; a step outside the
+    steps of its stage is left out. It ends when the next step of its stage starts, else when its stage ends, else at
+    the mtime of the file its line is the last start of. A stage without an end counts up to now while the run lives,
+    else up to its last heartbeat, and so does its last step. A time that counts up to now, or that has no end, is
+    open; `open` names each, and the total is then a lower bound."""
     run_id = run["run_id"]
+    live = board.is_live(run) and run.get("state") != "dead"
+    until = (time.time() if now is None else now) if live else run.get("updated")
     rows = db.stage_runs(run_id)
     # The driver records `[runtime] setup` as the stage `setup`, before every stage of the flow.
     order = {"setup": -1, **{n: i for i, n in enumerate(project.stages)}}
     stages = sorted((r for r in rows if not r["task"]), key=lambda r: (order.get(r["stage"], len(order)), r["attempt"]))
-    for r in stages:
-        r["wall_s"] = r["ended"] - r["started"] if r.get("ended") and r.get("started") else None
-        r["source"] = "stage_runs"
-    ended = {s["stage"]: s["ended"] for s in stages if s.get("ended")}
+    last: dict[str, Row] = {}
+    for r, nxt in zip(stages, [*stages[1:], None]):
+        # An attempt without an end ended when the next attempt started.
+        end = r.get("ended") or (nxt["started"] if nxt and nxt["stage"] == r["stage"] else None)
+        r.update(wall_s=_wall(r.get("started"), end or until), open=not end and (live or until is None),
+                 source="stage_runs")
+        last[r["stage"]] = r
     owned = owned_steps(project)
-    steps = [{**r, "source": "step_runs"} for r in db.step_runs(run_id)]
-    have = {s["stage"] for s in steps}
+    found = {(r["stage"], r["step"]): {**r, "source": "step_runs"} for r in db.step_runs(run_id)}
     for name, st in project.stages.items():
-        if st.step_log and name not in have:
+        if st.step_log:
             own = owned.get(name)
-            logged = {s["step"]: s for s in _log_steps(project, run, name, own.start if own else 0)}
-            steps += [s for k, s in sorted(logged.items()) if own is None or k in own]
-    steps.sort(key=lambda s: (order.get(s["stage"], len(order)), s["step"]))
+            # The flow's own line beats the poll: a progress command can see a step early.
+            found.update(((name, s["step"]), s) for s in _log_steps(project, run, name, own.start if own else 0))
+    steps = sorted((s for (stage, k), s in found.items() if stage not in owned or k in owned[stage]),
+                   key=lambda s: (order.get(s["stage"], len(order)), s["step"]))
     for s, nxt in zip(steps, [*steps[1:], None]):
-        end = nxt["started"] if nxt and nxt["stage"] == s["stage"] else ended.get(s["stage"]) or s.pop("end", None)
+        st = last.get(s["stage"])
+        if nxt and nxt["stage"] == s["stage"]:
+            end, s["open"] = nxt["started"], False
+        elif st is not None:
+            end, s["open"] = st.get("ended") or until, st["open"]
+        else:
+            end = s.get("end")
+            s["open"] = end is None
         s.pop("end", None)
         s["name"] = step_name(project, s["stage"], s["step"])
-        s["wall_s"] = end - s["started"] if end and end >= s["started"] else None
+        s["wall_s"] = _wall(s["started"], end)
     tasks: dict[str, Row] = {}
     for r in rows:
         if r["task"] and r.get("started") and r.get("ended"):
@@ -463,50 +494,65 @@ def runtime(project: Project, db: Database, run: Row) -> Row:
                 t["longest"], t["longest_s"] = r["task"], w
     total = sum(s["wall_s"] or 0 for s in stages) if stages else (
         sum(s["wall_s"] or 0 for s in steps) if steps else None)
+    opened = [" ".join(str(x) for x in (s["stage"], s["step"], s["name"]) if x is not None) for s in steps if s["open"]]
+    opened += [r["stage"] for r in stages if r["open"] and r["stage"] not in {s["stage"] for s in steps if s["open"]}]
     return {"run_id": run_id, "label": run.get("label"), "source": run.get("source"), "host": run.get("host"),
-            "stages": stages, "steps": steps, "tasks": list(tasks.values()), "total_s": total}
+            "stages": stages, "steps": steps, "tasks": list(tasks.values()), "total_s": total, "open": opened}
+
+
+def _what(text: str | None, row: Row) -> str | None:
+    return ", ".join(t for t in (text, "open" if row["open"] else None) if t) or None
 
 
 def runtime_view(rt: Row) -> RenderableType:
-    """One run: a row per stage attempt, its steps under it, its tasks summed, and the total."""
+    """One run: a row per stage attempt, its steps under it, its tasks summed, and the total; an open time says so,
+    and the total then reads as a lower bound."""
     body = []
     steps = rt["steps"]
     names = [s["stage"] for s in rt["stages"]] + [s["stage"] for s in steps if s["stage"] not in
                                                    {x["stage"] for x in rt["stages"]}]
     for name in dict.fromkeys(names):
         for s in (x for x in rt["stages"] if x["stage"] == name):
-            body.append([name, None, f"attempt {s['attempt']}, {s.get('status') or '-'}", board._ts(s.get("started")),
-                         dur(s["wall_s"]), s["source"]])
+            body.append([name, None, _what(f"attempt {s['attempt']}, {s.get('status') or '-'}", s),
+                         board._ts(s.get("started")), dur(s["wall_s"]), s["source"]])
         for s in (x for x in steps if x["stage"] == name):
-            body.append([name, s["step"], s["name"], board._ts(s["started"]), dur(s["wall_s"]), s["source"]])
+            body.append([name, s["step"], _what(s["name"], s), board._ts(s["started"]), dur(s["wall_s"]), s["source"]])
         for t in (x for x in rt["tasks"] if x["stage"] == name):
             body.append([name, None, f"{t['tasks']} tasks, longest {t['longest']} {dur(t['longest_s'])}", None,
                          dur(t["wall_s"]), t["source"]])
     if not body:
         return "no stage or step times"
-    body.append(["total", None, None, None, dur(rt["total_s"]), None])
+    body.append(["total", None, f"at least, open: {', '.join(rt['open'])}" if rt["open"] else None, None,
+                 dur(rt["total_s"]), None])
     return Group(Text(f"{rt['label']}  {rt['run_id']}", style="bold"),
                  board.table(["stage", "step", "what", "started", "wall", "source"], body,
                              styles={"started": "dim", "source": "dim"}, right=("step", "wall")))
 
 
 def runtime_batch_view(project: Project, rts: list[Row]) -> RenderableType:
-    """One row per run: the wall time of each stage, attempts summed, and the total."""
+    """One row per run: the wall time of each stage, attempts summed, and the total; an `open` column names the open
+    times of a run whose total is a lower bound."""
     names = [n for n in project.stages if any(s["stage"] == n for rt in rts for s in rt["stages"] or rt["steps"])]
+    opened = any(rt["open"] for rt in rts)
     body = []
     for rt in rts:
         per = {n: sum(s["wall_s"] or 0 for s in (rt["stages"] or rt["steps"]) if s["stage"] == n) or None for n in names}
-        body.append([rt["label"], rt.get("source"), rt.get("host"), *[dur(per[n]) for n in names], dur(rt["total_s"])])
+        body.append([rt["label"], rt.get("source"), rt.get("host"), *[dur(per[n]) for n in names], dur(rt["total_s"]),
+                     *([", ".join(rt["open"]) or None] if opened else [])])
     if not body:
         return "no runs"
-    return board.table(["label", "source", "host", *names, "total"], body, styles={"label": "bold", "source": "dim"},
-                       right=(*names, "total"))
+    return board.table(["label", "source", "host", *names, "total", *(["open"] if opened else [])], body,
+                       styles={"label": "bold", "source": "dim"}, right=(*names, "total"))
 
 
 # host and run samples
 
-def host_history(samples: list[Row]) -> list[Row]:
-    """One row per host: the sample count, the time span, and the cores, RAM and scratch in use over it."""
+def host_history(samples: list[Row], batch: str = "", runs: dict[str, list[list[Row]]] | None = None) -> list[Row]:
+    """One row per host: the sample count, the time span, and the cores, RAM and scratch in use over it.
+
+    `runs` maps a host to the run samples of each run of `batch` there, and the row of such a host gets `batch`: the
+    CPU cores, the RSS and the tree size those runs used together at each host sample. A run counts its last sample
+    at or before that time, from its first sample up to the first host sample after its last one."""
     out: dict[str, Row] = {}
     for s in samples:
         h = out.setdefault(s["host"], {"host": s["host"], "samples": [], "cores": s["cores"], "ram_gb": s["ram_gb"],
@@ -519,12 +565,28 @@ def host_history(samples: list[Row]) -> list[Row]:
                  ram_used_gb=[[s["ts"], s["ram_used_gb"]] for s in ss],
                  scratch_used_gb=[[s["ts"], s["scratch_used_gb"]] for s in ss],
                  gpus_busy=[[s["ts"], s["gpus_busy"]] for s in ss])
+        if own := [r for r in (runs or {}).get(h["host"], []) if r]:
+            h["batch"] = {"batch": batch, "runs": len(own), "source": "run_samples",
+                          **_use(own, [s["ts"] for s in ss])}
         del h["samples"]
     return list(out.values())
 
 
+def _use(runs: list[list[Row]], grid: list[int]) -> Row:
+    """The CPU cores, RSS and tree size that `runs`, the samples of each run, used together at each time of `grid`."""
+    times = [[s["ts"] for s in ss] for ss in runs]
+    out: Row = {"cores_used": [], "ram_used_gb": [], "tree_gb": []}
+    # The watcher writes the host sample of a cycle after the run samples, so a live run's last sample precedes it.
+    for prev, ts in zip([grid[0] - 1, *grid], grid):
+        at = [ss[bisect.bisect_right(t, ts) - 1] for ss, t in zip(runs, times) if t[0] <= ts and t[-1] > prev]
+        for key, col, k in (("cores_used", "cpu_pct", 0.01), ("ram_used_gb", "rss_gb", 1), ("tree_gb", "tree_gb", 1)):
+            out[key].append([ts, round(sum((s[col] or 0) * k for s in at), 2)])
+    return out
+
+
 def host_history_view(rows: list[Row]) -> RenderableType:
-    """Per host: a line of cores in use, RAM in use and scratch in use over the window, with the peak and the last."""
+    """Per host: a line of cores in use, RAM in use and scratch in use over the window, with the peak and the last;
+    under it, the batch's own line when the host ran runs of the batch."""
     if not rows:
         return "no host samples"
 
@@ -532,12 +594,19 @@ def host_history_view(rows: list[Row]) -> RenderableType:
         vals = [v for _, v in points if v is not None]
         return f"{board.spark(points, total)} {max(vals):.0f}/{vals[-1]:.0f} of {total or 0:.0f}" if vals else "-"
 
-    body = [[h["host"], board._ts(h["first"]), board._ts(h["last"]), cell(h["cores_used"], h["cores"]),
-             cell(h["ram_used_gb"], h["ram_gb"]), cell(h["scratch_used_gb"], h["scratch_gb"]),
-             cell(h["gpus_busy"], h["gpus"]) if h.get("gpus") else "-"] for h in rows]
+    body = []
+    for h in rows:
+        body.append([h["host"], board._ts(h["first"]), board._ts(h["last"]), cell(h["cores_used"], h["cores"]),
+                     cell(h["ram_used_gb"], h["ram_gb"]), cell(h["scratch_used_gb"], h["scratch_gb"]),
+                     cell(h["gpus_busy"], h["gpus"]) if h.get("gpus") else "-"])
+        if b := h.get("batch"):
+            body.append([f"  {b['batch']}", "", "", cell(b["cores_used"], h["cores"]), cell(b["ram_used_gb"], h["ram_gb"]),
+                         cell(b["tree_gb"], h["scratch_gb"]), ""])
+    note = "each line spans the window left to right, from 0 to the host's total"
+    if any(h.get("batch") for h in rows):
+        note += "; an indented line is the batch's own use: the CPU, the RSS and the tree size of its runs"
     return Group(board.table(["host", "from", "to", "cores (peak/last)", "RAM GB", "scratch GB", "GPUs"], body,
-                             styles={"host": "bold", "from": "dim", "to": "dim"}),
-                 Text("each line spans the window left to right, from 0 to the host's total", style="dim"))
+                             styles={"host": "bold", "from": "dim", "to": "dim"}), Text(note, style="dim"))
 
 
 # parameters

@@ -35,6 +35,7 @@ from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
     BACKENDS,
+    OPT_IN,
     SCHEDULERS,
     Batch,
     BotCommand,
@@ -331,12 +332,16 @@ def load_user(path: PathLike = DEFAULT_USER) -> User:
     file = Path(os.path.abspath(Path(path).expanduser()))
     if not file.exists():
         return User(path=file)
-    raw = _table(_read(file), {"schema", "digest_at", "telegram", "ntfy", "mail"}, file, "")
+    raw = _table(_read(file), {"schema", "digest_at", "alerts", "telegram", "ntfy", "mail"}, file, "")
     _schema(raw, file)
     at = raw.get("digest_at", "")
     if not isinstance(at, str) or at and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at):
         raise ConfigError(f"{file}: digest_at must be HH:MM or empty, not {at!r}")
-    return User(path=file, digest_at=at, telegram=_telegram(raw["telegram"], file) if "telegram" in raw else None,
+    kinds = raw.get("alerts", [])
+    if not isinstance(kinds, list) or not all(k in OPT_IN for k in kinds):
+        raise ConfigError(f"{file}: alerts is a list of {', '.join(OPT_IN)}, not {kinds!r}")
+    return User(path=file, digest_at=at, alerts=kinds,
+                telegram=_telegram(raw["telegram"], file) if "telegram" in raw else None,
                 ntfy=_channel(Ntfy, raw["ntfy"], file, "ntfy", "token_file") if "ntfy" in raw else None,
                 mail=_channel(Mail, raw["mail"], file, "mail", "password_file") if "mail" in raw else None)
 

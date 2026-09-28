@@ -309,6 +309,19 @@ def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> No
     assert code == 1 and "nope" in err
 
 
+def test_brief_run_says_how_long_a_live_stage_has_run_so_far(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "stage:synth")
+    now = int(time.time())
+    hb = json.loads((bdir(demo) / f"{a}.json").read_text())
+    (bdir(demo) / f"{a}.json").write_text(json.dumps({
+        **hb, "step_times": {"synth": {"0": now - 600, "1": now - 300}},
+        "stages": {"synth": {"attempt": 1, "status": "running", "started": now - 600}}}))
+    out = edr(capsys, "brief", "--run", "a@demo")[1]
+    assert "- Stage `synth`, attempt 1, started " in out and " and has run for 10m so far." in out
+    assert "  - Step 0 (setup) started " in out and " and took 5m.\n  - Step 1 (analyze) started " in out
+    assert out.count("has run for 5m so far.") == 1
+
+
 # keep, stop, actions
 
 

@@ -23,7 +23,8 @@ LIMIT = 4000  # the message limit is 4096 characters after parsing
 # One mark per state for a bot message.
 MARK = {"running": "🟢", "queued": "🔵", "resumed": "🔵", "stale": "🟡", "host_full": "🟡", "superseded": "🟡",
         "dead": "🔴", "hung": "🔴", "looping": "🔴", "over_budget": "🔴", "orphan": "🔴", "failed": "🔴", "killed": "🔴",
-        "incomplete": "🟠", "pending": "🔵", "held": "🟠", "suspended": "🟡", "done": "⚪", "retired": "⚫", "stopped": "⚫", "imported": "⚫", "abandoned": "⚫"}
+        "incomplete": "🟠", "pending": "🔵", "held": "🟠", "suspended": "🟡", "done": "⚪", "retired": "⚫", "stopped": "⚫", "imported": "⚫", "abandoned": "⚫",
+        "metrics": "⚪"}
 
 
 def esc(text: object) -> str:

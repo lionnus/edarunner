@@ -15,7 +15,7 @@ import re
 from typing import TYPE_CHECKING
 
 from edarunner.db import Database
-from edarunner.model import Project, Site, User
+from edarunner.model import OPT_IN, Project, Site, User
 
 if TYPE_CHECKING:
     from edarunner.cli import Router
@@ -27,7 +27,10 @@ Button = tuple[str, str, str]  # (label, callback_data, the command line for a c
 
 
 class Notifier:
-    """One channel. Every method is a no-op here; a channel overrides them."""
+    """One channel. Every method is a no-op here; a channel overrides them. `kinds` holds the opt-in alert kinds
+    that the user file asks for."""
+
+    kinds: frozenset[str] = frozenset()
 
     def start(self) -> None:
         """Start to take commands, when the channel can; only the holder of `serve.lock` calls it."""
@@ -45,6 +48,11 @@ class Notifier:
     def post(self, title: str, html: str, silent: bool = False) -> bool:
         """Send one message with the project and `title` in its first line; True when it was sent."""
         return False
+
+
+def wanted(notifiers: list[Notifier], kind: str) -> list[Notifier]:
+    """The channels that get an alert of `kind`: every channel, but an opt-in kind only where the user asked for it."""
+    return [n for n in notifiers if kind not in OPT_IN or kind in n.kinds]
 
 
 def button_cmds(buttons: list[Button] | None) -> list[tuple[str, str]]:
@@ -89,4 +97,6 @@ def make_notifiers(user: User, site: Site | None, project: Project, db: Database
         from edarunner.notify.mail import MailNotifier
 
         out.append(MailNotifier(project, mail))
+    for n in out:
+        n.kinds = frozenset(user.alerts)
     return out

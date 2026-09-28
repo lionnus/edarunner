@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from helpers_results import demo_qor
-from helpers_watch import NEW, NOW, Env, rid
+from helpers_watch import NEW, NOW, Env, Rec, rid
 
 from edarunner import board, census, collect, config, launch, watch
 from edarunner.backend import Live
@@ -183,6 +183,21 @@ def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) 
     assert rows[1][1].startswith("reports/1/area.rpt: no match for")
     (text,) = [e["text"] for e in env.db.events() if e["kind"] == "metrics"]
     assert text == f"1 new: area_cell_um2 at synth 0; area_cell_um2: 1 failed: {rows[1][1]}"
+
+
+def test_done_and_metrics_alerts_go_only_to_a_user_who_asks_for_them(env: Env) -> None:
+    hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth", elapsed_s=5400)
+    (Path(hb["root"]) / "reports" / "0").mkdir(parents=True)
+    (Path(hb["root"]) / "reports" / "0" / "area.rpt").write_text("i_top 1000.0\n")
+    asked, plain = Rec(), Rec()
+    asked.kinds = frozenset({"done", "metrics"})
+    watch.cycle(env.project, env.ssh, env.db, [asked, plain], now=NOW)
+    run_id = hb["run_id"]
+    assert asked.sent == [("done", run_id), ("metrics", run_id)] and plain.sent == []
+    news = asked.alerts[run_id]
+    assert (news.title, news.who, news.about) == ("new metrics of", "b_nodw@demo", "1 new: area_cell_um2 at synth 0.")
+    watch.cycle(env.project, env.ssh, env.db, [asked, plain], now=NOW + 1)
+    assert len(asked.sent) == 2  # once per run, and no new row
 
 
 def test_without_step_runs_only_a_done_stage_keeps_its_steps(env: Env) -> None:

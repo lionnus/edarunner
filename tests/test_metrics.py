@@ -156,6 +156,23 @@ def test_python_parser_and_fixed_step(tmp_path):
     ]
 
 
+def test_a_star_in_the_file_pattern_globs_and_the_first_file_by_name_counts(tmp_path):
+    run = results_tree(tmp_path / "results")
+    for step, name, took in (("2", "b_route.log", 20), ("2", "a_route.log", 21), ("3", "c.log", 30), ("qor_data", "x.log", 9)):
+        (run / "reports" / step).mkdir(exist_ok=True)
+        (run / "reports" / step / name).write_text(f"took {took}\n")
+    project = demo_project(tmp_path)
+    project.metrics = {
+        "took_s": Metric(name="took_s", stage=["synth"], step="*", file="reports/{step}/*.log", regex=r"took (\d+)"),
+        "any_area": Metric(name="any_area", stage=["synth"], file="reports/*/area.rpt", regex=r"i_top (\S+)"),
+    }
+    rows = extract(project, RUN, tmp_path / "results", {})
+    assert [(r["step"], r["value"], r["source_file"]) for r in by_name(rows, "took_s")] == [
+        (2, 21.0, "reports/2/a_route.log:1"), (3, 30.0, "reports/3/c.log:1")]
+    assert [(r["step"], r["value"], r["source_file"]) for r in by_name(rows, "any_area")] == [
+        (None, 1000.0, "reports/0/area.rpt:1")]
+
+
 def test_a_numbered_step_belongs_to_one_stage(tmp_path):
     run = tmp_path / "results" / RUN_ID
     for n in range(9):
