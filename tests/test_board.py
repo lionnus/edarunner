@@ -7,7 +7,7 @@ import subprocess
 import time
 
 import pytest
-from helpers_board import NOW, RUN, board_row, board_rows
+from helpers_board import NOW, RUN, SOURCE, board_row, board_rows
 
 from edarunner import board
 from edarunner.db import Database
@@ -45,18 +45,20 @@ def test_narrow_width_and_order(width):
 def test_wide_all_states():
     text = board.plain(board.wide(board_rows(), now=NOW))
     lines = text.splitlines()
-    assert lines[0].split() == ["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"]
+    assert lines[0].split() == ["#", "label", "source", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"]
     assert len(lines) == 8 and "\x1b" not in text
-    assert lines[2].startswith("#1  a") and " dead " in lines[2]
+    assert lines[2].split()[:3] == ["#1", "a", "gaaa111"] and " dead " in lines[2]
     assert lines[6].startswith("#5  b_nodw") and " incomplete " in lines[6] and " 1f/1d " in lines[6]
     assert lines[7].startswith("#6  a") and " done " in lines[7]
     assert board.wide([]) == "no runs"
+    cut = board.plain(board.wide([board_row("done", "a", "ABANDONED:" + "x" * 60)], now=NOW))
+    assert "ABANDONED:" + "x" * 30 in cut and "x" * 31 not in cut
 
 
 def test_a_stage_with_steps_is_starting_before_its_first_step():
     fresh = [board_row("run1", "c", "stage:pnr", "running", stage="pnr", step=None),
              board_row("fail", "b", "INCOMPLETE:1f0s", "running", stage="pnr", step=None)]
-    cells = [ln.split()[5:7] for ln in board.plain(board.wide(fresh, now=NOW, totals={"pnr": 13})).splitlines()[2:]]
+    cells = [ln.split()[6:8] for ln in board.plain(board.wide(fresh, now=NOW, totals={"pnr": 13})).splitlines()[2:]]
     assert cells[0] == ["pnr,", "starting"] and cells[1][0] == "pnr"
     assert "pnr, start" in board.narrow(fresh, now=NOW, totals={"pnr": 13})
     assert "starting" not in board.plain(board.wide(fresh, now=NOW))
@@ -213,6 +215,19 @@ def test_rows_from_db(tmp_path):
 
 
 def test_the_proposed_retire_names_the_phase_or_asks_for_a_reason() -> None:
-    row = {"label": "a", "batch": "demo", "phase": "KILLED:SIGTERM"}
+    row = {"label": "a", "batch": "demo", "phase": "KILLED:SIGTERM", "root": "/tmp/edr/demo/a"}
     assert board.triage_cmd(row, "killed", {}) == "edr retire a@demo --why KILLED:SIGTERM"
     assert board.triage_cmd({**row, "phase": None}, "imported", {}) == "edr retire a@demo --why '<why>'"
+    assert board.triage_cmd({**row, "root": None}, "killed", {}) is None  # no tree: a retire would only mark the row
+
+
+def test_a_label_at_a_batch_with_two_runs_prints_a_run_id_prefix() -> None:
+    failed = board_row("fail", "a", "FAILED:pnr")
+    dirty = board_row("fail", "a", "done", run_id=RUN["fail"] + "-dirty-0badc0de", source=SOURCE + "-dirty-0badc0de")
+    other = board_row("done", "b", "done")
+    runs = [failed, dirty, other]
+    # The clean id starts the dirty one, so only the whole clean id names the clean run alone.
+    assert board.handles(runs) == {failed["run_id"]: RUN["fail"], dirty["run_id"]: RUN["fail"] + "-", other["run_id"]: "b@demo"}
+    assert board.handle(dirty, runs) == RUN["fail"] + "-" and board.handle(dirty) == "a@demo"
+    assert board.triage_cmd(failed, "failed", {}, runs) == f"edr retire {RUN['fail']} --why FAILED:pnr"
+    assert board.prefix(RUN["done"], list(RUN.values())) == "20261001_0900_a"

@@ -46,10 +46,16 @@ queued, yellow when stale, red when dead, hung, over budget, an orphan or
 failed, and dim when done or retired. A pipe or the NO_COLOR variable
 gets the same text with no escape code, and --json never carries any.
 
-A handle names one run in one of three forms. label@batch is the newest
-run with that label in that batch. A run id prefix is the one run whose
-id starts with it; an ambiguous prefix is refused. The form #n is row n
-of the last board that edr status printed.
+A handle names one run in one of four forms. label@batch is the one run
+with that label in that batch; when the batch holds several, the handle
+is refused and the error lists them. label@source is the run of record
+of that label at that source tag: the newest run by start time that
+ended done, else the newest run. A name after the @ that is both a batch
+and a source is refused. A run id prefix is the one run whose id starts
+with it; an ambiguous prefix is refused. The form #n is row n of the
+last board that edr status printed. stop, retire and continue first
+print the run id and the phase of the run they act on to stderr, also
+with --dry-run.
 
 plan and launch take the batch as an argument, which defaults to
 EDR_BATCH and then to the newest batch directory in the state. status
@@ -78,7 +84,7 @@ A command below says where it refines a code.
 | [hosts](#hosts) | probe every host: its free room, and your runs on it |
 | [projects](#projects) | every registered project, its watcher and its live runs |
 | [tools](#tools) | every site tool: free seats and hosts |
-| [metrics](#metrics) | the metrics of one source or one run |
+| [metrics](#metrics) | the metrics of the sources or of one run |
 | [extract](#extract) | extract the metrics of runs again from their collected files |
 | [compare](#compare) | two or more runs side by side |
 | [runtime](#runtime) | stage, step and task times |
@@ -93,7 +99,7 @@ A command below says where it refines a code.
 | [track](#track) | run a command under the driver here, as a run of the project |
 | [keep](#keep) | more hours for a run, and no hung kill or superseded stop for that long |
 | [import](#import) | record a run tree that edr did not make, or its collected results |
-| [export](#export) | a frozen snapshot of one source |
+| [export](#export) | a frozen snapshot of one or more sources |
 | [stop](#stop) | stop one run |
 | [retire](#retire) | remove the run tree, or its prune targets |
 | [notify](#notify) | send one message, the board or the digest through every notifier |
@@ -129,7 +135,7 @@ session with the briefing; docs/guides/agents.md shows the hook.
 | Flag | Meaning |
 |---|---|
 | `--json` | the same as edr --json brief |
-| `--run HANDLE` | the history of one run: label@batch, a run id prefix, or #n from the last board |
+| `--run HANDLE` | the history of one run: label@batch, label@source, a run id prefix, or #n from the last board |
 
 ## status
 
@@ -139,10 +145,11 @@ edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--dige
 
 Without a handle, status prints the board: one line per run of every
 batch that is not retired, live runs first and dead ones on top. The columns are the row
-number, label, host, state, phase, stage/step, heartbeat age, failed and
-done task counts, and core-h: the hours so far times the cores the run
-reserved, the most that any of its stages needs. A live stage with steps
-shows &lt;stage&gt;, starting until its first step. The state of a live run
+number, label, source tag, host, state, phase (its first 40 characters),
+stage/step, heartbeat age, failed and done task counts, and core-h: the
+hours so far times the cores the run reserved, the most that any of its
+stages needs. A live stage with steps shows &lt;stage&gt;, starting until its
+first step. The state of a live run
 follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.
@@ -160,7 +167,7 @@ the project in the first column; it needs no project directory.
 
 | Flag | Meaning |
 |---|---|
-| `[handle]` | label@batch, a run id prefix, or #n from the last board |
+| `[handle]` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--json` | the same as edr --json status |
 | `--batch B` | one batch; default EDR_BATCH, else every batch |
 | `--narrow` | 48 columns, two lines per live run, for an ssh app on a phone |
@@ -286,11 +293,12 @@ gives tool, free, total, hosts (host to version) and note.
 edr metrics [--json] [--source SOURCE] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
 ```
 
-Prints every metric of one source with its label, source, stage, step,
+Prints every metric of the sources with its label, source, stage, step,
 task, name, value and unit. --source or --run is required. --source
 is the source tag exactly as edr checkout printed it, -dirty-...
-included; --run takes one run instead. --csv writes the columns of
-metrics.csv (docs/guides/results.md) to stdout.
+included, and may be given more than once; --run takes one run
+instead. --csv writes the columns of metrics.csv
+(docs/guides/results.md) to stdout.
 
 --run with --over steps prints the metrics along the steps of that run:
 one row per step with its name, one column per metric. With --metric,
@@ -305,8 +313,8 @@ has one. --instance takes that instance and every instance below it.
 | Flag | Meaning |
 |---|---|
 | `--json` | the same as edr --json metrics |
-| `--source SOURCE` | the exact source tag of the runs, as in the run id |
-| `--run HANDLE` | one run: label@batch, a run id prefix, or #n from the last board |
+| `--source SOURCE` | the exact source tag of the runs, as in the run id; repeatable |
+| `--run HANDLE` | one run: label@batch, label@source, a run id prefix, or #n from the last board |
 | `--metric NAME` | one metric, by name or canonical name |
 | `--over {steps}` | with --run: the metrics along the steps |
 | `--stage S` | the metrics of one stage |
@@ -343,11 +351,11 @@ new, changed, unchanged and failed for each run.
 
 | Flag | Meaning |
 |---|---|
-| `[handle]` | label@batch, a run id prefix, or #n from the last board |
+| `[handle]` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json extract |
 | `--batch B` | every run of the batch |
-| `--source SOURCE` | every run of the exact source tag |
+| `--source SOURCE` | every run of the exact source tag; repeatable |
 
 | Exit | Meaning |
 |---|---|
@@ -370,9 +378,14 @@ first. Each run is compared at its last step with an area report, or
 at --stage and --step. The source file of each run is printed under
 the table.
 
+A column is named by the label, or by label@source when the runs come
+from more than one source; then a line above the table names the
+sources, and --json sets mixed_sources. Two runs with the same name
+get a prefix of their run ids after it.
+
 | Flag | Meaning |
 |---|---|
-| `HANDLE ...` | label@batch, a run id prefix, or #n from the last board |
+| `HANDLE ...` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--json` | the same as edr --json compare |
 | `--area` | the hierarchical area per instance |
 | `--metric NAME` | this metric, by name or canonical name; repeatable |
@@ -405,7 +418,7 @@ time of each stage, with the attempts summed, and the total.
 
 | Flag | Meaning |
 |---|---|
-| `HANDLE ...` | label@batch, a run id prefix, or #n from the last board |
+| `HANDLE ...` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--json` | the same as edr --json runtime |
 | `--batch B` | every run of the batch |
 
@@ -604,7 +617,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 
 | Flag | Meaning |
 |---|---|
-| `handle` | label@batch, a run id prefix, or #n from the last board |
+| `handle` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json continue |
 | `--stage S ...` | the stages to run on the tree, in this order; default the stages the tree has left |
@@ -688,7 +701,7 @@ one before.
 
 | Flag | Meaning |
 |---|---|
-| `handle` | label@batch, a run id prefix, or #n from the last board |
+| `handle` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json keep |
 | `--hours N` | the hours; default 12 |
@@ -733,15 +746,19 @@ with YYYYMMDD_HHMM_.
 edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--labels a,b] [--with-logs]
 ```
 
-Writes a snapshot of one source to DIR: manifest.json, runs.csv,
-metrics.csv and the collected files of the newest run per label.
---source matches the source tag exactly. log/ and *.log stay out unless
-you pass --with-logs. It refuses a DIR that exists and is not empty.
-docs/guides/results.md explains the layout.
+Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
+metrics.csv and the collected files of one run per label and source,
+the newest run by start time that ended done, else the newest run.
+--source matches the source tag exactly and may be given more than
+once. The manifest lists the exported runs whose phase is not done
+under incomplete, and the other runs of each label and source under
+skipped. log/ and *.log stay out unless you pass --with-logs. It
+refuses a DIR that exists and is not empty. docs/guides/results.md
+explains the layout.
 
 --mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
-per run, of every source or of --source, with the parameters, the
+per run, of every source or of each --source, with the parameters, the
 metrics at their step, the stage and step times, and the collected
 files up to 1 MiB. A run already in the store is skipped. It needs the
 mlflow extra: pip install 'edarunner[mlflow]'.
@@ -750,7 +767,7 @@ mlflow extra: pip install 'edarunner[mlflow]'.
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json export |
-| `--source SOURCE` | the exact source tag of the runs, as in the run id |
+| `--source SOURCE` | the exact source tag of the runs, as in the run id; repeatable |
 | `--out DIR` | the directory to write; it must be absent or empty |
 | `--mlflow DIR` | write an MLflow tracking store in DIR instead |
 | `--labels a,b` | these labels only, comma separated |
@@ -774,7 +791,7 @@ has no driver pid is refused.
 
 | Flag | Meaning |
 |---|---|
-| `handle` | label@batch, a run id prefix, or #n from the last board |
+| `handle` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--why WHY` | the reason; it goes into the events table, required |
 | `--json` | the same as edr --json stop |
@@ -823,7 +840,7 @@ not collected unless you pass --uncollected.
 
 | Flag | Meaning |
 |---|---|
-| `[handle]` | label@batch, a run id prefix, or #n from the last board |
+| `[handle]` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--why WHY` | the reason; it goes into the events table, required |
 | `--json` | the same as edr --json retire |

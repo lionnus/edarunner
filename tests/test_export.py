@@ -16,6 +16,9 @@ RUN_A_OLD = "20261001_0900_a_demo_gaaa111"
 RUN_A = "20261002_1130_a_demo_gaaa111"
 RUN_B = "20261002_1130_b_nodw_demo_gaaa111"
 RUN_C = "20261003_0900_a_demo_gbbb222"
+DIRTY_TAG = "ccc333-dirty-0badc0de"
+CLEAN = "20261004_0800_x_demo_gccc333"
+DIRTY = f"20261004_0800_x_demo_g{DIRTY_TAG}"
 
 POWER_HIER = "phase,instance,total_w\nWHOLE,i_top,1.0\nWHOLE,i_top/i_core,0.8\nWHOLE,i_top/i_core/i_alu,0.3\n"
 POWER_FLAT = "phase,total_w\nPHASE_A,0.100\nWHOLE,0.250\n"
@@ -68,7 +71,7 @@ def test_export_one_source(world, tmp_path):
                      {"record": {"edarunner": "9.9", "driver_sha256": "ab12", "tools": {"fc": "V-2023.12"}}})
     db.upsert_stage_run({"run_id": RUN_A, "stage": "synth", "status": "done", "started": 100, "ended": 150})
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, db, "aaa111", out)
+    manifest = export.export(project, db, ["aaa111"], out)
 
     assert [r["run_id"] for r in manifest["runs"]] == [RUN_A, RUN_B]
     record = manifest["runs"][0]["record"]
@@ -79,9 +82,10 @@ def test_export_one_source(world, tmp_path):
                       "tools": {"fc": "V-2023.12"}, "stages": [{"stage": "synth", "task": "", "attempt": 1,
                                                                  "status": "done", "started": 100, "ended": 150}]}
     assert manifest["runs"][1]["record"]["tools"] == {} and manifest["runs"][1]["record"]["ended"] is None
-    assert manifest["source"] == "aaa111" and manifest["project"] == "demo"
-    assert manifest["schema"] == 1 and manifest["producer"].startswith("edarunner ")
-    assert manifest["incomplete"] == [RUN_B]
+    assert manifest["sources"] == ["aaa111"] and manifest["project"] == "demo"
+    assert manifest["schema"] == 2 and manifest["producer"].startswith("edarunner ")
+    assert manifest["incomplete"] == [{"run_id": RUN_B, "label": "b_nodw", "source": "aaa111", "phase": "stage:pnr"}]
+    assert manifest["skipped"] == [{"run_id": RUN_A_OLD, "label": "a", "source": "aaa111", "phase": "done"}]
     assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2}
     assert json.loads((out / "manifest.json").read_text()) == manifest
 
@@ -114,41 +118,62 @@ def test_export_one_source(world, tmp_path):
 
 def test_labels_and_refusals(world, tmp_path):
     project, db = world
-    manifest = export.export(project, db, "aaa111", tmp_path / "x", labels=["a"])
+    manifest = export.export(project, db, ["aaa111"], tmp_path / "x", labels=["a"])
     assert [r["label"] for r in manifest["runs"]] == ["a"] and manifest["incomplete"] == []
-    assert export.export(project, db, "bbb222", tmp_path / "y")["incomplete"] == [RUN_C]
+    assert [r["run_id"] for r in export.export(project, db, ["bbb222"], tmp_path / "y")["incomplete"]] == [RUN_C]
     with pytest.raises(Refuse, match="not empty"):
-        export.export(project, db, "aaa111", tmp_path / "x")
+        export.export(project, db, ["aaa111"], tmp_path / "x")
     with pytest.raises(Refuse, match="no run"):
-        export.export(project, db, "zzz", tmp_path / "z")
+        export.export(project, db, ["zzz"], tmp_path / "z")
     with pytest.raises(Refuse, match="no run"):  # a prefix of a source tag is not a match
-        export.export(project, db, "aaa", tmp_path / "z")
+        export.export(project, db, ["aaa"], tmp_path / "z")
     with pytest.raises(Refuse, match="no run"):
-        export.export(project, db, "aaa111", tmp_path / "z", labels=["nope"])
+        export.export(project, db, ["aaa111"], tmp_path / "z", labels=["nope"])
     with pytest.raises(Refuse, match="empty source"):
-        export.export(project, db, "", tmp_path / "z")
+        export.export(project, db, [""], tmp_path / "z")
+    with pytest.raises(Refuse, match="empty source"):
+        export.export(project, db, [], tmp_path / "z")
     assert not (tmp_path / "z").exists()
 
 
 def test_dry_run_writes_nothing(world, tmp_path, capsys):
     project, db = world
     out = tmp_path / "paper" / "export"
-    manifest = export.export(project, db, "aaa111", out, dry_run=True)
+    manifest = export.export(project, db, ["aaa111"], out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
     assert paths == ["runs.csv", "metrics.csv", "a/reports/3/area.rpt", "a/sim/power/reports/power.csv",
                      "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
-    real = export.export(project, db, "aaa111", out)
+    real = export.export(project, db, ["aaa111"], out)
     assert [(f["path"], f["sha256"]) for f in manifest["files"]] == [(f["path"], f["sha256"]) for f in real["files"]]
 
 
 def test_with_logs_copies_the_logs(world, tmp_path):
     project, db = world
     out = tmp_path / "with_logs"
-    manifest = export.export(project, db, "aaa111", out, labels=["a"], with_logs=True)
+    manifest = export.export(project, db, ["aaa111"], out, labels=["a"], with_logs=True)
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
     assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "a/log/synth.log",
                                                        "a/reports/3/area.rpt", "a/reports/3/run.log",
                                                        "a/sim/power/reports/power.csv"]
+
+
+def test_an_export_of_two_sources_holds_one_run_per_label_and_source(world, tmp_path):
+    project, db = world
+    # One label twice in one batch: the clean run failed and started last, the dirty run ended done.
+    for run_id, source, phase, started in ((CLEAN, "ccc333", "FAILED:pnr", 300), (DIRTY, DIRTY_TAG, "done", 200)):
+        db.upsert_run({"run_id": run_id, "batch": "demo", "label": "x", "config": "demo", "source": source, "host": "local",
+                       "phase": phase, "started": started, "updated": started + 50})
+        (project.data / "results" / run_id / "reports").mkdir(parents=True)
+        (project.data / "results" / run_id / "reports" / "area.rpt").write_text(f"{source}\n")
+    clean = export.export(project, db, ["ccc333"], tmp_path / "clean")
+    assert [r["run_id"] for r in clean["runs"]] == [CLEAN] and clean["skipped"] == []
+    assert clean["incomplete"] == [{"run_id": CLEAN, "label": "x", "source": "ccc333", "phase": "FAILED:pnr"}]
+    assert (tmp_path / "clean" / "x" / "reports" / "area.rpt").is_file()
+    both = export.export(project, db, ["ccc333", DIRTY_TAG], tmp_path / "both")
+    assert [r["run_id"] for r in both["runs"]] == [CLEAN, DIRTY] and both["sources"] == ["ccc333", DIRTY_TAG]
+    assert [r["run_id"] for r in both["incomplete"]] == [CLEAN]
+    assert (tmp_path / "both" / f"x@{DIRTY_TAG}" / "reports" / "area.rpt").read_text() == f"{DIRTY_TAG}\n"
+    assert (tmp_path / "both" / "x@ccc333" / "reports" / "area.rpt").read_text() == "ccc333\n"

@@ -16,7 +16,7 @@ from typing import Any
 from . import __version__, board, census, checkout, collect, config, home, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
-from .db import Database, NotFound
+from .db import Database, NotFound, pick
 from .guards import Refuse, assert_safe_target
 from .model import SCHEDULERS, Batch, Budget, Job, Project, Stage, Task
 
@@ -219,15 +219,17 @@ def spec_text(project: Project, spec: dict[str, Any]) -> str:
 
 # --- plan
 
-def _reuse_row(db: Database, reuse: dict[str, object], need_tree: bool = True) -> dict[str, Any]:
+def _reuse_row(db: Database, reuse: dict[str, object], source: str, need_tree: bool = True) -> dict[str, Any]:
+    """The run that `reuse` names: its `run_id` handle, or the `pick` of its label at `source`, the batch's."""
+    what = " ".join(f"{k}={v}" for k, v in reuse.items())
     if "run_id" in reuse:
         row = db.run(db.resolve(str(reuse["run_id"])))
     else:
-        rows = [r for r in db.runs() if r["label"] == reuse["label"]]
-        row = rows[-1] if rows else None
-    if row is None or (need_tree and not (row.get("root") and row.get("host"))):
-        what = " ".join(f"{k}={v}" for k, v in reuse.items())
-        raise NotFound(f"reuse {what}: no run{' with a host and a root' if need_tree else ''} in the database")
+        row = pick([r for r in db.runs() if r["label"] == reuse["label"] and r.get("source") == source])
+    if row is None:
+        raise NotFound(f"reuse {what}: no run of that label at source {source}")
+    if need_tree and not (row.get("root") and row.get("host")):
+        raise NotFound(f"reuse {what}: {row['run_id']} has no host and root")
     return row
 
 
@@ -243,7 +245,8 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
     the order of edr.toml, and the newest row of a stage says whether it ended with exit 0. The stages left
     follow the last stage that did. A run without a spec, such as an imported one, adds no stage.
     """
-    runs = [r for r in db.runs() if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
+    everyone = db.runs()
+    runs = [r for r in everyone if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
     names = {n for r in runs for n in collect.spec_stages(collect.load_spec(project, r)) or []}
     rows = sorted((s for r in runs for s in db.stage_runs(r["run_id"]) if not s["task"]),
                   key=lambda s: (s["started"] or 0, s["ended"] or 0))
@@ -251,7 +254,7 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
     order = [n for n in project.stages if n in names]
     ok = [i for i, n in enumerate(order) if n in last and last[n]["exit"] == 0]
     left = order[ok[-1] + 1:] if ok else order
-    if live := [board.handle(r) for r in runs if board.is_live(r)]:
+    if live := [board.handle(r, everyone) for r in runs if board.is_live(r)]:
         return left, f"{live[0]} on the same tree has not ended"
     if not left or left[0] not in last:
         return left, ""
@@ -281,7 +284,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
     restore = str(job.reuse.get("restore") or "") if job.reuse else ""
     if job.reuse:
         try:
-            row = _reuse_row(db, job.reuse, need_tree=not restore)
+            row = _reuse_row(db, job.reuse, batch.source, need_tree=not restore)
             source, reused = row["source"], row["run_id"]
             # The tag and the tree id belong to the tree, through any chain of reuse.
             tag = row.get("build_tag") or ""

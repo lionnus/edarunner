@@ -487,9 +487,10 @@ class Job:
     vars: dict[str, str] = doc("`{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; "
                                "`{vars.<name>}` in the stage strings, `[env]` and `collect`", factory=dict)
     reuse: dict[str, object] | None = doc(
-        "`{ run_id = \"...\" }` or `{ label = \"...\", latest = true }`: start on the tree of that run. With "
-        "`restore = \"<name>\"`, start on a fresh tree with the `collect_on_request.<name>` files of that run "
-        "copied back from `data/results/`", None)
+        "`{ run_id = \"...\" }` with a run id or another handle, or `{ label = \"...\", latest = true }` for the newest "
+        "run by start time of that label at the batch's source that ended done, else its newest run. The job starts "
+        "on the tree of that run; with `restore = \"<name>\"`, it starts on a fresh tree with the "
+        "`collect_on_request.<name>` files of that run copied back from `data/results/`", None)
 
 
 @dataclass

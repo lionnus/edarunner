@@ -548,6 +548,35 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
         assert [e["kind"] for e in db.events()] == ["export"]
 
 
+def test_two_runs_of_a_label_in_one_batch_are_named_apart(demo: Path, capsys, tmp_path: Path) -> None:
+    dirty_tag = "abc1234-dirty-0badc0de"
+    clean, dirty = seed(demo, "a", "FAILED:synth", exit=5), seed(demo, "a", "done", source=dirty_tag)
+    bare = seed(demo, "i", "FAILED:pnr", tree=False)  # no tree: a retire would only mark its row
+    for run in (clean, dirty):
+        add_metric(demo, run, "area_cell_um2", 1000.0)
+    code, _, err = edr(capsys, "status", "a@demo")
+    assert code == 1 and f"{clean} (abc1234, FAILED:synth)" in err and f"{dirty} ({dirty_tag}, done)" in err
+    # The clean id starts the dirty one, so only the whole clean id names the clean run alone.
+    code, out, _ = edr(capsys, "status", "--triage")
+    assert code == 0 and f"edr retire {clean} --why FAILED:synth" in out and "i@demo" not in out
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert [(d["handle"], d["command"]) for d in decisions] == [
+        (clean, f"edr retire {clean} --why FAILED:synth"), (clean + "-", f"edr export --source {dirty_tag} --out exports/{dirty_tag}")]
+    assert edr(capsys, "retire", clean, "--uncollected", "--why", "x", "--dry-run")[2] == f"{clean}: phase FAILED:synth\n"
+    assert edr(capsys, "stop", f"a@{dirty_tag}", "--why", "x", "--dry-run")[1:] == (f"{dirty}: already done\n",
+                                                                                    f"{dirty}: phase done\n")
+    code, out, err = edr(capsys, "continue", clean, "--stage", "synth", "--dry-run")
+    assert code == 0 and err == f"{clean}: phase FAILED:synth\n" and "a.synth" in out
+    assert len(edr(capsys, "metrics", "--source", "abc1234", "--source", dirty_tag, "--csv")[1].splitlines()) == 3
+    out = edr(capsys, "extract", "--source", "abc1234", "--source", dirty_tag, "--dry-run")[1]
+    assert {ln.split(": ")[0] for ln in out.splitlines()} == {clean, dirty, bare}
+    exp = tmp_path / "exp"
+    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--source", dirty_tag, "--labels", "a", "--out", str(exp))
+    manifest = json.loads((exp / "manifest.json").read_text())
+    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 2 files\n"
+    assert [r["run_id"] for r in manifest["runs"]] == [clean, dirty] and manifest["sources"] == ["abc1234", dirty_tag]
+
+
 def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     add_metric(demo, a, "area_cell_um2", 1000.0)  # unit u, the config says um2

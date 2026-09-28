@@ -211,9 +211,25 @@ def narrow_text(rows: list[Row], width: int = 48, now: float | None = None, tota
     return text
 
 
-def handle(row: Row) -> str:
-    """label@batch."""
-    return f"{_s(row.get('label'))}@{_s(row.get('batch'))}"
+def handle(row: Row, runs: list[Row] | None = None) -> str:
+    """label@batch. With `runs`, the runs of the project, it is the shortest unique prefix of the run id when
+    another of them has the same label and batch, since `db.resolve` refuses such a label@batch."""
+    h = f"{_s(row.get('label'))}@{_s(row.get('batch'))}"
+    others = [r for r in runs or [] if r["run_id"] != row.get("run_id")]
+    if not any(handle(r) == h for r in others):
+        return h
+    return prefix(row["run_id"], [r["run_id"] for r in others])
+
+
+def handles(runs: list[Row]) -> dict[str, str]:
+    """{run id: handle} of every run of `runs`, the runs of the project, as `handle` gives it."""
+    twins = Counter(handle(r) for r in runs)
+    return {r["run_id"]: handle(r, runs) if twins[handle(r)] > 1 else handle(r) for r in runs}
+
+
+def prefix(run_id: str, ids: list[str]) -> str:
+    """The shortest prefix of `run_id` that no other id of `ids` starts with; all of it when it starts another id."""
+    return run_id[:1 + max((len(os.path.commonprefix([run_id, i])) for i in ids if i != run_id), default=0)]
 
 
 def join(items: list[str]) -> str:
@@ -235,9 +251,11 @@ STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "
               "host_full": "--now --why host-full", "superseded": "--after-task --why superseded", "held": "--why held"}
 
 
-def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
-    """The one command a person runs next for a run in `state`; None for a running run or an orphan."""
-    h = handle(row)
+def triage_cmd(row: Row, state: str, hb: dict, runs: list[Row] | None = None) -> str | None:
+    """The one command a person runs next for a run in `state`; None for a running run, an orphan, and a run
+    without a tree whose next command would be a retire, which would only mark its row. With `runs`, the runs of
+    the project, the handle in the command names this run alone."""
+    h = handle(row, runs)
     if state in ("running", "orphan", "retired", "abandoned"):
         return None
     if state == "queued":
@@ -251,6 +269,8 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
         return f"edr stop {h} {STOP_FLAGS[state]}"
     if state == "done":
         return f"edr export --source {row.get('source')} --out exports/{row.get('source')}"
+    if not row.get("root"):
+        return None
     # The reason names what was observed, the phase the run ended with; without one the person writes it.
     return f"edr retire {h} --why {shlex.quote(str(row.get('phase') or '<why>'))}"
 
@@ -261,13 +281,13 @@ def wide(rows: list[Row], now: float | None = None, totals: dict[str, int] | Non
     Rows of several projects carry `project`, which then takes the place of the row number."""
     now = now or time.time()
     first = "project" if any("project" in r for r in rows) else "#"
-    body = [[r.get("project") if first == "project" else f"#{n}", r.get("label"), r.get("host"), state_text(state_of(r)),
-             r.get("phase"), _stage_step(r, totals), hm(_age_s(r, now)), _fd(r), f"{cost(r, now):.1f}"]
-            for n, r in enumerate(order(rows), 1)]
+    body = [[r.get("project") if first == "project" else f"#{n}", r.get("label"), r.get("source"), r.get("host"),
+             state_text(state_of(r)), _s(r.get("phase"))[:40] or None, _stage_step(r, totals), hm(_age_s(r, now)), _fd(r),
+             f"{cost(r, now):.1f}"] for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"
-    return table([first, "label", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"], body,
-                 styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "core-h"))
+    return table([first, "label", "source", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"], body,
+                 styles={"label": "bold", "source": "dim", "age": "dim"}, right=("age", "fail/done", "core-h"))
 
 
 def samples_table(samples: list[Row]) -> Table | None:
