@@ -214,11 +214,12 @@ per task, `parallel` at a time, each in its own directory with its own
 log and budget. The tasks come from a queue of files in the state
 directory, and a task is claimed by a rename, so two drivers that share
 a queue share one pool. The group counts every failed task, and a run
-with a failed or skipped task ends
-`INCOMPLETE:<n>f<m>s` with exit 8, never `done`. After `limits.streak`
+with a failed, skipped or held task ends
+`INCOMPLETE:<n>f<m>s<k>h` with exit 8, never `done`. After `limits.streak`
 failures in a row with the same signature, the last log line with its
-digits removed, the group sets `looping` and claims nothing more
-(`Driver.end_task`, `Driver.main`).
+digits removed, the group sets `looping` and claims nothing more. It
+counts each task it did not start as held, `<k>h` in the phase, and the
+run goes on with the next stage (`Driver.end_task`, `Driver.main`).
 
 The driver also enforces the limits of the project. None of them
 deletes a file:
@@ -316,6 +317,12 @@ The watcher never downloads anything, never resumes a run twice and
 never reads a retired batch. The read commands such as `edr status`
 ingest the heartbeats too, so the board follows the driver even between
 two cycles.
+
+A heartbeat or a spec that a reader cannot use, such as a heartbeat that
+an older driver wrote, stops only its own run. The watcher marks that run
+`unreadable`, sends one alert per error text and skips the run, and every
+other run goes through the cycle as usual. `edr status`, `edr brief` and
+the bot show the run as `unreadable` with the error.
 
 ### The work of the user
 

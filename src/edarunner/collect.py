@@ -55,14 +55,19 @@ def spec_tasks(spec: dict, root: str) -> Iterator[tuple[str, str, str]]:
             yield str(stage.get("name")), str(task["id"]), d[len(base):] if base != "/" and d.startswith(base) else d
 
 
-def spec_task_dirs(spec: dict, root: str) -> dict[str, str]:
-    """Task id -> task directory relative to the run root, from the spec's task groups."""
-    return {task: d for _, task, d in spec_tasks(spec, root)}
+def spec_task_dirs(spec: dict, root: str) -> dict[tuple[str, str], str]:
+    """(stage, task id) -> task directory relative to the run root, from the spec's task groups."""
+    return {(stage, task): d for stage, task, d in spec_tasks(spec, root)}
 
 
 def spec_task_fields(spec: dict) -> dict[str, dict[str, str]]:
     """Task id -> the fields the task ran with, from the spec's task groups; a task without them is left out."""
     return {str(t["id"]): t["fields"] for st in spec.get("stages") or [] for t in st.get("tasks") or [] if "fields" in t}
+
+
+def task_phases(heartbeat: dict) -> dict[tuple[str, str], str]:
+    """(stage, task id) -> phase of each task of a heartbeat; a task id is unique within its task group only."""
+    return {(stage, t): e.get("phase") for stage, tasks in (heartbeat.get("tasks") or {}).items() for t, e in tasks.items()}
 
 
 def stage_state(project: Project, heartbeat: dict, only: list[str] | None = None) -> tuple[list[str], str | None]:
@@ -102,7 +107,7 @@ def collect_run(
     if c.result.failures:
         return c.result
     finished, running = stage_state(project, heartbeat, only)
-    tasks = [t for t, e in (heartbeat.get("tasks") or {}).items() if e.get("phase") in _TASK_END]
+    tasks = [k for k, phase in task_phases(heartbeat).items() if phase in _TASK_END]
     paths = ["log/"]
     for name in finished:
         paths += c.render(project.stages[name], project.stages[name].collect, tasks)
@@ -148,7 +153,7 @@ def _on_request_paths(project: Project, c: _Copier, spec: dict, run: dict, name:
     """The rendered `collect_on_request.<name>` entries of the stages the spec ran, for the tasks of the heartbeat
     that started."""
     heartbeat = load_json(project.state_dir / str(run.get("batch") or "") / f"{run.get('run_id')}.json")
-    tasks = [t for t, e in (heartbeat.get("tasks") or {}).items() if e.get("phase") not in ("held", "skipped")]
+    tasks = [k for k, phase in task_phases(heartbeat).items() if phase not in ("held", "skipped")]
     only = spec_stages(spec)
     paths = [p for stage in project.stages.values() if only is None or stage.name in only
              for p in c.render(stage, stage.collect_on_request.get(name, []), tasks)]
@@ -160,7 +165,7 @@ def _on_request_paths(project: Project, c: _Copier, spec: dict, run: dict, name:
 class _Copier:
     def __init__(
         self, project: Project, ssh: Ssh, db: Database, run: dict, heartbeat: dict, dry_run: bool,
-        task_dirs: dict[str, str] | None = None, job_vars: dict[str, str] | None = None, host: str = "",
+        task_dirs: dict[tuple[str, str], str] | None = None, job_vars: dict[str, str] | None = None, host: str = "",
     ) -> None:
         self.project, self.ssh, self.db, self.dry_run = project, ssh, db, dry_run
         self.task_dirs = task_dirs or {}
@@ -178,11 +183,12 @@ class _Copier:
             self.result.failures.append(f"{self.run_id}: the run has no host or root")
         self.results = project.data / "results" / self.run_id
 
-    def render(self, stage: Stage, entries: list[str], tasks: list[str]) -> list[str]:
-        """Render `entries` with the run values; a task group renders once per task."""
+    def render(self, stage: Stage, entries: list[str], tasks: list[tuple[str, str]]) -> list[str]:
+        """Render `entries` with the run values; a task group renders once per task of its own among `tasks`, the
+        (stage, task id) pairs."""
         out = []
         for entry in entries:
-            for tid in tasks if stage.is_group else [None]:
+            for tid in [t for s, t in tasks if s == stage.name] if stage.is_group else [None]:
                 try:
                     out.append(render(entry, self._task_values(stage, tid) if tid else self.values))
                 except ConfigError as e:
@@ -197,10 +203,10 @@ class _Copier:
             task = resolve_task(self.project, tid)
             values.update({f"task.{k}": v for k, v in task.fields.items()})
         except ConfigError:
-            if tid not in self.task_dirs:
+            if (stage.name, tid) not in self.task_dirs:
                 raise
         values["task.id"] = tid
-        values["task_dir"] = self.task_dirs.get(tid) or render(stage.task_dir, values)
+        values["task_dir"] = self.task_dirs.get((stage.name, tid)) or render(stage.task_dir, values)
         return values
 
     def final_steps(self, entry: str, step: int) -> list[str]:

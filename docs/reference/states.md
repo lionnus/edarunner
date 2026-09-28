@@ -12,10 +12,13 @@ and a new reason edits that alert in place. A run that ends `done` alerts only a
 for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
 the stop of `superseded` for N hours; the full-host stop never waits for a keep.
 The triage proposes no retire for a run without a tree, such as one imported with `--results`,
-since a retire would only mark its row. For a run that ended `OVER_BUDGET` it proposes
-`edr continue` while the tree has stages or held tasks that `edr continue` runs without
-`--stage`, and nothing when it has none. When another run has the same label and batch, the
-command names the run by the shortest unique prefix of its run id instead of `<label>@<batch>`.
+since a retire would only mark its row. For a run that ended `OVER_BUDGET` or `STOPPED` it
+proposes `edr continue` while the tree has stages or held tasks that `edr continue` runs without
+`--stage`. When the tree has none, it proposes nothing for `OVER_BUDGET` and a retire for
+`STOPPED`. While `edr continue` refuses, such as for a stage that did not end with exit 0, it
+proposes neither, since a retire would take the tree that such a stage needs. When another run
+has the same label and batch, the command names the run by the shortest unique prefix of its run
+id instead of `<label>@<batch>`.
 
 | State | Mark | Test | Alert | Action | Proposed command |
 |---|---|---|---|---|---|
@@ -24,19 +27,20 @@ command names the run by the shortest unique prefix of its run id instead of `<l
 | `dead` | 🔴 | the heartbeat is older than `dead_s` and the driver process is gone from the host | yes | one resume from the last step, when the stage has `resume` and no process group of the run is alive | `edr continue <label>@<batch> --stage <stage> --from <step>` |
 | `hung` | 🔴 | the heartbeat is fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, tree size, log tail, task counts, log size, CPU time of the process groups | yes | `SIGTERM` to the process groups, only with `kill_hung` and while no keep holds | `edr stop <label>@<batch> --why hung` |
 | `looping` | 🔴 | the driver set `looping`: `streak` equal failure signatures in a row | yes | none | `edr stop <label>@<batch> --why looping` |
-| `over_budget` | 🔴 | the driver set `over_budget`, or the run ended `OVER_BUDGET` | yes | none | `edr stop <label>@<batch> --why over-budget` while the run lives; once it ended, `edr continue <label>@<batch>` with stages left, and none without |
+| `over_budget` | 🔴 | the driver set `over_budget`, or the run ended `OVER_BUDGET` | yes | none | `edr stop <label>@<batch> --why over-budget` while the run lives; once it ended, `edr continue <label>@<batch>` with stages or held tasks left, and none without |
 | `host_full` | 🟡 | the driver set `host_full`: the free scratch is below the floor of the host | yes | `stop --now` on the newest run of the host, of any of your projects, once per `grace_s` while the host stays full; a keep does not hold it off | `edr stop <label>@<batch> --now --why host-full` |
 | `superseded` | 🟡 | a newer batch runs the same label at another source | yes | `stop --after-task`, while no keep holds | `edr stop <label>@<batch> --after-task --why superseded` |
 | `orphan` | 🔴 | a process of the current user that matches `tool_procs` and that no live run owns: its `EDR_RUN_ID` names a run of a registered project that ended or whose driver is gone, or an unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and no safety marker of a registered project in its cwd or command line | yes | `SIGTERM`, only with `kill_orphan` of the project the process belongs to |  |
+| `unreadable` | 🔴 | a reader cannot use the heartbeat or the spec of the run, such as a heartbeat that an older driver wrote | yes | none; the watcher skips the run until its files read again | `edr status <label>@<batch>` |
 | `queued` | 🔵 | no host fits the job, or the scheduler holds `max_jobs` runs of the project |  | a launch when a host fits or a job ends, one per batch per cycle | `edr launch <batch> --only <label>` |
 | `pending` | 🔵 | the scheduler has the job in its queue and the driver has not started |  | none | `edr status <label>@<batch> --live` |
 | `held` | 🟠 | the scheduler holds the job and runs it only after a person releases it | yes | none | `edr stop <label>@<batch> --why held` |
 | `suspended` | 🟡 | the scheduler suspended the job; the heartbeat stands still until it resumes |  | none | `edr status <label>@<batch> --live` |
-| `imported` | ⚫ | `edr import` recorded the run with a phase that the driver ends a run with: `done`, `INCOMPLETE:<n>f<m>s`, `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED` or `KILLED:<signal>`; a run whose driver died is `FAILED:<stage>` |  | none | `edr retire <label>@<batch> --why '<phase>'` |
+| `imported` | ⚫ | `edr import` recorded the run with a phase that the driver ends a run with: `done`, `INCOMPLETE:<n>f<m>s<k>h`, `FAILED:<stage>`, `OVER_BUDGET:<stage>`, `STOPPED` or `KILLED:<signal>`; a run whose driver died is `FAILED:<stage>` |  | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `done` | ⚪ | the run ended `done` |  | none | `edr export --source <source> --out exports/<source>` |
-| `incomplete` | 🟠 | the run ended `INCOMPLETE:<n>f<m>s`: every stage ran, and a task failed or was skipped | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
+| `incomplete` | 🟠 | the run ended `INCOMPLETE:<n>f<m>s<k>h`: every stage ran, and a task failed, was skipped or was held | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `failed` | 🔴 | the run ended `FAILED` | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
-| `stopped` | ⚫ | a stop file or `edr stop` ended the run, or `edr stop` marked a queued run | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
+| `stopped` | ⚫ | a stop file or `edr stop` ended the run, or `edr stop` marked a queued run | yes | none | `edr continue <label>@<batch>` with stages or held tasks left, and `edr retire <label>@<batch> --why STOPPED` without |
 | `killed` | 🔴 | a signal ended the run | yes | none | `edr retire <label>@<batch> --why '<phase>'` |
 | `abandoned` | ⚫ | `edr retire` took a live run |  | none |  |
 | `retired` | ⚫ | `edr retire` took the run |  | none |  |

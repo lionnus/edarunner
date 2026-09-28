@@ -122,13 +122,14 @@ them on the same tree once the run has ended. Raise the budget in
 
 ### A task group ends `INCOMPLETE`
 
-Some tasks failed or were skipped. `edr status <handle>` shows the
-failure signature of each task, the last log line with its digits
-removed, and `log/<stage>.<task>.log` holds the whole output. After a
-fix, `edr continue <handle> --stage <S> --tasks <id>...` runs only those
-tasks on the same tree. When `limits.streak` tasks in a row fail with
-the same signature, the group stops claiming tasks and the run shows
-`looping`, which usually points to a fault shared by every task.
+Some tasks failed, were skipped or were held. `edr status <handle>`
+shows the failure signature of each task, the last log line with its
+digits removed, and `log/<stage>.<task>.log` holds the whole output.
+After a fix, `edr continue <handle> --stage <S> --tasks <id>...` runs
+only those tasks on the same tree. When `limits.streak` tasks in a row
+fail with the same signature, the group stops claiming tasks and the run
+shows `looping`, which usually points to a fault shared by every task.
+The tasks it did not start count as held, `<k>h` in the phase.
 
 ### A run is `hung`
 

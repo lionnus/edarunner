@@ -51,7 +51,7 @@ other message is `<project>: <kind>`.
 
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
-| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed`, `stopped` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, one on a full host Stop and Free space, and a run that ended `OVER_BUDGET` or `STOPPED` with stages left Continue | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
+| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `unreadable`, `held`, `incomplete`, `failed`, `killed`, `stopped` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, one on a full host Stop and Free space, and a run that ended `OVER_BUDGET` or `STOPPED` with stages left Continue | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
 | alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
@@ -634,6 +634,22 @@ edr keep b_nodw@demo --hours 12
 [Stop]  [+6h]  [+12h]  [+24h]
 ```
 
+`unreadable`: edarunner cannot use the heartbeat or the spec of the run,
+such as a heartbeat that an older driver wrote. The watcher skips that
+run and goes on with every other one, and it sends the alert again only
+when the error text changes.
+
+```
+🔴 demo: cannot read b_nodw@demo
+edarunner cannot read the heartbeat or the spec of the run: AttributeError: 'str' object has no attribute 'get'. The watcher skips this run until its files read again, and watches every other run as usual.
+
+stage: synth, step 3
+host: hostA
+
+See the run and the error:
+edr status b_nodw@demo
+```
+
 `held`: the scheduler holds the job.
 
 ```
@@ -646,15 +662,15 @@ Release it with the scheduler, or cancel it:
 edr stop b_nodw@demo --why held
 ```
 
-`incomplete`: the run ended with failed or skipped tasks.
+`incomplete`: the run ended with failed, skipped or held tasks.
 
 ```
 🟠 demo: failed tasks in b_nodw@demo
-The run ended with 3 failed and 1 skipped tasks. Their results are missing.
+The run ended with 3 failed, 1 skipped and 2 held tasks. Their results are missing.
 
 stage: synth, step 3 elaborate
 host: hostA
-tasks: 4 done, 3 failed, 1 skipped
+tasks: 4 done, 3 failed, 1 skipped, 2 held
 
 Information: elaborating top
 

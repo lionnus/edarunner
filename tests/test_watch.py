@@ -80,6 +80,25 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert env.ssh.killed == [] and not list(env.project.state_dir.glob("*/*.stop"))
 
 
+def test_a_heartbeat_that_cannot_be_read_stops_only_its_own_run(env: Env) -> None:
+    good = env.heartbeat("g", phase="done", exit=0, stage="power", tasks={"power": {"k_a": {"phase": "done"}}})
+    env.heartbeat("x", phase="done", exit=0, stage="power", tasks={"k_a": {"stage": "power", "phase": "done"}})  # flat
+    env.heartbeat("c", counts=[0])  # ingest takes it, and the hung check of the running stage cannot
+    error = "AttributeError: 'str' object has no attribute 'get'"
+    assert env.cycle() == {rid("g"): "done", rid("x"): "unreadable", rid("c"): "unreadable"}
+    assert "AttributeError: 'list' object has no attribute 'get'" in env.notifier.alerts[rid("c")].about
+    assert env.db.run(rid("x"))["state"] == "unreadable" and (rid("x"), "unreadable") in env.events()
+    a = env.notifier.alerts[rid("x")]
+    assert (a.kind, a.title, a.todo) == ("unreadable", "cannot read", [("See the run and the error:", "edr status x@demo")])
+    assert error in a.about
+    # The good run went on as usual: its task row, its collection and the board.
+    assert [tuple(r) for r in env.db.conn.execute("SELECT stage, task FROM stage_runs WHERE run_id=? AND task!=''",
+                                                   (good["run_id"],))] == [("power", "k_a")]
+    assert (rid("g"), "collect") in env.events() and len(env.notifier.boards) == 1
+    env.cycle(NOW + 60)  # the same error sends no second alert
+    assert env.notifier.sent.count(("unreadable", rid("x"))) == 1
+
+
 def test_a_run_that_ended_at_the_end_of_a_stage_offers_the_stages_left(env: Env) -> None:
     done = {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}
     o = env.heartbeat("o", phase="OVER_BUDGET:pnr", exit=9, stage="pnr",
@@ -97,7 +116,7 @@ def test_a_run_that_ended_at_the_end_of_a_stage_offers_the_stages_left(env: Env)
 
 def test_a_group_that_held_tasks_back_offers_them(env: Env) -> None:
     done = {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}
-    tasks = {t: {"stage": "power", "phase": p} for t, p in (("k_a", "done"), ("k_b", "done"), ("k_c", "held"), ("k_d", "held"))}
+    tasks = {"power": {t: {"phase": p} for t, p in (("k_a", "done"), ("k_b", "done"), ("k_c", "held"), ("k_d", "held"))}}
     h = env.heartbeat("h", phase="STOPPED", exit=10, stage="power", tasks=tasks,
                       stages={n: done for n in ("synth", "pnr", "export", "power")})
     spec = {"stages": [{"name": n} for n in ("synth", "pnr", "export", "power")]}
@@ -109,13 +128,42 @@ def test_a_group_that_held_tasks_back_offers_them(env: Env) -> None:
     assert a.todo[1][0].startswith("Continue runs the tasks k_c and k_d of power as one new run on local, in the tree ")
 
 
-def test_a_task_row_takes_the_stage_of_its_task(env: Env) -> None:
-    """A run that goes on after its task group keeps the rows of the group's tasks under that group."""
-    hb = env.heartbeat("x", phase="stage:export", stage="export",
-                       tasks={"k_a": {"stage": "power", "phase": "done", "started": 1, "ended": 2, "exit": 0}})
+def test_a_task_row_takes_the_stage_of_its_group(env: Env) -> None:
+    """A run that goes on after its task groups keeps the rows of each group's tasks under that group, also for a task
+    id that both groups ran."""
+    ran = {"started": 1, "ended": 2}
+    hb = env.heartbeat("x", phase="stage:export", stage="export", tasks={
+        "power": {"k_a": {**ran, "phase": "done", "exit": 0}}, "post": {"k_a": {**ran, "phase": "failed", "exit": 3}}})
     env.cycle()
-    assert [tuple(r) for r in env.db.conn.execute("SELECT stage, task, status FROM stage_runs WHERE run_id=? AND task!=''",
-                                                   (hb["run_id"],))] == [("power", "k_a", "done")]
+    assert sorted(tuple(r) for r in env.db.conn.execute(
+        "SELECT stage, task, status, exit FROM stage_runs WHERE run_id=? AND task!=''", (hb["run_id"],))) == [
+        ("post", "k_a", "failed", 3), ("power", "k_a", "done", 0)]
+
+
+def test_two_groups_that_share_a_task_id_collect_and_extract_their_own_tasks(env: Env) -> None:
+    """power ran k_small and failed k_big; the group post, in directories of its own, failed k_small and ran k_big."""
+    power = env.project.stages["power"]
+    env.project = replace(env.project, stages={**env.project.stages, "post": replace(power, name="post", task_dir="post/{task.test}")},
+                          metrics={**env.project.metrics, "post_w": replace(env.project.metrics["power_w"], name="post_w", stage=["post"])})
+    tasks = {"power": {"k_small": {"phase": "done"}, "k_big": {"phase": "failed"}},
+             "post": {"k_small": {"phase": "failed"}, "k_big": {"phase": "done"}}}
+    hb = env.heartbeat("d", phase="INCOMPLETE:2f0s0h", exit=8, stage="post", tasks=tasks)
+    root, groups, watts = Path(hb["root"]), [], iter((0.25, 0.5, 0.75, 1.0))
+    for group, base in (("power", "simulation/tests/demo"), ("post", "post")):
+        dirs = []
+        for tid, test in (("k_small", "GEMM_M64_N64"), ("k_big", "SOFTMAX_N512")):
+            (root / base / test / "power" / "reports").mkdir(parents=True)
+            (root / base / test / "power" / "reports" / "power.csv").write_text(f"phase,total_w\nWHOLE,{next(watts)}\n")
+            dirs.append({"id": tid, "dir": str(root / base / test)})
+        groups.append({"name": group, "tasks": dirs})
+    config.save_json(env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json", {"stages": groups})
+    env.cycle()
+    results = env.project.data / "results" / hb["run_id"]
+    assert sorted(str(p.relative_to(results)) for p in results.rglob("power.csv")) == [
+        "post/GEMM_M64_N64/power/reports/power.csv", "post/SOFTMAX_N512/power/reports/power.csv",
+        "simulation/tests/demo/GEMM_M64_N64/power/reports/power.csv", "simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv"]
+    assert sorted((m["stage"], m["task"], m["name"], m["value"]) for m in env.db.metrics(run_ids=[hb["run_id"]])) == [
+        ("post", "k_big", "post_w", 1.0), ("power", "k_small", "power_w", 0.25)]
 
 
 def keep(env: Env, hb: dict, hours: float, at: float = NOW) -> None:
@@ -349,7 +397,7 @@ def test_stage_rows_follow_the_stages_map(env) -> None:
 
 
 def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
-    hb = env.heartbeat("d", phase="done", exit=0, stage="power", tasks={"k_new": {"phase": "done"}})
+    hb = env.heartbeat("d", phase="done", exit=0, stage="power", tasks={"power": {"k_new": {"phase": "done"}}})
     root = Path(hb["root"])
     for n in range(4):
         (root / "reports" / str(n)).mkdir(parents=True)
@@ -372,7 +420,7 @@ def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
 
 def test_a_task_keeps_the_fields_it_ran_with(env: Env) -> None:
     # tasks.toml gives k_small the test GEMM_M64_N64 today; the run's spec says it ran as OLD_TEST.
-    hb = env.heartbeat("d", phase="done", exit=0, stage="power", tasks={"k_small": {"phase": "done"}})
+    hb = env.heartbeat("d", phase="done", exit=0, stage="power", tasks={"power": {"k_small": {"phase": "done"}}})
     task_dir = Path(hb["root"]) / "sim" / "k_small"
     (task_dir / "power").mkdir(parents=True)
     (task_dir / "power" / "OLD_TEST.csv").write_text("phase,total_w\nWHOLE,0.5\n")

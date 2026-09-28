@@ -53,13 +53,13 @@ def test_synth_only_reaches_done(tmp_path: Path) -> None:
 def test_group_runs_parallel_and_counts_a_failure(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big", "k_bad"), parallel=2)
     rc, hb = finish(start(spec), spec)
-    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:1f0s", 8)
-    small, big, bad = (hb["tasks"][t] for t in ("k_small", "k_big", "k_bad"))
+    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:1f0s0h", 8)
+    small, big, bad = (hb["tasks"]["power"][t] for t in ("k_small", "k_big", "k_bad"))
     assert small["phase"] == big["phase"] == "done"
     assert small["started"] < big["ended"] and big["started"] < small["ended"]
     assert bad["phase"] == "failed" and bad["exit"] == 1
     assert bad["signature"] == "boom: kernel bad failed"
-    assert hb["counts"] == {"done": 2, "failed": 1, "skipped": 0, "running": 0, "queued": 0}
+    assert hb["counts"] == {"done": 2, "failed": 1, "skipped": 0, "held": 0, "running": 0, "queued": 0}
     q = Path(spec["queue_dir"]) / "power"
     assert sorted(os.listdir(q / "done")) == ["k_bad", "k_big", "k_small"]
     assert os.listdir(q / "pending") == [] and os.listdir(q / "claimed") == []
@@ -136,17 +136,17 @@ def test_stop_file_after_task_ends_the_group_and_holds_the_tasks_not_started(tmp
     stop.write_text("after-task")
     rc, hb = finish(proc, spec)
     assert (rc, hb["phase"], hb["exit"]) == (10, "STOPPED", 10)
-    assert {t: (e["stage"], e["phase"]) for t, e in hb["tasks"].items()} == {
-        "k_small": ("power", "done"), "k_big": ("power", "done"), "k_small_2": ("power", "held"), "k_big_2": ("power", "held")}
+    assert {t: e["phase"] for t, e in hb["tasks"]["power"].items()} == {
+        "k_small": "done", "k_big": "done", "k_small_2": "held", "k_big_2": "held"}
     assert sorted(os.listdir(Path(spec["queue_dir"]) / "power" / "pending")) == ["k_big_2", "k_small_2"]
-    assert hb["counts"]["done"] == 2
+    assert (hb["counts"]["done"], hb["counts"]["held"], hb["counts"]["queued"]) == (2, 2, 0)
 
 
 def test_stop_file_now_kills_the_task(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small",), env={"DEMO_SLEEP": "20"})
     proc = start(spec)
-    hb = wait_for(spec, lambda h: h["tasks"].get("k_small", {}).get("phase") == "running")
-    pgid = hb["tasks"]["k_small"]["pgid"]
+    hb = wait_for(spec, lambda h: h["tasks"].get("power", {}).get("k_small", {}).get("phase") == "running")
+    pgid = hb["tasks"]["power"]["k_small"]["pgid"]
     Path(spec["state_file"]).with_name(RUN_ID + ".stop").write_text("now")
     rc, hb = finish(proc, spec, timeout=15)
     assert (rc, hb["phase"], hb["killed_by"]) == (10, "STOPPED", "stop")
@@ -259,15 +259,32 @@ def test_spec_env_expands_host_variables(tmp_path: Path) -> None:
     assert "command not found" not in log
 
 
-def test_streak_of_equal_signatures_sets_looping(tmp_path: Path) -> None:
+def test_streak_of_equal_signatures_sets_looping_and_the_run_counts_the_held_task(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_bad", "k_small"), parallel=1)
     tasks = spec["stages"][0]["tasks"]
     tasks.insert(1, dict(tasks[0], id="k_bad2"))
+    spec["stages"].append({"name": "report", "cwd": spec["root"], "cmd": "true"})
     rc, hb = finish(start(spec), spec)
-    assert (rc, hb["phase"], hb["looping"]) == (8, "INCOMPLETE:2f0s", True)
-    assert hb["tasks"]["k_bad"]["signature"] == hb["tasks"]["k_bad2"]["signature"] == "boom: kernel bad failed"
-    assert hb["tasks"]["k_small"]["phase"] == "held" and hb["counts"]["failed"] == 2
+    assert (rc, hb["phase"], hb["looping"]) == (8, "INCOMPLETE:2f0s1h", True)
+    power = hb["tasks"]["power"]
+    assert power["k_bad"]["signature"] == power["k_bad2"]["signature"] == "boom: kernel bad failed"
+    assert power["k_small"]["phase"] == "held"
+    assert hb["counts"] == {"done": 0, "failed": 2, "skipped": 0, "held": 1, "running": 0, "queued": 0}
     assert (Path(spec["queue_dir"]) / "power" / "pending" / "k_small").exists()
+    assert hb["stages"]["report"]["status"] == "done"  # the run goes on after the group
+
+
+def test_two_task_groups_keep_the_entries_of_a_task_id_they_share(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"))
+    power = spec["stages"][0]
+    spec["stages"].append(dict(power, name="post", tasks=[dict(t, cmd="exit 3") if t["id"] == "k_big" else t
+                                                          for t in power["tasks"]]))
+    rc, hb = finish(start(spec), spec)
+    assert (rc, hb["phase"]) == (8, "INCOMPLETE:1f0s0h")
+    assert {g: {t: e["phase"] for t, e in tasks.items()} for g, tasks in hb["tasks"].items()} == {
+        "power": {"k_small": "done", "k_big": "done"}, "post": {"k_small": "done", "k_big": "failed"}}
+    assert hb["tasks"]["power"]["k_big"]["exit"] == 0 and hb["tasks"]["post"]["k_big"]["exit"] == 3
+    assert (hb["counts"]["done"], hb["counts"]["failed"]) == (3, 1)
 
 
 def test_host_full_starts_nothing(tmp_path: Path) -> None:
@@ -291,9 +308,9 @@ def test_needs_disk_gb_refuses_a_stage_and_skips_a_task(tmp_path: Path) -> None:
     spec = render_spec(tmp_path / "group", stages=("power",), tasks=("k_small", "k_big"))
     spec["stages"][0]["tasks"][0]["needs"] = {"disk_gb": 1e9}
     rc, hb = finish(start(spec), spec)
-    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:0f1s", 8)
-    assert hb["tasks"]["k_small"]["phase"] == "skipped" and hb["tasks"]["k_big"]["phase"] == "done"
-    assert hb["counts"] == {"done": 1, "failed": 0, "skipped": 1, "running": 0, "queued": 0}
+    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:0f1s0h", 8)
+    assert hb["tasks"]["power"]["k_small"]["phase"] == "skipped" and hb["tasks"]["power"]["k_big"]["phase"] == "done"
+    assert hb["counts"] == {"done": 1, "failed": 0, "skipped": 1, "held": 0, "running": 0, "queued": 0}
     assert (Path(spec["queue_dir"]) / "power" / "pending" / "k_small").exists()
 
 
@@ -310,8 +327,8 @@ def test_per_task_budget_kills_that_task_only(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=2,
                        env={"DEMO_SLEEP": "4"}, budgets={"power": {"hours": 0.0003, "per": "task"}})
     rc, hb = finish(start(spec), spec)
-    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:1f0s", 8)
-    small, big = hb["tasks"]["k_small"], hb["tasks"]["k_big"]
+    assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:1f0s0h", 8)
+    small, big = hb["tasks"]["power"]["k_small"], hb["tasks"]["power"]["k_big"]
     assert small["phase"] == "failed" and small["over_budget"] is True and small["exit"] != 0
     assert big["phase"] == "done" and "over_budget" not in big  # its own 2 h budget holds
     assert "over_budget" not in hb and hb["killed_by"] is None
@@ -334,20 +351,20 @@ def test_two_shards_claim_from_one_queue(tmp_path: Path) -> None:
     a = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=1, env={"DEMO_SLEEP": "3"})
     b = dict(a, run_id=RUN_ID + "_b", state_file=str(Path(a["state_file"]).with_name(RUN_ID + "_b.json")))
     pa = start(a)
-    wait_for(a, lambda h: h["tasks"].get("k_small", {}).get("phase") == "running")
+    wait_for(a, lambda h: h["tasks"].get("power", {}).get("k_small", {}).get("phase") == "running")
     pb = start(b)
     (rc_a, ha), (rc_b, hb) = finish(pa, a), finish(pb, b)
     assert (rc_a, ha["phase"], rc_b, hb["phase"]) == (0, "done", 0, "done")
     q = Path(a["queue_dir"]) / "power"
     assert sorted(os.listdir(q / "done")) == ["k_big", "k_small"] and os.listdir(q / "claimed") == []
-    assert (set(ha["tasks"]), set(hb["tasks"])) == ({"k_small"}, {"k_big"})
+    assert (set(ha["tasks"]["power"]), set(hb["tasks"]["power"])) == ({"k_small"}, {"k_big"})
 
 
 def test_sighup_kills_the_group_and_reports(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small",), env={"DEMO_SLEEP": "20"})
     proc = start(spec)
-    hb = wait_for(spec, lambda h: h["tasks"].get("k_small", {}).get("phase") == "running")
-    pgid = hb["tasks"]["k_small"]["pgid"]
+    hb = wait_for(spec, lambda h: h["tasks"].get("power", {}).get("k_small", {}).get("phase") == "running")
+    pgid = hb["tasks"]["power"]["k_small"]["pgid"]
     proc.send_signal(signal.SIGHUP)
     rc, hb = finish(proc, spec, timeout=15)
     assert (rc, hb["phase"], hb["killed_by"], hb["exit"]) == (10, "KILLED:SIGHUP", "SIGHUP", 10)

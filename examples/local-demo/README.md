@@ -97,7 +97,7 @@ sed -e 's/^batch = .*/batch = "bad"/' -e 's/"k_big"]/"k_big", "k_bad"]/' jobs/de
 edr launch bad
 ```
 
-The run `a@bad` ends `INCOMPLETE:1f0s` with exit 8, and `edr status a@bad`
+The run `a@bad` ends `INCOMPLETE:1f0s0h` with exit 8, and `edr status a@bad`
 shows the signature `boom: kernel bad failed`.
 
 ## Clean up

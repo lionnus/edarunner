@@ -87,14 +87,14 @@ def _param(text: str) -> tuple[str, str]:
 def _check_phase(project: Project, phase: str) -> None:
     """Refuse a phase that the driver never ends a run with."""
     kind, sep, arg = phase.partition(":")
-    n = re.fullmatch(r"(\d+)f(\d+)s", arg)
+    n = re.fullmatch(r"(\d+)f(\d+)s(\d+)h", arg)
     stages = set(project.stages)
     if not {"done": not sep, "STOPPED": not sep, "KILLED": re.fullmatch(r"SIG[A-Z]+", arg),
-            "INCOMPLETE": n and int(n[1]) + int(n[2]) > 0, "FAILED": arg in stages | {"setup", "runtime"},
+            "INCOMPLETE": n and sum(map(int, n.groups())) > 0, "FAILED": arg in stages | {"setup", "runtime"},
             "OVER_BUDGET": arg in stages}.get(kind):
-        raise Refuse(f"--phase {phase}: a run ends done, INCOMPLETE:<n>f<m>s with a task that failed or was skipped, "
-                     "FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or KILLED:<signal>, with a stage of edr.toml; a run "
-                     "whose driver died is FAILED:<stage>")
+        raise Refuse(f"--phase {phase}: a run ends done, INCOMPLETE:<n>f<m>s<k>h with a task that failed, was skipped or "
+                     "was held, FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or KILLED:<signal>, with a stage of "
+                     "edr.toml; a run whose driver died is FAILED:<stage>")
 
 
 # These commands link the project into the registry, so the commands that span projects find it.
@@ -114,6 +114,7 @@ class Ctx:
         self.data: Any = None
         self._project: Project | None = None
         self._db: Database | None = None
+        self.unreadable: dict[str, str] = {}  # run id -> the error, of the heartbeats the last refresh could not use
 
     @property
     def project(self) -> Project:
@@ -212,19 +213,24 @@ class Ctx:
     def refresh(self, batch: str | None = None) -> None:
         """Ingest the heartbeat files of the shown batches, so the board follows the driver, not the last watcher cycle.
 
-        This is the watcher's own first step and idempotent, so a read command may run it.
+        This is the watcher's own first step and idempotent, so a read command may run it. A heartbeat that it cannot
+        use goes into `unreadable` with its error, and every other one goes in.
         """
         heartbeats = watch.read_heartbeats(self.project, {batch} if batch else None)
-        if heartbeats:
-            watch.ingest(self.db, heartbeats)
+        self.unreadable = watch.ingest(self.db, heartbeats) if heartbeats else {}
 
     def rows(self, batch: str | None = None) -> list[Row]:
-        """The runs of the batches that are not retired, with the state a heartbeat age gives."""
+        """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
+        the refresh could not use is `unreadable` and carries the error."""
         self.refresh(batch)
         retired = {b["batch"] for b in self.db.batches() if b.get("retired")}
         rows = [r for r in self.db.runs(batch=batch) if r["batch"] not in retired]
         now, lim = time.time(), self.project.limits
         for r in rows:
+            if r["run_id"] in self.unreadable:
+                r["state"], r["error"] = "unreadable", self.unreadable[r["run_id"]]
+            elif r.get("state") == "unreadable":
+                r["state"] = None  # the refresh read it, and the watcher classifies it again
             # The watcher's own classes (hung, host_full, ...) stay; only the age classes follow the heartbeat.
             if board.is_live(r) and r.get("updated") is not None and r.get("state") in (None, "running", "stale", "dead"):
                 age = now - r["updated"]
@@ -252,13 +258,13 @@ class Ctx:
         """The heartbeat of a run, or {} when the driver wrote none."""
         return config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.json")
 
-    def left(self, row: Row, state: str) -> list[str]:
-        """The stages that `edr continue` runs on the tree of a run that ended over its budget, for the triage; none
-        for another run, or when continue refuses."""
-        if state != "over_budget" or board.is_live(row):
+    def left(self, row: Row, state: str) -> list[str] | None:
+        """The stages that `edr continue` runs on the tree of a run that ended over its budget or stopped, for the
+        triage; an empty list for another run, and None when continue refuses."""
+        if state not in ("over_budget", "stopped") or board.is_live(row):
             return []
         left, _, why = launch.stages_left(self.project, self.db, row)
-        return [] if why else left
+        return None if why else left
 
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""
@@ -458,8 +464,7 @@ class Actions:
             return tgfmt.board(rows, totals=metrics.step_totals(self.c.project),
                                names=analysis.step_names(self.c.project), everything=everything)
         row = self.c.resolve(handle)
-        self.c.refresh(str(row["batch"]))
-        row = self.c.db.run(row["run_id"]) or row
+        row = next((r for r in self.c.rows(str(row["batch"])) if r["run_id"] == row["run_id"]), row)
         return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs(), self.c.left(row, board.state_of(row)))
 
     def events_text(self, n: int) -> str:
@@ -545,8 +550,7 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     if a.handle:
         row = c.resolve(a.handle)
-        c.refresh(str(row["batch"]))
-        row = c.db.run(row["run_id"]) or row
+        row = next((r for r in c.rows(str(row["batch"])) if r["run_id"] == row["run_id"]), row)
         hb, run_id = c.heartbeat(row), row["run_id"]
         stages = sorted(c.db.stage_runs(run_id), key=lambda r: (r["stage"] != "setup", r["stage"], r["task"], r["attempt"]))
         mets = c.db.metrics(run_ids=[run_id])
@@ -1927,10 +1931,11 @@ def _parser() -> argparse.ArgumentParser:
         Without a handle, status prints the board: one line per run of every
         batch that is not retired, live runs first and dead ones on top. The columns are the row
         number, label, source tag, host, state, phase (its first 40 characters),
-        stage/step, heartbeat age, failed and done task counts, and core-h: the
-        hours so far times the cores the run reserved, the most that any of its
-        stages needs. A live stage with steps shows <stage>, starting until its
-        first step. The state of a live run
+        stage/step, heartbeat age, failed and done task counts with the skipped
+        and held ones after them when there are any, such as 2f/5d/3h, and
+        core-h: the hours so far times the cores the run reserved, the most
+        that any of its stages needs. A live stage with steps shows <stage>,
+        starting until its first step. The state of a live run
         follows the heartbeat age (running, stale, dead) or the watcher's last
         verdict (hung, host_full, ...). A finished run shows its phase class:
         done, incomplete, failed, over_budget, stopped or killed.
@@ -2372,7 +2377,7 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True, exits={Exit.DONE: "the command ended done", 2: "FAILED:setup, the stage is not in the spec; "
                                 "or FAILED:<stage>, a checkpoint on a stage without resume",
                                 3: "FAILED:<stage>, too little disk for the stage", 4: "FAILED:<stage>, the tool gate timed out",
-                                5: "FAILED:<stage>, the command failed", 8: "INCOMPLETE, a task failed or was skipped",
+                                5: "FAILED:<stage>, the command failed", 8: "INCOMPLETE, a task failed, was skipped or was held",
                                 9: "OVER_BUDGET:<stage>, a budget passed", 10: "STOPPED or KILLED:<signal>"})
     s.add_argument("--label", required=True, metavar="L", help="the label of the run")
     s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
@@ -2411,10 +2416,10 @@ def _parser() -> argparse.ArgumentParser:
         tag holds -dirty, and a tag that edr checkout would not make, <hash>
         with -n<hash> for each source.nested repository and an optional
         -dirty-<8 hex>, gets a warning. --phase is a phase that the
-        driver ends a run with: done, INCOMPLETE:<n>f<m>s where a task failed
-        or was skipped, FAILED:<stage>, OVER_BUDGET:<stage>, STOPPED or
-        KILLED:<signal>. A run whose driver died is FAILED:<stage>, with the
-        stage it died in.
+        driver ends a run with: done, INCOMPLETE:<n>f<m>s<k>h where a task
+        failed, was skipped or was held, FAILED:<stage>, OVER_BUDGET:<stage>,
+        STOPPED or KILLED:<signal>. A run whose driver died is
+        FAILED:<stage>, with the stage it died in.
 
         Each task takes its fields from tasks.toml, as a launch would, and
         the task_fields table records them with the origin resolver. When a

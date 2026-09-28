@@ -180,6 +180,55 @@ def test_the_triage_stops_a_live_run_over_its_budget_and_continues_one_that_ende
     assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo") and "<code>edr " not in acts.status_text("z@demo")
 
 
+def test_the_triage_continues_a_stopped_run_with_work_left_and_retires_one_without(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "STOPPED")
+    ran(demo, a, "STOPPED", {"synth": ("done", 0), "pnr": ("done", 0)})  # export and power are left
+    h = seed(demo, "h", "STOPPED")
+    ran(demo, h, "STOPPED", {n: ("done", 0) for n in DEMO_STAGES})
+    beat(demo, h, tasks={"power": {"k_small": {"phase": "done", "started": 110, "ended": 120, "exit": 0},
+                                   "k_big": {"phase": "held"}}})
+    k = seed(demo, "k", "STOPPED")
+    ran(demo, k, "STOPPED", {"synth": ("done", 0), "pnr": ("stopped", None)})  # a stop --now in pnr: continue refuses
+    z = seed(demo, "z", "STOPPED")
+    ran(demo, z, "STOPPED", {n: ("done", 0) for n in DEMO_STAGES})
+    code, out, _ = edr(capsys, "status", "--triage")
+    assert code == 0 and "    edr continue a@demo\n" in out and "    edr continue h@demo\n" in out
+    assert "    edr retire z@demo --why STOPPED\n" in out and "k@demo" not in out
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert [(d["handle"], d["command"]) for d in decisions] == [
+        ("a@demo", "edr continue a@demo"), ("h@demo", "edr continue h@demo"), ("z@demo", "edr retire z@demo --why STOPPED")]
+    assert "The triage proposes `edr continue h@demo`." in edr(capsys, "brief", "--run", "h@demo")[1]
+    assert "The triage proposes nothing for it." in edr(capsys, "brief", "--run", "k@demo")[1]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo")
+    assert "<code>edr retire z@demo --why STOPPED</code>" in acts.status_text("z@demo")
+    assert "<code>edr " not in acts.status_text("k@demo")
+
+
+def test_a_heartbeat_that_cannot_be_read_shows_its_run_unreadable_and_the_others_as_usual(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    x = seed(demo, "x", "done")
+    beat(demo, x, tasks={"k_small": {"stage": "power", "phase": "done"}})  # the flat map of an older driver
+    error = "AttributeError: 'str' object has no attribute 'get'"
+    code, out, _ = edr(capsys, "--json", "status")
+    states = {r["run_id"]: (board.state_of(r), r.get("error")) for r in json.loads(out)["data"]["runs"]}
+    assert code == 0 and states == {a: ("done", None), x: ("unreadable", error)}
+    assert "    edr status x@demo\n" in edr(capsys, "status", "--triage")[1]
+    code, out, _ = edr(capsys, "status", "x@demo")
+    assert code == 0 and f"unreadable: {error}" in out
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert ("x@demo", "edr status x@demo") in [(d["handle"], d["command"]) for d in decisions]
+    assert f"such as a heartbeat that an older driver wrote ({error})" in edr(capsys, "brief", "--run", "x@demo")[1]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert "🔴 <code>x@demo</code> unreadable" in acts.status_text(everything=True)
+    assert f"unreadable: {error}" in acts.status_text("x@demo")
+    with Database(demo / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": x, "state": "unreadable"})  # as the watcher leaves it
+    beat(demo, x, tasks={})  # once the heartbeat reads again, so does the run
+    run = json.loads(edr(capsys, "--json", "status", "x@demo")[1])["data"]["run"]
+    assert board.state_of(run) == "done" and "error" not in run
+
+
 def test_events_filters(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "events")
     assert code == 2 and out == "no events\n"
@@ -708,7 +757,7 @@ def test_extract_takes_every_step_of_a_stage_over_budget_with_exit_0(demo: Path,
 
 def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
-    beat(demo, a, tasks={"k_small": {"phase": "done"}, "k_big": {"phase": "done"}})
+    beat(demo, a, tasks={"power": {"k_small": {"phase": "done"}, "k_big": {"phase": "done"}}})
     results = demo / "data" / "results" / a
     for n in (2, 3, 4):
         (results / "reports" / str(n)).mkdir(parents=True)
@@ -784,7 +833,7 @@ def test_extract_reads_parameters_from_the_files_and_flags_runs_that_contradict_
         "            if m['name'] == 'window_ns' and m['value'] == 4096]\n")
     a, b, c = (seed(demo, label, "done") for label in ("a", "b", "c"))
     d = seed(demo, "a.power", "done", tree_id=a)  # it continues a on the tree of a
-    beat(demo, c, tasks={"k_small": {"phase": "done"}, "k_big": {"phase": "done"}})
+    beat(demo, c, tasks={"power": {"k_small": {"phase": "done"}, "k_big": {"phase": "done"}}})
     for run, lanes, design in ((a, 8, "abc1234"), (b, 8, "abc1234"), (c, 4, "abc1234-dirty"), (d, 8, "abc1234")):
         results = demo / "data" / "results" / run
         (results / "log").mkdir(parents=True)
@@ -1039,8 +1088,8 @@ def test_continue_runs_exactly_the_tasks_a_group_held_back(demo: Path, capsys) -
 
     def group(done: tuple[str, ...], held: tuple[str, ...]) -> dict:
         """The task entries of a power group as the driver writes them after a stop."""
-        return {**{t: {"stage": "power", "phase": "done", "started": 110, "ended": 120, "exit": 0} for t in done},
-                **{t: {"stage": "power", "phase": "held"} for t in held}}
+        return {"power": {**{t: {"phase": "done", "started": 110, "ended": 120, "exit": 0} for t in done},
+                          **{t: {"phase": "held"} for t in held}}}
 
     def tasks_of(out: str) -> list[tuple[str, list[str]]]:
         return [(s["name"], [t["id"] for t in s["tasks"]]) for s in json.loads(out)["data"]["spec"]["stages"]]
@@ -1069,7 +1118,7 @@ def test_continue_runs_exactly_the_tasks_a_group_held_back(demo: Path, capsys) -
 def test_only_a_task_group_holds_tasks(demo: Path, capsys) -> None:
     b = seed(demo, "b_nodw", "OVER_BUDGET:synth")
     ran(demo, b, "OVER_BUDGET:synth", {"synth": ("over_budget", 0)}, names=("synth", "pnr"))
-    beat(demo, b, tasks={"k_small": {"phase": "skipped"}})  # an entry without a stage lands under synth
+    beat(demo, b, tasks={"synth": {"k_small": {"phase": "skipped"}}})  # synth is no task group
     edr(capsys, "status")
     code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
     assert code == 0 and stages_of(out)[1] == ["pnr"]
@@ -1304,6 +1353,14 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
     other.mkdir()
     assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--source", "abc1234", "--host", "local",
                "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
+
+
+def test_an_incomplete_phase_carries_the_held_tasks() -> None:
+    project = config.load_project(DEMO)
+    cli._check_phase(project, "INCOMPLETE:2f0s1h")
+    for bad in ("INCOMPLETE:0f0s0h", "INCOMPLETE:1f0s"):
+        with pytest.raises(Refuse, match="INCOMPLETE:<n>f<m>s<k>h with a task that failed, was skipped or was held"):
+            cli._check_phase(project, bad)
 
 
 def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys) -> None:

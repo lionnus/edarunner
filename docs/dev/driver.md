@@ -109,7 +109,10 @@ The driver writes `<run_id>.json` by a temporary file and a rename every
 `heartbeat_s` seconds and at every phase change, so a reader never sees
 a torn file. A heartbeat keeps its last phase after the driver dies;
 the watcher marks such a run `dead` after `dead_s`. The hung check of
-the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
+the watcher compares `cpu_s` and `log_bytes` from cycle to cycle. A
+heartbeat that the readers cannot use, such as one that an older driver
+wrote, shows its run as `unreadable` and leaves the other runs alone
+(`watch.ingest`, `watch.cycle`).
 
 | Field | Meaning |
 |---|---|
@@ -120,8 +123,8 @@ the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
 | `cpu_s`, `rss_gb` | the CPU time in seconds and the summed RSS of every process in `pgids`, read in one pass over `/proc` at every heartbeat; the CPU time includes reaped children. Without `/proc`, both come from `ps -e -o pgid=,cputimes=,rss=`, which gives whole seconds and leaves out the children |
 | `log_bytes` | the size of `log` in bytes; every heartbeat |
 | `stages` | per stage started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
-| `tasks` | per task: `stage`, `phase` (`running`, `done`, `failed`, `skipped` or `held`), `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
-| `counts` | `done`, `failed`, `skipped`, `running`, `queued`, over every task group of the run |
+| `tasks` | per task group, then per task, since a task id is unique within its group only: `phase` (`running`, `done`, `failed`, `skipped` or `held`), `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
+| `counts` | `done`, `failed`, `skipped`, `held`, `running`, `queued`, over every task group of the run; a task still pending when its group ends counts as `held`, not `queued` |
 | `started`, `updated`, `elapsed_s` | unix times; the watcher reads the age of `updated` |
 | `disk_free_gb`, `tree_gb` | free space at `root`; `du -s` of the tree at most once per ten minutes |
 | `cpu_pct` | the CPU use since the previous sample as a percent of one core, computed from two successive `cpu_s` values and the time between them. It is null on the first sample, and a heartbeat less than a second after the previous one keeps the old value. A process group that ended takes its CPU seconds with it, so a drop in `cpu_s` reads as zero |
@@ -180,7 +183,7 @@ task still in `pending/` as `held`; `launch.stages_left` reads them, and
 | A change to | Also changes |
 |---|---|
 | the spec | `launch._spec`, `tests/test_driver.py`, the table above |
-| a heartbeat field | `watch.ingest`, `board.py`, the table above; `cpu_s` and `log_bytes` also `watch._signature` |
+| a heartbeat field | `watch.ingest`, `board.py`, the table above; `cpu_s` and `log_bytes` also `watch._signature`, and `tasks` also `collect.task_phases` |
 | a phase or an exit code | `board.state_of`, `watch.STATES`, the table in `guides/run.md` |
 | the queue layout | `collect.py`, which reads the task directories from the spec |
 

@@ -189,6 +189,11 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.about = (f"A newer run of the same label runs at another source{f' ({newer})' if newer else ''}. edarunner "
                    f"stops this run after its running task, {_after(project)}, unless it has a keep.")
         a.todo = [("To keep it running:", f"edr keep {h} --hours 12")]
+    elif state == "unreadable":
+        a.title = "cannot read"
+        a.about = (f"edarunner cannot read the heartbeat or the spec of the run: {why}. The watcher skips this run "
+                   "until its files read again, and watches every other run as usual.")
+        a.todo = [("See the run and the error:", cmd)]
     elif state == "held":
         a.title = "scheduler holds"
         a.about = "The scheduler holds the job, and it starts only after someone releases it."
@@ -196,10 +201,10 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.todo = [("Release it with the scheduler, or cancel it:", cmd)]
     elif state == "incomplete":
         a.title = "failed tasks in"
-        a.about = (f"The run ended with {counts.get('failed', 0)} failed and {counts.get('skipped', 0)} skipped "
-                   "tasks. Their results are missing.")
+        a.about = (f"The run ended with {counts.get('failed', 0)} failed, {counts.get('skipped', 0)} skipped and "
+                   f"{counts.get('held', 0)} held tasks. Their results are missing.")
         a.facts.append(("tasks", f"{counts.get('done', 0)} done, {counts.get('failed', 0)} failed, "
-                                 f"{counts.get('skipped', 0)} skipped"))
+                                 f"{counts.get('skipped', 0)} skipped, {counts.get('held', 0)} held"))
         a.todo = [("See which tasks failed and the log tail:", f"edr status {h}")]
     elif state == "failed":
         a.title = "failed run"
