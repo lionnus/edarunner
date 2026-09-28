@@ -60,22 +60,29 @@ them.
 
 `edr checkout <ref>` pins one commit of the flow's repository. It
 fetches the repository when it has a remote, and makes a detached local
-clone of the commit under `source.worktrees/<hash>`, where `<hash>` is
-the short hash of the commit. Each repository that `source.nested` names
-gets its own clone inside that tree. The short hash is the source tag of
-every run built from this tree, and the batch file names it as
-`source` (`checkout.py`).
+clone of the commit under `source.worktrees/<tag>`. Each repository that
+`source.nested` names gets its own clone inside that tree, at the HEAD
+that the repository copy has. The tag is the short hash of the commit
+followed by `-n<short hash>` for each nested repository, such as
+`3f9a2c1-n8e0d4b2`, or the short hash alone without nested repositories.
+It is the source tag of every run built from this tree, and the batch
+file names it as `source` (`checkout.py`). A checkout of a tag clones
+the commits that the tag names, so a tag names the same source after a
+nested repository has moved on.
 
 Every run works on a copy of this clone, so a commit you make later
 never changes a running flow. A tree with uncommitted changes can go in
-as a snapshot with `edr checkout --dirty <dir>`: a clone of its HEAD with
-your changes copied over it, tagged `<hash>-dirty-<8 hex>` from the
-sha256 of its diff. The diff covers the untracked files that git does
-not ignore and the changes in each nested repository, and `checkout`
-writes it into the clone and into `data/sources/<tag>/` (`runid.diff`,
-`checkout._snapshot`). `launch`
-refuses a dirty tag unless you pass `--allow-dirty`, and it records the
-commit of each nested repository of the clone in the spec of every run.
+as a snapshot with `edr checkout --dirty <dir>`: a clone of its commits
+with the files that its tag covers copied over it, tagged
+`<tag>-dirty-<8 hex>` from the sha256 of its diff. The tag covers the
+tracked files and the untracked files that git does not ignore, of the
+tree and of each nested repository, and `checkout` writes the diff into
+the clone and into `data/sources/<tag>/` (`runid.diff`, `runid.files`,
+`checkout._snapshot`). A git repository in the tree that
+`source.nested` does not name and git does not ignore stops the
+snapshot. `launch` refuses a dirty tag unless you pass `--allow-dirty`,
+and it records the commit of each nested repository that the tag names
+in the spec of every run.
 
 Apart from that `git fetch`, edarunner leaves your source repository
 alone, and the repository is never the target of a delete

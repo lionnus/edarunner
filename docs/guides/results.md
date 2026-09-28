@@ -97,22 +97,35 @@ the rows: in `--json` and in the `canonical` column of `metrics.csv`.
 ## Run identity
 
 The identity of a number is the source tag of its run, the diff of a
-dirty tag, the commit of each nested repository, and the parameters of
-the run: its vars and overrides, and the values read from its own files.
-Give the tag next to every number you publish.
+dirty tag, and the parameters of the run: its vars and overrides, and
+the values read from its own files. Give the tag next to every number
+you publish.
 
-The source tag is the short hash of the commit that `edr checkout`
-pinned. A tree with changes gets `<hash>-dirty-<8 hex>`, where the hex
-digits start the sha256 of its diff. The diff holds the changes to
-tracked files, every untracked file that git does not ignore, and the
-same for each repository that `source.nested` names, so an edit in a
-nested flow repository gives a new tag as well. `edr checkout --dirty`
-writes the diff to `source.diff` and its base to `source.json`, in the
-clone and in `data/sources/<tag>/`. `edr retire --batch` removes the
-clone, but `data/sources/<tag>/` stays. `source.json` names the base
-commit and the commit of each nested repository. `git apply source.diff`
-in a clone of the base, with each nested repository at its commit, gives
-back every file of the tree that git does not ignore.
+The source tag names every commit that the source is made of. It starts
+with the short hash of the commit that `edr checkout` pinned and adds
+`-n<short hash>` for each repository that `source.nested` names, in the
+order of that list. With `nested = ["flow"]` a tag reads
+`3f9a2c1-n8e0d4b2`; a project without nested repositories gets the
+short hash alone. A commit in the nested flow repository therefore gives
+a new tag and a new clone, even when the outer commit stays the same,
+and `edr checkout 3f9a2c1-n8e0d4b2` checks out the same two commits
+after the flow repository has moved on.
+
+A tree with changes gets `-dirty-<8 hex>` at the end, such as
+`3f9a2c1-n8e0d4b2-dirty-7b21c0d9`, where the hex digits start the sha256
+of its diff. The diff holds the changes to tracked files and every
+untracked file that git does not ignore, of the tree and of each nested
+repository. `edr checkout --dirty` copies exactly these files over a
+clone of the commits, so a file that git ignores stays out of the
+snapshot. A git repository in the tree that `source.nested` does not
+name stops the checkout, since the tag would not cover it: name it
+there, or ignore it in `.gitignore`. The checkout writes the diff to
+`source.diff` and its base to `source.json`, in the clone and in
+`data/sources/<tag>/`. `edr retire --batch` removes the clone, but
+`data/sources/<tag>/` stays. `source.json` names the base commit and the
+commit of each nested repository. `git apply source.diff` in a clone of
+the base, with each nested repository at its commit, gives back every
+file of the tree that git does not ignore.
 
 The `parameters` table holds one row per run, key and origin:
 

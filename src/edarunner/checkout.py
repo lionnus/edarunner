@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -17,8 +16,6 @@ from pathlib import Path
 
 from . import runid
 from .model import Project
-
-SOURCE_RE = re.compile(r"^[0-9a-f]+(-dirty-[0-9a-f]{8})?$")
 
 
 class CheckoutError(Exception):
@@ -45,23 +42,17 @@ def checkout(
 
 
 def find(project: Project, source: str) -> Path:
-    """The checked-out tree of a source tag; a ref resolves to its short hash."""
+    """The checked-out tree of a source tag; a ref resolves to the tag that its checkout makes."""
     wts = project.source.worktrees
-    if SOURCE_RE.match(source) and (wts / source).is_dir():
+    if runid.parse_tag(source, project.source.nested) and (wts / source).is_dir():
         return wts / source
     try:
-        short = _short(project.source.repo, source)
+        tag = str(_resolve(project, source))
     except runid.GitError:
-        short = ""
-    if short and (wts / short).is_dir():
-        return wts / short
+        tag = ""
+    if tag and (wts / tag).is_dir():
+        return wts / tag
     raise CheckoutError(f"'{source}' is not checked out; run: edr checkout {source}")
-
-
-def nested_heads(project: Project, tree: Path) -> dict[str, str]:
-    """The short hash of the HEAD of each nested repository that `tree` holds."""
-    return {n: runid.git("rev-parse", "--short", "HEAD", cwd=tree / n)
-            for n in project.source.nested if (tree / n / ".git").exists()}
 
 
 def ensure(project: Project, source: str, dry_run: bool = False) -> CheckoutResult | None:
@@ -70,7 +61,8 @@ def ensure(project: Project, source: str, dry_run: bool = False) -> CheckoutResu
         find(project, source)
         return None
     except CheckoutError:
-        if "-dirty-" in source:
+        tag = runid.parse_tag(source, project.source.nested)
+        if tag and tag.dirty:
             raise CheckoutError(f"'{source}' is a dirty snapshot that is not checked out; "
                                 f"run: edr checkout --dirty <tree>") from None
     try:
@@ -84,6 +76,15 @@ def ensure(project: Project, source: str, dry_run: bool = False) -> CheckoutResu
 
 def _short(repo: Path, ref: str) -> str:
     return runid.git("rev-parse", "--short", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=repo)
+
+
+def _resolve(project: Project, ref: str) -> runid.Tag:
+    """The clean tag that the checkout of `ref` makes. A clean tag names every commit; any other ref takes each nested
+    repository at the HEAD that the repository copy has."""
+    repo, names = project.source.repo, project.source.nested
+    tag = runid.parse_tag(ref, names)
+    base, heads = (tag.base, tag.nested) if tag and not tag.dirty else (ref, dict.fromkeys(names, "HEAD"))
+    return runid.Tag(_short(repo, base), {n: _short(runid.nested_repo(repo, n), h) for n, h in heads.items()})
 
 
 def _clone(src: Path, dst: Path, commit: str, dry_run: bool) -> None:
@@ -109,74 +110,66 @@ def _pinned(project: Project, ref: str, dry_run: bool) -> CheckoutResult:
             print(f"dry: git -C {repo} fetch")
         else:
             runid.git("fetch", "-q", cwd=repo)
-    source = _short(repo, ref)
-    path = wts / source
+    tag = _resolve(project, ref)
+    path = wts / str(tag)
     if not (path / ".git").exists():
         if not dry_run:
             wts.mkdir(parents=True, exist_ok=True)
-        _clone(repo, path, source, dry_run)
-    nested = {n: _nested(repo / n, path / n, dry_run) for n in project.source.nested}
-    return CheckoutResult(path, source, {k: v for k, v in nested.items() if v}, False)
-
-
-def _nested(src: Path, dst: Path, dry_run: bool) -> str:
-    """Clone <repo>/<name> into the clone at the HEAD the repo copy has; '' when absent."""
-    if not (src / ".git").exists():
-        return ""
-    if (dst / ".git").exists():
-        return runid.git("rev-parse", "--short", "HEAD", cwd=dst)
-    head = runid.git("rev-parse", "--short", "HEAD", cwd=src)
-    _clone(src, dst, head, dry_run)
-    return head
+        _clone(repo, path, tag.base, dry_run)
+    for n, head in tag.nested.items():
+        if not (path / n / ".git").exists():
+            _clone(repo / n, path / n, head, dry_run)
+    return CheckoutResult(path, str(tag), tag.nested, False)
 
 
 def _snapshot(project: Project, tree: Path, dry_run: bool) -> CheckoutResult:
-    """A clone at the HEAD of `tree` with the files of `tree` copied over it, so git on the copy sees the changes.
+    """A clone of the commits of `tree` with the files its tag covers copied over it, so git on the copy sees the
+    changes.
 
     `source.diff` and `source.json` go into the clone and into `data/sources/<tag>/`, which `retire` keeps.
     """
-    source = runid.source_tag(tree, project.source.nested)
-    if "-dirty-" not in source:
-        # A clean tree pins its commit; a snapshot would collide with that clone.
+    names = project.source.nested
+    source = runid.source_tag(tree, names)
+    tag = runid.parse_tag(source, names)
+    if not (tag and tag.dirty):
+        # A clean tree pins its commits; a snapshot would collide with that clone.
         return _pinned(project, source, dry_run)
     path = project.source.worktrees / source
-    base = source.split("-dirty-")[0]
-    nested = nested_heads(project, tree)
-    excludes = [a for e in [".git", *project.sync.exclude] for a in ("--exclude", e)]
     # An edit of the same size, made in the second the clone wrote the file, passes rsync's size and mtime check.
-    cmd = ["rsync", "-a", "--checksum", *excludes, f"{tree}/", f"{path}/"]
+    cmd = ["rsync", "-a", "--checksum", "--from0", "--files-from=-", f"{tree}/", f"{path}/"]
     fresh = not (path / ".git").exists()
     if fresh and not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
     if fresh:
-        _clone(tree, path, base, dry_run)
-        for n in nested:
-            _nested(tree / n, path / n, dry_run)
+        _clone(tree, path, tag.base, dry_run)
+        for n, head in tag.nested.items():
+            _clone(tree / n, path / n, head, dry_run)
     if dry_run:
         print(f"dry: {' '.join(cmd)}")
-        return CheckoutResult(path, source, nested, True)
+        return CheckoutResult(path, source, tag.nested, True)
     # rsync adds and changes files; each file the diff deletes goes first, so a file of the tree can replace its
     # directory. A file that `git rm --cached` left in the tree stays.
-    for sub in ["", *nested]:
+    for sub in ["", *tag.nested]:
         diff = ["--no-optional-locks", "diff", "--name-only", "--no-renames", "--diff-filter=D", "-z", "HEAD"]
         for rel in runid.git(*diff, cwd=tree / sub).split("\0"):
             dst = path / sub / rel
             if rel and not os.path.lexists(tree / sub / rel) and (dst.is_symlink() or dst.is_file()):
                 dst.unlink()
-    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    r = subprocess.run(cmd, input="\0".join(runid.files(tree, names)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       text=True, errors="replace")
     if r.returncode:
         raise CheckoutError(f"{' '.join(cmd)}: {r.stdout.strip()}")
     meta = {
         "source": source,
-        "base": base,
+        "base": tag.base,
         "dirty": True,
-        "nested": nested,
+        "nested": tag.nested,
         "origin": str(tree),
         "created": int(time.time()),
     }
-    text = runid.diff(tree, project.source.nested) + "\n"
+    text = runid.diff(tree, names) + "\n"
     for d in (path, project.data / "sources" / source):
         d.mkdir(parents=True, exist_ok=True)
         (d / "source.diff").write_text(text)
         (d / "source.json").write_text(json.dumps(meta, indent=1) + "\n")
-    return CheckoutResult(path, source, nested, True)
+    return CheckoutResult(path, source, tag.nested, True)

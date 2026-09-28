@@ -123,8 +123,9 @@ probe reports. The state follows: the runs per batch and state, the
 live runs, every run the triage proposes a command for with that
 command, the runs that the checks flag, and the last ten events. Each
 batch names the source tags
-of its runs and how many commits each one lags behind [source] ref;
-a dirty tag counts from the commit it starts from. It ends with the
+of its runs and how many commits each one lags behind [source] ref,
+counted from the commit of the tree without the nested and dirty
+parts of the tag. It ends with the
 project's CLAUDE.md and AGENTS.md, when they exist, and the
 documentation.
 
@@ -326,14 +327,14 @@ Prints every metric of the chosen runs with its label, source, stage,
 step, task, name, value and unit, the file the value came from, and
 the snapshots that hold the run. Choose the runs with --source, --run,
 --label or --task; one of them is required, and they combine.
---source is the source tag exactly as edr checkout printed it,
--dirty-... included, and may be given more than once; --run takes one
-run instead. --label takes the runs whose label or config has that
-name, and the runs that edr continue made from a run of that label,
-whose label is &lt;label&gt;.&lt;stage&gt;. --task keeps the rows of one task. A
-snapshot is the directory that an edr export event names, when the
-manifest there lists the run. --csv writes the columns of metrics.csv
-(docs/guides/results.md) to stdout. A value that breaks the pass
+--source is the source tag exactly as edr checkout printed it, with
+its -n... and -dirty-... parts, and may be given more than once; --run
+takes one run instead. --label takes the runs whose label or config
+has that name, and the runs that edr continue made from a run of that
+label, whose label is &lt;label&gt;.&lt;stage&gt;. --task keeps the rows of one
+task. A snapshot is the directory that an edr export event names, when
+the manifest there lists the run. --csv writes the columns of
+metrics.csv (docs/guides/results.md) to stdout. A value that breaks the pass
 rule of its metric shows FAIL next to it, and --json gives each row
 a verdict (pass, FAIL or null) and its snapshots. A row whose file
 did not parse shows failed: and the error in place of the value.
@@ -644,17 +645,22 @@ edr checkout [--dry-run] [--json] [--dirty DIR] [ref]
 ```
 
 Fetches the repository, then makes a detached local clone of ref (default source.ref) at
-&lt;worktrees&gt;/&lt;short hash&gt;, and clones each source.nested repository into
-it at the HEAD the repository copy has. A local clone shares the git
-objects of the repository by hard links. It prints &lt;source&gt; &lt;path&gt;.
+&lt;worktrees&gt;/&lt;tag&gt;, and clones each source.nested repository into it at
+the HEAD the repository copy has. The tag is the short hash of the
+commit, then -n&lt;short hash&gt; for each source.nested repository in the
+order of that list. A tag as ref checks out the commits that it names.
+A local clone shares the git objects of the repository by hard links.
+It prints &lt;source&gt; &lt;path&gt;.
 
---dirty DIR clones the HEAD of a working tree and copies its files over
-the clone. The diff holds the changes to tracked files, the untracked
-files that git does not ignore, and the same for each source.nested
-repository; the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt; of its sha256 and is printed
-with (dirty). source.diff and source.json go into the clone and into
-data/sources/&lt;tag&gt;/, which retire keeps. A clean tree under --dirty is
-checked out as a clone.
+--dirty DIR clones the commits of a working tree and copies over the
+clone the files that its tag covers: the tracked files and the
+untracked files that git does not ignore, of the tree and of each
+source.nested repository. The diff of these files against the commits
+gives the tag &lt;tag&gt;-dirty-&lt;8 hex&gt; from its sha256, printed with
+(dirty). A git repository in the tree that source.nested does not name
+and git does not ignore is refused. source.diff and source.json go
+into the clone and into data/sources/&lt;tag&gt;/, which retire keeps. A
+clean tree under --dirty is checked out as a clone.
 
 | Flag | Meaning |
 |---|---|
@@ -872,7 +878,8 @@ and --ended give its host, start and end; without them these stay
 empty. Each --param KEY=VALUE writes a parameter of origin import, next
 to config, build_tag and source. The dirty flag is set when the source
 tag holds -dirty, and a tag that edr checkout would not make, &lt;hash&gt;
-or &lt;hash&gt;-dirty-&lt;8 hex&gt;, gets a warning. --phase is a phase that the
+with -n&lt;hash&gt; for each source.nested repository and an optional
+-dirty-&lt;8 hex&gt;, gets a warning. --phase is a phase that the
 driver ends a run with: done, INCOMPLETE:&lt;n&gt;f&lt;m&gt;s where a task failed
 or was skipped, FAILED:&lt;stage&gt;, OVER_BUDGET:&lt;stage&gt;, STOPPED or
 KILLED:&lt;signal&gt;. A run whose driver died is FAILED:&lt;stage&gt;, with the

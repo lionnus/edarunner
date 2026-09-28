@@ -229,40 +229,47 @@ def test_an_export_of_two_sources_holds_one_run_per_label_and_source(world, tmp_
 
 def test_parameters_run_columns_commands_and_the_diff_of_a_dirty_source(world, tmp_path):
     project, db = world
-    db.upsert_run({"run_id": DIRTY, "batch": "old", "label": "x", "config": "demo", "source": DIRTY_TAG, "dirty": 1,
-                   "host": "local", "phase": "done", "started": 200, "updated": 250, "tree_id": DIRTY})
+    project.source.nested = ["sub"]
+    tag = "ccc333-nfed4321-dirty-0badc0de"
+    run = f"20261004_0800_x_demo_g{tag}"
+    db.upsert_run({"run_id": run, "batch": "old", "label": "x", "config": "demo", "source": tag, "dirty": 1,
+                   "host": "local", "phase": "done", "started": 200, "updated": 250, "tree_id": run})
     db.mark_batch_retired("old")
-    db.set_parameters(DIRTY, {"config": "demo", "vars.netlist_stage": 15}, "spec")
-    db.set_parameters(DIRTY, {"source": DIRTY_TAG, "nested.sub": "fed4321"}, "checkout")
-    config.save_json(project.state_dir / "old" / f"{DIRTY}.spec.json", {"stages": [
+    db.set_parameters(run, {"config": "demo", "vars.netlist_stage": 15}, "spec")
+    db.set_parameters(run, {"source": tag, "nested.sub": "fed4321"}, "checkout")
+    config.save_json(project.state_dir / "old" / f"{run}.spec.json", {"stages": [
         {"name": "synth", "cmd": "make synth"},
         {"name": "power", "tasks": [{"id": "k_small", "cmd": "make power NETLIST=out/15 TCK=1000"}]}]})
-    kept = project.data / "sources" / DIRTY_TAG
-    config.save_json(kept / "source.json", {"source": DIRTY_TAG, "base": "ccc333", "nested": {"sub": "fed4321"}})
+    kept = project.data / "sources" / tag
+    config.save_json(kept / "source.json", {"source": tag, "base": "ccc333", "nested": {"sub": "fed4321"}})
     (kept / "source.diff").write_text("diff --git a/x b/x\n")
     out = tmp_path / "both"
-    manifest = export.export(project, db, ["aaa111", DIRTY_TAG], out)
+    manifest = export.export(project, db, ["aaa111", tag], out)
 
-    assert manifest["dirty_sources"] == [{"source": DIRTY_TAG, "base": "ccc333", "nested": {"sub": "fed4321"},
+    assert manifest["dirty_sources"] == [{"source": tag, "base": "ccc333", "nested": {"sub": "fed4321"},
                                           "diff_sha256": hashlib.sha256(b"diff --git a/x b/x\n").hexdigest()}]
-    assert (out / "sources" / DIRTY_TAG / "source.diff").read_text() == "diff --git a/x b/x\n"
-    assert f"sources/{DIRTY_TAG}/source.diff" in [f["path"] for f in manifest["files"]]
-    record = next(r["record"] for r in manifest["runs"] if r["run_id"] == DIRTY)
+    assert (out / "sources" / tag / "source.diff").read_text() == "diff --git a/x b/x\n"
+    assert f"sources/{tag}/source.diff" in [f["path"] for f in manifest["files"]]
+    record = next(r["record"] for r in manifest["runs"] if r["run_id"] == run)
     assert record["commands"] == [{"stage": "synth", "task": "", "cmd": "make synth"},
                                   {"stage": "power", "task": "k_small", "cmd": "make power NETLIST=out/15 TCK=1000"}]
     runs = {r["run_id"]: r for r in _read_csv(out / "runs.csv")}
-    assert [runs[DIRTY][k] for k in ("batch", "dirty", "tree_id", "retired")] == ["old", "1", DIRTY, "1"]
+    assert [runs[run][k] for k in ("batch", "dirty", "tree_id", "retired")] == ["old", "1", run, "1"]
     assert [runs[RUN_A][k] for k in ("batch", "dirty", "tree_id", "retired")] == ["demo", "", "", "0"]
     params = _read_csv(out / "parameters.csv")
     assert list(params[0]) == export.PARAMETER_COLUMNS and manifest["tables"]["parameters.csv"] == 4
     assert [(p["run_id"], p["label"], p["source"], p["key"], p["value"], p["origin"]) for p in params] == [
-        (DIRTY, "x", DIRTY_TAG, "config", "demo", "spec"), (DIRTY, "x", DIRTY_TAG, "nested.sub", "fed4321", "checkout"),
-        (DIRTY, "x", DIRTY_TAG, "source", DIRTY_TAG, "checkout"), (DIRTY, "x", DIRTY_TAG, "vars.netlist_stage", "15", "spec")]
-    # A dirty source whose diff was never kept is listed with its base and without a sha256.
-    db.upsert_run({"run_id": "20261005_0800_y_demo_gddd444-dirty", "batch": "old", "label": "y", "source": "ddd444-dirty",
-                   "phase": "done"})
-    lost = export.export(project, db, ["ddd444-dirty"], tmp_path / "lost")["dirty_sources"]
-    assert lost == [{"source": "ddd444-dirty", "base": "ddd444", "nested": {}, "diff_sha256": None}]
+        (run, "x", tag, "config", "demo", "spec"), (run, "x", tag, "nested.sub", "fed4321", "checkout"),
+        (run, "x", tag, "source", tag, "checkout"), (run, "x", tag, "vars.netlist_stage", "15", "spec")]
+    # A dirty source whose diff was never kept is listed with the commits of its tag and without a sha256; a tag that
+    # edr checkout does not make names no commit.
+    lost = ["ddd444-nfed4321-dirty-0ddba11c", "ddd444-dirty"]
+    for label, source in zip("yz", lost):
+        db.upsert_run({"run_id": f"20261005_0800_{label}_demo_g{source}", "batch": "old", "label": label, "source": source,
+                       "phase": "done"})
+    assert export.export(project, db, lost, tmp_path / "lost")["dirty_sources"] == [
+        {"source": lost[0], "base": "ddd444", "nested": {"sub": "fed4321"}, "diff_sha256": None},
+        {"source": lost[1], "base": None, "nested": {}, "diff_sha256": None}]
 
 
 def test_the_flags_of_the_exported_runs(world, tmp_path):

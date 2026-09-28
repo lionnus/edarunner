@@ -1705,7 +1705,7 @@ def test_track_dry_run_prints_the_spec_and_writes_nothing(demo: Path, capsys) ->
     code, _, err = edr(capsys, "track", "--label", "t", "--stage", "power", "--source", "a", "--dry-run", "--", "true")
     assert code == 1 and "task group" in err
     code, _, err = edr(capsys, "track", "--label", "t", "--stage", "synth", "--dry-run", "--", "true")
-    assert code == 1 and "not a git tree; pass --source" in err
+    assert code == 1 and "not a git repository" in err and err.rstrip().endswith("; pass --source")
 
 
 def test_track_execs_the_driver_and_the_watcher_collects(demo: Path) -> None:
