@@ -43,6 +43,7 @@ class RunPlan:
     reuse: str = ""  # the run id whose tree this run continues, or whose archive it restores
     restore: str = ""  # the collect_on_request list copied back from data/results of `reuse`
     values: dict[str, object] = field(default_factory=dict)
+    nested: dict[str, str] = field(default_factory=dict)  # the commit of each nested repository of the checkout
 
 
 # --- date pin and build tag
@@ -186,7 +187,8 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
     run_id = str(v["run_id"])
     spec: dict[str, Any] = {
         "schema": 1, "run_id": run_id, "batch": batch.batch, "project": project.project,
-        "label": job.label, "config": job.config, "vars": job.vars, "host": v["host"], "root": v["root"],
+        "label": job.label, "config": job.config, "vars": job.vars, "overrides": job.overrides,
+        "host": v["host"], "root": v["root"],
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
         "shell": "/bin/bash", "env": _env(project, v),
         "limits": {"host_free_min_gb": hosts.floor(project.site, str(v["host"] or "")),
@@ -339,9 +341,14 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             spec = _spec(project, batch, job, names, tasks, v)
         except (ConfigError, Refuse, KeyError) as e:
             problems.append(str(e))
+    try:
+        nested = checkout.nested_heads(project, checkout.find(project, source))
+    except checkout.CheckoutError:
+        nested = {}
     return RunPlan(run_id=run_id, label=job.label, host=host, root=root, spec=spec,
                    queued=not spec and not problems, problems=problems, source=source, build_tag=tag,
-                   tree_host="local" if sched and _fresh(job) else host or "", reuse=reused, restore=restore, values=v)
+                   tree_host="local" if sched and _fresh(job) else host or "", reuse=reused, restore=restore, values=v,
+                   nested=nested)
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
@@ -421,13 +428,15 @@ def write_spec(state: Path, batch: str, plan_: RunPlan, driver: Path, dry_run: b
     """Write <state_dir>/<batch>/<run_id>.spec.json by a temporary file and rename.
 
     The spec records `driver` and a `record` of what made the run: the edarunner version, the sha256
-    of the driver, and the version of each tool the site file gives for the host.
+    of the driver, the version of each tool the site file gives for the host, and the commit of each
+    nested repository of the checkout.
     """
     plan_.spec["driver"] = str(driver)
     plan_.spec["record"] = {
         "edarunner": __version__,
         "driver_sha256": hashlib.sha256(DRIVER_SRC.read_bytes()).hexdigest(),
         "tools": {k[5:-8]: v for k, v in plan_.values.items() if k.startswith("tool.") and k.endswith(".version") and v},
+        "nested": plan_.nested,
     }
     path = Path(state) / batch / f"{plan_.run_id}.spec.json"
     if not dry_run:

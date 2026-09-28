@@ -69,8 +69,13 @@ every run built from this tree, and the batch file names it as
 Every run works on a copy of this clone, so a commit you make later
 never changes a running flow. A tree with uncommitted changes can go in
 as a snapshot with `edr checkout --dirty <dir>`: a clone of its HEAD with
-your changes copied over it, tagged `<hash>-dirty-<8 hex>`. `launch`
-refuses a dirty tag unless you pass `--allow-dirty`.
+your changes copied over it, tagged `<hash>-dirty-<8 hex>` from the
+sha256 of its diff. The diff covers the untracked files that git does
+not ignore and the changes in each nested repository, and `checkout`
+writes it into the clone and into `data/sources/<tag>/` (`runid.diff`,
+`checkout._snapshot`). `launch`
+refuses a dirty tag unless you pass `--allow-dirty`, and it records the
+commit of each nested repository of the clone in the spec of every run.
 
 Apart from that `git fetch`, edarunner leaves your source repository
 alone, and the repository is never the target of a delete
@@ -446,7 +451,8 @@ a run whose results are not collected yet (`cli._refuse_shared_root`).
 `--batch` retires every run of a batch and writes the `RETIRED` file,
 which keeps the watcher and the board away from the batch. It then
 removes the batch's checked-out source unless a batch that is not
-retired uses the same source; that tree passes the guard too. `--host`
+retired uses the same source; that tree passes the guard too. The diff
+of a dirty source stays in `data/sources/<tag>/`. `--host`
 with `--prune` removes the prune targets of every finished run of the
 project on one host, to free a full scratch disk. It skips a run whose
 tree has stages left, since those stages may need the files.
@@ -459,7 +465,11 @@ The files you asked for end up on the head node.
 `data/results/<run_id>/` holds the collected files in the layout of the
 run tree, and `data/edr.db` holds every run, stage, step, metric, file
 and event. The metric rows name their source file, so each number can
-be traced to the report it came from.
+be traced to the report it came from. The `parameters` table holds the
+vars, the overrides and the nested commits of each run as its spec
+recorded them, each row with its origin, and `data/sources/<tag>/` holds
+the diff of each dirty source (`watch._parameters`,
+`checkout._snapshot`).
 
 Only the head node opens the database. SQLite's WAL journal does not
 work on a network filesystem, so the database reads the type of the

@@ -248,14 +248,15 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
 
 # collect, extract, resume, queue
 
-def _parameters(project: Project, run: Row) -> dict[str, Any]:
-    out = {k: run.get(k) for k in ("config", "build_tag", "source") if run.get(k)}
-    try:
-        job = next(j for j in config.load_batch(project, str(run["batch"])).jobs if j.label == run.get("label"))
-        out.update(job.overrides)
-    except (config.ConfigError, StopIteration):
-        pass
-    return out
+def _parameters(run: Row, spec: dict) -> dict[str, dict[str, Any]]:
+    """The parameters of a run by origin, from its spec, so a later edit of the batch file changes none: `spec` holds
+    the config, the build tag, the overrides and `vars.<name>`; `checkout` holds the source tag and the commit of
+    each nested repository as `nested.<name>`."""
+    nested = (spec.get("record") or {}).get("nested") or {}
+    return {"spec": {**{k: run[k] for k in ("config", "build_tag") if run.get(k)}, **(spec.get("overrides") or {}),
+                     **{f"vars.{k}": v for k, v in (spec.get("vars") or {}).items()}},
+            "checkout": {**({"source": run["source"]} if run.get("source") else {}),
+                         **{f"nested.{k}": v for k, v in nested.items()}}}
 
 
 def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> None:
@@ -281,7 +282,8 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     if new:
         db.add_event("watch", run["run_id"], "metrics", _added(new))
     if not rec.get("params"):
-        db.set_parameters(run["run_id"], _parameters(project, run), "spec")
+        for origin, params in _parameters(run, spec).items():
+            db.set_parameters(run["run_id"], params, origin)
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, len(new))
 

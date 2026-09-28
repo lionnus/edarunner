@@ -68,7 +68,8 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `run_id`, `batch`, `project`, `label`, `config`, `host` | identity, copied into the heartbeat |
 | `root` | the run tree; the driver exits 2 when it is not a directory |
 | `driver` | the driver copy the run started with; a resume uses it |
-| `record` | `edarunner` (the version that launched), `driver_sha256`, and `tools` with the version the site file gives per tool of the host; the export manifest copies it |
+| `vars`, `overrides` | the vars and the overrides of the job; the watcher writes them into `parameters`, and the collect renders `{vars.<name>}` with them; the driver does not read them |
+| `record` | `edarunner` (the version that launched), `driver_sha256`, `tools` with the version the site file gives per tool of the host, and `nested` with the commit of each nested repository of the checkout; the export manifest copies it, and the watcher writes `nested` into `parameters` |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
 | `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID` |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |

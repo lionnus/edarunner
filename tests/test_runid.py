@@ -1,4 +1,5 @@
-"""runid.py and checkout.py against a copy of examples/local-demo. Every write goes to tmp_path."""
+"""runid.py, checkout.py and the nested commits a plan records, against a copy of examples/local-demo. Every write goes
+to tmp_path."""
 
 import json
 import re
@@ -8,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from edarunner import checkout, config, runid
+from edarunner import checkout, config, launch, runid
+from edarunner.db import Database
+from edarunner.hosts import HostProbe, Ssh
 from helpers_driver import DEMO
 
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
@@ -64,7 +67,7 @@ def test_stage_head_twice_is_idempotent(project):
     assert a.nested == {"sub": nested_head}
     assert (a.path / "sub" / "secret.txt").read_text() == "42\n"
     assert git("rev-parse", "--short", "HEAD", cwd=a.path / "sub") == nested_head
-    assert runid.source_tag(a.path) == head
+    assert runid.source_tag(a.path, ["sub"]) == head
     assert checkout.find(project, head) == a.path and checkout.find(project, "HEAD") == a.path
     assert checkout.checkout(project, dirty_dir=repo) == a  # a clean tree pins its commit
     old = checkout.checkout(project, "HEAD~1")
@@ -93,12 +96,49 @@ def test_dirty_snapshot_tag_is_stable(project):
     meta = json.loads((a.path / "source.json").read_text())
     assert meta["source"] == a.source and meta["base"] == head and meta["nested"] == a.nested and meta["dirty"]
     assert a.nested == {"sub": git("rev-parse", "--short", "HEAD", cwd=repo / "sub")}
-    assert runid.source_tag(a.path) == a.source
+    assert runid.source_tag(a.path, ["sub"]) == a.source
     assert checkout.find(project, a.source) == a.path
     (repo / "README").write_text("changed again\n")
     assert checkout.checkout(project, dirty_dir=repo).source != a.source
 
 
+def test_untracked_files_and_nested_edits_count_in_the_tag_and_the_diff(project, tmp_path):
+    repo, nested = project.source.repo, project.source.nested
+    head, sub_head = git("rev-parse", "--short", "HEAD", cwd=repo), git("rev-parse", "--short", "HEAD", cwd=repo / "sub")
+    assert runid.source_tag(repo, nested) == head  # git lists the nested repository as sub/, and its own diff is empty
+    (repo / "notes.txt").write_text("untracked\n")
+    untracked = runid.source_tag(repo, nested)
+    (repo / "sub" / "more.txt").write_text("new\n")
+    (repo / "sub" / "secret.txt").unlink()
+    both = runid.source_tag(repo, nested)
+    assert untracked.startswith(f"{head}-dirty-") and both.startswith(f"{head}-dirty-") and both != untracked
+    assert runid.source_tag(repo, []) == untracked
+    a = checkout.checkout(project, dirty_dir=repo)
+    assert a.source == both and a.nested == {"sub": sub_head}
+    assert (a.path / "sub" / "more.txt").is_file() and not (a.path / "sub" / "secret.txt").exists()
+    # The diff and the metadata outlive the clone, which retire removes with its batch.
+    kept = project.data / "sources" / both
+    assert (kept / "source.diff").read_text() == (a.path / "source.diff").read_text()
+    assert json.loads((kept / "source.json").read_text()) == json.loads((a.path / "source.json").read_text())
+    # The diff applied to the base, with the nested repository at its HEAD, gives the tree again.
+    clone = tmp_path / "clone"
+    git("clone", "-q", str(repo), str(clone), cwd=tmp_path)
+    git("clone", "-q", str(repo / "sub"), str(clone / "sub"), cwd=tmp_path)
+    git("apply", str(kept / "source.diff"), cwd=clone)
+    assert (clone / "notes.txt").read_text() == "untracked\n" and (clone / "sub" / "more.txt").read_text() == "new\n"
+    assert not (clone / "sub" / "secret.txt").exists()
+
+
+def test_the_spec_records_the_nested_commits_of_the_checkout(project, tmp_path):
+    a = checkout.checkout(project, "HEAD")
+    batch = config.load_batch(project, "demo")
+    batch.source = a.source
+    probes = {"local": HostProbe("local", 4.0, 8.0, str(tmp_path / "scratch"), 50.0)}
+    with Database(tmp_path / "edr.db") as db:
+        plans = launch.plan(project, batch, Ssh(project.site), db, date="20260926_1200", probes=probes)
+    assert [p.nested for p in plans] == [a.nested, a.nested] and a.nested
+    spec = launch.write_spec(project.state_dir, "demo", plans[0], tmp_path / "driver.py", dry_run=True)
+    assert plans[0].spec["record"]["nested"] == a.nested and not spec.exists()
 
 
 def test_snapshot_drops_a_file_the_tree_deleted(project):
@@ -113,7 +153,7 @@ def test_dry_run_writes_nothing(project, tmp_path, capsys):
     repo = project.source.repo
     a = checkout.checkout(project, "HEAD")
     (repo / "README").write_text("changed\n")
-    runid.source_tag(repo)  # git refreshes its index stat cache on the first diff
+    runid.source_tag(repo, ["sub"])  # git refreshes its index stat cache on the first diff
     before = listing(tmp_path)
     old = checkout.checkout(project, "HEAD~1", dry_run=True)
     dirty = checkout.checkout(project, dirty_dir=repo, dry_run=True)

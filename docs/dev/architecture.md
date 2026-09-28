@@ -85,7 +85,7 @@ A channel never imports `cli` or `watch`; it gets its commands through the
 5. `watch.cycle` ingests the heartbeats into `runs`, `stage_runs`,
    `step_runs` and `run_samples`, classifies, acts, collects into
    `data/results`, extracts metrics into `metrics` and `area`, writes
-   `parameters`, resumes, launches queued rows, keeps the host probes in
+   `parameters` from the spec, resumes, launches queued rows, keeps the host probes in
    `host_samples`, and writes the boards.
 6. `export.export` takes one run per label and source tag by `db.pick`
    and copies its results with a manifest that lists the runs not done

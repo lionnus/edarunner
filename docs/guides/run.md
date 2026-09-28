@@ -53,8 +53,9 @@ edr launch sweep1
 `edr checkout` prints the source tag and the path of the pinned clone.
 When the batch names a clean source that is not checked out yet, `plan`
 and `launch` check it out themselves and print a `checkout <source> <path>`
-line. A tree with uncommitted changes needs `edr checkout --dirty <dir>`
-first, and `launch --allow-dirty`.
+line. A tree with uncommitted changes, an untracked file or a change in
+a nested repository included, needs `edr checkout --dirty <dir>` first,
+and `launch --allow-dirty`.
 
 Read every path of the dry run before the real launch. Within a minute
 of the launch, `edr status` should show each run past the `setup`

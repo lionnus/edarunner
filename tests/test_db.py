@@ -71,10 +71,12 @@ def test_upsert_then_update(tmp_path):
         assert [(r["stage"], r["task"], r["attempt"], r["status"], r["ended"]) for r in rows] == [
             ("power", "k_small", 1, "done", None), ("synth", "", 1, "done", 2)]
 
-        db.set_parameters(RUN_A, {"DW": 0, "name": "x"}, "config")
-        db.set_parameters(RUN_A, {"DW": 1}, "override")
-        params = {r["key"]: (r["value"], r["source"]) for r in db.conn.execute("SELECT * FROM parameters")}
-        assert params == {"DW": ("1", "override"), "name": ("x", "config")}
+        db.set_parameters(RUN_A, {"DW": 0, "name": "x"}, "spec")
+        db.set_parameters(RUN_A, {"DW": 1}, "import")
+        db.set_parameters(RUN_A, {"DW": 2}, "import")
+        # One row per key and origin; a second write under the same origin replaces the value.
+        assert [(r["key"], r["value"], r["origin"]) for r in db.parameters(RUN_A)] == [
+            ("DW", "2", "import"), ("DW", "0", "spec"), ("name", "x", "spec")]
 
         db.add_artifact({"run_id": RUN_A, "path": "reports/3/area.rpt", "bytes": 10, "class": "report"})
         db.add_artifact({"run_id": RUN_A, "path": "reports/3/area.rpt", "bytes": 12})

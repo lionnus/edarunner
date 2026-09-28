@@ -102,8 +102,8 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
                == ln for ln in lines)
     # The area of record is the deepest pnr step from route on, step 5, in both runs.
     code, out, _ = edr(capsys, "compare", "a@demo", "b_nodw@demo", "--metric", "area_cell_um2")
-    assert code == 0 and out.splitlines()[2].split() == ["area_cell_um2", "1052.5", "(pnr", "5)", "1052.5", "(pnr", "5)", "0",
-                                                         "+0.0%"]
+    row = next(ln.split() for ln in out.splitlines() if ln.startswith("area_cell_um2"))
+    assert code == 0 and row == ["area_cell_um2", "1052.5", "(pnr", "5)", "1052.5", "(pnr", "5)", "0", "+0.0%"]
     # The regexes of the demo read the qor.rpt that flow.sh writes, and the pass rule gives the verdict.
     code, out, _ = edr(capsys, "metrics", "--run", ids["b_nodw"], "--over", "steps")
     lines = [ln.split() for ln in out.splitlines()]
@@ -113,6 +113,9 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     with Database(demo / "data" / "edr.db") as db:
         params = {tuple(r) for r in db.conn.execute("SELECT run_id, key, value FROM parameters")}
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "source", source) in params
+    code, out, _ = edr(capsys, "--json", "compare", "a@demo", "b_nodw@demo")
+    assert {p["key"]: list(p["value"].values()) for p in json.loads(out)["data"]["parameters"]} == {
+        "DW": [None, "0"], "build_tag": ["demo", "demo_DW0"], "vars.netlist_stage": ["11", None]}
 
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--source", source, "--out", str(exp))

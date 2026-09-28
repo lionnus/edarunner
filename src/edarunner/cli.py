@@ -169,7 +169,7 @@ class Ctx:
     def resolve_source(self, b: Batch) -> Batch:
         """A ref as source becomes the source tag of its checked-out tree; CheckoutError when it is not checked out."""
         if not checkout.SOURCE_RE.match(b.source):
-            b.source = runid.source_tag(checkout.find(self.project, b.source))
+            b.source = runid.source_tag(checkout.find(self.project, b.source), self.project.source.nested)
         return b
 
     def refresh(self, batch: str | None = None) -> None:
@@ -693,24 +693,28 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     """Two or more runs side by side, each at its step of record, under a line that names the sources when they
-    differ."""
+    differ and a table of the parameters that differ."""
     runs = [c.resolve(h) for h in a.handles]
     sources = sorted({str(r.get("source")) for r in runs})
     mixed = len(sources) > 1
+    params = analysis.parameters_differ(c.db, runs)
 
     def shown(view: RenderableType) -> RenderableType:
-        return Group(Text(f"mixed sources: {', '.join(sources)}", style="yellow"), view) if mixed else view
+        head = [Text(f"mixed sources: {', '.join(sources)}", style="yellow")] if mixed else []
+        head += [analysis.parameters_view(runs, params)] if params else []
+        return Group(*head, view) if head else view
 
     if a.area:
         picked, rows, missing = analysis.area_delta(c.project, c.db, runs, a.depth, a.instance, a.stage, a.step)
         c.emit(shown(analysis.area_view(picked, rows, a.depth, missing)),
-               {"runs": picked, "depth": a.depth, "rows": rows, "missing": missing, "mixed_sources": mixed})
+               {"runs": picked, "depth": a.depth, "rows": rows, "missing": missing, "mixed_sources": mixed,
+                "parameters": params})
     else:
         mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage)
                 if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
         rows, missing = analysis.side_by_side(c.project, runs, mets, a.stage, a.step)
         c.emit(shown(analysis.side_by_side_view(runs, rows, missing)),
-               {"runs": runs, "rows": rows, "missing": missing, "mixed_sources": mixed})
+               {"runs": runs, "rows": rows, "missing": missing, "mixed_sources": mixed, "parameters": params})
     return Exit.DONE if rows and not missing else Exit.NOTHING
 
 
@@ -924,7 +928,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     if not root.is_dir():
         raise Refuse(f"'{root}' is not a directory")
     try:
-        source = a.source or runid.source_tag(root)
+        source = a.source or runid.source_tag(root, project.source.nested)
     except runid.GitError:
         raise Refuse(f"{root} is not a git tree; pass --source") from None
     date, host = time.strftime(launch.DATE_FMT), socket.gethostname()
@@ -940,7 +944,8 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     spec["stages"][0]["cmd"] = shlex.join(argv)
     spec.pop("runtime", None)  # the tree of a tracked command is the caller's, as it is
     spec["collect"] = a.collect
-    plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, source=source)
+    plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, source=source,
+                           nested=checkout.nested_heads(project, root))
     spec_path = project.state_dir / a.batch / f"{run_id}.spec.json"
     if spec_path.exists():
         raise Refuse(f"already tracked: {spec_path} exists")
@@ -1793,6 +1798,11 @@ def _parser() -> argparse.ArgumentParser:
         from more than one source; then a line above the table names the
         sources, and --json sets mixed_sources. Two runs with the same name
         get a prefix of their run ids after it.
+
+        Above the table, one line per parameter whose value differs between
+        the runs gives the value of each run: the config, the build tag, an
+        override, vars.<name> or nested.<name>, as the launch or the import
+        recorded it. --json lists them under parameters.
         """, exits={Exit.NOTHING: "no row to compare, or a run lacks its step of record or the --step"})
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
     s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
@@ -1848,9 +1858,12 @@ def _parser() -> argparse.ArgumentParser:
         objects of the repository by hard links. It prints <source> <path>.
 
         --dirty DIR clones the HEAD of a working tree and copies its files over
-        the clone, with the diff in source.diff; the tag is <hash>-dirty-<8 hex>
-        and is printed with (dirty). A clean tree under --dirty is checked out as a
-        clone.
+        the clone. The diff holds the changes to tracked files, the untracked
+        files that git does not ignore, and the same for each source.nested
+        repository; the tag is <hash>-dirty-<8 hex> of its sha256 and is printed
+        with (dirty). source.diff and source.json go into the clone and into
+        data/sources/<tag>/, which retire keeps. A clean tree under --dirty is
+        checked out as a clone.
         """, write=True)
     s.add_argument("ref", nargs="?", help="the git ref to check out; default source.ref")
     s.add_argument("--dirty", metavar="DIR", help="snapshot this working tree instead of a ref")
@@ -1989,14 +2002,15 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
     s = command("export", "a frozen snapshot of one or more sources", """
         Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-        metrics.csv and the collected files of one run per label and source,
-        the newest run by start time that ended done, else the newest run.
-        --source matches the source tag exactly and may be given more than
-        once. The manifest lists the exported runs whose phase is not done
-        under incomplete, and the other runs of each label and source under
-        skipped. log/ and *.log stay out unless you pass --with-logs. It
-        refuses a DIR that exists and is not empty. docs/guides/results.md
-        explains the layout.
+        metrics.csv, parameters.csv and the collected files of one run per
+        label and source, the newest run by start time that ended done, else
+        the newest run. --source matches the source tag exactly and may be
+        given more than once. The manifest lists the exported runs whose phase
+        is not done under incomplete, the other runs of each label and source
+        under skipped, and each dirty source under dirty_sources, whose diff
+        goes to sources/<tag>/source.diff. log/ and *.log stay out unless you
+        pass --with-logs. It refuses a DIR that exists and is not empty.
+        docs/guides/results.md explains the layout.
 
         --mlflow DIR writes the project database into a local MLflow tracking store
         in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
