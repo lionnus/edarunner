@@ -46,7 +46,7 @@ hold for every file:
 | `worktrees` | where `edr checkout` puts a local clone per commit | required |
 | `ref` | the ref `edr checkout` takes without an argument | `"HEAD"` |
 | `nested` | nested repositories inside the tree, cloned at the HEAD the repository copy has | `[]` |
-| `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{src}"` |
+| `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{source}"` |
 | `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)` or from `(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each override, such as `base_FREQ500` | `""` |
 
 ### [sync]
@@ -421,7 +421,7 @@ to the shell and stays as it is.
 | `{label}` | the label of the job | the run id, the stage strings |
 | `{config}` | the configuration name of the job; `""` without one | the run id, the stage strings |
 | `{build_tag}` | the build tag of the job | the run id, the stage strings |
-| `{src}` | the source tag of the batch | the run id, the stage strings |
+| `{source}` | the source tag of the batch | the run id, the stage strings |
 | `{overrides}` | the overrides of the job as `KEY=VALUE` tokens separated by spaces | the stage strings |
 | `{vars.<name>}` | a key of the job's `vars` table | the stage strings, `[env]`, `collect` |
 | `{run_id}` | the run id | the stage strings, `[env]`, `sync.after` |

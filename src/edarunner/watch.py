@@ -187,7 +187,7 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
         elif now - rec["since"] >= lim.hung_s:
             found.append(("hung", "no progress since " + time.strftime("%d.%m %H:%M", time.localtime(rec["since"]))))
     newer = [r["run_id"] for r in db.runs() if r["label"] == run.get("label") and r["batch"] != run.get("batch")
-             and r["run_id"] > run["run_id"] and r.get("src") != run.get("src") and r.get("phase") and board.is_live(r)]
+             and r["run_id"] > run["run_id"] and r.get("source") != run.get("source") and r.get("phase") and board.is_live(r)]
     if newer:
         found.append(("superseded", f"by {max(newer)}"))
     if not found:
@@ -288,7 +288,7 @@ def orphans(project: Project, ssh: Ssh, db: Database) -> list[Row]:
 # collect, extract, resume, queue
 
 def _parameters(project: Project, run: Row) -> dict[str, Any]:
-    out = {k: run.get(k) for k in ("config", "build_tag", "src") if run.get(k)}
+    out = {k: run.get(k) for k in ("config", "build_tag", "source") if run.get(k)}
     try:
         job = next(j for j in config.load_batch(project, str(run["batch"])).jobs if j.label == run.get("label"))
         out.update(job.overrides)

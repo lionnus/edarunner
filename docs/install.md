@@ -55,7 +55,7 @@ edr plan gcd                  # run ids, hosts, every path; writes nothing
 edr launch gcd                # one driver on the host `local`
 edr status                    # the board
 edr watch --once              # collect the reports and extract the metrics
-edr metrics --design <src>    # <src> is the hash that `edr checkout` printed
+edr metrics --source <source>    # <source> is the hash that `edr checkout` printed
 ```
 
 ## What you see
@@ -75,7 +75,7 @@ them. `edr metrics` then prints the area and the setup slack of each
 stage:
 
 ```text
-label  design   stage      step  task  metric                  value  unit
+label  source   stage      step  task  metric                  value  unit
 ──────────────────────────────────────────────────────────────────────────
 gcd    952ceeb  floorplan     -        area_floorplan_um2     698.25  um2
 gcd    952ceeb  floorplan     -        wns_floorplan_ns    -0.155306  ns
@@ -88,7 +88,7 @@ The synthesis area comes from the Yosys report, and the other numbers
 come from the metrics JSON that OpenROAD writes at each step.
 `examples/openroad-gcd/README.md` says which report each number comes
 from, and `examples/openroad-gcd/edr.toml` is the whole configuration.
-The design column holds the short hash of the commit that `edr checkout`
+The source column holds the short hash of the commit that `edr checkout`
 pinned, so every number stays tied to the source it came from.
 
 ## Next

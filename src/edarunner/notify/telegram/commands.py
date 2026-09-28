@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from edarunner.cli import Actions
 
 HANDLE = re.compile(r"^[\w.@#-]{1,128}$")
-DESIGN = re.compile(r"^[\w.-]{1,64}$")
+SOURCE = re.compile(r"^[\w.-]{1,64}$")
 LOG_LINES = 200
 # The words of the reply keyboard, in rows; a tap sends the word, which runs the command of that name.
 KEYBOARD = (("Status", "Hosts"), ("Events", "Tools", "Digest"))
@@ -49,12 +49,12 @@ BUILTINS = {b.name: b for b in (
     Builtin("pin", "", "pin a new board message", "Look"),
     Builtin("log", "<handle> [n]", "the last n log lines as a file, default 200", "Files", on_run=True, slow=True),
     Builtin("board", "", "compare.html and status.html as files", "Files"),
-    Builtin("csv", "<design>", "the metrics of one design as a CSV file", "Files"),
+    Builtin("csv", "<source>", "the metrics of one source as a CSV file", "Files"),
     Builtin("keep", "<handle> [hours]", "add hours, default 12", "Act on a run", self_logged=True, on_run=True),
     Builtin("ack", "<handle>", "cancel a pending kill", "Act on a run", self_logged=True, on_run=True),
     Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
     Builtin("compare", "<handle>...", "metrics side by side", "Compare", "pre"),
-    Builtin("metric", "<name> [--design SRC]", "one metric per run", "Compare", "pre"),
+    Builtin("metric", "<name> [--source SOURCE]", "one metric per run", "Compare", "pre"),
     Builtin("help", "", "this list", "Help", "html"),
     Builtin("start", "", "this list and the reply keyboard", "Help", "html"),
     Builtin("keyboard", "[off]", "show or remove the reply keyboard", "Help"),
@@ -193,9 +193,9 @@ class Commands:
         return Reply("board", "", documents=[Document(p.name, p.read_bytes()) for p in files])
 
     def cmd_csv(self, args: list[str]) -> Reply | str:
-        """The metrics of one design as `metrics.csv`."""
-        if not args or not DESIGN.match(args[0]):
-            return "usage: /csv <design>"
+        """The metrics of one source as `metrics.csv`."""
+        if not args or not SOURCE.match(args[0]):
+            return "usage: /csv <source>"
         return Reply("csv", args[0], documents=[Document("metrics.csv", self.actions.metrics_csv(args[0]))])
 
     def cmd_digest(self, args: list[str]) -> str:
@@ -226,11 +226,11 @@ class Commands:
         return self.actions.compare_text([handle([a]) for a in args])
 
     def cmd_metric(self, args: list[str]) -> str:
-        """One metric for every run, or for the runs of one design."""
+        """One metric for every run, or for the runs of one source."""
         if not args:
-            return "usage: /metric <name> [--design SRC]"
-        design = args[args.index("--design") + 1] if "--design" in args[:-1] else None
-        return self.actions.metric_text(args[0], design)
+            return "usage: /metric <name> [--source SOURCE]"
+        source = args[args.index("--source") + 1] if "--source" in args[:-1] else None
+        return self.actions.metric_text(args[0], source)
 
     def cmd_help(self, args: list[str]) -> str:
         """The built-in commands by group, then the custom commands."""

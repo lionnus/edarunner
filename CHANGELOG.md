@@ -15,7 +15,7 @@ database.
   snapshot of a dirty tree. Its short hash tags every run built from it.
   The copy on the host keeps `.git`, so the flow asks git for its
   version there as it does anywhere else, and every command gets
-  `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID` in its environment.
+  `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID` in its environment.
 - `[runtime] setup` runs one command on the host before the first stage,
   such as `uv sync --frozen`, and logs it to `log/setup.log`. A failure
   ends the run as `FAILED:runtime` before any tool seat is taken, and
@@ -55,10 +55,10 @@ database.
 
 - A metric comes from a report file through a regex, a CSV row, a JSON
   path, a hierarchical area report or a Python hook.
-- `edr metrics` prints the metrics of one design or one run,
+- `edr metrics` prints the metrics of one source or one run,
   `edr compare` puts two or more runs side by side with the deltas, and
   `edr runtime` prints the time of each stage, step and task.
-- `edr export` writes a frozen snapshot of one design with a manifest,
+- `edr export` writes a frozen snapshot of one source with a manifest,
   and `edr export --mlflow` writes the runs into an MLflow tracking store.
 - The watcher writes two HTML boards: `status.html` for the farm and
   `compare.html` for the metrics of the runs.

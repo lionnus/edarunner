@@ -68,7 +68,7 @@ def test_make_notifiers_needs_a_private_token(tmp_path):
     ("/stop a@demo disk full", ("stop_after_task", ("a@demo", "telegram", "disk full"), {})),
     ("/stop a@demo", ("stop_after_task", ("a@demo", "telegram", "stopped from telegram"), {})),
     ("/compare a@demo b_nodw@demo", ("compare_text", (["a@demo", "b_nodw@demo"],), {})),
-    ("/metric power_w --design HEAD", ("metric_text", ("power_w", "HEAD"), {})),
+    ("/metric power_w --source HEAD", ("metric_text", ("power_w", "HEAD"), {})),
     ("/metric power_w", ("metric_text", ("power_w", None), {})),
 ])
 def test_builtin_dispatch(bot, text, call):
@@ -487,9 +487,9 @@ def test_files_go_up_as_documents_under_the_limit(bot, tmp_path, monkeypatch):
     bot.handle_update(msg("/board"))
     assert [d["files"]["document"][0] for d in bot.api.of("sendDocument")[-2:]] == ["compare.html", "status.html"]
     bot.handle_update(msg("/csv gabc1234"))
-    assert bot.api.of("sendDocument")[-1]["files"] == {"document": ("metrics.csv", b"run_id,src\nr1,gabc1234\n")}
+    assert bot.api.of("sendDocument")[-1]["files"] == {"document": ("metrics.csv", b"run_id,source\nr1,gabc1234\n")}
     bot.handle_update(msg("/csv a;b"))
-    assert last_reply(bot) == "usage: /csv &lt;design&gt;"
+    assert last_reply(bot) == "usage: /csv &lt;source&gt;"
     monkeypatch.setattr(tgbot, "MAX_DOCUMENT", 2**20)
     sent = len(bot.api.of("sendDocument"))
     bot.handle_update(msg("/log a@demo 300000"))

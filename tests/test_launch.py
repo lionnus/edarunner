@@ -207,11 +207,11 @@ def test_a_job_without_config(env, tmp_path: Path) -> None:
 def test_plan_reuses_a_database_run(env) -> None:
     project, batch, ssh, db = env
     db.upsert_run({"run_id": f"{DATE}_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
-                       "root": "/x/edr/old", "src": "OLD"})
+                       "root": "/x/edr/old", "source": "OLD"})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
     a = launch.plan(project, batch, ssh, db, date=DATE)[0]
-    assert a.problems == [] and a.reuse == f"{DATE}_a_demo_gOLD" and a.src == "OLD"
+    assert a.problems == [] and a.reuse == f"{DATE}_a_demo_gOLD" and a.source == "OLD"
     assert a.root == "/x/edr/old" and a.run_id == f"{DATE}_a_demo_gOLD"
     assert a.spec["start_at"]["stage"] == "pnr" and a.spec["stages"][0]["cwd"] == "/x/edr/old"
     batch.jobs[0].reuse = {"label": "nope", "latest": True}
@@ -249,15 +249,15 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
 def test_launch_runs_the_setup_and_the_stage_with_the_run_identity(env, tmp_path: Path) -> None:
     project, batch, ssh, db = env
     synth_only(batch)
-    project.runtime = Runtime(setup="echo {run_id} $EDR_SRC > setup.out", when_changed=["uv.lock"])
+    project.runtime = Runtime(setup="echo {run_id} $EDR_SOURCE > setup.out", when_changed=["uv.lock"])
     synth = project.stages["synth"]
-    synth.cmd = "echo $EDR_SRC $EDR_RUN_ID $EDR_TREE_ID > stage.out && " + synth.cmd
+    synth.cmd = "echo $EDR_SOURCE $EDR_RUN_ID $EDR_TREE_ID > stage.out && " + synth.cmd
     (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path))
     run_id, root = row["run_id"], Path(row["root"])
     spec = json.loads((tmp_path / "state" / "demo" / f"{run_id}.spec.json").read_text())
-    assert spec["runtime"] == {"setup": f"echo {run_id} $EDR_SRC > setup.out", "when_changed": ["uv.lock"]}
-    assert {k: spec["env"][k] for k in ("EDR_SRC", "EDR_RUN_ID", "EDR_TREE_ID")} == \
-        {"EDR_SRC": "HEAD", "EDR_RUN_ID": run_id, "EDR_TREE_ID": run_id}
+    assert spec["runtime"] == {"setup": f"echo {run_id} $EDR_SOURCE > setup.out", "when_changed": ["uv.lock"]}
+    assert {k: spec["env"][k] for k in ("EDR_SOURCE", "EDR_RUN_ID", "EDR_TREE_ID")} == \
+        {"EDR_SOURCE": "HEAD", "EDR_RUN_ID": run_id, "EDR_TREE_ID": run_id}
     hb = wait_for({"state_file": str(tmp_path / "state" / "demo" / f"{run_id}.json")}, lambda h: h["phase"] == "done", timeout=60)
     assert hb["exit"] == 0
     assert (root / "setup.out").read_text() == f"{run_id} HEAD\n" and (root / "log" / "setup.log").is_file()
@@ -434,7 +434,7 @@ def test_publish_driver_one_copy_per_version(tmp_path: Path) -> None:
 def test_reuse_renders_tree_id_of_the_old_run(env) -> None:
     project, batch, ssh, db = env
     db.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
-                       "root": "/x/edr/old", "src": "OLD"})
+                       "root": "/x/edr/old", "source": "OLD"})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
     plans = launch.plan(project, batch, ssh, db, date=DATE)
@@ -448,14 +448,14 @@ def test_restore_launches_a_fresh_tree_from_the_archive(env, tmp_path: Path) -> 
     project, batch, ssh, db = env
     project.data = tmp_path / "data"
     old = "20260101_0000_a_demo_gOLD"
-    db.upsert_run({"run_id": old, "batch": "old", "label": "a", "src": "OLD", "build_tag": "demo", "state": "retired"})
+    db.upsert_run({"run_id": old, "batch": "old", "label": "a", "source": "OLD", "build_tag": "demo", "state": "retired"})
     archive = project.data / "results" / old / "out" / "11"
     archive.mkdir(parents=True)
     (archive / "netlist.v").write_text("module top; endmodule\n")
     synth_only(batch)
     batch.jobs[0].reuse = {"run_id": old, "restore": "netlist"}
     (p,) = launch.plan(project, batch, ssh, db, date=DATE)
-    assert p.problems == [] and p.reuse == old and p.restore == "netlist" and p.src == "OLD"
+    assert p.problems == [] and p.reuse == old and p.restore == "netlist" and p.source == "OLD"
     assert p.host == "local" and p.root and p.values["tree_id"] == old and p.build_tag == "demo"
     (dry,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path), dry_run=True)
     assert dry["problems"] == [] and not Path(p.root).exists()
@@ -514,9 +514,9 @@ def test_project_env_keeps_a_name_it_sets_itself(env) -> None:
 def test_tree_id_survives_a_chain_of_reuse(env) -> None:
     project, batch, ssh, db = env
     db.upsert_run({"run_id": "20260101_0000_a_demo_gOLD", "batch": "old", "label": "a", "host": "local",
-                       "root": "/x/edr/old", "src": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
+                       "root": "/x/edr/old", "source": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
     db.upsert_run({"run_id": "20260102_0000_a_demo_gOLD", "batch": "mid", "label": "a", "host": "local",
-                       "root": "/x/edr/old", "src": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
+                       "root": "/x/edr/old", "source": "OLD", "tree_id": "20260101_0000_a_demo_gOLD"})
     batch.jobs[0].reuse = {"label": "a", "latest": True}
     batch.jobs[0].stages = ["pnr"]
     a = next(p for p in launch.plan(project, batch, ssh, db, date=DATE) if p.label == "a")

@@ -70,7 +70,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `driver` | the driver copy the run started with; a resume uses it |
 | `record` | `edarunner` (the version that launched), `driver_sha256`, and `tools` with the version the site file gives per tool of the host; the export manifest copies it |
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
-| `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID` |
+| `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID` |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
 | `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
 | `stages` | the stages in run order |

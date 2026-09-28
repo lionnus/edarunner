@@ -61,7 +61,7 @@ Before you run it, check the following:
 | `hung`, `looping`, `over_budget` | the log tail in `edr status <handle>` |
 | `host_full` | `edr hosts`; one stop frees the host |
 | `superseded` | the newer batch is the one you want |
-| `done` | `edr metrics --design <src>` looks complete |
+| `done` | `edr metrics --source <source>` looks complete |
 | other finished | `edr watch --once` collected the results |
 
 `edr status --live` asks each host whether the driver process exists. Use
@@ -97,7 +97,7 @@ project; send it when a long task ends or needs a person.
 
 ## Read a number before you use it
 
-`edr metrics --design <src>` gives the numbers of one source tag. Keep
+`edr metrics --source <source>` gives the numbers of one source tag. Keep
 numbers from different tags out of one table, and name the tag in every
 caption. Every metric row carries `source_file`, so check which file a
 number came from before you put it in a table.

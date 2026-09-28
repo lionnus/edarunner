@@ -76,7 +76,7 @@ alone, and the repository is never the target of a delete
 `edr plan sweep1` works out what a launch would do and writes nothing
 (`launch.plan`). It reads the batch, computes the build tag of each job
 from its configuration name and overrides, and names each run
-`<date>_<label>_<build_tag>_g<src>` by default. The first launch pins
+`<date>_<label>_<build_tag>_g<source>` by default. The first launch pins
 the date in `<state_dir>/sweep1/RUN_DATE`, so runs of the batch that
 start later, after the stagger or from the queue, keep the same date; a
 plan before that first launch shows the current time. A job with
@@ -351,7 +351,7 @@ check` warns when the database sits on such a filesystem (`db.Database`,
 `cli.cmd_check`). A local `data/` is still the better place, because the
 watcher and each `edr` call take a file lock there.
 
-`edr metrics --design` and `edr export` select one source tag at a time
+`edr metrics --source` and `edr export` select one source tag at a time
 and match it exactly, so two versions of the design never end up in one
 table (`cli.cmd_metrics`, `export._select`). `edr export` writes a
 snapshot, a frozen directory with a manifest, and an analysis reads that

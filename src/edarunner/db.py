@@ -13,7 +13,7 @@ from typing import Any
 
 DDL = """
 CREATE TABLE IF NOT EXISTS batches(batch TEXT PRIMARY KEY, project TEXT, source TEXT, created INTEGER, retired INTEGER, run_date TEXT);
-CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT, config TEXT, build_tag TEXT, src TEXT, dirty INTEGER,
+CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT, config TEXT, build_tag TEXT, source TEXT, dirty INTEGER,
   host TEXT, root TEXT, created INTEGER, phase TEXT, state TEXT, stage TEXT, step INTEGER, exit INTEGER, killed_by TEXT,
   started INTEGER, updated INTEGER, disk_free_gb REAL, tree_gb REAL, counts TEXT, tree_id TEXT, handle TEXT);
 CREATE TABLE IF NOT EXISTS stage_runs(run_id TEXT, stage TEXT, task TEXT, attempt INTEGER, started INTEGER, ended INTEGER,
@@ -329,15 +329,15 @@ class Database:
 
     def metrics(
         self,
-        design: str | None = None,
+        source: str | None = None,
         stage: str | None = None,
         step: int | None = None,
         name: str | None = None,
         run_ids: list[str] | None = None,
     ) -> list[Row]:
-        """Metric rows joined with the run's label, config and src. `name` matches name or canonical."""
+        """Metric rows joined with the run's label, config and source. `name` matches name or canonical."""
         where, args = ["1"], []
-        for cond, val in (("r.src=?", design), ("m.stage=?", stage), ("m.step=?", step)):
+        for cond, val in (("r.source=?", source), ("m.stage=?", stage), ("m.step=?", step)):
             if val is not None:
                 where.append(cond)
                 args.append(val)
@@ -348,19 +348,19 @@ class Database:
             where.append(f"m.run_id IN ({', '.join('?' * len(run_ids))})" if run_ids else "0")
             args += list(run_ids)
         return self._rows(
-            "SELECT m.*, r.label, r.config, r.src FROM metrics m JOIN runs r ON r.run_id=m.run_id "
+            "SELECT m.*, r.label, r.config, r.source FROM metrics m JOIN runs r ON r.run_id=m.run_id "
             f"WHERE {' AND '.join(where)} ORDER BY m.run_id, m.stage, m.step, m.task, m.name",
             args,
         )
 
-    def area(self, run_ids: list[str] | None = None, design: str | None = None, stage: str | None = None,
+    def area(self, run_ids: list[str] | None = None, source: str | None = None, stage: str | None = None,
              step: int | None = None, instance: str | None = None, depth: int | None = None) -> list[Row]:
-        """Area rows with the run's label and src and the metric's source_file and unit.
+        """Area rows with the run's label and source and the metric's source_file and unit.
 
         `instance` matches that instance and every one below it.
         """
         where, args = ["1"], []
-        for cond, val in (("r.src=?", design), ("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
+        for cond, val in (("r.source=?", source), ("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
             if val is not None:
                 where.append(cond)
                 args.append(val)
@@ -371,7 +371,7 @@ class Database:
             where.append(f"a.run_id IN ({', '.join('?' * len(run_ids))})" if run_ids else "0")
             args += list(run_ids)
         return self._rows(
-            "SELECT a.*, r.label, r.src, m.source_file, m.unit FROM area a JOIN runs r ON r.run_id=a.run_id "
+            "SELECT a.*, r.label, r.source, m.source_file, m.unit FROM area a JOIN runs r ON r.run_id=a.run_id "
             "LEFT JOIN metrics m ON m.run_id=a.run_id AND m.stage=a.stage AND m.step IS a.step AND m.task='' "
             "AND m.name=a.name "
             f"WHERE {' AND '.join(where)} ORDER BY a.run_id, a.stage, a.step, a.name, a.area DESC",

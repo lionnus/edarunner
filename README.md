@@ -65,7 +65,7 @@ edr plan gcd                  # run ids, hosts, every path; writes nothing
 edr launch gcd                # one driver on the `local` host
 edr status                    # the board
 edr watch --once              # collect the reports and extract the metrics
-edr metrics --design <src>    # <src> is the hash that `edr checkout` printed
+edr metrics --source <source>    # <source> is the hash that `edr checkout` printed
 ```
 
 Synthesis, floorplan and placement take about half a minute. Once the
@@ -77,7 +77,7 @@ board says `done`, `edr watch --once` collects the reports and
 ────────────────────────────────────────────────────────────────
 #1  gcd    local  done   done   place        0m      0f/0d   0.0
 
-label  design   stage      step  task  metric                  value  unit
+label  source   stage      step  task  metric                  value  unit
 ──────────────────────────────────────────────────────────────────────────
 gcd    952ceeb  floorplan     -        area_floorplan_um2     698.25  um2
 gcd    952ceeb  floorplan     -        wns_floorplan_ns    -0.155306  ns

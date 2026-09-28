@@ -134,15 +134,15 @@ class Ctx:
         b = config.load_batch(self.project, self.batch_name(name))
         got = checkout.ensure(self.project, b.source, dry_run)
         if got:
-            print(f"checkout {got.src} {got.path}" + (" (dry)" if dry_run else ""))
-            if not checkout.SRC_RE.match(b.source):
-                b.source = got.src
+            print(f"checkout {got.source} {got.path}" + (" (dry)" if dry_run else ""))
+            if not checkout.SOURCE_RE.match(b.source):
+                b.source = got.source
         return self.resolve_source(b)
 
     def resolve_source(self, b: Batch) -> Batch:
-        """A ref as source becomes the src tag of its checked-out tree; CheckoutError when it is not checked out."""
-        if not checkout.SRC_RE.match(b.source):
-            b.source = runid.src_tag(checkout.find(self.project, b.source))
+        """A ref as source becomes the source tag of its checked-out tree; CheckoutError when it is not checked out."""
+        if not checkout.SOURCE_RE.match(b.source):
+            b.source = runid.source_tag(checkout.find(self.project, b.source))
         return b
 
     def refresh(self, batch: str | None = None) -> None:
@@ -310,10 +310,10 @@ def _final_metrics(c: Ctx, rows: list[Row]) -> dict[str, dict[str, tuple[int, An
 
 
 def _metrics_table(rows: list[Row]) -> Table | str:
-    body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
+    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m.get("task") or "", m["name"], m["value"],
              m.get("unit")] for m in rows]
-    return board.table(["label", "design", "stage", "step", "task", "metric", "value", "unit"], body,
-                       styles={"label": "bold", "design": "dim"}, right=("step", "value")) if rows else "no metrics"
+    return board.table(["label", "source", "stage", "step", "task", "metric", "value", "unit"], body,
+                       styles={"label": "bold", "source": "dim"}, right=("step", "value")) if rows else "no metrics"
 
 
 def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
@@ -404,9 +404,9 @@ class Actions:
         bdir = self.c.project.data / "board"
         return [p for p in (bdir / "compare.html", bdir / "status.html") if p.is_file()]
 
-    def metrics_csv(self, design: str) -> bytes:
-        """The CSV of `edr metrics --design <design> --csv`."""
-        return _metrics_csv(self.c.db.metrics(design=design)).encode()
+    def metrics_csv(self, source: str) -> bytes:
+        """The CSV of `edr metrics --source <source> --csv`."""
+        return _metrics_csv(self.c.db.metrics(source=source)).encode()
 
     def compare_text(self, handles: list[str]) -> str:
         """One block per metric: its name, then one `label value` line per run."""
@@ -421,12 +421,12 @@ class Actions:
                               ).splitlines()[1:]
         return "\n".join(out)
 
-    def metric_text(self, name: str, design: str | None) -> str:
-        """`label design step value` per metric row."""
-        rows = self.c.db.metrics(design=design, name=name)
-        body = [[str(m.get("label")) + (f"[{m['task']}]" if m.get("task") else ""), m.get("src"), m.get("step"),
+    def metric_text(self, name: str, source: str | None) -> str:
+        """`label source step value` per metric row."""
+        rows = self.c.db.metrics(source=source, name=name)
+        body = [[str(m.get("label")) + (f"[{m['task']}]" if m.get("task") else ""), m.get("source"), m.get("step"),
                  f"{m['value']}{' ' + m['unit'] if m.get('unit') else ''}"] for m in rows]
-        return board.cols(["label", "design", "step", "value"], body) if body else "no metrics"
+        return board.cols(["label", "source", "step", "value"], body) if body else "no metrics"
 
 
 # --- commands
@@ -543,23 +543,23 @@ def _metrics_csv(rows: list[Row]) -> str:
 
 
 def _area_table(rows: list[Row]) -> Table | str:
-    body = [[m.get("label"), m.get("src"), m["stage"], m.get("step"), m["instance"], m["depth"], m["area"],
+    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m["instance"], m["depth"], m["area"],
              m.get("local_area"), m.get("cells")] for m in rows]
-    return board.table(["label", "design", "stage", "step", "instance", "depth", "area", "local", "cells"], body,
-                       styles={"label": "bold", "design": "dim"},
+    return board.table(["label", "source", "stage", "step", "instance", "depth", "area", "local", "cells"], body,
+                       styles={"label": "bold", "source": "dim"},
                        right=("step", "depth", "area", "local", "cells")) if rows else "no area rows"
 
 
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
-    """The metrics of one design, as a table or CSV; with --instance or --depth, its area rows."""
+    """The metrics of one source, as a table or CSV; with --instance or --depth, its area rows."""
     if a.instance is not None or a.depth is not None:
         run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
-        rows = c.db.area(run_ids=run_ids, design=a.design, stage=a.stage, step=a.step, instance=a.instance,
+        rows = c.db.area(run_ids=run_ids, source=a.source, stage=a.stage, step=a.step, instance=a.instance,
                          depth=a.depth)
         c.emit(_area_table(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    if not a.design and not a.run:
-        raise Refuse("metrics needs --design or --run")
+    if not a.source and not a.run:
+        raise Refuse("metrics needs --source or --run")
     run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
     if a.over:
         if not run_ids:
@@ -567,7 +567,7 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
         rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
         c.emit(analysis.over_steps_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
-    rows = c.db.metrics(design=a.design, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
+    rows = c.db.metrics(source=a.source, stage=a.stage, step=a.step, name=a.metric, run_ids=run_ids)
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
@@ -578,12 +578,12 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
     """Extract every configured metric again from the collected files of runs, as the watcher does."""
-    if sum(map(bool, (a.handle, a.batch, a.design))) != 1:
-        raise Refuse("extract needs one of a handle, --batch or --design")
+    if sum(map(bool, (a.handle, a.batch, a.source))) != 1:
+        raise Refuse("extract needs one of a handle, --batch or --source")
     if a.handle:
         runs = [c.resolve(a.handle)]
     else:
-        runs = [r for r in c.db.runs(batch=a.batch) if not a.design or r["src"] == a.design]
+        runs = [r for r in c.db.runs(batch=a.batch) if not a.source or r["source"] == a.source]
     out, lines = [], []
     for run in runs:
         old = {(m["stage"], m["step"], m["task"], m["name"]): m for m in c.db.metrics(run_ids=[run["run_id"]])}
@@ -687,7 +687,7 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
         except ConfigError as e:
             problems.append(str(e))
             continue
-        # The same src tag as plan; check runs before checkout, so a ref that is not checked out stays as written.
+        # The same source tag as plan; check runs before checkout, so a ref that is not checked out stays as written.
         with contextlib.suppress(checkout.CheckoutError):
             c.resolve_source(b)
         batches.append(b)
@@ -723,8 +723,8 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
 def cmd_checkout(c: Ctx, a: argparse.Namespace) -> int:
     """Check out a ref as a clone, or copy a dirty tree as a snapshot."""
     res = checkout.checkout(c.project, a.ref, Path(a.dirty) if a.dirty else None, a.dry_run)
-    c.emit(Text.assemble((res.src, "bold"), " ", (str(res.path), "dim"), (" (dirty)" if res.dirty else "", "yellow")),
-           {"src": res.src, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
+    c.emit(Text.assemble((res.source, "bold"), " ", (str(res.path), "dim"), (" (dirty)" if res.dirty else "", "yellow")),
+           {"source": res.source, "path": str(res.path), "nested": res.nested, "dirty": res.dirty})
     return Exit.DONE
 
 
@@ -781,7 +781,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace) -> int:
         batch, job = None, None
     if job is None:
         job = Job(label=str(row["label"]), config=str(row.get("config") or ""))
-        batch = Batch(batch=str(row["batch"]), source=str(row["src"] or ""), jobs=[job],
+        batch = Batch(batch=str(row["batch"]), source=str(row["source"] or ""), jobs=[job],
                       path=project.root / "jobs" / f"{row['batch']}.toml")
     job.reuse, job.stages, job.host = {"run_id": run_id}, [a.stage], a.on or "auto"
     if a.tasks:
@@ -825,14 +825,14 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     if not root.is_dir():
         raise Refuse(f"'{root}' is not a directory")
     try:
-        src = a.src or runid.src_tag(root)
+        source = a.source or runid.source_tag(root)
     except runid.GitError:
-        raise Refuse(f"{root} is not a git tree; pass --src") from None
+        raise Refuse(f"{root} is not a git tree; pass --source") from None
     date, host = time.strftime(launch.DATE_FMT), socket.gethostname()
     job = Job(label=a.label, config=a.label)
-    batch = Batch(batch=a.batch, source=src, jobs=[job], path=project.root / "jobs" / f"{a.batch}.toml")
+    batch = Batch(batch=a.batch, source=source, jobs=[job], path=project.root / "jobs" / f"{a.batch}.toml")
     v = config.placeholders(project, date=date, batch=a.batch, label=a.label, config=a.label, build_tag="track",
-                            src=src, overrides={})
+                            source=source, overrides={})
     run_id = config.render(project.source.run_id, v)
     assert_run_id(run_id)
     v.update(run_id=run_id, tree_id=run_id, host=None, mount="", root=str(root))
@@ -841,7 +841,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     spec["stages"][0]["cmd"] = shlex.join(argv)
     spec.pop("runtime", None)  # the tree of a tracked command is the caller's, as it is
     spec["collect"] = a.collect
-    plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, src=src)
+    plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, source=source)
     spec_path = project.state_dir / a.batch / f"{run_id}.spec.json"
     if spec_path.exists():
         raise Refuse(f"already tracked: {spec_path} exists")
@@ -851,9 +851,9 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
         c.emit(json.dumps(spec, indent=1), spec)
         return Exit.DONE
     now = int(time.time())
-    c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": src, "run_date": date})
+    c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": source, "run_date": date})
     c.db.upsert_run({"run_id": run_id, "batch": a.batch, "label": a.label, "config": a.label, "build_tag": "track",
-                     "src": src, "dirty": int("-dirty" in src), "host": host, "root": str(root), "created": now,
+                     "source": source, "dirty": int("-dirty" in source), "host": host, "root": str(root), "created": now,
                      "phase": "setup", "state": "running", "started": now, "tree_id": run_id,
                      "handle": str(Handle("track", f"{host}:{os.getpid()}", host))})
     c.db.add_event("user", run_id, "track", shlex.join(argv))
@@ -892,15 +892,15 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     tasks = {t: config.resolve_task(c.project, t) for t in a.tasks or []}
     now = int(time.time())
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
-               src=a.src, dirty=0, host=a.host or "", root=root or None, created=now, phase=a.phase, state="imported",
+               source=a.source, dirty=0, host=a.host or "", root=root or None, created=now, phase=a.phase, state="imported",
                stage="", step=-1, exit=0 if a.phase == "done" else None, started=now, updated=now,
                counts=json.dumps({}), tree_id=a.run_id)
     where = f"{a.host}:{root}" if root else f"results {results}"
     text = f"{where} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
     if not a.dry_run:
-        c.db.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.src, created=now))
+        c.db.upsert_batch(dict(batch=a.batch, project=c.project.project, source=a.source, created=now))
         c.db.upsert_run(row)
-        c.db.set_parameters(a.run_id, {k: row[k] for k in ("config", "build_tag", "src") if row[k]}, "import")
+        c.db.set_parameters(a.run_id, {k: row[k] for k in ("config", "build_tag", "source") if row[k]}, "import")
         if results:
             text += f", {_import_results(c, row, results, tasks)} metrics"
         c.db.add_event("user", a.run_id, "import", text)
@@ -930,24 +930,24 @@ def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
-    """Write a frozen snapshot of one design, or the project database into an MLflow store."""
+    """Write a frozen snapshot of one source, or the project database into an MLflow store."""
     if a.mlflow:
         if a.dry_run:
-            n = len([r for r in c.db.runs() if a.design is None or r.get("src") == a.design])
+            n = len([r for r in c.db.runs() if a.source is None or r.get("source") == a.source])
             c.emit(f"{a.mlflow}: {n} runs (dry)", {"runs": n})
             return Exit.DONE
         from .mlflow_export import export_mlflow
 
-        res = export_mlflow(c.project, c.db, Path(a.mlflow), a.design)
-        c.db.add_event("user", "", "export", f"mlflow {a.design or 'every design'} -> {a.mlflow}")
+        res = export_mlflow(c.project, c.db, Path(a.mlflow), a.source)
+        c.db.add_event("user", "", "export", f"mlflow {a.source or 'every source'} -> {a.mlflow}")
         c.emit(f"{res['tracking_uri']}: {len(res['written'])} runs written, {len(res['skipped'])} already there", res)
         return Exit.DONE
-    if not a.design or not a.out:
-        raise Refuse("export needs --design and --out, or --mlflow DIR")
+    if not a.source or not a.out:
+        raise Refuse("export needs --source and --out, or --mlflow DIR")
     labels = a.labels.split(",") if a.labels else None
-    manifest = export.export(c.project, c.db, a.design, Path(a.out), labels, a.dry_run, a.with_logs)
+    manifest = export.export(c.project, c.db, a.source, Path(a.out), labels, a.dry_run, a.with_logs)
     if not a.dry_run:
-        c.db.add_event("user", "", "export", f"{a.design} -> {a.out}")
+        c.db.add_event("user", "", "export", f"{a.source} -> {a.out}")
     c.emit(f"{a.out}: {len(manifest['runs'])} runs, {len(manifest['files'])} files" + (" (dry)" if a.dry_run else ""),
            manifest)
     return Exit.DONE
@@ -1056,10 +1056,10 @@ def _worktree_target(c: Ctx, batch: str) -> Path | None:
     A tree that fails the guard is kept with one line on stdout, so the run trees still go.
     """
     rows = {b["batch"]: b for b in c.db.batches()}
-    src = str((rows.get(batch) or {}).get("source") or "")
-    if not src or any(b["batch"] != batch and not b.get("retired") and b.get("source") == src for b in rows.values()):
+    source = str((rows.get(batch) or {}).get("source") or "")
+    if not source or any(b["batch"] != batch and not b.get("retired") and b.get("source") == source for b in rows.values()):
         return None
-    path = c.project.source.worktrees / src
+    path = c.project.source.worktrees / source
     if not path.is_dir():
         return None
     if path.resolve() == c.project.source.repo.resolve():
@@ -1347,11 +1347,11 @@ def _parser() -> argparse.ArgumentParser:
         their versions. A tool without a probe shows - for the seats. --json
         gives tool, free, total, hosts (host to version) and note.
         """, exits={Exit.HOSTS: "a probe failed, or printed no number"})
-    s = command("metrics", "the metrics of one design or one run", """
-        Prints every metric of one design with its label, design, stage, step,
-        task, name, value and unit. --design or --run is required. --design is the source
-        tag exactly as edr checkout printed it, -dirty-... included; --run takes
-        one run instead. --csv writes the columns of
+    s = command("metrics", "the metrics of one source or one run", """
+        Prints every metric of one source with its label, source, stage, step,
+        task, name, value and unit. --source or --run is required. --source
+        is the source tag exactly as edr checkout printed it, -dirty-...
+        included; --run takes one run instead. --csv writes the columns of
         metrics.csv (docs/guides/results.md) to stdout.
 
         --run with --over steps prints the metrics along the steps of that run:
@@ -1360,11 +1360,11 @@ def _parser() -> argparse.ArgumentParser:
         source file.
 
         --instance or --depth prints the area rows of an area_hier metric
-        instead: label, design, stage, step, instance, depth, area with the
+        instead: label, source, stage, step, instance, depth, area with the
         children, local area without them, and the cell count when the report
         has one. --instance takes that instance and every instance below it.
         """, exits={Exit.NOTHING: "no metric row"})
-    s.add_argument("--design", metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--source", metavar="SOURCE", help="the exact source tag of the runs, as in the run id")
     s.add_argument("--run", metavar="HANDLE", help="one run: " + HANDLE)
     s.add_argument("--metric", metavar="NAME", help="one metric, by name or canonical name")
     s.add_argument("--over", choices=["steps"], help="with --run: the metrics along the steps")
@@ -1382,7 +1382,7 @@ def _parser() -> argparse.ArgumentParser:
         name or unit has changed, or when its area_hier metric has no area
         rows yet. Rows that the new extraction does not find are kept.
 
-        Pass exactly one of a handle, --batch or --design. For each run,
+        Pass exactly one of a handle, --batch or --source. For each run,
         extract prints how many rows are new, changed, unchanged and failed,
         where a failed row is a file that did not parse, and it writes an
         extract event with the same counts. With --json, data holds run_id,
@@ -1390,7 +1390,7 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True, exits={Exit.NOTHING: "no run matches"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")
-    s.add_argument("--design", metavar="SRC", help="every run of the exact source tag")
+    s.add_argument("--source", metavar="SOURCE", help="every run of the exact source tag")
     s = command("compare", "two or more runs side by side", """
         Puts two or more runs side by side. Without --area, it prints one row
         per stage, step, task and metric: the step name, the value of each run, and the
@@ -1441,7 +1441,7 @@ def _parser() -> argparse.ArgumentParser:
         Fetches the repository, then makes a detached local clone of ref (default source.ref) at
         <worktrees>/<short hash>, and clones each source.nested repository into
         it at the HEAD the repository copy has. A local clone shares the git
-        objects of the repository by hard links. It prints <src> <path>.
+        objects of the repository by hard links. It prints <source> <path>.
 
         --dirty DIR clones the HEAD of a working tree and copies its files over
         the clone, with the diff in source.diff; the tag is <hash>-dirty-<8 hex>
@@ -1458,7 +1458,7 @@ def _parser() -> argparse.ArgumentParser:
 
         If the batch's source is a clean ref that has not been checked out
         yet, plan checks it out first, the same way edr checkout does, and
-        prints a checkout <src> <path> line. With --dry-run it prints that line
+        prints a checkout <source> <path> line. With --dry-run it prints that line
         and the git commands but checks nothing out. Apart from that checkout,
         plan writes nothing. A dirty source that has not been checked out is
         refused; add it with edr checkout --dirty DIR.
@@ -1513,7 +1513,7 @@ def _parser() -> argparse.ArgumentParser:
         budget work; the command replaces its cmd. The tree is --root, default
         the current directory, and the driver writes log/<stage>.log there. The
         run id follows source.run_id with the label as config, track as the
-        build tag, and --src (default the source tag of the tree) as src.
+        build tag, and --source (default the source tag of the tree) as {source}.
 
         edr track then replaces itself with the driver: the pid, the signals
         and the exit code are the driver's. With --collect, the watcher copies
@@ -1533,7 +1533,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--label", required=True, metavar="L", help="the label of the run")
     s.add_argument("--stage", required=True, metavar="S", help="the stage name; a stage of edr.toml lends its settings")
     s.add_argument("--batch", default="track", metavar="B", help="the batch; default track")
-    s.add_argument("--src", metavar="TAG", help="the source tag; default the tag of the tree")
+    s.add_argument("--source", metavar="SOURCE", help="the source tag; default the tag of the tree")
     s.add_argument("--root", metavar="DIR", help="the run tree; default the current directory")
     s.add_argument("--collect", action="store_true", help="the watcher collects the stage and extracts its metrics")
     s.add_argument("cmd", nargs=argparse.REMAINDER, help="the command, after --")
@@ -1557,7 +1557,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--run-id", required=True, dest="run_id", help="the run id; it must start with YYYYMMDD_HHMM_")
     s.add_argument("--label", required=True, help="the label of the run")
     s.add_argument("--config", default="", help="the configuration name of the run; default empty")
-    s.add_argument("--src", required=True, metavar="SRC", help="the source tag of the tree")
+    s.add_argument("--source", required=True, metavar="SOURCE", help="the source tag of the tree")
     s.add_argument("--host", help="the host of the tree")
     s.add_argument("--root", metavar="PATH", help="the tree on the host")
     s.add_argument("--results", metavar="DIR", help="collected files in the run layout; linked as data/results/<run id>")
@@ -1566,21 +1566,21 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--phase", default="done", help="the terminal phase; default done")
     s.add_argument("--build-tag", dest="build_tag", metavar="TAG", help="the build tag of the run")
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
-    s = command("export", "a frozen snapshot of one design", """
-        Writes a snapshot of one design to DIR: manifest.json, runs.csv,
+    s = command("export", "a frozen snapshot of one source", """
+        Writes a snapshot of one source to DIR: manifest.json, runs.csv,
         metrics.csv and the collected files of the newest run per label.
-        --design matches the source tag exactly. log/ and *.log stay out unless
+        --source matches the source tag exactly. log/ and *.log stay out unless
         you pass --with-logs. It refuses a DIR that exists and is not empty.
         docs/guides/results.md explains the layout.
 
         --mlflow DIR writes the project database into a local MLflow tracking store
         in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
-        per run, of every design or of --design, with the parameters, the
+        per run, of every source or of --source, with the parameters, the
         metrics at their step, the stage and step times, and the collected
         files up to 1 MiB. A run already in the store is skipped. It needs the
         mlflow extra: pip install 'edarunner[mlflow]'.
         """, write=True)
-    s.add_argument("--design", metavar="SRC", help="the exact source tag of the runs, as in the run id")
+    s.add_argument("--source", metavar="SOURCE", help="the exact source tag of the runs, as in the run id")
     s.add_argument("--out", metavar="DIR", help="the directory to write; it must be absent or empty")
     s.add_argument("--mlflow", metavar="DIR", help="write an MLflow tracking store in DIR instead")
     s.add_argument("--labels", metavar="a,b", help="these labels only, comma separated")

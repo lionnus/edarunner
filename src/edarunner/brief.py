@@ -146,7 +146,7 @@ def run_data(c: Any, row: Row, file_host: str) -> Row:
     st = watch.STATES.get(state["state"])
     return {
         "handle": state["handle"], "run_id": row["run_id"], "label": row.get("label"), "batch": row["batch"],
-        "config": row.get("config"), "src": row.get("src"), "host": row.get("host"), "root": row.get("root"),
+        "config": row.get("config"), "source": row.get("source"), "host": row.get("host"), "root": row.get("root"),
         "state": state["state"], "phase": row.get("phase"), "stage": row.get("stage"), "step": row.get("step"),
         "step_name": hb.get("step_name"), "age_s": state["age_s"], "started": row.get("started"),
         "exit": row.get("exit"), "runtime": analysis.runtime(c.project, c.db, row), "events": events,
@@ -274,7 +274,7 @@ def run_text(d: Row) -> str:
     """The history of one run as Markdown."""
     out = [f"# {d['handle']}", ""]
     ident = f"`{d['handle']}` is the run `{d['run_id']}` of batch `{d['batch']}`. It builds the configuration " \
-            f"`{d['config'] or '-'}` from source `{d['src'] or '-'}`"
+            f"`{d['config'] or '-'}` from source `{d['source'] or '-'}`"
     ident += f" on host `{d['host']}`, in `{d['root']}`." if d.get("root") else f" on host `{d['host'] or '-'}`."
     if board.is_live({"phase": d["phase"]}):
         ident += f" It is {d['state']} in {_where(d)}, and its last heartbeat is {ago(d['age_s'])} old."

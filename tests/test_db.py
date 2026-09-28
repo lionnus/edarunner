@@ -16,8 +16,8 @@ RUN_C = "20261003_0900_a_demo_gbbb222"
 def _seed(db: Database) -> None:
     db.upsert_batch({"batch": "demo", "project": "demo", "source": "aaa111", "run_date": "20261002_1130"})
     db.upsert_batch({"batch": "demo2", "project": "demo", "source": "bbb222", "run_date": "20261003_0900"})
-    for run_id, batch, label, src in ((RUN_A, "demo", "a", "aaa111"), (RUN_B, "demo", "b_nodw", "aaa111"), (RUN_C, "demo2", "a", "bbb222")):
-        db.upsert_run({"run_id": run_id, "batch": batch, "label": label, "config": "demo", "src": src, "host": "local",
+    for run_id, batch, label, source in ((RUN_A, "demo", "a", "aaa111"), (RUN_B, "demo", "b_nodw", "aaa111"), (RUN_C, "demo2", "a", "bbb222")):
+        db.upsert_run({"run_id": run_id, "batch": batch, "label": label, "config": "demo", "source": source, "host": "local",
                         "phase": "stage:synth", "state": "running", "counts": {"done": 0, "failed": 0}})
 
 
@@ -102,7 +102,7 @@ def test_resolve(tmp_path):
             db.resolve("#1", None)
 
 
-def test_metrics_by_design(tmp_path):
+def test_metrics_by_source(tmp_path):
     with Database(tmp_path / "edr.db") as db:
         _seed(db)
         for run_id, value in ((RUN_A, 1000.0), (RUN_B, 1010.0), (RUN_C, 2000.0)):
@@ -113,10 +113,10 @@ def test_metrics_by_design(tmp_path):
         assert not db.add_metric({"run_id": RUN_A, "stage": "synth", "step": 3, "name": "area_cell_um2", "value": 1.0})
         assert db.conn.execute("SELECT count(*) FROM metrics").fetchone()[0] == 4
 
-        rows = db.metrics(design="aaa111")
+        rows = db.metrics(source="aaa111")
         assert [(r["run_id"], r["name"], r["value"], r["label"]) for r in rows] == [
             (RUN_A, "power_w", 0.25, "a"), (RUN_A, "area_cell_um2", 1000.0, "a"), (RUN_B, "area_cell_um2", 1010.0, "b_nodw")]
-        assert [r["value"] for r in db.metrics(design="bbb222")] == [2000.0]
+        assert [r["value"] for r in db.metrics(source="bbb222")] == [2000.0]
         assert [r["run_id"] for r in db.metrics(name="design__instance__area", step=3)] == [RUN_A, RUN_B, RUN_C]
         assert [r["run_id"] for r in db.metrics(stage="power")] == [RUN_A]
         assert [r["run_id"] for r in db.metrics(run_ids=[RUN_C])] == [RUN_C]

@@ -72,6 +72,6 @@ def test_check_probes_each_host_once_and_resolves_the_source(demo: Path, capsys,
     assert probed == ["local"] and planned == [("HEAD", ["local"])] * 2
     tree = demo / "wt" / "deadbee"
     tree.mkdir(parents=True)
-    (tree / "source.json").write_text('{"src": "deadbee"}')
-    monkeypatch.setattr(checkout, "find", lambda project, src: tree)
+    (tree / "source.json").write_text('{"source": "deadbee"}')
+    monkeypatch.setattr(checkout, "find", lambda project, source: tree)
     assert edr(capsys, "check")[0] == 0 and planned[2:] == [("deadbee", ["local"])] * 2

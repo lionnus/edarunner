@@ -92,7 +92,7 @@ PLACEHOLDERS = {
     "label": ("the label of the job", "the run id, the stage strings"),
     "config": ("the configuration name of the job; `\"\"` without one", "the run id, the stage strings"),
     "build_tag": ("the build tag of the job", "the run id, the stage strings"),
-    "src": ("the source tag of the batch", "the run id, the stage strings"),
+    "source": ("the source tag of the batch", "the run id, the stage strings"),
     "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
     "vars.<name>": ("a key of the job's `vars` table", "the stage strings, `[env]`, `collect`"),
     "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),

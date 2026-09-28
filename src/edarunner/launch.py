@@ -36,7 +36,7 @@ class RunPlan:
     spec: dict[str, Any]
     queued: bool
     problems: list[str] = field(default_factory=list)
-    src: str = ""
+    source: str = ""
     build_tag: str = ""
     tree_host: str = ""  # where the tree is synced: the host, or `local` for a tree under a scheduler's tree_root
     reuse: str = ""  # the run id whose tree this run continues, or whose archive it restores
@@ -61,17 +61,17 @@ def pin_date(state: Path, batch: str, dry_run: bool = False) -> str:
     return date
 
 
-def build_tag(project: Project, job: Job, src: str = "") -> str:
+def build_tag(project: Project, job: Job, source: str = "") -> str:
     """The build tag of a job: the source hook, else config plus one token per override.
 
-    The hook gets the worktree of `src` as a third argument when one exists, so it
+    The hook gets the worktree of `source` as a third argument when one exists, so it
     can read the configuration table and the interpreter of that source.
     """
     if project.source.build_tag:
         fn, name = config.load_hook(project.root, project.source.build_tag)
         worktree = None
-        if src:
-            candidate = project.source.worktrees / src
+        if source:
+            candidate = project.source.worktrees / source
             worktree = str(candidate) if candidate.is_dir() else None
         args = (job.config, job.overrides, worktree)
         try:
@@ -167,7 +167,7 @@ def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[
 
 
 def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
-    """The site env, then the project env rendered per run, then `EDR_SRC`, `EDR_RUN_ID` and `EDR_TREE_ID`.
+    """The site env, then the project env rendered per run, then `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID`.
 
     A project value builds on the site: its `$NAME` or `${NAME}` takes the site value of
     NAME when the project does not set NAME under another key. The host expands the rest.
@@ -178,7 +178,7 @@ def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
         env[k] = string.Template.pattern.sub(
             lambda m, site=site: site.get(m.group("named") or m.group("braced") or "", m.group(0)),
             config.render(val, v))
-    env.update(EDR_SRC=str(v.get("src") or ""), EDR_RUN_ID=str(v["run_id"]), EDR_TREE_ID=str(v.get("tree_id") or v["run_id"]))
+    env.update(EDR_SOURCE=str(v.get("source") or ""), EDR_RUN_ID=str(v["run_id"]), EDR_TREE_ID=str(v.get("tree_id") or v["run_id"]))
     return env
 
 
@@ -253,12 +253,12 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
     names = job.stages or list(project.stages)
     sched = project.site.scheduler.backend in SCHEDULERS
     problems = _check_overrides(project, job, names)
-    src, host, mount, root, reused, tag, tree = batch.source, None, "", "", "", "", ""
+    source, host, mount, root, reused, tag, tree = batch.source, None, "", "", "", "", ""
     restore = str(job.reuse.get("restore") or "") if job.reuse else ""
     if job.reuse:
         try:
             row = _reuse_row(db, job.reuse, need_tree=not restore)
-            src, reused = row["src"], row["run_id"]
+            source, reused = row["source"], row["run_id"]
             # The tag and the tree id belong to the tree, through any chain of reuse.
             tag = row.get("build_tag") or ""
             tree = row.get("tree_id") or reused
@@ -270,12 +270,12 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             problems.append(str(e))
     if not tag:
         try:
-            tag = build_tag(project, job, src)
+            tag = build_tag(project, job, source)
         except ConfigError as e:
             problems.append(str(e))
             tag = job.config
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
-                            build_tag=tag, src=src, overrides=job.overrides, vars=job.vars)
+                            build_tag=tag, source=source, overrides=job.overrides, vars=job.vars)
     run_id = render_run_id(project.source.run_id, v)
     if _fresh(job) and sched:
         # The scheduler picks the host, and the tree lies where every node reads it.
@@ -313,7 +313,7 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
         except (ConfigError, Refuse, KeyError) as e:
             problems.append(str(e))
     return RunPlan(run_id=run_id, label=job.label, host=host, root=root, spec=spec,
-                   queued=not spec and not problems, problems=problems, src=src, build_tag=tag,
+                   queued=not spec and not problems, problems=problems, source=source, build_tag=tag,
                    tree_host="local" if sched and _fresh(job) else host or "", reuse=reused, restore=restore, values=v)
 
 
@@ -412,15 +412,15 @@ def submit(backend: Backend, db: Database, project: Project, run_id: str, host: 
     return handle
 
 
-def _src_dir(project: Project, src: str, src_dir: Path | None, dry_run: bool = False) -> Path:
+def _src_dir(project: Project, source: str, src_dir: Path | None, dry_run: bool = False) -> Path:
     if src_dir is not None:
         return Path(src_dir)
     try:
-        return Path(checkout.find(project, src))
+        return Path(checkout.find(project, source))
     except checkout.CheckoutError:
         # A dry run checked nothing out; the tree would be at the path of the checkout.
-        if dry_run and checkout.SRC_RE.match(src):
-            return project.source.worktrees / src
+        if dry_run and checkout.SOURCE_RE.match(source):
+            return project.source.worktrees / source
         raise
 
 
@@ -456,7 +456,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
             print(f"waiting {stagger} s (stagger) before {p.label}")
             time.sleep(stagger)
         if not p.reuse or p.restore:
-            ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.src, src_dir, dry_run), p.root, project.sync.exclude,
+            ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.source, src_dir, dry_run), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
             if ok and p.restore:
                 res = collect.restore_on_request(project, ssh, db, db.run(p.reuse) or {}, p.restore,
@@ -494,7 +494,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
 def run_row(p: RunPlan, batch: Batch) -> dict[str, Any]:
     """The `runs` row of a planned run, before the driver starts."""
     return {"run_id": p.run_id, "batch": batch.batch, "label": p.label, "config": p.spec.get("config") or p.values.get("config"),
-            "build_tag": p.build_tag, "src": p.src, "dirty": int("-dirty" in p.src), "host": p.host, "root": p.root or None,
+            "build_tag": p.build_tag, "source": p.source, "dirty": int("-dirty" in p.source), "host": p.host, "root": p.root or None,
             "tree_id": p.values.get("tree_id") or p.run_id, "created": int(time.time())}
 
 

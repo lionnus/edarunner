@@ -31,7 +31,7 @@ def test_read_heartbeats_skips_retired_spec_keep_and_torn(env: Env) -> None:
 
 def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     a = env.heartbeat("a")
-    env.heartbeat("a", batch="demo2", date=NEW, src="gdef5678")
+    env.heartbeat("a", batch="demo2", date=NEW, source="gdef5678")
     env.heartbeat("r")
     env.heartbeat("s", age=60)
     env.heartbeat("d", age=200)
@@ -112,8 +112,8 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
     a, k, f = env.heartbeat("a"), env.heartbeat("k"), env.heartbeat("f", host_full=True)
     e = env.heartbeat("e")
     for label in ("a", "k", "f"):
-        env.heartbeat(label, batch="demo2", date=NEW, src="gdef5678")
-    env.heartbeat("e", batch="demo2", date=NEW, src="gdef5678", phase="FAILED:synth", exit=5)
+        env.heartbeat(label, batch="demo2", date=NEW, source="gdef5678")
+    env.heartbeat("e", batch="demo2", date=NEW, source="gdef5678", phase="FAILED:synth", exit=5)
     (env.project.state_dir / "demo" / f"{k['run_id']}.keep.json").write_text('{"hours": 12}')
     states = env.cycle()
     assert states[rid("a")] == "superseded" and states[rid("k")] == "superseded"
@@ -146,7 +146,7 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert by[("synth", 3, "area_cell_um2")] == 1031.5 and by[("synth", 0, "wns_ns")] == 0.0
     assert len(by) == 8 and all(v is not None for v in by.values())
     params = {r["key"]: r["value"] for r in env.db.conn.execute("SELECT key, value FROM parameters WHERE run_id=?", (run_id,))}
-    assert params == {"config": "demo", "DW": "0", "src": "gabc1234"}
+    assert params == {"config": "demo", "DW": "0", "source": "gabc1234"}
     assert (run_id, "collect") not in env.events()
     env.cycle(NOW + 1)
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 8

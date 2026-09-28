@@ -32,12 +32,12 @@ def bdir(root: Path, batch: str = "demo") -> Path:
 
 
 def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batch: str = "demo",
-         src: str = "abc1234", date: str = DATE, tree: bool = True, **extra) -> str:
+         source: str = "abc1234", date: str = DATE, tree: bool = True, **extra) -> str:
     """A database row, a heartbeat and a run tree under the tmp scratch; returns the run id."""
-    run_id = f"{date}_{label}_demo_g{src}"
+    run_id = f"{date}_{label}_demo_g{source}"
     project = config.load_project(root)
     now = int(time.time())
-    row = {"run_id": run_id, "batch": batch, "label": label, "config": "demo", "src": src, "host": "local",
+    row = {"run_id": run_id, "batch": batch, "label": label, "config": "demo", "source": source, "host": "local",
            "phase": phase, "state": "running", "started": now - 100, "updated": now - 5,
            "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0, "queued": 0}, **extra}
     if tree:
@@ -52,6 +52,6 @@ def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batc
         (project.state_dir / batch).mkdir(parents=True, exist_ok=True)
         (project.state_dir / batch / f"{run_id}.json").write_text(json.dumps(hb))
     with Database(project.data / "edr.db") as db:
-        db.upsert_batch({"batch": batch, "project": "demo", "source": src})
+        db.upsert_batch({"batch": batch, "project": "demo", "source": source})
         db.upsert_run(row)
     return run_id

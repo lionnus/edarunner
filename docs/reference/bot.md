@@ -28,7 +28,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 |---|---|
 | `/log <handle> [n]` | the last n log lines as a file, default 200 |
 | `/board` | compare.html and status.html as files |
-| `/csv <design>` | the metrics of one design as a CSV file |
+| `/csv <source>` | the metrics of one source as a CSV file |
 
 ### Act on a run
 
@@ -43,7 +43,7 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | Command | Effect |
 |---|---|
 | `/compare <handle>...` | metrics side by side |
-| `/metric <name> [--design SRC]` | one metric per run |
+| `/metric <name> [--source SOURCE]` | one metric per run |
 
 ### Help
 

@@ -17,8 +17,8 @@ NOW = 1_800_000_000.0
 OLD, NEW = "20260926_1200", "20260926_1300"
 
 
-def rid(label: str, date: str = OLD, src: str = "gabc1234") -> str:
-    return f"{date}_{label}_demo_{src}"
+def rid(label: str, date: str = OLD, source: str = "gabc1234") -> str:
+    return f"{date}_{label}_demo_{source}"
 
 
 class FakeSsh(Ssh):
@@ -82,8 +82,8 @@ class Env:
         self.notifier = Rec()
 
     def heartbeat(self, label: str, batch: str = "demo", phase: str = "stage:synth", age: float = 5,
-                  date: str = OLD, src: str = "gabc1234", **extra) -> dict:
-        run_id = rid(label, date, src)
+                  date: str = OLD, source: str = "gabc1234", **extra) -> dict:
+        run_id = rid(label, date, source)
         root = self.tmp / "scratch" / "edr" / "demo" / run_id
         (root / "log").mkdir(parents=True, exist_ok=True)
         (root / "log" / "synth.log").write_text("step 1\n")
@@ -96,8 +96,8 @@ class Env:
         hb.update(extra)
         (self.project.state_dir / batch).mkdir(parents=True, exist_ok=True)
         (self.project.state_dir / batch / f"{run_id}.json").write_text(json.dumps(hb))
-        # launch writes src; the heartbeat has no src.
-        self.db.upsert_run({"run_id": run_id, "batch": batch, "label": label, "src": src})
+        # launch writes source; the heartbeat has no source.
+        self.db.upsert_run({"run_id": run_id, "batch": batch, "label": label, "source": source})
         return hb
 
     def cycle(self, now: float = NOW, **kw) -> dict[str, str]:

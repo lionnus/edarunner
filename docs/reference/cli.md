@@ -70,7 +70,7 @@ A command below says where it refines a code.
 | [events](#events) | the last events |
 | [hosts](#hosts) | probe every host |
 | [tools](#tools) | every site tool: free seats and hosts |
-| [metrics](#metrics) | the metrics of one design or one run |
+| [metrics](#metrics) | the metrics of one source or one run |
 | [extract](#extract) | extract the metrics of runs again from their collected files |
 | [compare](#compare) | two or more runs side by side |
 | [runtime](#runtime) | stage, step and task times |
@@ -83,7 +83,7 @@ A command below says where it refines a code.
 | [track](#track) | run a command under the driver here, as a run of the project |
 | [keep](#keep) | add hours to the running stage or task; --ack cancels a pending kill |
 | [import](#import) | record a run tree that edr did not make, or its collected results |
-| [export](#export) | a frozen snapshot of one design |
+| [export](#export) | a frozen snapshot of one source |
 | [stop](#stop) | stop one run |
 | [retire](#retire) | remove the run tree, or its prune targets |
 | [notify](#notify) | send one message, the board or the digest through every notifier |
@@ -250,13 +250,13 @@ gives tool, free, total, hosts (host to version) and note.
 ## metrics
 
 ```
-edr metrics [--json] [--design SRC] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
+edr metrics [--json] [--source SOURCE] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
 ```
 
-Prints every metric of one design with its label, design, stage, step,
-task, name, value and unit. --design or --run is required. --design is the source
-tag exactly as edr checkout printed it, -dirty-... included; --run takes
-one run instead. --csv writes the columns of
+Prints every metric of one source with its label, source, stage, step,
+task, name, value and unit. --source or --run is required. --source
+is the source tag exactly as edr checkout printed it, -dirty-...
+included; --run takes one run instead. --csv writes the columns of
 metrics.csv (docs/guides/results.md) to stdout.
 
 --run with --over steps prints the metrics along the steps of that run:
@@ -265,14 +265,14 @@ it prints that one metric, its change from the step before and its
 source file.
 
 --instance or --depth prints the area rows of an area_hier metric
-instead: label, design, stage, step, instance, depth, area with the
+instead: label, source, stage, step, instance, depth, area with the
 children, local area without them, and the cell count when the report
 has one. --instance takes that instance and every instance below it.
 
 | Flag | Meaning |
 |---|---|
 | `--json` | the same as edr --json metrics |
-| `--design SRC` | the exact source tag of the runs, as in the run id |
+| `--source SOURCE` | the exact source tag of the runs, as in the run id |
 | `--run HANDLE` | one run: label@batch, a run id prefix, or #n from the last board |
 | `--metric NAME` | one metric, by name or canonical name |
 | `--over {steps}` | with --run: the metrics along the steps |
@@ -289,7 +289,7 @@ has one. --instance takes that instance and every instance below it.
 ## extract
 
 ```
-edr extract [--dry-run] [--json] [--batch B] [--design SRC] [handle]
+edr extract [--dry-run] [--json] [--batch B] [--source SOURCE] [handle]
 ```
 
 Extracts every metric in edr.toml again from the files collected for
@@ -300,7 +300,7 @@ stage. New rows are added. A row is replaced when its value, canonical
 name or unit has changed, or when its area_hier metric has no area
 rows yet. Rows that the new extraction does not find are kept.
 
-Pass exactly one of a handle, --batch or --design. For each run,
+Pass exactly one of a handle, --batch or --source. For each run,
 extract prints how many rows are new, changed, unchanged and failed,
 where a failed row is a file that did not parse, and it writes an
 extract event with the same counts. With --json, data holds run_id,
@@ -312,7 +312,7 @@ new, changed, unchanged and failed for each run.
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json extract |
 | `--batch B` | every run of the batch |
-| `--design SRC` | every run of the exact source tag |
+| `--source SOURCE` | every run of the exact source tag |
 
 | Exit | Meaning |
 |---|---|
@@ -423,7 +423,7 @@ edr checkout [--dry-run] [--json] [--dirty DIR] [ref]
 Fetches the repository, then makes a detached local clone of ref (default source.ref) at
 &lt;worktrees&gt;/&lt;short hash&gt;, and clones each source.nested repository into
 it at the HEAD the repository copy has. A local clone shares the git
-objects of the repository by hard links. It prints &lt;src&gt; &lt;path&gt;.
+objects of the repository by hard links. It prints &lt;source&gt; &lt;path&gt;.
 
 --dirty DIR clones the HEAD of a working tree and copies its files over
 the clone, with the diff in source.diff; the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt;
@@ -450,7 +450,7 @@ job.
 
 If the batch's source is a clean ref that has not been checked out
 yet, plan checks it out first, the same way edr checkout does, and
-prints a checkout &lt;src&gt; &lt;path&gt; line. With --dry-run it prints that line
+prints a checkout &lt;source&gt; &lt;path&gt; line. With --dry-run it prints that line
 and the git commands but checks nothing out. Apart from that checkout,
 plan writes nothing. A dirty source that has not been checked out is
 refused; add it with edr checkout --dirty DIR.
@@ -535,7 +535,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 ## track
 
 ```
-edr track [--dry-run] [--json] --label L --stage S [--batch B] [--src TAG] [--root DIR] [--collect] ...
+edr track [--dry-run] [--json] --label L --stage S [--batch B] [--source SOURCE] [--root DIR] [--collect] ...
 ```
 
 Runs one command in the foreground under the driver, on this machine, and
@@ -548,7 +548,7 @@ gives its steps, progress, budget, retry and tools, so the gate and the
 budget work; the command replaces its cmd. The tree is --root, default
 the current directory, and the driver writes log/&lt;stage&gt;.log there. The
 run id follows source.run_id with the label as config, track as the
-build tag, and --src (default the source tag of the tree) as src.
+build tag, and --source (default the source tag of the tree) as {source}.
 
 edr track then replaces itself with the driver: the pid, the signals
 and the exit code are the driver's. With --collect, the watcher copies
@@ -569,7 +569,7 @@ the global table. docs/guides/run.md lists the phases.
 | `--label L` | the label of the run, required |
 | `--stage S` | the stage name; a stage of edr.toml lends its settings, required |
 | `--batch B` | the batch; default track |
-| `--src TAG` | the source tag; default the tag of the tree |
+| `--source SOURCE` | the source tag; default the tag of the tree |
 | `--root DIR` | the run tree; default the current directory |
 | `--collect` | the watcher collects the stage and extracts its metrics |
 
@@ -609,7 +609,7 @@ cancels a pending kill or stop of the watcher.
 ## import
 
 ```
-edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --src SRC [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
+edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --source SOURCE [--host HOST] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--why WHY]
 ```
 
 Records a run that edr did not start, such as one you ran by hand. With
@@ -626,7 +626,7 @@ with YYYYMMDD_HHMM_.
 | `--run-id RUN_ID` | the run id; it must start with YYYYMMDD_HHMM_, required |
 | `--label LABEL` | the label of the run, required |
 | `--config CONFIG` | the configuration name of the run; default empty |
-| `--src SRC` | the source tag of the tree, required |
+| `--source SOURCE` | the source tag of the tree, required |
 | `--host HOST` | the host of the tree |
 | `--root PATH` | the tree on the host |
 | `--results DIR` | collected files in the run layout; linked as data/results/&lt;run id&gt; |
@@ -639,18 +639,18 @@ with YYYYMMDD_HHMM_.
 ## export
 
 ```
-edr export [--dry-run] [--json] [--design SRC] [--out DIR] [--mlflow DIR] [--labels a,b] [--with-logs]
+edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--labels a,b] [--with-logs]
 ```
 
-Writes a snapshot of one design to DIR: manifest.json, runs.csv,
+Writes a snapshot of one source to DIR: manifest.json, runs.csv,
 metrics.csv and the collected files of the newest run per label.
---design matches the source tag exactly. log/ and *.log stay out unless
+--source matches the source tag exactly. log/ and *.log stay out unless
 you pass --with-logs. It refuses a DIR that exists and is not empty.
 docs/guides/results.md explains the layout.
 
 --mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
-per run, of every design or of --design, with the parameters, the
+per run, of every source or of --source, with the parameters, the
 metrics at their step, the stage and step times, and the collected
 files up to 1 MiB. A run already in the store is skipped. It needs the
 mlflow extra: pip install 'edarunner[mlflow]'.
@@ -659,7 +659,7 @@ mlflow extra: pip install 'edarunner[mlflow]'.
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json export |
-| `--design SRC` | the exact source tag of the runs, as in the run id |
+| `--source SOURCE` | the exact source tag of the runs, as in the run id |
 | `--out DIR` | the directory to write; it must be absent or empty |
 | `--mlflow DIR` | write an MLflow tracking store in DIR instead |
 | `--labels a,b` | these labels only, comma separated |

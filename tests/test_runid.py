@@ -57,14 +57,14 @@ def test_stage_head_twice_is_idempotent(project):
     nested_head = git("rev-parse", "--short", "HEAD", cwd=repo / "sub")
     a = checkout.checkout(project, "HEAD")
     assert a == checkout.checkout(project, "HEAD")
-    assert a.path == project.source.worktrees / head and a.src == head and not a.dirty
+    assert a.path == project.source.worktrees / head and a.source == head and not a.dirty
     assert git("rev-parse", "HEAD", cwd=a.path) == git("rev-parse", "HEAD", cwd=repo)
     assert (a.path / ".git").is_dir() and git("describe", "--always", "--dirty", cwd=a.path) == head
     assert (a.path / "flow" / "flow.sh").exists() and (a.path / "README").exists()
     assert a.nested == {"sub": nested_head}
     assert (a.path / "sub" / "secret.txt").read_text() == "42\n"
     assert git("rev-parse", "--short", "HEAD", cwd=a.path / "sub") == nested_head
-    assert runid.src_tag(a.path) == head
+    assert runid.source_tag(a.path) == head
     assert checkout.find(project, head) == a.path and checkout.find(project, "HEAD") == a.path
     assert checkout.checkout(project, dirty_dir=repo) == a  # a clean tree pins its commit
     old = checkout.checkout(project, "HEAD~1")
@@ -81,8 +81,8 @@ def test_dirty_snapshot_tag_is_stable(project):
     (repo / "notes.txt").write_text("untracked\n")
     a = checkout.checkout(project, dirty_dir=repo)
     assert a == checkout.checkout(project, dirty_dir=repo) and a.dirty
-    assert re.fullmatch(rf"{head}-dirty-[0-9a-f]{{8}}", a.src)
-    assert a.path == project.source.worktrees / a.src
+    assert re.fullmatch(rf"{head}-dirty-[0-9a-f]{{8}}", a.source)
+    assert a.path == project.source.worktrees / a.source
     assert (a.path / "README").read_text() == "changed\n"
     assert (a.path / "notes.txt").exists() and (a.path / ".git").is_dir()
     assert (a.path / "sub" / "secret.txt").exists() and (a.path / "sub" / ".git").is_dir()
@@ -91,12 +91,12 @@ def test_dirty_snapshot_tag_is_stable(project):
     assert git("describe", "--always", "--dirty", cwd=a.path).endswith("-dirty")
     assert "+changed" in (a.path / "source.diff").read_text()
     meta = json.loads((a.path / "source.json").read_text())
-    assert meta["src"] == a.src and meta["base"] == head and meta["nested"] == a.nested and meta["dirty"]
+    assert meta["source"] == a.source and meta["base"] == head and meta["nested"] == a.nested and meta["dirty"]
     assert a.nested == {"sub": git("rev-parse", "--short", "HEAD", cwd=repo / "sub")}
-    assert runid.src_tag(a.path) == a.src
-    assert checkout.find(project, a.src) == a.path
+    assert runid.source_tag(a.path) == a.source
+    assert checkout.find(project, a.source) == a.path
     (repo / "README").write_text("changed again\n")
-    assert checkout.checkout(project, dirty_dir=repo).src != a.src
+    assert checkout.checkout(project, dirty_dir=repo).source != a.source
 
 
 
@@ -113,12 +113,12 @@ def test_dry_run_writes_nothing(project, tmp_path, capsys):
     repo = project.source.repo
     a = checkout.checkout(project, "HEAD")
     (repo / "README").write_text("changed\n")
-    runid.src_tag(repo)  # git refreshes its index stat cache on the first diff
+    runid.source_tag(repo)  # git refreshes its index stat cache on the first diff
     before = listing(tmp_path)
     old = checkout.checkout(project, "HEAD~1", dry_run=True)
     dirty = checkout.checkout(project, dirty_dir=repo, dry_run=True)
     assert listing(tmp_path) == before
     assert not old.path.exists() and old.nested == {"sub": a.nested["sub"]}
-    assert "-dirty-" in dirty.src and not dirty.path.exists() and dirty.dirty
+    assert "-dirty-" in dirty.source and not dirty.path.exists() and dirty.dirty
     out = capsys.readouterr().out
     assert "git clone --local --no-checkout" in out and "rsync -a" in out
