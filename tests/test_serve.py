@@ -183,8 +183,9 @@ def test_the_global_board_names_every_project_and_your_hosts(two) -> None:
     text = serve.global_board(two, {"hosts": {"local": probe}, "runs": [
         {"project": "alpha", "host": "local", "cpu_pct": 200.0, "tree_gb": 7.0}]}, NOW)
     lines = text.splitlines()
-    assert lines[:4] == ["<b>alpha</b>", "🔴 <code>d@demo</code> dead, synth 2/4 elaborate, 1h",
-                         "🟢 <code>a@demo</code> synth 2/4 elaborate, 1h", "<b>beta</b> <i>nothing live, 1 ended in 24 h</i>"]
+    assert lines[:4] == ["<b>alpha</b>", "#1 🔴 <code>d@demo</code> dead, synth 2/4 elaborate, 1h",
+                         "#2 🟢 <code>a@demo</code> synth 2/4 elaborate, 1h", "<b>beta</b> <i>nothing live, 1 ended in 24 h</i>"]
+    assert serve.Store().get_store("last_board") == [["alpha", "r2"], ["alpha", "r1"]]
     assert lines[5:7] == ["<b>Machines</b>", "<b>local</b> free 2/4 cores, 4/8 GB RAM, 50/100 GB scratch; yours: alpha 1, "
                           "2 cores, 7 GB scratch"]
     assert lines[-1] == "<i>2 live: 1 dead, 1 running. /status &lt;project&gt; shows one project.</i>"

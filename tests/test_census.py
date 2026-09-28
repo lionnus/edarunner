@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -147,10 +148,10 @@ def test_a_full_host_loses_one_run_once_per_grace(two, fake, monkeypatch) -> Non
     census.work([Rec()], NOW)
     assert stops == []
     keep = beta.state_dir / "demo" / f"{DATE}_b_demo_gabc1234.keep.json"
-    keep.write_text('{"hours": 1, "ack": true}')
-    census.work([Rec()], NOW + beta.limits.grace_s)
+    keep.write_text('{"hours": 24}')
+    os.utime(keep, (NOW, NOW))  # a keep does not hold off this stop: the full disk blocks every other user
+    census.work([Rec()], NOW + beta.limits.grace_s - 1)
     assert stops == []
-    keep.unlink()
     census.work([Rec()], NOW + beta.limits.grace_s + 1)
     assert [(p, r) for p, r, _ in stops] == [("beta", f"{DATE}_b_demo_gabc1234")] and stops[0][2]["now"]
     census.work([Rec()], NOW + beta.limits.grace_s + 2)

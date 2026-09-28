@@ -2,8 +2,8 @@
 
 The watcher calls `make_notifiers` once and then `send`, `board` and `post`
 on every channel: Telegram, ntfy and mail. docs/guides/alerts.md lists what each
-channel gets. The channels never import `cli` or `watch` at run time; they
-get their commands through the `cli.Actions` object the CLI hands in.
+channel gets. The channels never import `cli` or `watch` at run time; the bot
+that polls gets its commands through the `cli.Router` object the CLI hands in.
 """
 
 from __future__ import annotations
@@ -18,19 +18,19 @@ from edarunner.db import Database
 from edarunner.model import Project, Site
 
 if TYPE_CHECKING:
-    from edarunner.cli import Actions
+    from edarunner.cli import Router
     from edarunner.notify.alerts import Alert
 
 log = logging.getLogger(__name__)
 
-Button = tuple[str, str]  # (label, callback_data)
+Button = tuple[str, str, str]  # (label, callback_data, the command line for a channel without buttons)
 
 
 class Notifier:
     """One channel. Every method is a no-op here; a channel overrides them."""
 
     def start(self) -> None:
-        """Start a background thread when the channel has one."""
+        """Start to take commands, when the channel can; only the holder of `serve.lock` calls it."""
 
     def stop(self) -> None:
         """Stop that thread."""
@@ -47,23 +47,9 @@ class Notifier:
         return False
 
 
-def alert_buttons(handle: str) -> list[Button]:
-    """The three buttons of an alert: keep 12 h, ack, and stop after the running task."""
-    return [("keep 12h", f"keep12:{handle}"), ("ack", f"ack:{handle}"), ("stop", f"stop:{handle}")]
-
-
-# The shell command of each alert button, for a channel without buttons.
-BUTTON_CMDS = {"keep12": "edr keep {} --hours 12", "ack": "edr keep {} --ack", "stop": "edr stop {} --after-task"}
-
-
 def button_cmds(buttons: list[Button] | None) -> list[tuple[str, str]]:
     """(label, shell command) of each alert button, for a channel without callback buttons."""
-    out = []
-    for label, data in buttons or []:
-        action, _, handle = data.partition(":")
-        if action in BUTTON_CMDS:
-            out.append((label, BUTTON_CMDS[action].format(handle)))
-    return out
+    return [(label, cmd) for label, _, cmd in buttons or []]
 
 
 def untag(text: str) -> str:
@@ -83,14 +69,14 @@ def _private(path: object, channel: str) -> str | None:
     return None
 
 
-def make_notifiers(site: Site, project: Project, db: Database, actions: Actions) -> list[Notifier]:
-    """Build every configured channel. A channel without its secret is skipped."""
+def make_notifiers(site: Site, project: Project, db: Database, router: Router | None = None) -> list[Notifier]:
+    """Build every configured channel. A channel without its secret is skipped; `router` lets the bot take commands."""
     out: list[Notifier] = []
     tg = site.telegram
     if tg is not None and (token_file := _private(tg.token_file, "telegram")):
         from edarunner.notify.telegram import TelegramBot
 
-        out.append(TelegramBot(site, project, db, actions, token_file))
+        out.append(TelegramBot(site, project, db, router, token_file))
     nt = getattr(site, "ntfy", None)
     if nt is not None and (nt.token_file is None or _private(nt.token_file, "ntfy")):
         from edarunner.notify.ntfy import NtfyNotifier

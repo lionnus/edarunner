@@ -47,7 +47,8 @@ report files and the numbers in them.
 | `db.py` | the project database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |
 | `board.py` | the text boards, the rich tables and the plain text of one, `status.html`, `compare.html` |
-| `notify/__init__.py` | the notifier interface, `make_notifiers`, and the plain text of an alert |
+| `notify/__init__.py` | the notifier interface and `make_notifiers` |
+| `notify/alerts.py` | what each alert says, its buttons, and its plain text for ntfy and mail |
 | `notify/ntfy.py` | `NtfyNotifier`: one JSON post per alert to an ntfy server |
 | `notify/mail.py` | `MailNotifier`: one mail per alert through `smtplib` |
 | `notify/digest.py` | `Digest`, the daily summary that the watcher sends and `/digest` shows |
@@ -55,14 +56,14 @@ report files and the numbers in them.
 | `notify/telegram/format.py` | pure functions that turn database rows into Telegram HTML |
 | `notify/telegram/commands.py` | the built-in command table and one handler per command |
 | `notify/telegram/custom.py` | the custom argv commands of `[telegram.commands.*]` |
-| `notify/telegram/buttons.py` | the inline buttons of an alert, the action of a press, the confirmation of a stop |
-| `notify/telegram/bot.py` | `TelegramBot`: the poll thread, the router, the allowlist, the alerts and the pinned board |
+| `notify/telegram/buttons.py` | the markup of the alert buttons, the action of a press, the question before a stop or a delete |
+| `notify/telegram/bot.py` | `TelegramBot`: the poll thread, the dispatch of an update, the allowlist, the alerts and the pinned board |
 | `brief.py` | `edr brief`: the Markdown briefing of the project or of one run |
-| `cli.py` | the commands, the exit codes, `--json`, the project lookup |
+| `cli.py` | the commands, the exit codes, `--json`, the project lookup; `Actions`, what the bot does on one project, and `Router`, which finds the project of a bot command or button press |
 | `tools/gen_docs.py` | the pages under `docs/reference/`, from the parser, the model, `STATES`, the marks and the bot table |
 
 A channel never imports `cli` or `watch`; it gets its commands through the
-`Actions` object the CLI hands in.
+`Router` object the CLI hands in.
 
 ## Data flow
 

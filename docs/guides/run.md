@@ -167,8 +167,7 @@ cycle does, and [alerts.md](alerts.md) sets up the channels.
 ## Act on one run
 
 ```sh
-edr keep base@sweep1 --hours 6                    # more time for the running stage or task
-edr keep base@sweep1 --ack                        # cancel the pending kill or stop of the watcher
+edr keep base@sweep1 --hours 6                    # 6 more hours, and no automatic stop or kill for as long
 edr stop base@sweep1 --after-task --why "superseded by sweep2"
 edr stop base@sweep1 --why "wrong config"         # SIGTERM to the driver and its process groups
 edr stop base@sweep1 --now --why "host full"      # then SIGKILL after 30 s
@@ -176,9 +175,12 @@ edr stop base@sweep1 --now --why "host full"      # then SIGKILL after 30 s
 
 `keep` adds hours to the budget of the running stage or task. The driver
 reads the keep file at every heartbeat, and a keep file older than the
-start of the current stage or task does not count. `--ack` cancels the
-pending kill of a `hung` run and the stop of a `host_full` one, and any
-keep file holds off the stop of a `superseded` run.
+start of the current stage or task does not count. For as many hours
+from the time you write it, the watcher neither kills the run as `hung`
+nor stops it as `superseded`. A keep never holds off the stop of a
+`host_full` run, since a full disk blocks every other user of the host;
+free scratch there instead, as [cleanup.md](cleanup.md#free-a-full-host)
+shows.
 
 `stop` and `retire` need `--why`. The text goes into the event log with
 the name of whoever acted, and `edr events --run <handle>` shows it

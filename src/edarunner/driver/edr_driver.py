@@ -22,6 +22,7 @@ POLL_S = 5
 TICK_S = 0.5
 DU_EVERY_S = 600
 TAIL_LINES = 80
+LOG_LINES, LOG_WIDTH = 4, 100  # the log lines an alert and the chat show
 GB = 1024.0 ** 3
 
 
@@ -122,6 +123,13 @@ def tail(path, n, size=65536):
     except OSError:
         return ""
     return "\n".join(lines[-n:])
+
+
+def last_lines(path, n, width):
+    # type: (str, int, int) -> str
+    """The last n lines of a file that are not blank, each cut to `width` characters."""
+    lines = [ln.rstrip() for ln in tail(path, 20 * n).splitlines() if ln.strip()]
+    return "\n".join(ln if len(ln) <= width else ln[:width - 1] + "\u2026" for ln in lines[-n:])
 
 
 def read_leases(d):
@@ -234,7 +242,7 @@ class Driver(object):
             if tree is not None:
                 hb["tree_gb"] = tree
             if hb["log"]:
-                hb["last_log"] = tail(hb["log"], 3)
+                hb["last_log"] = last_lines(hb["log"], LOG_LINES, LOG_WIDTH)
             hb["keep_hours"] = self.read_keep()[1]
             hb["counts"]["running"] = sum(1 for t in hb["tasks"].values() if t["phase"] == "running")
             data = json.dumps(hb, sort_keys=True)
@@ -555,6 +563,16 @@ class Driver(object):
             for p in procs:
                 self.killpg(p.pid, signal.SIGTERM)
 
+    def check_budget(self, name, budget, started, procs):
+        """Mark the stage over its budget, or clear the mark when a keep file moved the budget past the time spent."""
+        over = self.budget_over(budget, started)
+        if over and not self.over_budget:
+            self.mark_over(name, budget, procs)
+        elif not over and self.over_budget == name and not budget.get("kill"):
+            self.over_budget = None
+            with self.lock:
+                self.hb["over_budget"] = None
+
     def progress(self, st, cwd):
         if not st.get("progress"):
             return
@@ -628,8 +646,7 @@ class Driver(object):
                 if time.time() >= next_probe:
                     self.progress(st, cwd)
                     next_probe = time.time() + POLL_S
-                if not self.over_budget and self.budget_over(budget, started):
-                    self.mark_over(name, budget, [p])
+                self.check_budget(name, budget, started, [p])
                 time.sleep(TICK_S)
             self.forget(p)
             self.check_stop()
@@ -728,8 +745,8 @@ class Driver(object):
                 del running[tid]
                 self.forget(p)
                 self.end_task(q, st, task, p.returncode, log, cwd)
-            if not per_task and not self.over_budget and self.budget_over(budget, t_group):
-                self.mark_over(name, budget, [r[0] for r in running.values()])
+            if not per_task:
+                self.check_budget(name, budget, t_group, [r[0] for r in running.values()])
             hold = bool(self.stop_mode or self.over_budget or self.hb.get("looping"))
             pending = self.pending(q, tasks, skipped)
             with self.lock:

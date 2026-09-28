@@ -14,20 +14,43 @@ from typing import Any
 
 from edarunner import board, hosts
 from edarunner.model import Project
-from edarunner.notify import Button, alert_buttons, button_cmds
+from edarunner.notify import Button, button_cmds
 from edarunner.notify.telegram.format import MARK
 
 Row = dict[str, Any]
-CUT = 120  # a command line or a log line on a phone
+CUT = 120  # a command line on a phone
+LOG_WIDTH = 100  # a log line on a phone
 LIMIT = 4000  # under the 4096 of Telegram and ntfy
-# The kinds whose run still reads a keep or a stop file, so the three buttons act.
-BUTTON_KINDS = frozenset({"hung", "looping", "over_budget", "host_full", "superseded"})
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# The states whose live run gets Stop and more time: the keep file holds off the watcher's own action.
+KEEP_KINDS = frozenset({"hung", "looping", "over_budget", "superseded"})
+KEEP_LINE = ("+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no "
+             "automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; "
+             "on Telegram it asks once more.")
+# The buttons of an alert by the action of their `callback_data`: the label, the command line of a channel without
+# buttons, and what the button does.
+BUTTONS = {
+    "stop": ("Stop", "edr stop {handle} --after-task --why {why}", "asks once more, then stops the run after its current task"),
+    "keep6": ("+6h", "edr keep {handle} --hours 6", "6 more hours on the budget of the running stage or task, and for 6 "
+                                                    "hours no kill as hung and no stop as superseded"),
+    "keep12": ("+12h", "edr keep {handle} --hours 12", "the same for 12 hours"),
+    "keep24": ("+24h", "edr keep {handle} --hours 24", "the same for 24 hours"),
+    "free": ("Free space", "edr retire --host {host} --prune {prune} --why host-full",
+             "asks once more, then removes every prune target of the finished runs of the project on the full host"),
+}
+
+
+def button(action: str, project: str, **values: str) -> Button:
+    """The alert button of `action` for `project`; `values` fill its command line."""
+    label, cmd, _ = BUTTONS[action]
+    return label, f"{action}:{project}", cmd.format(**values)
 
 
 @dataclass
 class Alert:
-    """One alert: `title who` is the first line, `todo` holds (what it does, command or None)."""
+    """One alert: `title who` is the first line, `todo` holds (what it does, command or None).
+
+    `log` holds the last lines of the log of the run, which every channel shows as one block."""
 
     kind: str
     key: str  # a channel keeps one message per kind and key
@@ -38,6 +61,7 @@ class Alert:
     code: str = ""
     todo: list[tuple[str, str | None]] = field(default_factory=list)
     buttons: list[Button] = field(default_factory=list)
+    log: list[str] = field(default_factory=list)
 
 
 def cut(text: str, most: int = CUT) -> str:
@@ -56,15 +80,19 @@ def subject(project: str, a: Alert) -> str:
     return f"{mark(a)} {project}: {a.title}" + (f" {a.who}" if a.who else "")
 
 
-def blocks(a: Alert, code: Callable[[str], str], plain: Callable[[str], str] = str) -> str:
-    """What was seen, the facts, and what to do, a blank line apart; `code` renders a command or a log line."""
+def blocks(a: Alert, code: Callable[[str], str], plain: Callable[[str], str] = str,
+           log: Callable[[list[str]], str] | None = None) -> str:
+    """What was seen, the facts, the log lines, and what to do, a blank line apart; `code` renders a command,
+    and `log` the log lines as one block."""
     facts = [plain(f"{k}: {v}") for k, v in a.facts] + ([code(a.code)] if a.code else [])
     todo = [line for say, cmd in a.todo for line in (plain(say), *([code(cmd)] if cmd else []))]
-    return "\n\n".join("\n".join(b) for b in ([plain(a.about)], facts, todo) if b)
+    shown = [(log or (lambda lines: "\n".join(map(code, lines))))(a.log)] if a.log else []
+    return "\n\n".join("\n".join(b) for b in ([plain(a.about)], facts, shown, todo) if b)
 
 
 def text(a: Alert, indent: str = "") -> str:
-    """The body of an alert as plain text; `indent` sets a code line apart, as in a mail. A button is a command line."""
+    """The body of an alert as plain text; `indent` sets a command and the log lines apart, as in a mail. A button
+    is a command line."""
     buttons = [f"{label}: {c}" for label, c in button_cmds(a.buttons)]
     return "\n\n".join([blocks(a, lambda c: indent + c), *(["\n".join(buttons)] if buttons else [])])[:LIMIT]
 
@@ -75,9 +103,10 @@ def _stage(run: Row, hb: dict) -> str:
     return str(hb.get("stage") or run.get("stage") or "-") + (f", step {at}" if at else "")
 
 
-def _last_log(hb: dict) -> str:
-    line = next((ln for ln in reversed(str(hb.get("last_log") or "").splitlines()) if ln.strip()), "")
-    return cut(_ANSI.sub("", line))
+def log_lines(hb: dict) -> list[str]:
+    """The last log lines of a heartbeat, without colour codes, each cut to LOG_WIDTH characters."""
+    lines = [_ANSI.sub("", ln).rstrip() for ln in str(hb.get("last_log") or "").splitlines()]
+    return [ln if len(ln) <= LOG_WIDTH else ln[:LOG_WIDTH - 1] + "…" for ln in lines if ln.strip()][-4:]
 
 
 def _after(project: Project) -> str:
@@ -85,16 +114,22 @@ def _after(project: Project) -> str:
 
 
 def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: dict, now: float) -> Alert:
-    """The alert of a run in `state`; `reasons` are what `watch.classify` found."""
+    """The alert of a run in `state`; `reasons` are what `watch.classify` found.
+
+    Only the alert of a live run has buttons. A run that is `hung`, `looping`, `over_budget` or
+    `superseded` gets Stop, +6h, +12h and +24h. A run on a full host gets Stop, and Free space when
+    the project declares prune targets; a keep does not hold off the full-host stop, since a full
+    disk blocks every other user of the host. Each alert says in one line what its buttons do.
+    Mail and ntfy show each button as a command line."""
     h, lim = board.handle(run), project.limits
     host = str(hb.get("host") or run.get("host") or "-")
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
     cmd = board.triage_cmd(run, state, hb)
     counts = hb.get("counts") or {}
     a = Alert(state, str(run.get("key") or run["run_id"]), state, h, why,
-              [("stage", _stage(run, hb)), ("host", host)], _last_log(hb),
-              buttons=alert_buttons(h) if state in BUTTON_KINDS and run.get("run_id") else [])
+              [("stage", _stage(run, hb)), ("host", host)], log=log_lines(hb))
     status = ("See the last stage and the log tail:", f"edr status {h}")
+    more = state in KEEP_KINDS
     if state == "dead":
         age, pid = board.hm(now - float(hb.get("updated") or now)), hb.get("driver_pid")
         a.title = "driver gone for"
@@ -107,7 +142,7 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.about = (f"The run is alive, but it has shown {why}: the step, the log, the tree size and the CPU "
                    "time stand still. The tool may wait for a licence, or it is stuck.")
         a.todo = [("If it is stuck, stop it:", cmd),
-                  (f"edarunner sends SIGTERM to its processes {_after(project)} unless you press ack."
+                  (f"edarunner sends SIGTERM to its processes {_after(project)} unless it has a keep."
                    if lim.kill_hung else "edarunner leaves it alone, since kill_hung is off.", None)]
     elif state == "looping":
         a.title = "same failure again in"
@@ -126,21 +161,25 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         if not board.is_live(hb):
             a.about += "The run ended OVER_BUDGET."
             a.todo = [status]
+        elif budget and budget.kill:
+            a.about += "The driver sent SIGTERM to the stage, and the run ends OVER_BUDGET."
+            a.todo = [status]
+            more = False  # more time comes too late for a stage that got SIGTERM
         else:
-            a.about += ("The driver sent SIGTERM to the stage, and the run ends OVER_BUDGET."
-                        if budget and budget.kill else "The stage runs to its end, and the run then ends OVER_BUDGET.")
+            a.about += "The stage runs to its end; more time on the budget before then lets the run go on."
             a.todo = [("Stop it now if the rest of the stage is of no use:", cmd)]
     elif state == "host_full":
         a.title, a.who = "disk almost full on", host
         a.facts[1] = ("run", h)
         a.about = (f"{host} has less than {hosts.floor(project.site, host):g} GB of free scratch, so the driver starts nothing "
-                   f"new there. edarunner stops the newest run on {host} {_after(project)} unless that run has an ack.")
-        a.todo = [("Free scratch on the host. To keep this run from the stop, ack it:", f"edr keep {h} --ack")]
+                   f"new there, and the full disk blocks every other user of {host}. edarunner stops the newest run on "
+                   f"{host} {_after(project)} unless the disk gets back above the floor.")
+        a.todo = [("Free scratch on the host, or stop this run:", f"edr stop {h} --after-task --why host-full")]
     elif state == "superseded":
         a.title = "newer run replaces"
         newer = why.removeprefix("by ")
         a.about = (f"A newer run of the same label runs at another source{f' ({newer})' if newer else ''}. edarunner "
-                   f"stops this run after its running task, {_after(project)}, unless it has a keep file.")
+                   f"stops this run after its running task, {_after(project)}, unless it has a keep.")
         a.todo = [("To keep it running:", f"edr keep {h} --hours 12")]
     elif state == "held":
         a.title = "scheduler holds"
@@ -167,6 +206,18 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         by = hb.get("killed_by") or run.get("killed_by")
         a.about = "A signal ended the run" + (f" ({by})" if by else "") + ", so its last stage did not finish."
         a.todo = [status]
+    if board.is_live(hb) and more:
+        a.buttons = [button(x, project.project, handle=h, why=state) for x in ("stop", "keep6", "keep12", "keep24")]
+        a.todo.append((KEEP_LINE, None))
+    elif board.is_live(hb) and state == "host_full":
+        prune = sorted({n for st in project.stages.values() for n in st.prune})
+        a.buttons = [button("stop", project.project, handle=h, why="host-full")]
+        if prune:
+            a.buttons.append(button("free", project.project, host=host, prune=",".join(prune)))
+        stop = "Stop ends the run after its current task"
+        a.todo.append((f"{stop}, and Free space removes the prune targets {', '.join(prune)} of the finished runs of "
+                       f"{project.project} on {host}. On Telegram both ask once more." if prune else
+                       f"{stop}; on Telegram it asks once more.", None))
     return a
 
 

@@ -82,4 +82,4 @@ def test_hosts_and_tools():
 def test_run_detail_strips_colour_codes_from_the_log_line():
     row = board_row("run1", "c", "stage:synth", "running")
     hb = {"last_log": "ok\n\x1b[1;31mError:\x1b[0m timing <met>\x1b[K\n"}
-    assert fmt.run_detail(row, hb, NOW).splitlines()[-1] == "<pre>Error: timing &lt;met&gt;</pre>"
+    assert fmt.run_detail(row, hb, NOW).splitlines()[-2:] == ["<pre>ok", "Error: timing &lt;met&gt;</pre>"]

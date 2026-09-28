@@ -22,6 +22,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, replace
 from enum import IntEnum
 from pathlib import Path
@@ -42,6 +43,7 @@ from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
 from .notify import make_notifiers, untag
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
+from .notify.telegram.bot import REPLY_DAYS
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 Row = dict[str, Any]
@@ -342,16 +344,11 @@ def _metrics_table(rows: list[Row]) -> Table | str:
                        styles={"label": "bold", "source": "dim"}, right=("step", "value")) if rows else "no metrics"
 
 
-def _keep(c: Ctx, row: Row, hours: int | None, ack: bool | None, actor: str) -> str:
-    """Write the keep file next to the spec; a field not given keeps its current value."""
-    run_id = row["run_id"]
-    path = c.project.state_dir / str(row["batch"]) / f"{run_id}.keep.json"
-    cur = config.load_json(path)
-    data = {"hours": cur.get("hours", 0) if hours is None else hours,
-            "ack": bool(cur.get("ack")) if ack is None else ack}
-    note = f"keep {data['hours']} h" + (", ack" if data["ack"] else "")
+def _keep(c: Ctx, row: Row, hours: int, actor: str) -> str:
+    """Write the keep file next to the spec: `hours` more on the budget, and the watcher waits that long."""
+    run_id, note = row["run_id"], f"keep {hours} h"
     if not c.a.dry_run:
-        config.save_json(path, data)
+        config.save_json(c.project.state_dir / str(row["batch"]) / f"{run_id}.keep.json", {"hours": hours})
         c.db.add_event(actor, run_id, "keep", note)
     return note
 
@@ -372,12 +369,27 @@ class Actions:
                 "host": str(row.get("host") or "")}
 
     def keep(self, handle: str, hours: int, actor: str) -> str:
+        """`hours` more on the budget of the running stage or task, and no action of the watcher for that long."""
         row = self.c.resolve(handle)
-        return f"{board.handle(row)}: " + _keep(self.c, row, hours, None, actor)
+        if not board.is_live(row):
+            return f"{board.handle(row)} already {row['phase']}"
+        return (f"{board.handle(row)}: " + _keep(self.c, row, hours, actor)
+                + ", and no automatic stop or kill for as long unless its host runs out of scratch")
 
-    def ack(self, handle: str, actor: str) -> str:
+    def free_space(self, handle: str, actor: str) -> str:
+        """Remove every prune target of the finished runs of the project on the host of a run, as edr retire does."""
         row = self.c.resolve(handle)
-        return f"{board.handle(row)}: " + _keep(self.c, row, None, True, actor)
+        names = sorted({n for st in self.c.project.stages.values() for n in st.prune})
+        if not names:
+            return f"{self.c.project.project} declares no prune targets"
+        a = argparse.Namespace(**{**vars(self.c.a), "handle": None, "batch": None, "host": row["host"],
+                                  "prune": ",".join(names), "collect": None, "uncollected": False, "dry_run": False,
+                                  "why": f"{row['host']} full: {actor}"})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cmd_retire(self.c, a)
+        return (out.getvalue().strip() or f"no finished run of {self.c.project.project} with a tree on {row['host']}") + (
+            "" if code == Exit.DONE else f"\nexit {int(code)}")
 
     def stop_after_task(self, handle: str, actor: str, why: str) -> str:
         c, row = self.c, self.c.resolve(handle)
@@ -937,8 +949,7 @@ def cmd_keep(c: Ctx, a: argparse.Namespace) -> int:
     if not board.is_live(row):
         c.emit(f"{row['run_id']}: already {row['phase']}")
         return Exit.NOTHING
-    hours = a.hours if a.hours is not None or a.ack else 12
-    c.emit(f"{row['run_id']}: " + _keep(c, row, hours, a.ack or None, "user") + (" (dry)" if a.dry_run else ""))
+    c.emit(f"{row['run_id']}: " + _keep(c, row, a.hours, "user") + (" (dry)" if a.dry_run else ""))
     return Exit.DONE
 
 
@@ -1045,10 +1056,19 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
     """Remove the run tree, or the prune targets, after the guard; --batch marks RETIRED."""
-    if not a.handle and not a.batch:
-        raise Refuse("retire needs a handle or --batch")
+    if sum(map(bool, (a.handle, a.batch, a.host))) != 1:
+        raise Refuse("retire needs one of a handle, --batch and --host")
+    if a.host and not a.prune:
+        raise Refuse("--host takes --prune")
     project, dry = c.project, " (dry)" if a.dry_run else ""
-    rows = c.db.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
+    if a.host:
+        rows = [r for r in c.db.runs() if r.get("host") == a.host and r.get("root") and not board.is_live(r)
+                and r.get("state") != "retired"]
+    else:
+        rows = c.db.runs(batch=a.batch) if a.batch else [c.resolve(a.handle)]
+    if a.host and not rows:
+        c.emit(f"no finished run with a tree on {a.host}")
+        return Exit.NOTHING
     if a.batch and not rows and not (project.state_dir / a.batch).is_dir():
         c.emit(f"no runs in batch {a.batch}")
         return Exit.NOTHING
@@ -1163,10 +1183,11 @@ def _retire_targets(c: Ctx, row: Row, hb: dict, root: str, a: argparse.Namespace
     if a.prune:
         scalars = {k: v for k, v in {**hb, **row}.items() if isinstance(v, (str, int, float))}
         values = config.placeholders(project, **scalars)
+        names = a.prune.split(",")
+        if missing := [n for n in names if not any(n in st.prune for st in project.stages.values())]:
+            raise Refuse(f"no stage has prune.{missing[0]}")
         targets = [posixpath.join(root, config.render(p, values))
-                   for st in project.stages.values() for p in st.prune.get(a.prune, [])]
-        if not targets:
-            raise Refuse(f"no stage has prune.{a.prune}")
+                   for n in names for st in project.stages.values() for p in st.prune.get(n, [])]
     else:
         if not (project.data / "results" / row["run_id"] / "log").is_dir() and not a.uncollected:
             raise Refuse(f"{row['run_id']}: results not collected; run edr watch --once, or pass --uncollected")
@@ -1188,7 +1209,7 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
         print(f"edr watch: pid {home.holder(path)} watches {project.project} already")
         return Exit.NOTHING
     try:
-        return watch.run_forever(project, c.ssh, c.db, _notifiers(c), once=a.once, served=a.served)
+        return watch.run_forever(project, c.ssh, c.db, _notifiers(c, a.served), once=a.once, served=a.served)
     finally:
         os.close(fd)
 
@@ -1205,7 +1226,7 @@ def cmd_serve(c: Ctx, a: argparse.Namespace) -> int:
         return Exit.DONE
     if a.dry_run:
         return _serve_plan(c)
-    notifiers = serve.notifiers()
+    notifiers = serve.notifiers(None if a.check or a.once else Router(a))
     if a.check:
         return serve.check(notifiers)
     return serve.run(notifiers, once=a.once)
@@ -1273,13 +1294,129 @@ def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.DONE if sent == len(notifiers) else Exit.REFUSED
 
 
-def _notifiers(c: Ctx) -> list:
+def _notifiers(c: Ctx, served: bool = False) -> list:
+    """The channels of the project; unless it is served, the bot polls once the watcher holds serve.lock."""
     project = c.project
-    bot = Ctx(c.a)
-    bot._project = project
     # The bot polls in its own thread.
-    bot._db = Database(project.data / "edr.db", threads=True)
-    return make_notifiers(project.site, project, bot.db, Actions(bot))
+    return make_notifiers(project.site, project, Database(project.data / "edr.db", threads=True),
+                          None if served else Router(c.a))
+
+
+class Router:
+    """The projects of the bot: the Actions of each, the handle search over all, and the texts of all at once."""
+
+    def __init__(self, a: argparse.Namespace) -> None:
+        self.a = argparse.Namespace(**{**vars(a), "json": False, "dry_run": False, "command": "status"})
+
+    def names(self) -> list[str]:
+        """The registered projects that load."""
+        return sorted(census.projects())
+
+    @contextlib.contextmanager
+    def actions(self, name: str) -> Iterator[Actions]:
+        """The Actions of project `name`, with its database open for the block."""
+        project = census.projects().get(name)
+        if project is None:
+            raise Refuse(f"no registered project {name}; the projects: {', '.join(self.names()) or 'none'}")
+        c = Ctx(self.a)
+        c._project = project
+        c._db = Database(project.data / "edr.db")
+        try:
+            yield Actions(c)
+        finally:
+            c.close()
+
+    def pick(self, args: list[str], run: tuple[str, str] | None) -> tuple[str, list[str]]:
+        """The project a command names in its first argument, else the one of the alert it replies to, else the only
+        one; and the arguments that remain. Refuse lists the projects when none of these gives one."""
+        names = self.names()
+        if args and args[0] in names:
+            return args[0], args[1:]
+        if run:
+            return run[0], args
+        if len(names) == 1:
+            return names[0], args
+        raise Refuse("name a project first: " + ", ".join(names) if names else "no registered project")
+
+    def resolve(self, handle: str) -> tuple[str, str]:
+        """(project, handle) of one run: `project/label@batch`, `#n` of the last board, or a handle that one project knows."""
+        if "/" in handle:
+            project, _, h = handle.partition("/")
+            return project, h
+        if handle.startswith("#"):
+            board_ = serve.Store().get_store("last_board", [])
+            n = int(handle[1:]) if handle[1:].isdigit() else 0
+            if not 1 <= n <= len(board_):
+                raise Refuse(f"{handle}: the last board has {len(board_)} runs")
+            return board_[n - 1][0], board_[n - 1][1]
+        found = []
+        for name in self.names():
+            with self.actions(name) as act:
+                try:
+                    found.append((name, board.handle(act.c.resolve(handle))))
+                except Refuse:
+                    pass
+        if len(found) != 1:
+            raise Refuse(f"{handle}: " + ("no run of any project has it" if not found else
+                                          "more than one project has it: " + ", ".join(f"{p}/{h}" for p, h in found)))
+        return found[0]
+
+    def run_of(self, project: str, msg_id: int) -> str | None:
+        """The run id of the alert `msg_id` of project `project`, while it is younger than REPLY_DAYS."""
+        with self.actions(project) as act:
+            hit = act.c.db.get_store("telegram", {}).get("replies", {}).get(str(msg_id))
+        return hit[0] if hit and time.time() - hit[1] < REPLY_DAYS * 86400 else None
+
+    def replied(self, msg_id: int) -> tuple[str, str] | None:
+        """(project, run id) of the alert `msg_id` of any project."""
+        return next(((n, r) for n in self.names() if (r := self.run_of(n, msg_id))), None)
+
+    def board_text(self) -> str:
+        """The board of every project, the one the supervisor pins."""
+        now = time.time()
+        return serve.global_board(census.projects(), census.read(float("inf"), now), now)
+
+    def projects_text(self) -> str:
+        """One line per project: its watcher and its live runs."""
+        c = Ctx(self.a)
+        cmd_projects(c, self.a)
+        return tgfmt.projects(c.data or [])
+
+    def events_text(self, n: int) -> str:
+        """The last `n` events of every project, newest first, each run as project/label@batch."""
+        rows, names = [], {}
+        for name in self.names():
+            with self.actions(name) as act:
+                rows += act.c.db.events(n=n)
+                names.update({r["run_id"]: f"{name}/{board.handle(r)}" for r in act.c.db.runs()})
+        return tgfmt.events(sorted(rows, key=lambda e: e["ts"])[-n:], names)
+
+    def hosts_text(self) -> str:
+        """The free room of every host of every project and your runs on it."""
+        found = census.projects()
+        sites = census.host_sites(found)
+        probes = {h: p for site in {id(s): s for s in sites.values()}.values()
+                  for h, p in probe_all(Ssh(site), [h for h in site.hosts if sites.get(h) is site]).items()}
+        rows = census.host_view(probes, census.live_runs(found.values(), time.time()),
+                                {h: floor(sites[h], h) for h in probes}, Placement())
+        return tgfmt.hosts(rows)
+
+    def tools_text(self) -> str:
+        """Every tool of the sites of every project, once."""
+        rows: dict[str, Row] = {}
+        for name in self.names():
+            with self.actions(name) as act:
+                for r in _tool_rows(act.c):
+                    rows.setdefault(r["tool"], r)
+        return tgfmt.tools(rows.values())
+
+    def digest_text(self) -> str:
+        """The digest of every project, one after the other."""
+        out = []
+        for name in self.names():
+            with self.actions(name) as act:
+                out.append(f"<b>{tgfmt.esc(name)}</b>\n" + act.digest_text())
+        return tgfmt.fit("\n\n".join(out)) or "<i>no project</i>"
 
 
 # --- parser and main
@@ -1364,7 +1501,7 @@ def _parser() -> argparse.ArgumentParser:
         plan and launch take the batch as an argument, which defaults to
         EDR_BATCH and then to the newest batch directory in the state. status
         --batch defaults to EDR_BATCH and then to every batch. retire needs a
-        handle or --batch.
+        handle, --batch or --host.
         """))
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     p.add_argument("-P", "--project", metavar="NAME", help="the registered project NAME, from any directory")
@@ -1695,15 +1832,17 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--root", metavar="DIR", help="the run tree; default the current directory")
     s.add_argument("--collect", action="store_true", help="the watcher collects the stage and extracts its metrics")
     s.add_argument("cmd", nargs=argparse.REMAINDER, help="the command, after --")
-    s = command("keep", "add hours to the running stage or task; --ack cancels a pending kill", """
-        Writes the keep file of a live run. --hours (default 12 when --ack is
-        absent) adds hours to the budget of the running stage or task; --ack
-        cancels a pending kill or stop of the watcher.
+    s = command("keep", "more hours for a run, and no hung kill or superseded stop for that long", """
+        Writes the keep file of a live run with N hours, 12 by default. The
+        driver adds them to the time budget of the running stage or task, and
+        for N hours from now the watcher takes no automatic action on the run:
+        it neither kills it when it is hung nor stops it when a newer batch
+        supersedes it. The full-host stop does not wait for a keep, since a
+        full disk blocks every other user of the host. A new keep replaces the
+        one before.
         """, write=True, exits={Exit.NOTHING: "the run has ended"})
     s.add_argument("handle", help=HANDLE)
-    s.add_argument("--hours", type=int, metavar="N",
-                   help="hours to add to the budget of the running stage or task; default 12 without --ack")
-    s.add_argument("--ack", action="store_true", help="cancel the watcher's pending kill or stop")
+    s.add_argument("--hours", type=int, default=12, metavar="N", help="the hours; default 12")
     s = command("import", "record a run tree that edr did not make, or its collected results", """
         Records a run that edr did not start, such as one you ran by hand. With
         --host and --root, it records the tree on that host, so reuse and edr
@@ -1760,9 +1899,13 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--now", action="store_true", help="SIGKILL after 30 s")
     s = command("retire", "remove the run tree, or its prune targets", """
         Removes the run tree on the host, or with --prune T the paths that
-        prune.T names in the stages, after the guard on every target. --batch
-        retires every run of the batch and marks it RETIRED, so the watcher
-        skips it. A live run gets the phase ABANDONED:<why>.
+        prune.T names in the stages, after the guard on every target; T may
+        name several sets, comma separated. --batch retires every run of the
+        batch and marks it RETIRED, so the watcher skips it. A live run gets the
+        phase ABANDONED:<why>. --host H with --prune prunes every finished run
+        of the project that has a tree on H, to free the scratch of a full host;
+        the Free space button of a host_full alert runs it with every set the
+        project declares.
 
         The logs and results survive a retire. The watcher has already copied
         log/ and the collect paths of every finished stage to
@@ -1779,11 +1922,13 @@ def _parser() -> argparse.ArgumentParser:
         live run uses, a tree shared with a run whose results are not collected
         (retire them together with --batch), and a tree whose own results are
         not collected unless you pass --uncollected.
-        """, write=True, why=True, exits={Exit.NOTHING: "the batch has no run", Exit.HOSTS: "an rm failed"})
+        """, write=True, why=True, exits={Exit.NOTHING: "the batch has no run, or no finished run has a tree on the host",
+                                          Exit.HOSTS: "an rm failed"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch, then mark it RETIRED")
     s.add_argument("--collect", metavar="NAMES", help="copy these collect_on_request lists, comma separated, to the head node first")
-    s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree")
+    s.add_argument("--prune", metavar="T", help="remove the prune targets named T instead of the tree; comma separated")
+    s.add_argument("--host", metavar="H", help="with --prune: every finished run of the project with a tree on H")
     s.add_argument("--uncollected", action="store_true", help="remove a tree whose results were never collected")
     s = command("notify", "send one message, the board or the digest through every notifier", """
         Sends one message through every notifier that the site configures. The
@@ -1798,8 +1943,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--digest", action="store_true", help="send the daily digest now; the watcher still sends its own")
     s.add_argument("--silent", action="store_true", help="send without a sound on the phone")
     s = command("watch", "the watcher", """
-        Runs the watcher loop: one cycle every heartbeat_s seconds, with the
-        Telegram bot as a thread when the site file configures it. --once runs one cycle.
+        Runs the watcher loop: one cycle every heartbeat_s seconds. --once runs one cycle.
         --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
         reads and classifies every run, prints the states and writes nothing.
         docs/how-it-works.md explains the cycle.
@@ -1810,17 +1954,23 @@ def _parser() -> argparse.ArgumentParser:
         per error text and goes on with the last config that loaded: it reads
         the heartbeats, alerts and collects, but resumes and launches nothing
         until the file loads again.
+
+        Every watcher sends its alerts. When no supervisor runs, the first
+        watcher that takes ~/.edr/serve.lock also does the work of the user
+        and runs the Telegram bot for the commands and button presses of every
+        project.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
                                               "with --check, watch.json is older than three cycles",
                                 Exit.NOTHING: "another process watches the project"})
     s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")
     s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")
-    s.add_argument("--served", action="store_true", help="started by edr serve: no census, no pinned board")
+    s.add_argument("--served", action="store_true", help="started by edr serve: no census, no pinned board, no bot")
     s = command("serve", "the supervisor: one watcher per registered project", """
         Runs the supervisor of the user: a cycle every minute that keeps one
         edr watch --served per registered project in the project directory,
-        does the work that belongs to the user once for every project, and
-        edits one pinned global board. A watcher that exits starts again after
+        does the work that belongs to the user once for every project, edits
+        one pinned global board, and runs the Telegram bot for the commands and
+        button presses of every project. A watcher that exits starts again after
         1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
         watch.json stood still for three heartbeats and at least 15 minutes
         while its config loads is killed and started again, with an alert. A

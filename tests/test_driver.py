@@ -164,10 +164,26 @@ def test_keep_file_extends_the_budget(tmp_path: Path) -> None:
     proc = start(spec)
     wait_for(spec, lambda h: h["phase"] == "stage:synth")
     keep = Path(spec["state_file"]).with_name(RUN_ID + ".keep.json")
-    keep.write_text(json.dumps({"hours": 1, "ack": True}))
+    keep.write_text(json.dumps({"hours": 1}))
     rc, hb = finish(proc, spec)
     assert (rc, hb["phase"]) == (0, "done")
     assert hb["keep_hours"] == 1
+
+
+def test_a_keep_after_the_budget_clears_the_mark(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("synth",), budgets={"synth": {"hours": 0.0003, "kill": False}})
+    proc = start(spec)
+    wait_for(spec, lambda h: h.get("over_budget") == "synth")
+    Path(spec["state_file"]).with_name(RUN_ID + ".keep.json").write_text(json.dumps({"hours": 1}))
+    wait_for(spec, lambda h: h.get("over_budget") is None)
+    rc, hb = finish(proc, spec)
+    assert (rc, hb["phase"]) == (0, "done")
+
+
+def test_the_heartbeat_keeps_the_last_four_lines_of_the_log(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_text("one\n\ntwo\n" + "x" * 150 + "\n  \nthree\nfour\n\n")
+    assert _load_driver().last_lines(str(log), 4, 100).splitlines() == ["two", "x" * 99 + "\u2026", "three", "four"]
 
 
 def test_gate_waits_then_fails(tmp_path: Path) -> None:

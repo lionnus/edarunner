@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -77,12 +78,19 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert env.ssh.killed == [] and not list(env.project.state_dir.glob("*/*.stop"))
 
 
+def keep(env: Env, hb: dict, hours: float, at: float = NOW) -> None:
+    """The keep file of `hours` for the run of `hb`, written at `at`."""
+    path = env.project.state_dir / "demo" / f"{hb['run_id']}.keep.json"
+    path.write_text(json.dumps({"hours": hours}))
+    os.utime(path, (at, at))
+
+
 def test_hung_after_unchanged_progress_and_kill(env: Env) -> None:
     lim = env.project.limits
     lim.hung_s, lim.grace_s = 0, 0
     env.heartbeat("a")
     b = env.heartbeat("b", pgids=[4400])
-    (env.project.state_dir / "demo" / f"{b['run_id']}.keep.json").write_text('{"hours": 0, "ack": true}')
+    keep(env, b, 1)
     assert env.cycle() == {rid("a"): "running", rid("b"): "running"}
     lim.kill_hung = True
     assert env.cycle(NOW + 1) == {rid("a"): "hung", rid("b"): "hung"}
@@ -90,6 +98,9 @@ def test_hung_after_unchanged_progress_and_kill(env: Env) -> None:
     assert sorted(env.events()) == sorted([(rid("a"), "hung"), (rid("a"), "kill"), (rid("b"), "hung")])
     env.cycle(NOW + 2)
     assert len(env.ssh.killed) == 1 and env.notifier.sent == [("hung", rid("a")), ("hung", rid("b"))]
+    env.heartbeat("b", pgids=[4400], age=-3596)  # still fresh an hour later
+    env.cycle(NOW + 3601)  # the keep of one hour is over
+    assert env.ssh.killed[1:] == [("pgid", 4400, "TERM")]
 
 
 def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
@@ -99,7 +110,7 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
     for label in ("a", "k", "f"):
         env.heartbeat(label, batch="demo2", date=NEW, source="gdef5678")
     env.heartbeat("e", batch="demo2", date=NEW, source="gdef5678", phase="FAILED:synth", exit=5)
-    (env.project.state_dir / "demo" / f"{k['run_id']}.keep.json").write_text('{"hours": 12}')
+    keep(env, k, 12)
     states = env.cycle()
     assert states[rid("a")] == "superseded" and states[rid("k")] == "superseded"
     assert states[rid("f")] == "host_full" and states[rid("e")] == "running"
@@ -109,7 +120,10 @@ def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
     assert (rid("a"), "stop") in env.events() and (rid("k"), "stop") not in env.events()
     n = env.events().count((rid("f"), "stop"))
     env.cycle(NOW + 1)
-    assert env.events().count((rid("f"), "stop")) == n == 1
+    assert env.events().count((rid("f"), "stop")) == n == 1 and (rid("k"), "stop") not in env.events()
+    env.heartbeat("k", age=-12 * 3600)  # still fresh twelve hours later
+    env.cycle(NOW + 12 * 3600 + 1)  # the keep of twelve hours is over
+    assert (rid("k"), "stop") in env.events()
 
 
 def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:

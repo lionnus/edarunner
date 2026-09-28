@@ -300,6 +300,6 @@ watcher, the one that holds `~/.edr/serve.lock`, checks the orphans,
 stops the newest run of a full host and sweeps the leases for all of
 them. `edr hosts` shows your runs on each host by project,
 `edr status --all` the board of every project, and `edr projects` the
-projects with their watchers. With
-one Telegram bot for both, set `telegram_poll = false` in one of them;
-[alerts.md](alerts.md#one-chat-or-one-per-project) explains why.
+projects with their watchers. One Telegram bot serves both;
+[alerts.md](alerts.md#one-bot-for-every-project) shows how a command
+names its project.

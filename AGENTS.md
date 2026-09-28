@@ -120,8 +120,9 @@ number came from before you put it in a table.
 - Never relaunch a batch under its old name to get new directories.
   `launch` refuses a job whose spec, the run's JSON file in the state
   directory, exists. Use a new batch name.
-- Never stop `edr serve` or a watcher to make the board quiet. Use
-  `edr keep <handle> --ack` on the run instead.
+- Never stop `edr serve` or a watcher to keep it from acting on a run.
+  `edr keep <handle> --hours <n>` holds off its kill or stop of that run
+  for n hours.
 - Never write a site string into the public repository: a host name, a
   licence server, a user name, a chat id. See
   [docs/dev/conventions.md](docs/dev/conventions.md).

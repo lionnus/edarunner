@@ -13,13 +13,13 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from helpers_telegram import FakeActions, FakeApi, FakeDatabase, make_project, make_site
+from helpers_telegram import FakeApi, FakeDatabase, make_project, make_site
 
 from edarunner import cli, config
 from edarunner.config import ConfigError
 from edarunner.model import Mail, Ntfy
-from edarunner.notify import BUTTON_CMDS, alert_buttons, make_notifiers, untag
-from edarunner.notify.alerts import Alert
+from edarunner.notify import make_notifiers, untag
+from edarunner.notify.alerts import Alert, button
 from edarunner.notify.mail import MailNotifier
 from edarunner.notify.ntfy import NtfyNotifier
 from edarunner.notify.telegram import TelegramBot
@@ -56,9 +56,12 @@ def secret(tmp_path: Path, name: str, mode: int = 0o600) -> Path:
     return path
 
 
+BUTTONS = [button(x, "demo", handle="a@demo", why="hung") for x in ("stop", "keep6", "keep12", "keep24")]
+
+
 def dead(buttons: bool = True) -> Alert:
     return Alert("dead", "r1", "driver gone for", "a@demo", "no heartbeat", todo=[("Look:", "edr status a@demo")],
-                 buttons=alert_buttons("a@demo") if buttons else [])
+                 buttons=BUTTONS if buttons else [])
 
 
 def test_ntfy_sends_alerts_with_priority_and_button_lines(ntfy_server, tmp_path):
@@ -68,11 +71,11 @@ def test_ntfy_sends_alerts_with_priority_and_button_lines(ntfy_server, tmp_path)
     path, auth, body = got[0]
     assert path == "/" and auth == "Bearer s3cret"
     assert body == {"topic": "edr-x", "title": "🔴 demo: driver gone for a@demo", "priority": 5, "message":
-                    "no heartbeat\n\nLook:\nedr status a@demo\n\nkeep 12h: edr keep a@demo --hours 12\n"
-                    "ack: edr keep a@demo --ack\nstop: edr stop a@demo --after-task",
-                    "actions": [{"action": "copy", "label": "keep 12h", "value": "edr keep a@demo --hours 12"},
-                                {"action": "copy", "label": "ack", "value": "edr keep a@demo --ack"},
-                                {"action": "copy", "label": "stop", "value": "edr stop a@demo --after-task"}]}
+                    "no heartbeat\n\nLook:\nedr status a@demo\n\nStop: edr stop a@demo --after-task --why hung\n"
+                    "+6h: edr keep a@demo --hours 6\n+12h: edr keep a@demo --hours 12\n+24h: edr keep a@demo --hours 24",
+                    "actions": [{"action": "copy", "label": "Stop", "value": "edr stop a@demo --after-task --why hung"},
+                                {"action": "copy", "label": "+6h", "value": "edr keep a@demo --hours 6"},
+                                {"action": "copy", "label": "+12h", "value": "edr keep a@demo --hours 12"}]}
     n.send(Alert("hung", "r1", "no progress in", "a@demo", "stuck"))
     assert got[1][2]["priority"] == 4 and got[1][2]["message"] == "stuck" and "actions" not in got[1][2]
     assert n.post("note", "a &amp; <b>b</b>", silent=True)
@@ -177,15 +180,14 @@ def test_ntfy_resends_without_actions_when_the_server_refuses_them(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
     n = NtfyNotifier(PROJECT, Ntfy(topic="t"))
-    copy = [{"action": "copy", "label": "ack", "value": "edr keep a@demo --ack"}]
+    copy = [{"action": "copy", "label": "+6h", "value": "edr keep a@demo --hours 6"}]
     assert n.publish("dead a@demo", "x", 5, copy)
     assert [("actions" in b) for b in bodies] == [True, False]
     assert not n.publish("dead a@demo", "bad", 5, copy) and len(bodies) == 4
 
 
 # Every message kind of the watcher and of edr notify, as its call site makes it:
-# (the call, the title after "<project>: ", the text lines, the button commands).
-BUTTONS = [c.format("a@demo") for c in BUTTON_CMDS.values()]
+# (the call, the title after "<project>: ", the text lines, the buttons).
 KINDS = {
     "alert": (lambda n: n.send(dead()), "driver gone for a@demo", ["no heartbeat", "", "Look:", "edr status a@demo"],
               BUTTONS),
@@ -202,37 +204,41 @@ KINDS = {
 
 
 def telegram_got(tmp_path, monkeypatch, call):
-    """(title, text lines, button commands) of the one message the bot sends; a button is a callback."""
-    bot = TelegramBot(make_site(tmp_path), make_project(tmp_path), FakeDatabase(), FakeActions(),
-                      str(tmp_path / "telegram.token"))
+    """(title, text lines, buttons) of the one message the bot sends; a button is (label, callback_data)."""
+    bot = TelegramBot(make_site(tmp_path), make_project(tmp_path), FakeDatabase(), None, str(tmp_path / "telegram.token"))
     bot.api = FakeApi()
     call(bot)
     [sent] = bot.api.of("sendMessage")
     title, *lines = untag(sent["text"]).splitlines()
     keys = (sent.get("reply_markup") or {}).get("inline_keyboard") or [[]]
-    cmds = [BUTTON_CMDS[k["callback_data"].split(":")[0]].format(k["callback_data"].split(":")[1]) for k in keys[0]]
-    return title[title.index("demo: "):], lines, cmds  # an alert title starts with the mark of its state
+    return title[title.index("demo: "):], lines, [(k["text"], k["callback_data"]) for k in keys[0]]
 
 
 def ntfy_got(tmp_path, monkeypatch, call):
-    """(title, text lines, button commands) of the one push; each command is also a text line."""
+    """(title, text lines, buttons) of the one push; a button is (label, command) of a copy action, at most three."""
     bodies = []
     monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout: bodies.append(json.loads(req.data))
                         or mock.MagicMock(status=200, __enter__=lambda self: self))
     call(NtfyNotifier(PROJECT, Ntfy(topic="t")))
     [body] = bodies
-    cmds = [a["value"] for a in body.get("actions", [])]
-    assert all(any(line.endswith(": " + c) for line in body["message"].splitlines()) for c in cmds)
-    return body["title"][body["title"].index("demo: "):], body["message"].splitlines(), cmds
+    got = [(a["label"], a["value"]) for a in body.get("actions", [])]
+    assert all(f"{label}: {c}" in body["message"].splitlines() for label, c in got)
+    return body["title"][body["title"].index("demo: "):], body["message"].splitlines(), got
 
 
 def mail_got(tmp_path, monkeypatch, call):
-    """(subject, text lines, button commands) of the one mail; a button is a `label: command` line."""
+    """(subject, text lines, buttons) of the one mail; a button is a `label: command` line."""
     with mock.patch("smtplib.SMTP") as smtp:
         call(MailNotifier(PROJECT, Mail(host="h", sender="f@example.org", to=["t@example.org"])))
     [(msg,), _] = smtp.return_value.__enter__.return_value.send_message.call_args
     lines = [ln.strip() for ln in msg.get_content().splitlines()]
-    return msg["Subject"][msg["Subject"].index("demo: "):], lines, [ln.split(": ", 1)[1] for ln in lines if ln.startswith(("keep 12h:", "ack:", "stop:"))]
+    labels = {b[0] for b in BUTTONS}
+    return msg["Subject"][msg["Subject"].index("demo: "):], lines, [
+        tuple(ln.split(": ", 1)) for ln in lines if ln.split(": ", 1)[0] in labels]
+
+
+EXPECT = {telegram_got: lambda bs: [(b[0], b[1]) for b in bs], ntfy_got: lambda bs: [(b[0], b[2]) for b in bs][:3],
+          mail_got: lambda bs: [(b[0], b[2]) for b in bs]}
 
 
 @pytest.mark.parametrize("channel", [telegram_got, ntfy_got, mail_got], ids=["telegram", "ntfy", "mail"])
@@ -242,4 +248,4 @@ def test_every_channel_carries_every_kind(kind, channel, tmp_path, monkeypatch):
     got_title, got_lines, got_buttons = channel(tmp_path, monkeypatch, call)
     assert got_title == f"demo: {title}"
     assert got_lines[: len(lines)] == lines
-    assert got_buttons == buttons
+    assert got_buttons == EXPECT[channel](buttons)

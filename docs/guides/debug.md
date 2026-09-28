@@ -102,10 +102,12 @@ stage; the driver logs it and runs the stage.
 
 Exit 3 means the scratch disk had less free space than `needs.disk_gb`
 of the first stage at the start. `host_full` means the free space fell
-below `limits.host_free_min_gb` while runs were going; after `grace_s`
-the watcher stops the newest run on that host unless you acknowledge it
-with `edr keep <handle> --ack`. `edr hosts` shows the scratch of each
-host.
+below `host_free_min_gb` of the site or of the host while runs were
+going; after `grace_s` the watcher stops the newest run on that host,
+and a keep does not hold that stop off. `edr retire --host <host>
+--prune <name>` removes the prune targets of your finished runs there.
+`edr hosts` shows the scratch of each host and how much your trees
+hold.
 
 ### The run went over budget
 
@@ -130,7 +132,7 @@ the same signature, the group stops claiming tasks and the run shows
 The heartbeat is fresh, but nothing has changed for `limits.hung_s`:
 neither the step, the log, the tree size nor the CPU time. Read the log tail
 first. The watcher kills a hung run only when `kill_hung` is set, and
-`edr keep <handle> --ack` cancels that.
+`edr keep <handle> --hours <n>` holds that off for n hours.
 
 ### A metric is missing
 

@@ -1,6 +1,9 @@
-"""The Telegram bot: alerts with buttons, a pinned board, and the command router.
+"""The Telegram bot: alerts with buttons, a pinned board, and the commands of every project.
 
-Long polling over outbound HTTPS only; one chat id is obeyed, and one user id when
+Every watcher sends its alerts, and keeps the run of each alert with buttons in the database of its
+project. Only the holder of `~/.edr/serve.lock`, the supervisor or else the first watcher, polls:
+Telegram takes one poller per token. Its router finds the project of every command and button
+press. Long polling runs over outbound HTTPS only; one chat id is obeyed, and one user id when
 `user_id` is set.
 """
 
@@ -21,30 +24,30 @@ from edarunner.notify.telegram.buttons import Buttons, markup
 from edarunner.notify.telegram.commands import Commands, Reply, keyboard_word
 
 if TYPE_CHECKING:
-    from edarunner.cli import Actions
+    from edarunner.cli import Router
     from edarunner.notify.alerts import Alert
 
 log = logging.getLogger(__name__)
 
-REPLY_DAYS = 7  # how long a reply to an alert still finds its run
+REPLY_DAYS = 7  # how long a reply to an alert and a button press still find its run
 MAX_DOCUMENT = 20 * 2**20  # the upload limit of the Bot API is 50 MB; a phone needs far less
 # The reaction on a command message. ⏳, ✅ and ❌ are not in the set of reactions that Telegram accepts.
 REACTIONS = {"busy": "👀", "ok": "👍", "failed": "👎"}
 
 
 class TelegramBot(Notifier):
-    """One bot, one chat, one poll thread."""
+    """One bot and one chat; with a router it also takes the commands and button presses of every project."""
 
-    def __init__(self, site: Site, project: Project, db: Any, actions: Actions, token_file: str) -> None:
+    def __init__(self, site: Site, project: Project, db: Any, router: Router | None, token_file: str) -> None:
         assert site.telegram is not None
         self.site = site
         self.tg = site.telegram
         self.project = project
         self.db = db
-        self.actions = actions
+        self.router = router
         self.api = BotApi(Path(token_file).read_text().strip())
-        self.commands = Commands(actions, db, self.tg, lambda: self.project, self.repin)
-        self.buttons = Buttons(actions, self.commands.event)
+        self.commands = Commands(router, db, self.tg, str(site.path.parent), self.repin) if router else None
+        self.buttons = Buttons(router, db, self.commands.event) if router and self.commands else None
         self.chat_id = int(self.tg.chat_id)
         self.user_id = self.tg.user_id or None
         self.topic = self.tg.topic_id
@@ -67,8 +70,7 @@ class TelegramBot(Notifier):
 
     def send(self, alert: Alert) -> str | None:
         """Send one alert; a repeat with the same kind and key edits it in place."""
-        # A press reaches the watcher that polls, which acts on its own project only.
-        keys = markup(alert.buttons) if alert.buttons and self.project.telegram_poll else None
+        keys = markup(alert.buttons) if alert.buttons else None
         try:
             mid = self._upsert(f"alert:{alert.kind}:{alert.key}", fmt.alert(self.project.project, alert), keys)
         except ApiError as e:
@@ -79,20 +81,13 @@ class TelegramBot(Notifier):
         return str(mid)
 
     def _remember(self, msg_id: int, run_id: str) -> None:
-        """Keep the run of an alert for REPLY_DAYS, so a reply to it needs no handle."""
+        """Keep the run of an alert for REPLY_DAYS, so a press or a reply finds it."""
         now = time.time()
         with self._lock:
             runs = {k: v for k, v in self._state.get("replies", {}).items() if now - v[1] < REPLY_DAYS * 86400}
             runs[str(msg_id)] = [run_id, now]
             self._state["replies"] = runs
             self.db.set_store("telegram", self._state)
-
-    def _replied_run(self, msg: dict) -> str | None:
-        """The run id of the alert that `msg` replies to, or None."""
-        target = (msg.get("reply_to_message") or {}).get("message_id")
-        with self._lock:
-            hit = self._state.get("replies", {}).get(str(target))
-        return hit[0] if hit and time.time() - hit[1] < REPLY_DAYS * 86400 else None
 
     def board(self, text: str) -> None:
         """Rewrite the pinned board silently; create and pin it once. `text` is Telegram HTML."""
@@ -113,7 +108,8 @@ class TelegramBot(Notifier):
             old = self._state.pop("board", None)
         if old is not None:
             self._call(self.api.unpin, self.chat_id, old)
-        self.board(self.actions.status_text())
+        if self.router is not None:
+            self.board(self.router.board_text())
 
     def _upsert(self, key: str, text: str, markup: dict | None, silent: bool = False, pin: bool = False) -> int:
         """Edit the message kept under `key`, or send a new one and keep its id."""
@@ -137,9 +133,8 @@ class TelegramBot(Notifier):
     # The poll thread
 
     def start(self) -> None:
-        """Publish the command menu and start the long-poll thread."""
-        if not self.project.telegram_poll:
-            log.info("telegram: alerts only; another project polls this bot")
+        """Publish the command menu and start the long-poll thread; a bot without a router only sends."""
+        if self.commands is None:
             return
         self._call(self.api.set_my_commands, self.commands.menu())
         if not self.user_id:
@@ -173,6 +168,8 @@ class TelegramBot(Notifier):
 
     def handle_update(self, u: dict) -> None:
         """Dispatch one update: a command, a button press, or a stranger."""
+        if self.commands is None or self.buttons is None or self.router is None:
+            return
         msg, q = u.get("message"), u.get("callback_query")
         m = msg or (q or {}).get("message") or {}
         who = m.get("chat", {}).get("id")
@@ -199,12 +196,15 @@ class TelegramBot(Notifier):
             self._press(q)
         elif msg and msg.get("text", "").startswith("/"):
             parts = msg["text"].split()
-            self._command(msg, parts[0][1:].split("@")[0], parts[1:], self._replied_run(msg), thread)
+            target = (msg.get("reply_to_message") or {}).get("message_id")
+            run = self.router.replied(int(target)) if target else None
+            self._command(msg, parts[0][1:].split("@")[0], parts[1:], run, thread)
         elif msg and (word := keyboard_word(msg.get("text", ""))):
             self._command(msg, word, [], None, thread)
 
-    def _command(self, msg: dict, name: str, args: list[str], run: str | None, thread: int | None) -> None:
+    def _command(self, msg: dict, name: str, args: list[str], run: tuple[str, str] | None, thread: int | None) -> None:
         """Run one command and react on its message: busy while a slow one runs, then ok or failed."""
+        assert self.commands is not None
         if self.commands.slow(name):
             self._react(msg, "busy")
         r = self.commands.run(name, args, msg["text"] if msg["text"].startswith("/") else "/" + name, run)
@@ -221,37 +221,37 @@ class TelegramBot(Notifier):
     def _in_topic(self, thread: int | None) -> bool:
         """True when the bot obeys a message of forum thread `thread`; the first one of a thread prints its id."""
         if self.topic is not None:
-            # Another project's watcher answers in its own thread; this one stays silent.
             return thread == self.topic
         if thread is not None and thread not in self._topics:
             self._topics.add(thread)
             print(f"telegram: a message came from topic {thread} of chat {self.chat_id}; "
-                  f"set topic_id = {thread} in [telegram] of edr.toml", file=sys.stderr)
+                  f"set topic_id = {thread} in [telegram]", file=sys.stderr)
         return True
 
     def _reply(self, r: Reply, thread: int | None = None) -> bool:
-        """Send a reply under the bold first line, into the project's topic or the thread of the command.
+        """Send a reply under the bold first line, into the topic of the bot or the thread of the command.
 
         True when every part went out; a file over MAX_DOCUMENT goes out as a line that says so.
         """
-        thread, ok = self.topic or thread, True
+        thread, ok, name = self.topic or thread, True, r.project or self.project.project
         for d in r.documents:
             if len(d.data) > MAX_DOCUMENT:
                 ok = False
                 self._reply(Reply(r.title, f"{d.name}: {len(d.data) / 2**20:.1f} MB is over the limit of "
-                                           f"{MAX_DOCUMENT // 2**20} MB"), thread)
+                                           f"{MAX_DOCUMENT // 2**20} MB", project=r.project), thread)
                 continue
-            caption = fmt.head(self.project.project, r.title) + (f"\n{fmt.esc(r.body)}" if r.body else "")
+            caption = fmt.head(name, r.title) + (f"\n{fmt.esc(r.body)}" if r.body else "")
             ok &= self._call(self.api.send_document, self.chat_id, d.name, d.data, caption, thread_id=thread) is not None
         if r.documents:
             return ok
         body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
-        full = fmt.head(self.project.project, r.title) + "\n" + body
+        full = fmt.head(name, r.title) + "\n" + body
         return self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full),
                           markup=r.markup, thread_id=thread) is not None
 
     def _press(self, q: dict) -> None:
         """Answer a button press and rewrite its alert."""
+        assert self.buttons is not None
         p = self.buttons.press(q)
         self._call(self.api.answer_callback, q["id"], p.answer)
         m = q.get("message")

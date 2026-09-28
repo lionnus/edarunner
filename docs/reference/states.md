@@ -8,19 +8,19 @@ The state is the watcher's verdict on a run; the phase is the driver's word in t
 where the run is or how it ended. A live run gets its state from the heartbeat and the database;
 a finished run from its phase.
 Every change of state writes an event. A state that alerts sends one alert per run and reason,
-and a new reason edits that alert in place. `edr keep --ack` cancels the pending kill of `hung`
-and the stop of `host_full`; any keep file holds off the stop of `superseded`.
+and a new reason edits that alert in place. A keep of N hours holds off the kill of `hung` and
+the stop of `superseded` for N hours; the full-host stop never waits for a keep.
 
 | State | Mark | Test | Alert | Action | Proposed command |
 |---|---|---|---|---|---|
 | `running` | 🟢 | the heartbeat is younger than `stale_s` |  | none |  |
 | `stale` | 🟡 | the heartbeat is older than `stale_s`; or older than `dead_s`, but the driver is alive or the host did not answer |  | none | `edr status <label>@<batch> --live` |
 | `dead` | 🔴 | the heartbeat is older than `dead_s` and the driver process is gone from the host | yes | one resume from the last step, when the stage has `resume` and no process group of the run is alive | `edr continue <label>@<batch> --stage <stage> --from <step>` |
-| `hung` | 🔴 | the heartbeat is fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, tree size, log tail, task counts, log size, CPU time of the process groups | yes | `SIGTERM` to the process groups, only with `kill_hung` and no `ack` | `edr stop <label>@<batch> --why hung` |
+| `hung` | 🔴 | the heartbeat is fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, tree size, log tail, task counts, log size, CPU time of the process groups | yes | `SIGTERM` to the process groups, only with `kill_hung` and while no keep holds | `edr stop <label>@<batch> --why hung` |
 | `looping` | 🔴 | the driver set `looping`: `streak` equal failure signatures in a row | yes | none | `edr stop <label>@<batch> --why looping` |
 | `over_budget` | 🔴 | the driver set `over_budget`, or the run ended `OVER_BUDGET` | yes | none | `edr stop <label>@<batch> --why over-budget` |
-| `host_full` | 🟡 | the driver set `host_full`: the free scratch is below the floor of the host | yes | `stop --now` on the newest run of the host, of any of your projects, once per `grace_s` while the host stays full, unless that run has `ack` | `edr stop <label>@<batch> --now --why host-full` |
-| `superseded` | 🟡 | a newer batch runs the same label at another source | yes | `stop --after-task`, unless the run has a keep file | `edr stop <label>@<batch> --after-task --why superseded` |
+| `host_full` | 🟡 | the driver set `host_full`: the free scratch is below the floor of the host | yes | `stop --now` on the newest run of the host, of any of your projects, once per `grace_s` while the host stays full; a keep does not hold it off | `edr stop <label>@<batch> --now --why host-full` |
+| `superseded` | 🟡 | a newer batch runs the same label at another source | yes | `stop --after-task`, while no keep holds | `edr stop <label>@<batch> --after-task --why superseded` |
 | `orphan` | 🔴 | a process of the current user that matches `tool_procs` and that no live run owns: its `EDR_RUN_ID` names a run of a registered project that ended or whose driver is gone, or an unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and no safety marker of a registered project in its cwd or command line | yes | `SIGTERM`, only with `kill_orphan` of the project the process belongs to |  |
 | `queued` | 🔵 | no host fits the job, or the scheduler holds `max_jobs` runs of the project |  | a launch when a host fits or a job ends, one per batch per cycle | `edr launch <batch> --only <label>` |
 | `pending` | 🔵 | the scheduler has the job in its queue and the driver has not started |  | none | `edr status <label>@<batch> --live` |

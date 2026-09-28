@@ -53,6 +53,21 @@ This frees the space of a large library or build directory while the
 reports and the checkpoints stay, so `edr continue` can still build on
 the tree.
 
+## Free a full host
+
+`--host` prunes the finished runs of the project on one host:
+
+```sh
+edr retire --host hostA --prune lib --why "hostA full" --dry-run
+edr retire --host hostA --prune lib --why "hostA full"
+```
+
+It takes every run on `hostA` that has ended, has a tree and is not
+retired, and removes the paths of each `--prune` name; several names go
+apart by commas. The live runs keep their trees. The Free space button
+of a `host_full` alert runs this command with every prune name of the
+project, after a second tap.
+
 ## Retire a batch
 
 ```sh

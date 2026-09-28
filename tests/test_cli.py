@@ -13,13 +13,13 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 from helpers_cli import DATE, bdir, dead_pid, edr, seed
 
-from edarunner import board, cli, config, home, launch, watch
+from edarunner import board, cli, config, home, launch, serve, watch
 from edarunner import db as db_mod
 from edarunner.db import Database
 from edarunner.guards import Refuse
@@ -249,19 +249,19 @@ def test_brief_run_tells_a_failed_run_with_its_command(demo: Path, capsys) -> No
 # keep, stop, actions
 
 
-def test_keep_merges_fields(demo: Path, capsys) -> None:
+def test_keep_writes_the_hours(demo: Path, capsys) -> None:
     a, b = seed(demo, "a", "done"), seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
     assert edr(capsys, "keep", "b@demo")[0] == 1
     code, out, _ = edr(capsys, "keep", "b_nodw@demo", "--hours", "3", "--dry-run")
     assert code == 0 and "(dry)" in out and not list(bdir(demo).glob("*.keep.json"))
-    assert edr(capsys, "keep", "b_nodw@demo", "--hours", "3")[0] == 0 and keep_file(demo, b) == {"hours": 3, "ack": False}
-    assert edr(capsys, "keep", "b_nodw@demo", "--ack")[0] == 0 and keep_file(demo, b) == {"hours": 3, "ack": True}
-    assert edr(capsys, "keep", "b_nodw@demo")[0] == 0 and keep_file(demo, b) == {"hours": 12, "ack": True}
+    assert edr(capsys, "keep", "b_nodw@demo", "--hours", "3")[0] == 0 and keep_file(demo, b) == {"hours": 3}
+    assert edr(capsys, "keep", "b_nodw@demo")[0] == 0 and keep_file(demo, b) == {"hours": 12}
+    assert edr(capsys, "keep", "b_nodw@demo", "--ack")[0] == 1  # no such flag
     code, out, _ = edr(capsys, "keep", "a@demo")
     assert code == 2 and "already done" in out
     with Database(demo / "data" / "edr.db") as db:
-        assert [(e["actor"], e["kind"], e["text"]) for e in db.events()] == [
-            ("user", "keep", "keep 3 h"), ("user", "keep", "keep 3 h, ack"), ("user", "keep", "keep 12 h, ack")]
+        assert [(e["actor"], e["kind"], e["text"]) for e in db.events()] == [("user", "keep", "keep 3 h"),
+                                                                              ("user", "keep", "keep 12 h")]
 
 
 def test_stop_after_task_now_and_finished(demo: Path, capsys) -> None:
@@ -354,13 +354,14 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     add_metric(demo, b, "area_cell_um2", 999.0)
     add_metric(demo, a, "power_w", 0.25, step=None, task="k_small")
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
-    assert acts.keep("b_nodw@demo", 5, "telegram") == "b_nodw@demo: keep 5 h" and keep_file(demo, b) == {"hours": 5, "ack": False}
-    assert acts.ack("b_nodw@demo", "telegram") == "b_nodw@demo: keep 5 h, ack" and keep_file(demo, b)["ack"] is True
+    assert acts.keep("b_nodw@demo", 5, "telegram") == ("b_nodw@demo: keep 5 h, and no automatic stop or kill for as long "
+                                                         "unless its host runs out of scratch")
+    assert keep_file(demo, b) == {"hours": 5} and acts.keep("a@demo", 5, "telegram") == "a@demo already done"
     assert acts.stop_after_task("b_nodw@demo", "telegram", "why") == "b_nodw@demo stops after its task"
     assert acts.stop_after_task("a@demo", "telegram", "why") == "a@demo already done"
     assert (bdir(demo) / f"{b}.stop").exists()
     with Database(demo / "data" / "edr.db") as db:
-        assert {e["actor"] for e in db.events()} == {"telegram"} and len(db.events()) == 3
+        assert {e["actor"] for e in db.events()} == {"telegram"} and len(db.events()) == 2
     assert acts.status_text().splitlines() == [
         "<b>Running</b>", "🟢 <code>b_nodw@demo</code> synth 2/4 elaborate, 1m", "", "<b>Finished in the last 24 hours</b>",
         "⚪ <code>a@demo</code> done, ended 0m ago", "", "<i>1 running, 1 done</i>", "<i>🟢 running, ⚪ done</i>"]
@@ -372,7 +373,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert acts.status_text("a@demo").splitlines()[3] .startswith("<code>edr export --source ")
     events = acts.events_text(2).splitlines()
     assert events[0][5:] == " <b>stop</b> <code>b_nodw@demo</code>" and events[1] == "    <i>after-task: why</i>"
-    assert len(events) == 4
+    assert len(events) == 4 and "keep" in events[2]
     assert b not in acts.events_text(8)
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[:3] == ["design__instance__area", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
@@ -391,24 +392,54 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert info["handle"] == "a@demo" and info["run_id"] == a and info["host"] == "local" and info["run_root"].endswith(a)
     for text in ("\n".join(cmp), acts.metric_text("design__instance__area", None)):
         assert "\x1b" not in text and all(len(ln) <= 40 for ln in text.splitlines()), text
+    assert acts.free_space("b_nodw@demo", "telegram") == f"{a}: rm -rf {info['run_root']}/out on local"
+    assert not (Path(info["run_root"]) / "out").exists() and (Path(info["run_root"]) / "log").exists()
     capsys.readouterr()
 
 
 
-def test_a_button_press_records_one_event(demo: Path, tmp_path: Path) -> None:
+def test_the_router_finds_the_project_and_the_run_of_a_press_or_a_command(demo: Path, tmp_path: Path, capsys,
+                                                                            monkeypatch) -> None:
     b = seed(demo, "b_nodw", "stage:synth", pid=dead_pid())
+    assert edr(capsys, "register")[0] == 0
+    beta = tmp_path / "edr" / "beta"
+    shutil.copytree(demo, beta, ignore=shutil.ignore_patterns("data"))
+    (beta / "edr.toml").write_text((beta / "edr.toml").read_text().replace('project = "demo"', 'project = "beta"'))
+    monkeypatch.chdir(beta)
+    seed(beta, "b_nodw", "stage:synth", pid=dead_pid(), date="20260926_1300")
+    assert edr(capsys, "register")[0] == 0
+    monkeypatch.chdir(tmp_path)
     token = tmp_path / "token"
     token.write_text("1:A")
-    ctx = cli.Ctx(argparse.Namespace(json=False, dry_run=False))
-    ctx.project.site.telegram = Telegram(token_file=token, chat_id=42)
-    bot = TelegramBot(ctx.project.site, ctx.project, ctx.db, cli.Actions(ctx), str(token))
+    router = cli.Router(argparse.Namespace(json=False, dry_run=False, command="serve"))
+    assert router.names() == ["beta", "demo"] and router.resolve("demo/b_nodw@demo") == ("demo", "b_nodw@demo")
+    with pytest.raises(Refuse, match="more than one project has it: beta/b_nodw@demo, demo/b_nodw@demo"):
+        router.resolve("b_nodw@demo")
+    assert router.pick(["beta", "x"], None) == ("beta", ["x"]) and router.pick(["x"], ("demo", b)) == ("demo", ["x"])
+    with pytest.raises(Refuse, match="name a project first: beta, demo"):
+        router.pick(["x"], None)
+    project = config.load_project(demo)
+    site = replace(project.site, telegram=Telegram(token_file=token, chat_id=42))
+    with Database(project.data / "edr.db") as db:
+        sender = TelegramBot(site, project, db, None, str(token))
+        sender.api.call = lambda method, params, files=None: {"message_id": 7}
+        alert = watch.alerts.run_alert(project, db.run(b), "hung", ["hung: x"], json.loads((bdir(demo) / f"{b}.json").read_text()),
+                                       time.time())
+        sender.send(alert)  # the watcher of demo remembers the run of message 7
+    assert router.run_of("demo", 7) == b and router.replied(7) == ("demo", b) and router.run_of("beta", 7) is None
+    bot = TelegramBot(site, project, serve.Store(), router, str(token))
     bot.api.call = lambda method, params, files=None: {}
-    press = {"id": "q", "from": {"id": 7}, "data": "ack:b_nodw@demo",
-             "message": {"message_id": 1, "chat": {"id": 42}, "text": "dead b_nodw@demo"}}
+    press = {"id": "q", "from": {"id": 7}, "data": "keep6:demo", "message": {"message_id": 7, "chat": {"id": 42}, "text": "x"}}
     bot.handle_update({"update_id": 1, "callback_query": press})
-    events = ctx.db.events()
-    assert [(e["actor"], e["run_id"], e["kind"]) for e in events] == [("telegram", b, "keep")]
-    ctx.close()
+    assert keep_file(demo, b) == {"hours": 6} and not list((beta / "data").glob("x"))
+    with Database(project.data / "edr.db") as db:
+        assert [(e["actor"], e["run_id"], e["kind"]) for e in db.events()] == [("telegram", b, "keep")]
+    assert "beta" in router.projects_text() and "demo" in router.board_text()
+    assert "b_nodw" in router.events_text(5) and router.tools_text().startswith("<b>demo</b>")
+    hosts = router.hosts_text().splitlines()  # max_per_host counts the runs of both projects
+    assert hosts[0].startswith("🔴 <b>local</b>") and hosts[0].endswith("yours: beta 1, demo 1, 0 cores, 0 GB scratch")
+    assert hosts[1] == "    <i>2 of your runs, max_per_host is 2</i>" and "<b>beta</b>" in router.digest_text()
+
 
 # retire
 

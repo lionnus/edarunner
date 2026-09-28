@@ -14,7 +14,7 @@ keys.
 
 | Channel | Alerts | Buttons | Board | Commands |
 |---|---|---|---|---|
-| Telegram | one message per alert, edited in place | keep, ack, stop | one pinned message | yes |
+| Telegram | one message per alert, edited in place | Stop and +6h, +12h, +24h; Stop and Free space on a full host | one pinned message | yes |
 | ntfy | one push per alert, priority by kind | a copy button and a line per command | on request | no |
 | mail | one mail per alert | a line per command | on request | no |
 
@@ -30,13 +30,13 @@ other message is `<project>: <kind>`.
 
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
-| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; `hung`, `looping`, `over_budget`, `host_full` and `superseded` also get the keep, ack and stop buttons | one push per change, with the next command, and the button commands with three copy buttons | one mail per change, with the next command and the button commands |
+| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, and one on a full host Stop and Free space | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
 | alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
 | `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |
-| `board` | the watcher every cycle | one pinned message, edited in place | none | none |
+| `board` | the supervisor every minute, or a watcher without a supervisor every cycle | one pinned message, edited in place | none | none |
 | `board` on request | `edr notify --board` | one new message | one low push | one mail |
 | `note` | `edr notify TEXT` | one message | one push, the lowest priority with `--silent` | one mail |
 | a command reply, the result of a detached command, a button answer | the bot, for a command from the chat | a reply in the chat | none; ntfy takes no commands | none; mail takes no commands |
@@ -44,8 +44,9 @@ other message is `<project>: <kind>`.
 
 ntfy and mail have no callback buttons. The alert text carries each
 button as a line `<label>: <command>`, for example
-`ack: edr keep a@demo --ack`. On ntfy a copy button also puts the
-command on the clipboard. A server without copy buttons refuses the
+`+6h: edr keep a@demo --hours 6`. On ntfy the first three buttons also
+come as copy buttons, which put the command on the clipboard, since ntfy
+takes three actions per message. A server without copy buttons refuses the
 push with a 400, and the channel sends it again without the buttons.
 
 The board changes every cycle, so the watcher keeps a live copy of it
@@ -65,11 +66,13 @@ A cron line mails the board every morning:
 
 ## Telegram
 
-The bot is a thread of `edr watch`. It sends the alerts with three
-buttons, keeps one pinned board message, and answers commands from one
-chat. It uses long polling over outbound HTTPS, so it needs no open port
-and no webhook. [reference/bot.md](../reference/bot.md) lists every
-command.
+One bot serves every registered project. It runs in `edr serve`, or,
+without a supervisor, in the first watcher that takes
+`~/.edr/serve.lock`. It keeps one pinned board and answers the commands
+and the button presses of one chat. Every watcher sends the alerts of
+its own project through the same bot. The bot uses long polling over
+outbound HTTPS, so it needs no open port and no webhook.
+[reference/bot.md](../reference/bot.md) lists every command.
 
 ### Set up the bot
 
@@ -83,7 +86,7 @@ command.
    ```
 
    The bot does not start when the file is missing or when the group or
-   others can read it. `edr watch` logs the reason.
+   others can read it. `edr serve` logs the reason.
 3. Add the section to `site.toml`:
 
    ```toml
@@ -93,53 +96,58 @@ command.
    user_id = 0
    ```
 
-4. Open the new bot on the phone and send `/start`. Start `edr watch`.
+4. Open the new bot on the phone and send `/start`. Start `edr serve`.
    With `chat_id = 0` the bot obeys nobody, but it prints the chat id of
-   the first message it receives to stderr:
+   the first message it receives to stderr, the journal of the service:
 
    ```
    telegram: the first message came from chat 987654321; set chat_id = 987654321 in [telegram]
    ```
 
-5. Put that number in `chat_id` and restart `edr watch`. The bot now
+5. Put that number in `chat_id` and restart `edr serve`. The bot now
    publishes its command menu with `setMyCommands` and answers.
 
 `user_id` is optional. When it is set, the bot obeys the messages and
 the button presses of that one user and ignores every other member of
 the chat. When it is unset, the chat is the only gate, so the chat must
-be a private one; `edr watch` logs a warning to say so. Your user id is
+be a private one; `edr serve` logs a warning to say so. Your user id is
 the `from.id` of a message; a bot such as @userinfobot shows it.
 
 ### Who the bot obeys
 
 The bot obeys one `chat_id`, and one `user_id` when it is set. Every
 other chat or user gets no answer, and the first message from it
-records one `rejected` event in the database. The token is the one
+records one `rejected` event: in the journal of `edr serve`, or in the
+events of the project of a watcher without a supervisor. The token is the one
 secret; it lives in a file with mode 600, and the bot refuses any other
 mode.
 
 The bot never runs a shell string or free text. A custom command is an
 argv list from the site file on the head node, and every argument from
 the phone must match its allowlist regex in full. The bot never kills a
-process, and never runs `retire`, `prune`, `launch` or `rm`. `/stop`
-writes the `after-task` stop file, and `/keep` and `/ack` write the keep
-file, through the same code as the command line. Every command, action
-and refusal goes into the events with the actor `telegram`.
+process, and never runs `launch` or `rm`. `/stop` and the Stop button
+write the `after-task` stop file, `/keep` and the +6h, +12h and +24h
+buttons write the keep file, and the Free space button runs
+`edr retire --host <host> --prune <names>`, each through the same code
+as the command line. Every action goes into the events of its project
+with the actor `telegram`, and a refusal goes where a `rejected` event
+goes.
 
 ### Replies on the phone
 
 Every message starts with one bold line that names the project, so the
-messages of two projects in one chat stay apart. Under that line, a
-reply is formatted text: one short line per item, a run handle in
-monospace, and a count or a note in italics. A tap on a handle copies
-it, so you can paste it into `/status <handle>`.
+messages of two projects in one chat stay apart; a message of the
+supervisor names `edr`. Under that line, a reply is formatted text: one
+short line per item, a run handle in monospace, and a count or a note in
+italics. A tap on a handle copies it, so you can paste it into
+`/status <handle>`.
 
 The first line is `<project>: <title>`. Each run line starts with one
 mark for its state; [reference/states.md](../reference/states.md) lists
 them.
 
 A `<pre>` block holds only text whose width the bot does not control:
-the last log line of `/status <handle>`, the columns of `/compare` and
+the last log lines of `/status <handle>`, the columns of `/compare` and
 `/metric`, and the output of a custom command. A message stays under
 the limit of 4096 characters; the bot cuts a long reply at a line end.
 
@@ -152,44 +160,85 @@ four parts:
 - the title: the mark of the state, the project and the state in bold,
   then the run handle or the host in monospace;
 - one or two sentences on what edarunner saw and why it matters;
-- the facts: the stage and step, the host, and the last log line or the
-  command line in monospace, cut to 120 characters;
+- the facts: the stage and step, the host, and the command line in
+  monospace, cut to 120 characters, then the last four lines of the log
+  of the running stage or task in one block, each cut to 100 characters;
 - what to do: the command to run next in monospace, and what edarunner
   does by itself.
 
-[What each alert says](#what-each-alert-says) shows every kind. The
-alerts of a live run that still reads its keep and stop files (`hung`,
-`looping`, `over_budget`, `host_full` and `superseded`) carry three
-inline buttons:
+[What each alert says](#what-each-alert-says) shows every kind. Only
+the alert of a run that is still live carries buttons:
 
-| Button | `callback_data` | Action |
-|---|---|---|
-| keep 12h | `keep12:<handle>` | `edr keep <handle> --hours 12` |
-| ack | `ack:<handle>` | `edr keep <handle> --ack` |
-| stop | `stop:<handle>` | asks first, then `edr stop <handle> --after-task` |
+| Alert | Buttons |
+|---|---|
+| `hung`, `looping`, `over_budget`, `superseded` | Stop, +6h, +12h, +24h |
+| `host_full` | Stop, and Free space when the project declares prune targets |
 
-The bot answers every press, appends the result to the alert text, and
-keeps the buttons. Each press records one event in the project database,
-the `keep` or `stop` event of that action, with the actor `telegram`.
+| Button | Action |
+|---|---|
+| Stop | asks once more, then `edr stop <handle> --after-task` |
+| +6h, +12h, +24h | `edr keep <handle> --hours 6`, 12 or 24: that many more hours on the budget of the running stage or task, and for as long the watcher neither kills the run as `hung` nor stops it as `superseded` |
+| Free space | asks once more, then `edr retire --host <host> --prune <names>` with every prune name of the project: it removes the prune targets of the finished runs of the project on the full host |
 
-The stop button acts only on a second tap. The first tap adds the line
-`Stop <handle>?` to the alert and shows two buttons, `Yes, stop` and
-`No`. `No` restores the three buttons. A question older than 10 minutes
-is stale: `Yes, stop` then restores the buttons and stops nothing. The
-bot reads the age from the edit date of the message, so a question
-survives a restart of the watcher.
+A keep never holds off the stop of a full host. A full scratch disk
+blocks every other user of the host, so after `grace_s` the watcher
+stops the newest run there unless the disk gets back above the floor.
+An `over_budget` alert of a stage with `kill = true` gets no buttons,
+since the driver has sent `SIGTERM` to the stage already. Each alert
+says in one line what its buttons do.
+
+The `callback_data` of a button names the action and the project, such
+as `keep6:demo`, and the run is the one of the alert: the watcher that
+sent it keeps its message id for 7 days.
+[reference/bot.md](../reference/bot.md#alert-buttons) lists them. The
+bot answers every press, appends the result to the alert text, and
+keeps the buttons. Each press records one event in the database of the
+project, the event of that action, with the actor `telegram`.
+
+Stop and Free space act only on a second tap. The first tap adds a
+question to the alert, such as `Stop b_nodw@demo after its current
+task?`, and shows two buttons, `Yes, stop` and `No`. `No` restores the
+buttons of the alert. A question older than 10 minutes is stale: a tap
+on its yes then restores the buttons and does nothing. The bot keeps
+each open question on disk, so it survives a restart.
 
 ### The board
 
-The board is one message, pinned once and edited silently on every
-watcher cycle. Its first line holds the project name and the time of the
-last edit. Under it come two sections, each with one line per run: the
-mark, the handle in monospace, which a tap copies, and what the run
-does.
+The board is one message, pinned once and edited silently every cycle.
+Its message id stays on disk, so a restart edits the same message.
+`/pin` unpins the old message and
+pins a new one at the bottom of the chat. Under `edr serve` the board
+holds every registered project; a watcher without a supervisor pins the
+board of its own project.
 
-- Running: the live runs, the worst state first. A line holds the state
-  when it is not `running`, the stage with its step of the total and the
-  step name, and the time since the run started. A stage with steps
+The board of every project, which `/status` also sends, has a bold line
+per project and under it one line per live run: its number, the mark,
+the handle in monospace, which a tap copies, and what the run does. A
+line holds the state when it is not `running`, the stage with its step
+of the total and the step name, and the time since the run started. The
+numbers count on over every project, so `/status #2` names the second
+run of the board. A project with no live run gets one line with the
+count of its runs that ended in the last 24 hours. Machines lists each
+host that holds a run of yours, with its free room and what your runs
+use there. The last line counts the live runs per state:
+
+```
+edr: board 14:05
+demo
+#1 🔴 a@demo dead, synth 3/13 elaborate, 5h
+#2 🟢 c@demo pnr 9/13 route_opt, 3h
+power nothing live, 2 ended in 24 h
+
+Machines
+hostA free 21/32 cores, 93/376 GB RAM, 195/1538 GB scratch; yours: demo 2, 16 cores, 120 GB scratch
+
+2 live: 1 dead, 1 running. /status <project> shows one project.
+```
+
+The board of one project, which `/status <project>` sends and a lone
+watcher pins, has two sections with one line per run:
+
+- Running: the live runs, the worst state first. A stage with steps
   shows `starting` until the first step.
 - Finished in the last 24 hours: the state and when the run ended. The
   older runs fold into one line, `and N older runs: /status all`, and
@@ -213,32 +262,30 @@ and 4 older runs: /status all
 ```
 
 Each section shows at most 30 runs and then a line `… and N more`.
-When no run is live, the Running section says `nothing live`. The board's
-message id lives in the database's `store` table under `telegram`, so a
-restart edits the same message.
-`/pin` unpins the old message and pins a new one at the bottom of the
-chat.
+When no run is live, the Running section says `nothing live`.
 
 ### Built-in commands
 
 [reference/bot.md](../reference/bot.md) lists every built-in command
 with its arguments. A handle is `label@batch`, a run id prefix, or `#n`
-from the last board.
+from the last board; `project/label@batch` also names the project.
 
 `/status <handle>` shows the mark, the handle and the state, then the
 stage and step, the host and the age, the proposed command in monospace,
-and the last log line in a `<pre>` block. `/events` shows one line
+and the last four log lines in a `<pre>` block. `/events` shows one line
 `HH:MM kind handle` per event, the kind in bold, and the reason indented
 under it in italics; it shows a handle in place of a run id. `/hosts`
-shows one line per host, with the same colour marks as `edr hosts` and
-each resource as used/total:
+shows one line per host: the mark of `edr hosts`, which says whether a
+run can start there, the free room of total, and your runs there by
+project with the cores and scratch they use:
 
 ```
-hostA 🟢 cores 21/32, 🟡 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0/1
+🟢 hostA free 21/32 cores, 93/376 GB RAM, 195/1538 GB scratch, 1/1 GPUs; yours: demo 1, 8 cores, 40 GB scratch
 ```
 
-The hosts come in the order of `edr hosts`, the worst mark first. A host
-without a GPU has no `gpu` part, and a host that fails the probe shows
+The hosts come in the order of `edr hosts`, the ones where a run can
+start first. A line in italics under a host says why no run can start
+there, or that your runs fill it. A host that fails the probe shows
 `⚫ no answer`. `/tools` shows `fc 3/8 seats used, hostA, hostB` per tool.
 `/help` lists the commands as links that you can tap. `/compare` and
 `/metric` reply with a `<pre>` block of aligned columns.
@@ -279,11 +326,11 @@ Claude session in a directory that is not trusted, says why.
 ### The keyboard
 
 `/start` and `/keyboard` show a reply keyboard under the text field. It
-stays until `/keyboard off` removes it. Its buttons are five words:
+stays until `/keyboard off` removes it. Its buttons are six words:
 
 ```
-Status   Hosts
-Events   Tools   Digest
+Status   Projects   Hosts
+Events   Tools      Digest
 ```
 
 A tap sends the word as a plain message, and the bot runs the command
@@ -326,13 +373,13 @@ limit instead.
 ### Reply to an alert
 
 A command sent as a reply to an alert acts on the run of that alert, so
-it needs no handle. The bot keeps the message id and the run id of every
-alert of the last 7 days in the database's `store` table, under `telegram`.
+it needs no handle. The watcher that sends an alert with buttons keeps
+its message id and run id for 7 days in the `store` table of the
+project database, under `telegram`.
 
 | Reply | Same as |
 |---|---|
 | `/keep 24` | `/keep <run> 24` |
-| `/ack` | `/ack <run>` |
 | `/stop disk full` | `/stop <run> disk full` |
 | `/status` | `/status <run>` |
 
@@ -355,69 +402,48 @@ reply = "Claude session for {handle} started on {host}"
 The same command without a reply answers
 `/claude_run: missing placeholder {host} in '...'` and runs nothing.
 
-### One chat, or one per project
+### One bot for every project
 
-The default is one bot in one chat for every project of a site. The bold
-first line of every message names the project, so the messages of two
-projects stay apart.
+One bot in one chat serves every registered project, and the bold first
+line of every message names the project. Telegram lets one consumer poll
+a bot token, so only the holder of `~/.edr/serve.lock` polls: `edr serve`,
+or without it the first watcher that takes the lock. Every other watcher
+sends its alerts and polls nothing.
 
-Telegram lets one consumer poll a bot token. Two watchers on one token
-fight over the updates and each sees half of them. So with one bot, set
-`telegram_poll = false` in `edr.toml` of every project but one. A
-project without the poll sends its alerts and its board to the chat, but
-its alerts carry no buttons. The commands reach the one watcher that
-polls, and act on its project only.
+A command acts on every project, or names one as its first word:
 
-A chat per project, such as one Telegram group per project, needs a bot
-per project, because each watcher must poll its own token. To set it
-up:
+- `/status`, `/events`, `/hosts`, `/tools` and `/digest` answer for every
+  project. `/status demo` and `/events demo 20` answer for `demo` alone.
+- A handle names a run of any project. When two projects know the
+  handle, the bot refuses it and names both; write `demo/b_nodw@demo`
+  then.
+- A reply to an alert acts on the run of that alert.
+- `/board`, `/csv` and `/metric` need a project. They take the first
+  word, else the project of the alert they reply to, else the only
+  project.
 
-1. Make one more bot with @BotFather, as in [Set up the bot](#set-up-the-bot). Write its
-   token to its own file, mode 600, for example
-   `~/.config/edarunner/myflow.token`.
-2. Make a group, add the bot, and send `/start` in the group.
-3. Add a `[telegram]` table to `edr.toml` of that project:
-
-   ```toml
-   [telegram]
-   token_file = "~/.config/edarunner/myflow.token"
-   chat_id = 0
-   ```
-
-4. Restart the watcher of that project. It prints the chat id of the
-   group to stderr. A group id is negative. Put it in `chat_id` and
-   restart the watcher again.
-
-The table in `edr.toml` replaces `token_file`, `chat_id`, `user_id` and
-`topic_id` of the site for this project only; the custom commands stay
-in `site.toml`. Keep `telegram_poll = true` in a project with its own
-bot.
-
-### Topics: one group, one thread per project
+### Topics
 
 A Telegram group with Topics on is a forum: each topic is a thread with
-its own id. `topic_id` in `[telegram]` puts every message of a project
-into one thread: the alerts, the board, the replies and the pinned
-board. The bot then obeys a command or a button press only when it
-comes from that thread. It ignores a command from another thread
-without an event, because the watcher of another project answers it.
+its own id. `topic_id` in `[telegram]` of the site file puts every
+message of the bot into one thread: the alerts, the board, the replies
+and the pinned board. The bot then obeys a command or a button press
+only when it comes from that thread.
 
 To set it up:
 
 1. Make a group and turn on Topics in the group settings.
-2. Add the bot of each project and make it an admin with the right to
-   pin messages. An admin bot also receives the plain words of the
-   reply keyboard.
-3. Make one topic per project.
-4. Start the watcher of the project without `topic_id` and send
-   `/status` in its topic. The watcher prints the id of the topic to
-   stderr:
+2. Add the bot and make it an admin with the right to pin messages. An
+   admin bot also receives the plain words of the reply keyboard.
+3. Make one topic for the bot.
+4. Start `edr serve` without `topic_id` and send `/status` in the topic.
+   The bot prints the id of the topic to stderr:
 
    ```
-   telegram: a message came from topic 17 of chat -1001234; set topic_id = 17 in [telegram] of edr.toml
+   telegram: a message came from topic 17 of chat -1001234; set topic_id = 17 in [telegram]
    ```
 
-5. Put the id into `edr.toml` of that project and restart its watcher:
+5. Put the id into `[telegram]` of the site file and restart `edr serve`:
 
    ```toml
    [telegram]
@@ -426,14 +452,14 @@ To set it up:
    ```
 
 Without `topic_id`, the bot answers a command in the thread it came
-from, and it sends its alerts and its board to the main thread. Each
-project that answers commands still needs its own bot, because one
-token has one poller.
+from, and it sends its alerts and its board to the main thread.
 
 ## What each alert says
 
-Each example shows the Telegram message as it reads on the phone. ntfy
-and mail carry the same text; mail indents each command by four
+Each example shows the Telegram message as it reads on the phone, with
+each button as `[label]`. The first example shows the four log lines of
+an alert; the others show one line to stay short. ntfy and mail carry
+the same text; mail indents each command and each log line by four
 spaces, and a button becomes a line `<label>: <command>`.
 [reference/states.md](../reference/states.md) says when the watcher
 finds each state.
@@ -446,7 +472,11 @@ The run has written no heartbeat for 50m, and its driver 4711 is gone from hostA
 
 stage: synth, step 3 elaborate
 host: hostA
+
+Information: reading top.v
 Information: elaborating top
+Warning: latch inferred for q (VER-2)
+Information: 4 designs read
 
 Resume it from the last step:
 edr continue b_nodw@demo --stage synth --from elaborate
@@ -461,11 +491,15 @@ The run is alive, but it has shown no progress since 14.01 03:00: the step, the 
 
 stage: synth, step 3 elaborate
 host: hostA
+
 Information: elaborating top
 
 If it is stuck, stop it:
 edr stop b_nodw@demo --why hung
 edarunner leaves it alone, since kill_hung is off.
++6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.
+
+[Stop]  [+6h]  [+12h]  [+24h]
 ```
 
 `looping`: the same failure, `streak` times in a row.
@@ -477,52 +511,68 @@ The last 2 tasks failed with the same error, so the driver starts no new task. M
 stage: synth, step 3 elaborate
 host: hostA
 tasks: 4 done, 3 failed
+
 Information: elaborating top
 
 Read the log and fix the cause, then stop the run:
 edr stop b_nodw@demo --why looping
++6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.
+
+[Stop]  [+6h]  [+12h]  [+24h]
 ```
 
 `over_budget`: a stage went past its `budget`.
 
 ```
 🔴 demo: over budget in b_nodw@demo
-Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end, and the run then ends OVER_BUDGET.
+Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end; more time on the budget before then lets the run go on.
 
 stage: synth, step 3 elaborate
 host: hostA
+
 Information: elaborating top
 
 Stop it now if the rest of the stage is of no use:
 edr stop b_nodw@demo --why over-budget
++6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.
+
+[Stop]  [+6h]  [+12h]  [+24h]
 ```
 
 `host_full`: the free scratch of a host is below its floor, `host_free_min_gb` of the site or of the host.
 
 ```
 🟡 demo: disk almost full on hostA
-hostA has less than 100 GB of free scratch, so the driver starts nothing new there. edarunner stops the newest run on hostA 1h after this alert unless that run has an ack.
+hostA has less than 100 GB of free scratch, so the driver starts nothing new there, and the full disk blocks every other user of hostA. edarunner stops the newest run on hostA 1h after this alert unless the disk gets back above the floor.
 
 stage: synth, step 3 elaborate
 run: b_nodw@demo
+
 Information: elaborating top
 
-Free scratch on the host. To keep this run from the stop, ack it:
-edr keep b_nodw@demo --ack
+Free scratch on the host, or stop this run:
+edr stop b_nodw@demo --after-task --why host-full
+Stop ends the run after its current task, and Free space removes the prune targets netlist of the finished runs of demo on hostA. On Telegram both ask once more.
+
+[Stop]  [Free space]
 ```
 
 `superseded`: a newer batch runs the same label at another source.
 
 ```
 🟡 demo: newer run replaces b_nodw@demo
-A newer run of the same label runs at another source (20260927_0900_b_nodw_demo_gdef5678). edarunner stops this run after its running task, 1h after this alert, unless it has a keep file.
+A newer run of the same label runs at another source (20260927_0900_b_nodw_demo_gdef5678). edarunner stops this run after its running task, 1h after this alert, unless it has a keep.
 
 stage: synth, step 3 elaborate
 host: hostA
+
 Information: elaborating top
 
 To keep it running:
 edr keep b_nodw@demo --hours 12
++6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.
+
+[Stop]  [+6h]  [+12h]  [+24h]
 ```
 
 `held`: the scheduler holds the job.
@@ -546,6 +596,7 @@ The run ended with 3 failed and 1 skipped tasks. Their results are missing.
 stage: synth, step 3 elaborate
 host: hostA
 tasks: 4 done, 3 failed, 1 skipped
+
 Information: elaborating top
 
 See which tasks failed and the log tail:
@@ -560,6 +611,7 @@ The run ended in stage synth with exit code 1.
 
 stage: synth, step 3 elaborate
 host: hostA
+
 Information: elaborating top
 
 See the stage that failed and the log tail:
@@ -574,6 +626,7 @@ A signal ended the run (SIGTERM), so its last stage did not finish.
 
 stage: synth, step 3 elaborate
 host: hostA
+
 Information: elaborating top
 
 See the last stage and the log tail:
@@ -740,7 +793,8 @@ message has five parts:
 - the live runs, with the stage and the time since the start;
 - the queued runs;
 - the three hosts with the least free scratch, as used of total;
-- the open alerts: live runs in an alert state without an `ack`.
+- the open alerts: live runs in an alert state without a keep that
+  still holds.
 
 ```
 demo: digest
