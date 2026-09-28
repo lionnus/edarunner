@@ -246,6 +246,7 @@ the number does not apply.
 | `pass` | a rule the value must meet: `==`, `!=`, `<`, `<=`, `>` or `>=` and a number, such as `"== 0"`; `edr metrics`, `edr compare` and `--over steps` print FAIL next to a value that breaks it | unset |
 | `record` | `{ stage, from }`: the step of record of a run is its deepest step of `stage` with a value, at or after step `from`. `edr compare`, compare.html, the MLflow export and the `record` column of metrics.csv take that step, and a run without one is named missing. The stage needs `steps`, and the metric needs `step` | unset |
 | `optional` | a file without the number gives no row instead of a failed one: no match of `regex`, no row of `csv` that matches `where`, no key of `json` | `false` |
+| `better` | `"lower"` or `"higher"`: the direction in which the number improves, such as lower for an area and higher for a slack. compare.html colours a change that way green and the other way red; a metric without the key gets no colour | unset |
 
 ### [parameters.<name>]
 

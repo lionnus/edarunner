@@ -275,11 +275,12 @@ def test_pattern_resolver(tmp_path):
         config.resolve_task(p, "gemm_x")
 
 
-def test_metric_reduce_and_pass_rule(tmp_path):
+def test_metric_reduce_pass_rule_and_better(tmp_path):
     root = demo_copy(tmp_path)
     p = config.load_project(root)
     assert (p.metrics["wns_ns"].reduce, p.metrics["setup_violations"].reduce) == ("min", "sum")
     assert (p.metrics["setup_violations"].pass_, p.metrics["area_cell_um2"].pass_) == ("== 0", "")
+    assert [p.metrics[n].better for n in ("area_cell_um2", "wns_ns", "power_w")] == ["lower", "higher", ""]
     toml = root / "edr.toml"
     text = toml.read_text()
     for old, new, match in (('reduce = "min"', 'reduce = "mean"', "wns_ns.reduce needs regex and is one of first, last"),
@@ -287,7 +288,8 @@ def test_metric_reduce_and_pass_rule(tmp_path):
                             ('pass = "== 0"', 'pass = "0"', 'setup_violations.pass is an operator and a number'),
                             ('pass = "== 0"', 'pass = "== none"', "pass is an operator and a number"),
                             ('pass = "== 0"', "pass = 0", "pass is an operator and a number"),
-                            ('pass = "== 0"', 'pass_ = "== 0"', "unknown key 'metrics.setup_violations.pass_'")):
+                            ('pass = "== 0"', 'pass_ = "== 0"', "unknown key 'metrics.setup_violations.pass_'"),
+                            ('better = "higher"', 'better = "up"', 'wns_ns.better is "lower" or "higher"')):
         toml.write_text(text.replace(old, new))
         with pytest.raises(ConfigError, match=match):
             config.load_project(root)

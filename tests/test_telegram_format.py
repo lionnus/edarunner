@@ -83,3 +83,13 @@ def test_run_detail_strips_colour_codes_from_the_log_line():
     row = board_row("run1", "c", "stage:synth", "running")
     hb = {"last_log": "ok\n\x1b[1;31mError:\x1b[0m timing <met>\x1b[K\n"}
     assert fmt.run_detail(row, hb, NOW).splitlines()[-2:] == ["<pre>ok", "Error: timing &lt;met&gt;</pre>"]
+
+
+def test_a_compare_of_300_rows_keeps_its_first_rows_under_the_message_limit():
+    rows = [f"area_{n} um2\n  alpha  {n}.5 (pnr 12)\n  beta   {n}.7 (pnr 12)  +0.1%" for n in range(300)]
+    missing = ["missing: gamma has pnr steps 8 to 9"]
+    text = fmt.first_rows(rows, missing)
+    kept = text.count(" um2\n")
+    assert len("demo: compare\n" + text) < 4096 and text.startswith("\n".join(rows[:2]) + "\n")
+    assert text.splitlines()[-2:] == [f"… {300 - kept} more rows", *missing] and kept > 40
+    assert fmt.first_rows(rows[:3], missing) == "\n".join([*rows[:3], *missing])

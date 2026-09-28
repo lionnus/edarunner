@@ -62,6 +62,10 @@ class FakeActions:
     def metrics_csv(self, source: str) -> bytes:
         return f"run_id,source\nr1,{source}\n".encode()
 
+    def compare_page(self, handles: list[str]) -> bytes:
+        self.calls.append(("compare_page", (handles,), {}))
+        return b"<html>compare</html>"
+
     def run_info(self, handle: str) -> dict:
         self.calls.append(("run_info", (handle,), {}))
         return {"handle": "a@demo", "run_id": handle, "run_root": "/scratch/edr/demo/" + handle, "host": "hostA"}

@@ -429,6 +429,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     add_metric(demo, a, "area_cell_um2", 1031.5, step=5, stage="pnr")
     add_metric(demo, b, "area_cell_um2", 999.0)
     add_metric(demo, a, "power_w", 0.25, step=None, task="k_small")
+    add_metric(demo, b, "power_w", 0.3, step=None, task="k_small")
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     assert acts.keep("b_nodw@demo", 5, "telegram") == ("b_nodw@demo: keep 5 h, and no automatic stop or kill for as long "
                                                          "unless its host runs out of scratch")
@@ -452,14 +453,17 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert len(events) == 4 and "keep" in events[2]
     assert b not in acts.events_text(8)
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
-    # The area of a is at its step of record, pnr 5; b_nodw has no pnr step, so it is named missing.
-    assert cmp[:3] == ["area_cell_um2", "  a       1031.5 (pnr 5)", "  b_nodw               -"]
-    assert cmp[3:] == ["power_w[k_small]", "  a       0.25", "  b_nodw     -", "missing: b_nodw has no pnr step"]
+    # The area of a is at its step of record, pnr 5; b_nodw has no pnr step, so it is named missing. The percent is
+    # against the first run.
+    assert cmp[:3] == ["area_cell_um2 u", "  a       1031.5 (pnr 5)", "  b_nodw               -"]
+    assert cmp[3:] == ["power_w[k_small] u", "  a       0.25", "  b_nodw   0.3  +20.0%", "missing: b_nodw has no pnr step"]
+    page = acts.compare_page(["b_nodw@demo", "a@demo"]).decode()
+    assert json.loads(re.search(r'id="edr-tick">(.*?)</script>', page)[1]) == {"runs": [b, a], "named": True}
     assert len(acts.metric_text("design__instance__area", None).splitlines()) == 4 and acts.metric_text("design__instance__area", "zzz") == "no metrics"
     assert acts.hosts_text().startswith("🟢 <b>local</b> free ")
     assert acts.tools_text() == "<b>demo</b> 2/10 seats used, local"
     assert acts.metrics_csv("abc1234").decode().splitlines()[0].startswith("run_id,label,")
-    assert len(acts.metrics_csv("abc1234").decode().splitlines()) == 5 and acts.metrics_csv("zzz").count(b"\n") == 1
+    assert len(acts.metrics_csv("abc1234").decode().splitlines()) == 6 and acts.metrics_csv("zzz").count(b"\n") == 1
     assert acts.board_files() == []
     (demo / "data" / "board").mkdir(parents=True)
     (demo / "data" / "board" / "status.html").write_text("<html></html>")

@@ -64,7 +64,8 @@ BUILTINS = {b.name: b for b in (
     Builtin("keep", "<handle> [hours]", "that many more hours on the budget, default 12, and no kill as hung and no "
                                         "stop as superseded for that long", "Act on a run", self_logged=True, on_run=True),
     Builtin("stop", "<handle> [why]", "stop after the running task", "Act on a run", self_logged=True, on_run=True),
-    Builtin("compare", "<handle>...", "metrics side by side, runs of one project", "Compare", "pre"),
+    Builtin("compare", "<handle>...", "metrics side by side, runs of one project, and compare.html opened on them",
+            "Compare", "pre", slow=True),
     Builtin("metric", "[project] <name> [--source SOURCE]", "one metric per run", "Compare", "pre"),
     Builtin("help", "", "this list", "Help", "html"),
     Builtin("start", "", "this list and the reply keyboard", "Help", "html"),
@@ -265,14 +266,16 @@ class Commands:
             return Reply("stop", act.stop_after_task(h, "telegram", why), project=project)
 
     def cmd_compare(self, args: list[str]) -> Reply | str:
-        """The metrics of several runs of one project side by side."""
+        """The metrics of several runs of one project side by side, and compare.html opened on those runs."""
         if not args:
             return "usage: /compare <handle>..."
         found = [self._handle([a]) for a in args]
         if len({p for p, _ in found}) > 1:
             raise ValueError("compare takes the runs of one project")
-        with self.router.actions(found[0][0]) as act:
-            return Reply("compare", act.compare_text([h for _, h in found]), "pre", project=found[0][0])
+        project, handles = found[0][0], [h for _, h in found]
+        with self.router.actions(project) as act:
+            return Reply("compare", act.compare_text(handles), "pre",
+                         documents=[Document("compare.html", act.compare_page(handles))], project=project)
 
     def cmd_metric(self, args: list[str]) -> Reply | str:
         """One metric for every run of a project, or for the runs of one source."""

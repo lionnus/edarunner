@@ -42,6 +42,21 @@ def fit(text: str) -> str:
     return text if len(text) <= LIMIT else text[:LIMIT].rsplit("\n", 1)[0] + "\n…"
 
 
+def first_rows(rows: list[str], tail: list[str], limit: int = LIMIT) -> str:
+    """`rows`, each of one or more lines, then the lines of `tail`, in at most `limit` characters: the rows at the end
+    that do not fit give way to a line `… N more rows`."""
+    text = "\n".join(rows + tail)
+    if len(text) <= limit:
+        return text
+    room, kept = limit - len("\n".join(tail)) - 30, []  # 30 holds the line that counts the rest
+    for r in rows:
+        room -= len(r) + 1
+        if room < 0:
+            break
+        kept.append(r)
+    return "\n".join([*kept, f"… {len(rows) - len(kept)} more rows", *tail])
+
+
 def mark(state: str) -> str:
     """The mark of a run state; an unknown state gets the mark of done."""
     return MARK.get(state, "⚪")

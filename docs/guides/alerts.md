@@ -173,6 +173,7 @@ A `<pre>` block holds only text whose width the bot does not control:
 the last log lines of `/status <handle>`, the columns of `/compare` and
 `/metric`, and the output of a custom command. A message stays under
 the limit of 4096 characters; the bot cuts a long reply at a line end.
+`/compare` keeps its first rows and ends with `… N more rows`.
 
 ### Alerts
 
@@ -318,7 +319,8 @@ start first. A line in italics under a host says why no run can start
 there, or that your runs fill it. A host that fails the probe shows
 `⚫ no answer`. `/tools` shows `fc 3/8 seats used, hostA, hostB` per tool.
 `/help` lists the commands as links that you can tap. `/compare` and
-`/metric` reply with a `<pre>` block of aligned columns.
+`/metric` reply with a `<pre>` block of aligned columns, and `/compare`
+then sends compare.html opened on its runs.
 
 A custom command replies with the output of its program as it is. Give
 the program a narrow format, or the phone wraps the lines.
@@ -388,8 +390,9 @@ fail; the bot ignores that failure and answers as usual.
 
 ### Files
 
-Three commands answer with a file instead of a message. The phone opens
-an HTML file in its browser and a CSV file in a sheet app.
+Three commands answer with a file instead of a message, and `/compare`
+sends one after its message. The phone opens an HTML file in its browser
+and a CSV file in a sheet app.
 
 - `/log <handle> [n]` fetches the last `n` lines, default 200, of the
   log of the running or last stage from the host, with the same ssh
@@ -398,6 +401,9 @@ an HTML file in its browser and a CSV file in a sheet app.
   of the last watcher cycle.
 - `/csv <source>` sends `metrics.csv`, the output of
   `edr metrics --source <source> --csv`.
+- `/compare <handle>...` sends `compare.html` opened on the runs of the
+  handles, the first as the base of every percent, as
+  `edr compare --html` writes it.
 
 A file over 20 MB is not sent; the bot answers with its size and the
 limit instead.

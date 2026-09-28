@@ -50,7 +50,7 @@ A handle is `label@batch`, `label@source`, a run id prefix, or `#n` from the las
 
 | Command | Effect |
 |---|---|
-| `/compare <handle>...` | metrics side by side, runs of one project |
+| `/compare <handle>...` | metrics side by side, runs of one project, and compare.html opened on them |
 | `/metric [project] <name> [--source SOURCE]` | one metric per run |
 
 ### Help

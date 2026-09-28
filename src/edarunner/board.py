@@ -24,9 +24,11 @@ from rich.console import Console, Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
+from .db import pick
+
 Row = dict[str, Any]
 
-# compare.html loads Plotly from this file in data/board when a user put a copy there, else from the CDN.
+# compare.html loads Plotly from this file next to it when a user put a copy there, else from the CDN.
 PLOTLY_FILE = "plotly.min.js"
 PLOTLY_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 TERMINAL = ("done", "INCOMPLETE", "FAILED", "OVER_BUDGET", "STOPPED", "KILLED", "ABANDONED")
@@ -367,6 +369,11 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
 
 # html pages
 
+def plotly_src(folder: str | os.PathLike) -> str:
+    """The Plotly script of a page in `folder`: PLOTLY_FILE when that file is there, else PLOTLY_URL."""
+    return PLOTLY_FILE if os.path.isfile(os.path.join(folder, PLOTLY_FILE)) else PLOTLY_URL
+
+
 def _h(value: Any) -> str:
     return html.escape(_s(value))
 
@@ -438,18 +445,41 @@ def status_html(rows: list[Row], events: list[Row], hosts: dict[str, Any], now: 
 
 
 def compare_html(runs: list[Row], parameters: list[Row], metrics: list[Row], plotly_src: str | None,
-                 areas: dict[str, Row] | None = None, step_names: dict[int, str] | None = None) -> str:
+                 areas: dict[str, Row] | None = None, step_names: dict[int, str] | None = None,
+                 tick: list[str] | None = None, better: dict[str, str] | None = None) -> str:
     """A self-contained page over the lists; the plots need `plotly_src`, the tables do not.
 
+    The page opens with the runs of `tick` ticked, the first as the base of every percent, and the runs table folded.
+    Without `tick`, it ticks two done runs of the newest source, one per label and the older first, and the runs table
+    is open. A URL hash `#runs=<run id or label@source>,...` ticks those runs instead, where label@source is the run
+    that `db.pick` takes. A run with `retired` set carries a mark.
+
     The compare table shows each run at the metric row whose `record` is 1, from `analysis.mark_record`, and `missing`
-    when a metric with `record` has no such row; any other metric at its last step. `areas` maps a run id to its area
-    report, {stage, step, source_file, rows: [[instance, depth, area]]}; `step_names` maps a step number to its name.
+    when a metric with `record` has no such row; any other metric at its last step. Its rows go by task, the metrics
+    without a task first, and `better` maps a metric name to `lower` or `higher`, which colours the changes of that
+    metric. `areas` maps a run id to its area report, {stage, step, source_file, rows: [[instance, depth, area]]};
+    `step_names` maps a step number to its name.
     """
-    enriched = [{**r, "state": state_of(r), "core-h": round(cost(r), 2)} for r in order(runs)]
+    groups: dict[tuple, list[Row]] = {}
+    for r in runs:
+        groups.setdefault((r.get("label"), r.get("source")), []).append(r)
+    picks = {pick(g)["run_id"] for g in groups.values()}
+    named = tick is not None
+    if tick is None:
+        done = sorted((r for r in runs if r.get("phase") == "done"), key=lambda r: (r.get("started") or 0, r["run_id"]),
+                      reverse=True)
+        newest: dict[Any, str] = {}
+        for r in done:
+            if r.get("source") == done[0].get("source") and len(newest) < 2:
+                newest.setdefault(r.get("label"), r["run_id"])
+        tick = list(newest.values())[::-1]
+    enriched = [{**r, "state": state_of(r), "core-h": round(cost(r), 2), "pick": int(r["run_id"] in picks)}
+                for r in order(runs)]
     script = f'<script src="{_h(plotly_src)}"></script>' if plotly_src else ""
     return _COMPARE.substitute(plotly=script, runs=_json_block(enriched), parameters=_json_block(parameters),
                                metrics=_json_block(metrics), areas=_json_block(areas or {}),
-                               steps=_json_block({str(k): v for k, v in (step_names or {}).items()}))
+                               steps=_json_block({str(k): v for k, v in (step_names or {}).items()}),
+                               tick=_json_block({"runs": tick, "named": named}), better=_json_block(better or {}))
 
 
 # templates
@@ -458,10 +488,10 @@ _CSS = """
 body{font:15px system-ui,sans-serif;margin:12px;background:#fff;color:#111}
 table{border-collapse:collapse;width:100%;margin-bottom:16px}
 td,th{padding:6px 4px;border-bottom:1px solid #ddd;text-align:left;font-size:14px;vertical-align:top}
-small{color:#777;word-break:break-all}h3{margin:16px 0 6px}
+small{color:#777;overflow-wrap:anywhere}h3{margin:16px 0 6px}
 .st{font-weight:600}.s-running .st{color:#2a7}.s-stale .st{color:#e90}.s-dead .st,.s-failed .st,.s-hung .st{color:#d33}
 .s-done .st{color:#888}.s-incomplete .st,.s-over_budget .st,.s-looping .st{color:#a3c}.s-stopped .st,.s-killed .st{color:#bbb}
-select{font:inherit;margin:0 8px 8px 0}.hc{margin:0 0 10px}.hc svg{max-width:100%;height:auto}.up{color:#d33}.dn{color:#2a7}
+select{font:inherit;margin:0 8px 8px 0}.hc{margin:0 0 10px}.hc svg{max-width:100%;height:auto}.worse{color:#d33}.better{color:#2a7}
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}td,th{border-color:#333}small{color:#999}}
 """
 
@@ -482,17 +512,22 @@ _COMPARE = Template("""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>edr compare</title>
 <style>""" + _CSS + """
 input.f{width:100%;box-sizing:border-box;font:inherit;font-size:13px}.tw{overflow-x:auto}
-button{font:inherit;margin:0 8px 8px 0}</style>$plotly</head><body>
+button{font:inherit;margin:0 8px 8px 0}summary h3{display:inline}#cmp th,#cmp td:first-child{overflow-wrap:anywhere}
+#cmp small{white-space:nowrap}tr.task td{font-weight:600;padding-top:12px;overflow-wrap:anywhere}</style>$plotly</head><body>
 <script type="application/json" id="edr-runs">$runs</script>
 <script type="application/json" id="edr-parameters">$parameters</script>
 <script type="application/json" id="edr-metrics">$metrics</script>
 <script type="application/json" id="edr-areas">$areas</script>
 <script type="application/json" id="edr-steps">$steps</script>
-<h3>runs</h3>
-<p><small>A filter keeps the rows whose cell holds its text; &gt;n and &lt;n compare numbers. Tick the runs to compare.</small></p>
+<script type="application/json" id="edr-tick">$tick</script>
+<script type="application/json" id="edr-better">$better</script>
+<details id="rd"><summary><h3>runs</h3></summary>
+<p><small>A filter keeps the rows whose cell holds its text; &gt;n and &lt;n compare numbers. Tick the runs to compare;
+the first one ticked is the base of every percent. Open the page as compare.html#runs=label@source,label@source to tick
+those runs.</small></p>
 <button id="tickall">tick the shown runs</button><button id="untick">untick all</button>
-<div class="tw"><table id="runs"></table></div>
-<h3>compare</h3><div class="tw"><table id="cmp"></table></div>
+<div class="tw"><table id="runs"></table></div></details>
+<h3>compare</h3><small id="lost"></small><div class="tw"><table id="cmp"></table></div>
 <div id="area"><h3>area delta</h3>A <select id="aa"></select> B <select id="ab"></select> depth <select id="ad"></select>
 <div class="tw"><table id="areat"></table></div><small id="areas"></small></div>
 <div id="plots">
@@ -504,25 +539,29 @@ button{font:inherit;margin:0 8px 8px 0}</style>$plotly</head><body>
 <script>
 const q = s => document.querySelector(s), get = id => JSON.parse(document.getElementById(id).textContent);
 const RUNS = get('edr-runs'), PARAMETERS = get('edr-parameters'), METRICS = get('edr-metrics');
-const AREAS = get('edr-areas'), STEPS = get('edr-steps');
+const AREAS = get('edr-areas'), STEPS = get('edr-steps'), TICKED = get('edr-tick'), BETTER = get('edr-better');
 const PAR = {}, PKEYS = [];
 for (const p of PARAMETERS) { (PAR[p.run_id] ??= {})[p.key] = p.value; if (!PKEYS.includes(p.key)) PKEYS.push(p.key); }
 PKEYS.sort();
 const mkey = m => m.name + (m.task ? '[' + m.task + ']' : '');
 // A metric with `record` shows its row of record, and `missing` without one; any other metric its last step.
-const FIN = {}, MKEYS = [], CANON = {};
+const FIN = {}, MKEYS = [], META = {};
 for (const m of METRICS) {
   const k = mkey(m), s = m.step ?? 1e9, cur = (FIN[m.run_id] ??= {}), rank = m.record === 1 ? 2 : m.record === 0 ? 0 : 1;
   if (!MKEYS.includes(k)) MKEYS.push(k);
-  CANON[k] = m.canonical;
+  META[k] = m;
   if (!(k in cur) || rank > cur[k].rank || (rank === cur[k].rank && s >= cur[k].step))
     cur[k] = { v: rank ? m.value : null, step: s, rank, at: !rank ? 'missing' : m.step == null ? '' : m.stage + ' ' + m.step };
 }
-MKEYS.sort();
+// The metrics without a task first, then by task and name; the numbers in a name compare by value.
+const nat = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+MKEYS.sort((a, b) => nat(META[a].task || '', META[b].task || '') || nat(META[a].name, META[b].name));
 const num = v => { const n = Number(v); return v === null || v === undefined || v === '' || !isFinite(n) ? null : n; };
 const val = (r, d) => d in (FIN[r.run_id] || {}) ? FIN[r.run_id][d].v
   : d in (PAR[r.run_id] || {}) ? (num(PAR[r.run_id][d]) ?? PAR[r.run_id][d]) : r[d] ?? null;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// A name may break after an underscore, so a narrow column wraps it there.
+const brk = s => esc(s).replace(/_/g, '_<wbr>');
 // The format of board.num: six significant digits, every digit before the point, and no exponent.
 const fmt = v => typeof v !== 'number' ? String(v ?? '') : Math.abs(v) >= 999999.5 ? v.toFixed(0)
   : Math.abs(v) >= 1e-6 || !v ? String(+v.toPrecision(6))
@@ -536,7 +575,11 @@ const tr = (cells, tag = 'td') => '<tr>' + cells.map(c => '<' + tag + '>' + c + 
 
 const COLS = ['label', 'source', 'batch', 'host', 'state', 'phase', 'core-h', ...PKEYS];
 const cell = (r, c) => PKEYS.includes(c) && !(c in r) ? PAR[r.run_id]?.[c] : r[c];
-const TICK = new Set(RUNS.slice(0, 2).map(r => r.run_id));
+// The runs of the URL hash #runs=<run id or label@source>,..., else the runs the page was written with.
+const WANT = (new URLSearchParams(location.hash.slice(1)).get('runs') || '').split(',').filter(Boolean);
+const runOf = w => RUNS.find(r => r.run_id === w || r.pick && r.label + '@' + r.source === w);
+const LOST = WANT.filter(w => !runOf(w));
+const TICK = new Set(WANT.length ? WANT.map(runOf).filter(Boolean).map(r => r.run_id) : TICKED.runs);
 const FILTER = {};
 function keep(r) {
   return COLS.every(c => {
@@ -548,10 +591,12 @@ function keep(r) {
   });
 }
 const shown = () => RUNS.filter(keep);
-const checked = () => RUNS.filter(r => TICK.has(r.run_id));
+// In the order they were ticked, so the first run ticked is the base of the compare table.
+const checked = () => [...TICK].map(id => RUNS.find(r => r.run_id === id)).filter(Boolean);
 function runsBody() {
   return shown().map(r => tr(['<input type="checkbox" data-run="' + esc(r.run_id) + '"' + (TICK.has(r.run_id) ? ' checked' : '') + '>',
-    ...COLS.map((c, i) => i ? esc(cell(r, c)) : '<span title="' + esc(r.run_id) + '">' + esc(r.label) + '</span>')])).join('');
+    ...COLS.map((c, i) => i ? esc(cell(r, c)) : '<span title="' + esc(r.run_id) + '">' + esc(r.label) + '</span>'
+      + (r.retired ? ' <small>retired</small>' : ''))])).join('');
 }
 function runsTable() {
   const head = tr(['', ...COLS.map(c => esc(c))], 'th')
@@ -561,18 +606,31 @@ function runsTable() {
     document.getElementById('rb').innerHTML = runsBody(); draw(); } });
   q('#runs').addEventListener('change', e => { const id = e.target.dataset?.run; if (!id) return;
     e.target.checked ? TICK.add(id) : TICK.delete(id); draw(); });
-  q('#tickall').addEventListener('click', () => { shown().forEach(r => TICK.add(r.run_id)); runsTable(); draw(); });
-  q('#untick').addEventListener('click', () => { TICK.clear(); runsTable(); draw(); });
+  q('#tickall').addEventListener('click', () => { shown().forEach(r => TICK.add(r.run_id));
+    document.getElementById('rb').innerHTML = runsBody(); draw(); });
+  q('#untick').addEventListener('click', () => { TICK.clear(); document.getElementById('rb').innerHTML = runsBody(); draw(); });
 }
+const DIR = { lower: -1, higher: 1 };
 function compareTable(sel) {
   if (!sel.length) { q('#cmp').innerHTML = tr(['tick a run']); return; }
-  const base = FIN[sel[0].run_id] || {};
-  const rows = MKEYS.filter(k => sel.some(r => FIN[r.run_id]?.[k] != null)).map(k => tr([esc(k), ...sel.map((r, i) => {
-    const f = FIN[r.run_id]?.[k], v = f?.v, b = base[k]?.v, p = i ? pct(v, b) : '';
-    return fmt(v) + (f?.at ? ' <small>' + esc(f.at) + '</small>' : '')
-      + (p ? ' <small class="' + (v > b ? 'up' : 'dn') + '">' + p + '</small>' : '');
-  })]));
-  q('#cmp').innerHTML = tr(['metric', ...sel.map(r => esc(r.label))], 'th') + rows.join('');
+  const base = FIN[sel[0].run_id] || {}, rows = [];
+  let task;
+  for (const k of MKEYS.filter(k => sel.some(r => FIN[r.run_id]?.[k] != null))) {
+    const m = META[k], dir = DIR[BETTER[m.name]];
+    if ((m.task || '') !== task) {
+      task = m.task || '';
+      rows.push('<tr class="task"><td colspan="' + (sel.length + 1) + '">' + brk(task || 'flow') + '</td></tr>');
+    }
+    rows.push(tr([brk(m.name) + (m.unit ? ' <small>' + esc(m.unit) + '</small>' : ''), ...sel.map((r, i) => {
+      const f = FIN[r.run_id]?.[k], v = f?.v, b = base[k]?.v;
+      // The percent against the first run; across a sign change or from 0, the difference.
+      const p = !i || v == null || b == null ? '' : pct(v, b) || (v === b ? '' : (v > b ? '+' : '') + fmt(v - b));
+      const c = p && dir && v !== b ? ' class="' + ((v - b) * dir > 0 ? 'better' : 'worse') + '"' : '';
+      return fmt(v) + (f?.at ? ' <small>' + esc(f.at) + '</small>' : '') + (p ? ' <small' + c + '>' + p + '</small>' : '');
+    })]));
+  }
+  q('#cmp').innerHTML = tr(['metric', ...sel.map(r => brk(r.label) + '<wbr><small>@' + esc(r.source) + '</small>')], 'th')
+    + rows.join('');
 }
 const ARUNS = RUNS.filter(r => r.run_id in AREAS);
 function areaTable() {
@@ -619,7 +677,7 @@ function plots(sel) {
   Plotly.react('scatp', Object.entries(groups).map(([g, rs]) => ({ x: rs.map(r => val(r, sx)), y: rs.map(r => val(r, sy)),
     text: rs.map(r => r.label), name: sc + '=' + g, mode: 'markers', marker: { size: 10 } })),
     { ...LAYOUT, xaxis: { title: sx }, yaxis: { title: sy } });
-  const pk = MKEYS.filter(k => /^power__(?!total)/.test(CANON[k] || ''));
+  const pk = MKEYS.filter(k => /^power__(?!total)/.test(META[k].canonical || ''));
   q('#phases').hidden = !pk.length;
   if (pk.length) {
     const tasks = [...new Set(pk.map(k => k.includes('[') ? k.slice(k.indexOf('[')) : ''))];
@@ -635,12 +693,16 @@ function draw() {
   if (HAVE_PLOTLY) plots(sel);
 }
 runsTable();
+q('#rd').open = !(WANT.length || TICKED.named);
+q('#lost').textContent = LOST.length ? 'no run is named ' + LOST.join(', ') : '';
 const dims = [...PKEYS, ...MKEYS];
 fill('#traj', MKEYS.filter(k => METRICS.some(m => mkey(m) === k && m.step != null)), null);
 fill('#sx', dims, dims[0]); fill('#sy', dims, dims[1] ?? dims[0]); fill('#sc', ['label', 'host', 'source', ...PKEYS], 'label');
 fill('#pm', MKEYS, MKEYS.find(k => !k.includes('[')) ?? MKEYS[0]);
-const aids = ARUNS.map(r => r.run_id), alab = ARUNS.map(r => r.label + ' ' + r.source);
-fill('#aa', aids, aids[0], alab); fill('#ab', aids, aids[1] ?? aids[0], alab);
+// The area delta opens on the first two ticked runs with an area report.
+const aids = ARUNS.map(r => r.run_id), alab = ARUNS.map(r => r.label + '@' + r.source);
+const ta = [...checked().map(r => r.run_id).filter(id => id in AREAS), ...aids];
+fill('#aa', aids, ta[0], alab); fill('#ab', aids, ta.find(id => id !== ta[0]) ?? ta[0], alab);
 const depths = [...new Set(Object.values(AREAS).flatMap(a => a.rows.map(r => r[1])))].filter(d => d > 0).sort((a, b) => a - b);
 fill('#ad', depths.map(String), String(depths[0] ?? 1));
 q('#area').hidden = !ARUNS.length;
