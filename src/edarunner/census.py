@@ -233,7 +233,8 @@ def _orphans(census: Row, projects: dict[str, Project], notifiers: list[Notifier
 
 
 def _full_hosts(census: Row, projects: dict[str, Project], store: Row, now: float) -> None:
-    """Stop the newest run of each full host once per `grace_s` of its project, whatever project it belongs to."""
+    """Stop the newest run of each full host once per `grace_s` of its project, whatever project it belongs to and
+    whatever keep it has."""
     clocks = store.setdefault("full", {})
     full = {r["host"] for r in census["runs"] if r.get("host_full")}
     for host in set(clocks) - full:
@@ -246,8 +247,8 @@ def _full_hosts(census: Row, projects: dict[str, Project], store: Row, now: floa
             continue
         p = projects[target["project"]]
         hb = config.load_json(p.state_dir / target["batch"] / f"{target['run_id']}.json")
-        keep = config.load_json(p.state_dir / target["batch"] / f"{target['run_id']}.keep.json")
-        if now - since < p.limits.grace_s or keep.get("ack"):
+        # A keep never holds off this stop: a full disk blocks every other user of the host.
+        if now - since < p.limits.grace_s:
             continue
         clocks[host] = now
         why = f"{host} full: below {hosts.floor(p.site, host):g} GB free"

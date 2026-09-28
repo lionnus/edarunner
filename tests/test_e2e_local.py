@@ -74,8 +74,8 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     spec = json.loads((state / "demo" / f"{ids['a']}.spec.json").read_text())
     assert driver.name.startswith("edr_driver-") and spec["driver"] == str(driver)
     assert edr(capsys, "launch", "demo")[0] == 2  # already launched
-    code, out, _ = edr(capsys, "keep", "a@demo", "--hours", "1", "--ack")
-    assert code == 0 and json.loads((state / "demo" / f"{ids['a']}.keep.json").read_text()) == {"hours": 1, "ack": True}
+    code, out, _ = edr(capsys, "keep", "a@demo", "--hours", "1")
+    assert code == 0 and json.loads((state / "demo" / f"{ids['a']}.keep.json").read_text()) == {"hours": 1}
 
     rows = wait_terminal(capsys, 2)
     assert {r["run_id"]: r["phase"] for r in rows} == {ids["a"]: "done", ids["b_nodw"]: "done"}

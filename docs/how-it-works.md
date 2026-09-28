@@ -268,9 +268,9 @@ does this, in order:
 3. A state that alerts sends one message per run and state to every
    channel in the site file. A new reason for the same state edits the
    Telegram message in place. After `grace_s`, the watcher takes the
-   action of the state: it stops a `superseded` run after its task
-   unless the run has a keep file, and sends `SIGTERM` to a `hung` run
-   only with `kill_hung` (`watch._act`).
+   action of the state: it stops a `superseded` run after its task, and
+   sends `SIGTERM` to a `hung` run only with `kill_hung`. A keep file
+   holds off both for its hours (`watch._act`, `config.kept`).
 4. For every stage and task that ended, it copies `log/` and the stage's
    `collect` paths from the run tree into `data/results/<run_id>/` on
    the head node, plus the step directories of a running stage that are
@@ -327,7 +327,8 @@ and does the work after each of its cycles:
    killed.
 3. While a live run on a host reports `host_full`, it stops the newest
    run on that host with `--now` once per `grace_s`, whatever project
-   the run belongs to, unless that run has an `ack`.
+   the run belongs to. A keep does not hold this stop off, since a full
+   disk blocks every other user of the host.
 4. It removes a seat lease whose run has no heartbeat in a registered
    project, has ended, is dead or has left the stage, or that is older
    than the stage budget, and writes a `lease` event with the reason
@@ -365,12 +366,18 @@ reads. Under systemd it sends `READY=1` once it holds the lock and
 `WATCHDOG=1` every cycle, so a supervisor that hangs is restarted. A
 watcher that hangs is the supervisor's job.
 
-The Telegram bot is a thread of the watcher. It obeys one chat and,
-when set, one user, and it never runs a shell string or free text: a
-custom command is an argv list from the site file, and every argument
-from the phone must match its allowlist regex in full. The bot never
-kills a process and never runs `retire`, `prune`, `launch` or `rm`
-(`notify/telegram/bot.py`, `notify/telegram/custom.py`).
+The Telegram bot is a thread of the supervisor, or of the watcher that
+holds `serve.lock` when no supervisor runs; every other watcher only
+sends its alerts. The bot takes the commands and button presses of
+every registered project and finds the project of each one
+(`cli.Router`). It obeys one chat and, when set, one user, and it never
+runs a shell string or free text: a custom command is an argv list from
+the site file, and every argument from the phone must match its
+allowlist regex in full. The bot never kills a process and never runs
+`launch` or `rm`. Its one delete is the Free space button of a
+`host_full` alert, which runs `edr retire --host <host> --prune <names>`
+after a second tap (`notify/telegram/bot.py`,
+`notify/telegram/buttons.py`, `notify/telegram/custom.py`).
 [guides/alerts.md](guides/alerts.md) sets it up.
 
 ### Stop and keep
@@ -393,11 +400,12 @@ still alive after the wait, `edr stop` exits 3, and `--now` is the next
 step: `SIGTERM`, then `SIGKILL` after 30 seconds. A queued run that is
 stopped is marked `stopped` and never starts.
 
-`edr keep <handle> --hours <n>` writes the keep file, which adds hours to
-the budget of the running stage or task. `--ack` cancels the pending
-kill of a `hung` run and the stop of a `host_full` one. Both `stop` and
-`retire` require `--why`, and the text goes into the event log with the
-name of whoever acted.
+`edr keep <handle> --hours <n>` writes the keep file. The driver adds the
+hours to the budget of the running stage or task, and for as many hours
+the watcher neither kills the run as `hung` nor stops it as
+`superseded`. The stop of a full host does not wait for a keep. Both
+`stop` and `retire` require `--why`, and the text goes into the event
+log with the name of whoever acted.
 
 ### Retire
 
@@ -412,7 +420,9 @@ a run whose results are not collected yet (`cli._refuse_shared_root`).
 `--batch` retires every run of a batch and writes the `RETIRED` file,
 which keeps the watcher and the board away from the batch. It then
 removes the batch's checked-out source unless a batch that is not
-retired uses the same source; that tree passes the guard too.
+retired uses the same source; that tree passes the guard too. `--host`
+with `--prune` removes the prune targets of every finished run of the
+project on one host, to free a full scratch disk.
 [guides/cleanup.md](guides/cleanup.md) covers retire, prune and the
 archive of large files.
 

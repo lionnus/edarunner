@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from edarunner import board, cli, config, model, watch
-from edarunner.notify import alert_buttons
+from edarunner.notify import alerts
 from edarunner.notify.telegram import bot as tg
 from edarunner.notify.telegram import commands as tgc
 from edarunner.notify.telegram import format as tgfmt
@@ -35,20 +35,16 @@ def head(title: str) -> str:
 
 
 Part = type | tuple[type, list[str]]
-TG = ("In `edr.toml` the table takes `token_file`, `chat_id`, `user_id` and `topic_id` of the site's `[telegram]` table and "
-      "replaces them for this project only. A key it leaves out keeps the site's value. Without a `[telegram]` "
-      "table in `site.toml`, the table here needs `chat_id`. The custom commands stay in `site.toml`.")
 # The sections of configuration.md: the heading, the dataclasses (or some of their fields) it lists, and the
 # prose above the table; "" takes the docstring of the first dataclass.
 CONFIG: list[tuple[str, list[Part], str]] = [
-    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "env"])], ""),
+    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "env"])], ""),
     ("### [source]", [model.Source], ""),
     ("### [sync]", [model.Sync], ""),
     ("### [runtime]", [model.Runtime], ""),
     ("### [safety]", [model.Safety], ""),
     ("### [limits]", [model.Limits], ""),
     ("### [placement]", [model.Placement], ""),
-    ("### [telegram]", [], TG),
     ("### [stages.<name>]", [model.Stage], ""),
     ("#### needs", [model.Needs], ""),
     ("#### budget", [model.Budget], ""),
@@ -233,13 +229,17 @@ def states_page() -> str:
 def bot_page() -> str:
     out = [head("Telegram bot"), "The Telegram bot sends the alerts with their buttons, keeps one pinned board up to date "
            "and answers the commands below.\n\n", rest(tg) + "\n\n", "## Built-in commands\n\n",
-           "A handle is `label@batch`, a run id prefix, or `#n` from the last board.\n\n"]
+           "A handle is `label@batch`, a run id prefix, or `#n` from the last board; `project/label@batch` also names "
+           "the project. Without `[project]`, `/status` and `/events` answer for every project, and the other commands "
+           "take the project of the alert they reply to, or the only one.\n\n"]
     groups: dict[str, list[tgc.Builtin]] = {}
     for b in tgc.BUILTINS.values():
         groups.setdefault(b.group, []).append(b)
     for group, cmds in groups.items():
         out += [f"### {group}\n\n", table(["Command", "Effect"], [[code(f"/{b.name} {b.args}".rstrip()), b.help] for b in cmds]), "\n"]
-    out += ["## Alert buttons\n\n", table(["Button", "callback_data"], [[label, code(data)] for label, data in alert_buttons("<handle>")]),
+    out += ["## Alert buttons\n\n", doc(alerts.run_alert).partition("\n\n")[2] + "\n\n",
+            table(["Button", "callback_data", "Effect"], [[label, code(f"{action}:<project>"), effect]
+                                                         for action, (label, _, effect) in alerts.BUTTONS.items()]),
             "\n## Custom commands\n\n", doc(model.BotCommand) + "\n\n", fields_table(model.BotCommand)]
     return "".join(out).rstrip() + "\n"
 

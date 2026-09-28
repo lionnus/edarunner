@@ -119,11 +119,13 @@ hostB: your trees hold 900 GB and push its scratch under the floor of 100 GB
 
 ## From your phone
 
-`edr watch` sends an alert to every channel you configure when a run dies,
-hangs, fails or runs over its budget. On Telegram the alert carries the
-next command and three buttons to keep, acknowledge or stop the run. ntfy
-and mail get the same alerts, with the commands written out. The bot also
-answers `/status`, `/hosts`, `/events`, `/tools` and `/digest`. A site can
+The watcher sends an alert to every channel you configure when a run
+dies, hangs, fails or runs over its budget. On Telegram the alert carries
+the next command and the buttons Stop, +6h, +12h and +24h, which give the
+run more hours and hold off the watcher's own stop for as long. ntfy and
+mail get the same alerts, with the commands written out. One bot serves
+all your projects and answers `/status`, `/projects`, `/hosts`,
+`/events`, `/tools` and `/digest`. A site can
 add its own commands, such as one that opens a Claude Code session in the
 project directory. Scripts and hooks send their own messages with `edr
 notify`. See [docs/guides/alerts.md](docs/guides/alerts.md) for the bot,

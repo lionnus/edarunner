@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 
 from helpers_watch import NOW, Env, rid
@@ -13,7 +14,7 @@ from edarunner.notify.digest import Digest
 
 
 def fill(e: Env) -> None:
-    """Five runs, one of them before the last digest, a keep file with ack, and four host probes."""
+    """Five runs, one of them before the last digest, a keep file that holds, and four host probes."""
     db = e.db
     db.set_store("digest", {"day": "2027-01-14", "ts": NOW - 5 * 3600})
     alert = {"state": "hung", "msgs": {"hung": {"text": "no progress", "ids": ["1"]}}}
@@ -26,7 +27,9 @@ def fill(e: Env) -> None:
                         "stage": "synth" if phase else None, "started": NOW - 7200 if phase else None,
                         "updated": updated})
     (e.project.state_dir / "demo").mkdir(parents=True)
-    (e.project.state_dir / "demo" / f"{rid('k')}.keep.json").write_text('{"hours": 0, "ack": true}')
+    keep = e.project.state_dir / "demo" / f"{rid('k')}.keep.json"
+    keep.write_text('{"hours": 1}')
+    os.utime(keep, (NOW, NOW))  # a keep that holds closes the alert of its run
     hosts = {"hostA": {"host": "hostA", "free_gb": 100.0, "total_gb": 1000.0},
              "hostB": {"host": "hostB", "free_gb": 900.0, "total_gb": 1000.0},
              "hostC": {"host": "hostC", "error": "timeout"},

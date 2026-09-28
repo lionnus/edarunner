@@ -168,29 +168,23 @@ def test_site_types_and_user_id(tmp_path):
         config.load_project(root)
 
 
-def test_project_telegram_overrides_the_site(tmp_path):
+def test_telegram_belongs_to_the_site_only(tmp_path):
     root = demo_copy(tmp_path)
     site, edr = root / "site.toml", root / "edr.toml"
     site_text, edr_text = site.read_text(), edr.read_text()
-    site.write_text(site_text + '\n[telegram]\nchat_id = 42\nuser_id = 7\n[telegram.commands.x]\nhelp = "x"\nrun = ["true"]\n')
-    edr.write_text(edr_text + '\n[telegram]\ntoken_file = "bot.token"\nchat_id = -100\n')
+    site.write_text(site_text + '\n[telegram]\nchat_id = 42\nuser_id = 7\ntopic_id = 17\n[telegram.commands.x]\nhelp = "x"\nrun = ["true"]\n')
     tg = config.load_project(root).site.telegram
-    assert (tg.token_file, tg.chat_id, tg.user_id, list(tg.commands)) == (root / "bot.token", -100, 7, ["x"])
-    edr.write_text(edr_text + '\n[telegram]\nuser_id = 9\ntopic_id = 17\n')
-    tg = config.load_project(root).site.telegram
-    assert (tg.chat_id, tg.user_id, tg.token_file.name, tg.topic_id) == (42, 9, "telegram.token", 17)
+    assert (tg.chat_id, tg.user_id, tg.topic_id, tg.token_file.name, list(tg.commands)) == (42, 7, 17, "telegram.token", ["x"])
     for bad, match in (('chat_id = "1"', "telegram.chat_id must be int, not str"), ("token_file = 5", "token_file must be str"),
-                       ('topic_id = "17"', "telegram.topic_id must be int, not str"),
-                       ("[telegram.commands.y]", "unknown key 'telegram.commands'")):
-        edr.write_text(edr_text + f"\n[telegram]\n{bad}\n")
+                       ("user_id = 9", "missing key 'telegram.chat_id'")):
+        site.write_text(site_text + f"\n[telegram]\n{bad}\n")
         with pytest.raises(ConfigError, match=match):
             config.load_project(root)
     site.write_text(site_text)
-    edr.write_text(edr_text + "\n[telegram]\nuser_id = 9\n")
-    with pytest.raises(ConfigError, match="missing key 'telegram.chat_id'"):
-        config.load_project(root)
-    edr.write_text(edr_text + "\n[telegram]\nchat_id = 5\n")
-    assert config.load_project(root).site.telegram.chat_id == 5
+    for text, key in (("telegram_poll = false\n" + edr_text, "telegram_poll"), (edr_text + "\n[telegram]\nchat_id = 5\n", "telegram")):
+        edr.write_text(text)
+        with pytest.raises(ConfigError, match=f"unknown key '{key}'"):
+            config.load_project(root)
 
 
 def test_the_disk_floor_belongs_to_the_site_and_a_host_may_set_its_own(tmp_path):

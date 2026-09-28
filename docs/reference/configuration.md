@@ -33,7 +33,6 @@ hold for every file:
 | `state_dir` | the state directory, on a filesystem every host mounts | `"~/.edr/{project}"` |
 | `data` | the head-node data directory: `edr.db`, `results/`, `board/` | `"data"` |
 | `run_prefix` | the run tree prefix under the host scratch | `"{user}/edr/{project}"` |
-| `telegram_poll` | `false`: this project's watcher sends alerts and the board but does not poll for commands; one project per bot token polls | `true` |
 | `env` | the variables every command of every stage needs, on top of the site `env`; a value takes the run placeholders. A `$NAME` or `${NAME}` that the site sets takes the site value, so `PATH = "{root}/.venv/bin:$PATH"` keeps the site path; a value without a reference replaces the site value, and any other `$VAR` expands on the host | `{}` |
 
 ### [source]
@@ -114,10 +113,6 @@ has a tool the job needs, `plan` reports it as a problem.
 | `min_free_ram_gb` | free RAM a host needs, in GB | `60` |
 | `avoid` | hosts `auto` never picks | `[]` |
 | `prefer` | hosts `auto` tries first, in order | `[]` |
-
-### [telegram]
-
-In `edr.toml` the table takes `token_file`, `chat_id`, `user_id` and `topic_id` of the site's `[telegram]` table and replaces them for this project only. A key it leaves out keeps the site's value. Without a `[telegram]` table in `site.toml`, the table here needs `chat_id`. The custom commands stay in `site.toml`.
 
 ### [stages.<name>]
 

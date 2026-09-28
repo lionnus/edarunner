@@ -33,7 +33,7 @@ class Digest:
         live = [r for r in rows if board.is_live(r)]
         ended = [r for r in rows if not board.is_live(r) and (r.get("updated") or 0) >= since]
         notes = self.db.get_store("notified", {})
-        alerts = [r for r in live if self._alerted(notes.get(r["run_id"]) or {}) and not self._acked(r)]
+        alerts = [r for r in live if self._alerted(notes.get(r["run_id"]) or {}) and not config.kept(self.project, r, now)]
         probes = config.load_json(self.project.data / "board" / "board.json").get("hosts") or {}
         hosts = sorted((p for p in probes.values() if "error" not in p and p.get("total_gb")),
                        key=lambda p: p["free_gb"])[:HOSTS]
@@ -55,7 +55,3 @@ class Digest:
     def _alerted(note: dict) -> bool:
         """True when the watcher sent an alert for the state the run is in now."""
         return note.get("state") in (note.get("msgs") or {})
-
-    def _acked(self, row: dict) -> bool:
-        keep = config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.keep.json")
-        return bool(keep.get("ack"))

@@ -124,7 +124,8 @@ EXPECTED = {
         '\n'
         'stage: synth, step 3 elaborate\n'
         'host: hostA\n'
-        '<code>Information: elaborating top</code>\n'
+        '\n'
+        '<pre>Information: elaborating top</pre>\n'
         '\n'
         'Resume it from the last step:\n'
         '<code>edr continue b@demo --stage synth --from elaborate</code>\n'
@@ -134,6 +135,7 @@ EXPECTED = {
         '\n'
         'stage: synth, step 3 elaborate\n'
         'host: hostA\n'
+        '\n'
         '    Information: elaborating top\n'
         '\n'
         'Resume it from the last step:\n'
@@ -146,49 +148,59 @@ EXPECTED = {
         '\n'
         'stage: synth, step 3 elaborate\n'
         'host: hostA\n'
-        '<code>Information: elaborating top</code>\n'
+        '\n'
+        '<pre>Information: elaborating top</pre>\n'
         '\n'
         'If it is stuck, stop it:\n'
         '<code>edr stop b@demo --why hung</code>\n'
-        'edarunner sends SIGTERM to its processes 1h after this alert unless you press ack.',
+        'edarunner sends SIGTERM to its processes 1h after this alert unless it has a keep.\n'
+        '+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.',
         '🔴 demo: no progress in b@demo\n'
         'The run is alive, but it has shown no progress since 14.01 03:00: the step, the log, the tree size and the CPU time stand still. The tool may wait for a licence, or it is stuck.\n'
         '\n'
         'stage: synth, step 3 elaborate\n'
         'host: hostA\n'
+        '\n'
         '    Information: elaborating top\n'
         '\n'
         'If it is stuck, stop it:\n'
         '    edr stop b@demo --why hung\n'
-        'edarunner sends SIGTERM to its processes 1h after this alert unless you press ack.\n'
+        'edarunner sends SIGTERM to its processes 1h after this alert unless it has a keep.\n'
+        '+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.\n'
         '\n'
-        'keep 12h: edr keep b@demo --hours 12\n'
-        'ack: edr keep b@demo --ack\n'
-        'stop: edr stop b@demo --after-task\n',
+        'Stop: edr stop b@demo --after-task --why hung\n'
+        '+6h: edr keep b@demo --hours 6\n'
+        '+12h: edr keep b@demo --hours 12\n'
+        '+24h: edr keep b@demo --hours 24\n',
     ),
     'over_budget': (
         '🔴 <b>demo: over budget in</b> <code>b@demo</code>\n'
-        'Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end, and the run then ends OVER_BUDGET.\n'
+        'Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end; more time on the budget before then lets the run go on.\n'
         '\n'
         'stage: synth, step 3 elaborate\n'
         'host: hostA\n'
-        '<code>Information: elaborating top</code>\n'
+        '\n'
+        '<pre>Information: elaborating top</pre>\n'
         '\n'
         'Stop it now if the rest of the stage is of no use:\n'
-        '<code>edr stop b@demo --why over-budget</code>',
+        '<code>edr stop b@demo --why over-budget</code>\n'
+        '+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.',
         '🔴 demo: over budget in b@demo\n'
-        'Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end, and the run then ends OVER_BUDGET.\n'
+        'Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end; more time on the budget before then lets the run go on.\n'
         '\n'
         'stage: synth, step 3 elaborate\n'
         'host: hostA\n'
+        '\n'
         '    Information: elaborating top\n'
         '\n'
         'Stop it now if the rest of the stage is of no use:\n'
         '    edr stop b@demo --why over-budget\n'
+        '+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.\n'
         '\n'
-        'keep 12h: edr keep b@demo --hours 12\n'
-        'ack: edr keep b@demo --ack\n'
-        'stop: edr stop b@demo --after-task\n',
+        'Stop: edr stop b@demo --after-task --why over_budget\n'
+        '+6h: edr keep b@demo --hours 6\n'
+        '+12h: edr keep b@demo --hours 12\n'
+        '+24h: edr keep b@demo --hours 24\n',
     ),
     'held': (
         '🟠 <b>demo: scheduler holds</b> <code>b@demo</code>\n'
@@ -220,3 +232,24 @@ def test_every_channel_says_the_same(kind, tmp_path, monkeypatch):
 def test_an_alert_stays_under_the_message_limit(tmp_path, monkeypatch):
     a = alerts.run_alert(PROJECT, RUN, "failed", ["the job left the scheduler: " + "x" * 9000], {}, NOW)
     assert len(telegram(a, tmp_path)) <= alerts.LIMIT + 2 and len(ntfy(a, monkeypatch)) <= alerts.LIMIT + 100
+
+
+def test_buttons_only_on_a_live_run_and_free_space_only_with_prune_targets():
+    hung = alerts.run_alert(PROJECT, RUN, "hung", ["hung: no progress"], HB, NOW)
+    assert [b[1] for b in hung.buttons] == ["stop:demo", "keep6:demo", "keep12:demo", "keep24:demo"]
+    full = alerts.run_alert(PROJECT, RUN, "host_full", ["host_full: hostA below 1 GB free"], HB, NOW)
+    assert [(b[0], b[2]) for b in full.buttons] == [("Stop", "edr stop b@demo --after-task --why host-full"),
+                                                    ("Free space", "edr retire --host hostA --prune netlist --why host-full")]
+    assert full.about.endswith("unless the disk gets back above the floor.") and "Free space removes" in full.todo[-1][0]
+    bare = replace(PROJECT, stages={n: replace(st, prune={}) for n, st in PROJECT.stages.items()})
+    assert [b[0] for b in alerts.run_alert(bare, RUN, "host_full", ["host_full: x"], HB, NOW).buttons] == ["Stop"]
+    killing = replace(PROJECT, stages={**PROJECT.stages, "synth": replace(PROJECT.stages["synth"], budget=replace(
+        PROJECT.stages["synth"].budget, kill=True))})
+    for project, state, hb in ((PROJECT, "over_budget", {**HB, "phase": "OVER_BUDGET:synth", "exit": 9}),
+                               (killing, "over_budget", HB), (PROJECT, "dead", HB), (PROJECT, "failed", {"phase": "FAILED:synth"})):
+        assert alerts.run_alert(project, RUN, state, [], hb, NOW).buttons == [], state
+
+
+def test_an_alert_shows_the_last_four_log_lines_cut_to_a_phone():
+    hb = {**HB, "last_log": "one\n\x1b[1;31mtwo\x1b[0m\nthree\n" + "x" * 150 + "\n\nfive\n"}
+    assert alerts.run_alert(PROJECT, RUN, "dead", [], hb, NOW).log == ["two", "three", "x" * 99 + "…", "five"]

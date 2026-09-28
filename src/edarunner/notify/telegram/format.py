@@ -6,7 +6,6 @@ Every function is pure and returns text under the message limit of 4096 characte
 from __future__ import annotations
 
 import html
-import re
 import textwrap
 import time
 from collections import Counter
@@ -25,7 +24,6 @@ LIMIT = 4000  # the message limit is 4096 characters after parsing
 MARK = {"running": "🟢", "queued": "🔵", "resumed": "🔵", "stale": "🟡", "host_full": "🟡", "superseded": "🟡",
         "dead": "🔴", "hung": "🔴", "looping": "🔴", "over_budget": "🔴", "orphan": "🔴", "failed": "🔴", "killed": "🔴",
         "incomplete": "🟠", "pending": "🔵", "held": "🟠", "suspended": "🟡", "done": "⚪", "retired": "⚫", "stopped": "⚫", "imported": "⚫", "abandoned": "⚫"}
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def esc(text: object) -> str:
@@ -54,11 +52,12 @@ def head(project: str, title: str) -> str:
 
 
 def alert(project: str, a: Alert) -> str:
-    """An alert: the mark and the bold title, then what was seen, the facts and each command in monospace."""
+    """An alert: the mark and the bold title, then what was seen, the facts, the log lines in a <pre> block and each
+    command in monospace."""
     from edarunner.notify.alerts import blocks
 
     title = f"{MARK.get(a.kind, '🔴')} <b>{esc(project)}: {esc(a.title)}</b>" + (f" <code>{esc(a.who)}</code>" if a.who else "")
-    return fit(title + "\n" + blocks(a, lambda c: f"<code>{esc(c)}</code>", esc))
+    return fit(title + "\n" + blocks(a, lambda c: f"<code>{esc(c)}</code>", esc, lambda lines: pre("\n".join(lines))))
 
 
 # A state in plain words, for the legend under a board.
@@ -136,16 +135,17 @@ def board(rows: list[Row], now: float | None = None, totals: dict[str, int] | No
 
 
 def run_detail(row: Row, hb: dict, now: float) -> str:
-    """The state, stage, step, host, age, next command and last log line of one run."""
+    """The state, stage, step, host, age, next command and the last log lines of one run."""
+    from edarunner.notify.alerts import log_lines
+
     state = runs.state_of(row)
     step = " ".join(str(v) for v in (hb.get("step") or row.get("step"), hb.get("step_name")) if v not in (None, ""))
     age = runs.hm(None if row.get("updated") is None else now - row["updated"])
-    log_line = next((ln for ln in reversed(str(hb.get("last_log") or "").splitlines()) if ln.strip()), "-")
     cmd = runs.triage_cmd(row, state, hb)
     lines = [f"{mark(state)} <code>{esc(runs.handle(row))}</code> {esc(state)}",
              esc(f"stage {row.get('stage') or '-'}, step {step or '-'}"), esc(f"on {row.get('host') or '-'}, {age}")]
     lines += [f"<code>{esc(cmd)}</code>"] if cmd else []
-    return "\n".join(lines + [pre(_ANSI.sub("", log_line)[-300:])])
+    return "\n".join(lines + [pre("\n".join(log_lines(hb)) or "-")])
 
 
 def events(rows: Iterable[Row], names: dict[str, str]) -> str:
@@ -202,13 +202,14 @@ def global_board(projects: dict[str, list[Row]], labels: dict[str, tuple[dict, d
     states: Counter = Counter()
     for name, rows in sorted(projects.items()):
         live = [r for r in runs.order(rows) if runs.is_live(r)]
+        first = sum(states.values()) + 1  # `#n` counts the live runs over every project, as the bot resolves it
         states.update(runs.state_of(r) for r in live)
         if not live:
             ended = sum(1 for r in rows if not runs.is_live(r) and now - (r.get("updated") or 0) < DAY_S)
             lines.append(f"<b>{esc(name)}</b> <i>nothing live" + (f", {ended} ended in 24 h" if ended else "") + "</i>")
             continue
         totals, names = labels.get(name, ({}, {}))
-        lines += [f"<b>{esc(name)}</b>", *(run_line(r, now, totals, names) for r in live[:most])]
+        lines += [f"<b>{esc(name)}</b>", *(f"#{n} {run_line(r, now, totals, names)}" for n, r in enumerate(live[:most], first))]
         if len(live) > most:
             lines.append(f"<i>… and {len(live) - most} more: /status {esc(name)}</i>")
     if hosts:
@@ -220,6 +221,16 @@ def global_board(projects: dict[str, list[Row]], labels: dict[str, tuple[dict, d
     lines += ["", "<i>" + esc(f"{sum(states.values())} live" + (f": {count}" if count else "")
                               + ". /status <project> shows one project.") + "</i>"]
     return fit("\n".join(lines))
+
+
+def projects(rows: Iterable[Row]) -> str:
+    """One line per project of `edr projects`: its watcher and its live runs, and its note in italics."""
+    lines = []
+    for r in rows:
+        watcher = f"watched by pid {r['watcher']}" if r.get("watcher") else "not watched"
+        live = "" if r.get("live") is None else f", {r['live']} live"
+        lines.append(f"<b>{esc(r['project'])}</b> {watcher}{live}" + (f"\n    <i>{esc(r['note'])}</i>" if r.get("note") else ""))
+    return fit("\n".join(lines)) or "<i>no registered project</i>"
 
 
 def tools(rows: Iterable[Row]) -> str:

@@ -117,7 +117,7 @@ the watcher compares `cpu_s` and `log_bytes` from cycle to cycle.
 | `cpu_pct` | the CPU use since the previous sample as a percent of one core, computed from two successive `cpu_s` values and the time between them. It is null on the first sample, and a heartbeat less than a second after the previous one keeps the old value. A process group that ended takes its CPU seconds with it, so a drop in `cpu_s` reads as zero |
 | `step_times` | per stage, the unix time the driver first saw each step number from `progress`; a resumed step replaces its time in `step_runs` |
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
-| `last_cmd`, `last_log`, `log` | the last command, the last three lines of the current log, its path |
+| `last_cmd`, `last_log`, `log` | the last command, the last four lines of the current log that are not empty, each cut to 100 characters, and the path of that log |
 | `keep_hours` | the hours the keep file adds |
 | `gate` | why the run waits at a gate, such as `pnr: 1 free, 1 held by others, 1 needed`; null when it does not |
 | `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
@@ -141,8 +141,11 @@ once.
 
 The driver reads the keep file at every heartbeat. `hours` adds to the
 budget of the running stage or task; a keep file older than the start
-of that stage or task does not count. `ack` is for the watcher, which
-reads the same file.
+of that stage or task does not count. When the longer budget is no
+longer passed, the driver clears `over_budget`, unless the budget has
+`kill = true` and the stage got `SIGTERM` already. The watcher reads the
+same file: for `hours` from the time the file was written, it neither
+kills the run as `hung` nor stops it as `superseded`.
 
 ## The task queue
 

@@ -54,7 +54,7 @@ of the last board that edr status printed.
 plan and launch take the batch as an argument, which defaults to
 EDR_BATCH and then to the newest batch directory in the state. status
 --batch defaults to EDR_BATCH and then to every batch. retire needs a
-handle or --batch.
+handle, --batch or --host.
 
 ## Exit codes
 
@@ -91,7 +91,7 @@ A command below says where it refines a code.
 | [launch](#launch) | start one driver per job of a batch |
 | [continue](#continue) | more work on the tree of an existing run |
 | [track](#track) | run a command under the driver here, as a run of the project |
-| [keep](#keep) | add hours to the running stage or task; --ack cancels a pending kill |
+| [keep](#keep) | more hours for a run, and no hung kill or superseded stop for that long |
 | [import](#import) | record a run tree that edr did not make, or its collected results |
 | [export](#export) | a frozen snapshot of one source |
 | [stop](#stop) | stop one run |
@@ -659,20 +659,23 @@ the global table. docs/guides/run.md lists the phases.
 ## keep
 
 ```
-edr keep [--dry-run] [--json] [--hours N] [--ack] handle
+edr keep [--dry-run] [--json] [--hours N] handle
 ```
 
-Writes the keep file of a live run. --hours (default 12 when --ack is
-absent) adds hours to the budget of the running stage or task; --ack
-cancels a pending kill or stop of the watcher.
+Writes the keep file of a live run with N hours, 12 by default. The
+driver adds them to the time budget of the running stage or task, and
+for N hours from now the watcher takes no automatic action on the run:
+it neither kills it when it is hung nor stops it when a newer batch
+supersedes it. The full-host stop does not wait for a keep, since a
+full disk blocks every other user of the host. A new keep replaces the
+one before.
 
 | Flag | Meaning |
 |---|---|
 | `handle` | label@batch, a run id prefix, or #n from the last board |
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json keep |
-| `--hours N` | hours to add to the budget of the running stage or task; default 12 without --ack |
-| `--ack` | cancel the watcher's pending kill or stop |
+| `--hours N` | the hours; default 12 |
 
 | Exit | Meaning |
 |---|---|
@@ -770,13 +773,17 @@ has no driver pid is refused.
 ## retire
 
 ```
-edr retire [--dry-run] --why WHY [--json] [--batch B] [--collect NAMES] [--prune T] [--uncollected] [handle]
+edr retire [--dry-run] --why WHY [--json] [--batch B] [--collect NAMES] [--prune T] [--host H] [--uncollected] [handle]
 ```
 
 Removes the run tree on the host, or with --prune T the paths that
-prune.T names in the stages, after the guard on every target. --batch
-retires every run of the batch and marks it RETIRED, so the watcher
-skips it. A live run gets the phase ABANDONED:&lt;why&gt;.
+prune.T names in the stages, after the guard on every target; T may
+name several sets, comma separated. --batch retires every run of the
+batch and marks it RETIRED, so the watcher skips it. A live run gets the
+phase ABANDONED:&lt;why&gt;. --host H with --prune prunes every finished run
+of the project that has a tree on H, to free the scratch of a full host;
+the Free space button of a host_full alert runs it with every set the
+project declares.
 
 The logs and results survive a retire. The watcher has already copied
 log/ and the collect paths of every finished stage to
@@ -802,12 +809,13 @@ not collected unless you pass --uncollected.
 | `--json` | the same as edr --json retire |
 | `--batch B` | every run of the batch, then mark it RETIRED |
 | `--collect NAMES` | copy these collect_on_request lists, comma separated, to the head node first |
-| `--prune T` | remove the prune targets named T instead of the tree |
+| `--prune T` | remove the prune targets named T instead of the tree; comma separated |
+| `--host H` | with --prune: every finished run of the project with a tree on H |
 | `--uncollected` | remove a tree whose results were never collected |
 
 | Exit | Meaning |
 |---|---|
-| 2 | the batch has no run |
+| 2 | the batch has no run, or no finished run has a tree on the host |
 | 3 | an rm failed |
 
 ## notify
@@ -841,8 +849,7 @@ line can mail either.
 edr watch [--dry-run] [--json] [--once] [--check] [--served]
 ```
 
-Runs the watcher loop: one cycle every heartbeat_s seconds, with the
-Telegram bot as a thread when the site file configures it. --once runs one cycle.
+Runs the watcher loop: one cycle every heartbeat_s seconds. --once runs one cycle.
 --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
 reads and classifies every run, prints the states and writes nothing.
 docs/how-it-works.md explains the cycle.
@@ -854,13 +861,18 @@ per error text and goes on with the last config that loaded: it reads
 the heartbeats, alerts and collects, but resumes and launches nothing
 until the file loads again.
 
+Every watcher sends its alerts. When no supervisor runs, the first
+watcher that takes ~/.edr/serve.lock also does the work of the user
+and runs the Telegram bot for the commands and button presses of every
+project.
+
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
 | `--json` | the same as edr --json watch |
 | `--once` | one cycle; exit 1 when it failed |
 | `--check` | exit 1 when watch.json is older than three cycles |
-| `--served` | started by edr serve: no census, no pinned board |
+| `--served` | started by edr serve: no census, no pinned board, no bot |
 
 | Exit | Meaning |
 |---|---|
@@ -875,8 +887,9 @@ edr serve [--dry-run] [--json] [--once] [--check] [--unit]
 
 Runs the supervisor of the user: a cycle every minute that keeps one
 edr watch --served per registered project in the project directory,
-does the work that belongs to the user once for every project, and
-edits one pinned global board. A watcher that exits starts again after
+does the work that belongs to the user once for every project, edits
+one pinned global board, and runs the Telegram bot for the commands and
+button presses of every project. A watcher that exits starts again after
 1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
 watch.json stood still for three heartbeats and at least 15 minutes
 while its config loads is killed and started again, with an alert. A

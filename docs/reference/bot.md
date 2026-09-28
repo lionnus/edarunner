@@ -4,20 +4,24 @@
 
 The Telegram bot sends the alerts with their buttons, keeps one pinned board up to date and answers the commands below.
 
-Long polling over outbound HTTPS only; one chat id is obeyed, and one user id when
+Every watcher sends its alerts, and keeps the run of each alert with buttons in the database of its
+project. Only the holder of `~/.edr/serve.lock`, the supervisor or else the first watcher, polls:
+Telegram takes one poller per token. Its router finds the project of every command and button
+press. Long polling runs over outbound HTTPS only; one chat id is obeyed, and one user id when
 `user_id` is set.
 
 ## Built-in commands
 
-A handle is `label@batch`, a run id prefix, or `#n` from the last board.
+A handle is `label@batch`, a run id prefix, or `#n` from the last board; `project/label@batch` also names the project. Without `[project]`, `/status` and `/events` answer for every project, and the other commands take the project of the alert they reply to, or the only one.
 
 ### Look
 
 | Command | Effect |
 |---|---|
-| `/status [handle\|all]` | the board, every finished run with all, or one run |
-| `/events [n]` | the last events, newest first |
-| `/hosts` | cores, RAM, scratch and GPUs, used of total |
+| `/status [project\|handle] [all]` | the board of every project, the board of one with all its runs, or one run |
+| `/projects` | every project with its watcher and its live runs |
+| `/events [project] [n]` | the last events of every project or of one, newest first |
+| `/hosts` | the free room of every host and your runs on it |
 | `/tools` | seats used of total, and the hosts, per tool |
 | `/digest` | the daily digest now |
 | `/pin` | pin a new board message |
@@ -27,23 +31,22 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 | Command | Effect |
 |---|---|
 | `/log <handle> [n]` | the last n log lines as a file, default 200 |
-| `/board` | compare.html and status.html as files |
-| `/csv <source>` | the metrics of one source as a CSV file |
+| `/board [project]` | compare.html and status.html as files |
+| `/csv [project] <source>` | the metrics of one source as a CSV file |
 
 ### Act on a run
 
 | Command | Effect |
 |---|---|
-| `/keep <handle> [hours]` | add hours, default 12 |
-| `/ack <handle>` | cancel a pending kill |
+| `/keep <handle> [hours]` | that many more hours on the budget, default 12, and no kill as hung and no stop as superseded for that long |
 | `/stop <handle> [why]` | stop after the running task |
 
 ### Compare
 
 | Command | Effect |
 |---|---|
-| `/compare <handle>...` | metrics side by side |
-| `/metric <name> [--source SOURCE]` | one metric per run |
+| `/compare <handle>...` | metrics side by side, runs of one project |
+| `/metric [project] <name> [--source SOURCE]` | one metric per run |
 
 ### Help
 
@@ -55,11 +58,19 @@ A handle is `label@batch`, a run id prefix, or `#n` from the last board.
 
 ## Alert buttons
 
-| Button | callback_data |
-|---|---|
-| keep 12h | `keep12:<handle>` |
-| ack | `ack:<handle>` |
-| stop | `stop:<handle>` |
+Only the alert of a live run has buttons. A run that is `hung`, `looping`, `over_budget` or
+`superseded` gets Stop, +6h, +12h and +24h. A run on a full host gets Stop, and Free space when
+the project declares prune targets; a keep does not hold off the full-host stop, since a full
+disk blocks every other user of the host. Each alert says in one line what its buttons do.
+Mail and ntfy show each button as a command line.
+
+| Button | callback_data | Effect |
+|---|---|---|
+| Stop | `stop:<project>` | asks once more, then stops the run after its current task |
+| +6h | `keep6:<project>` | 6 more hours on the budget of the running stage or task, and for 6 hours no kill as hung and no stop as superseded |
+| +12h | `keep12:<project>` | the same for 12 hours |
+| +24h | `keep24:<project>` | the same for 24 hours |
+| Free space | `free:<project>` | asks once more, then removes every prune target of the finished runs of the project on the full host |
 
 ## Custom commands
 

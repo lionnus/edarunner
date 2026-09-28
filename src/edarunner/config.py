@@ -67,7 +67,7 @@ DEFAULT_SITE = "~/.config/edarunner/site.toml"  # the site file of `edr hosts` o
 # `${VAR}` belongs to the shell, so a `$` before the brace is not a placeholder.
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
-    "schema", "project", "site", "state_dir", "data", "run_prefix", "telegram_poll", "telegram",
+    "schema", "project", "site", "state_dir", "data", "run_prefix",
     "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "host_free_min_gb", "hosts", "tools", "nfs_export",
@@ -138,13 +138,6 @@ def _default(cls: type, name: str) -> Any:
     return f.default if f.default is not MISSING else f.default_factory()  # type: ignore[misc]
 
 
-def _flag(raw: dict, key: str, file: Path) -> bool:
-    value = raw.get(key, _default(Project, key))
-    if not isinstance(value, bool):
-        raise ConfigError(f"{file}: {key} must be true or false")
-    return value
-
-
 def placeholders(project: Project, **extra: object) -> dict[str, object]:
     """The placeholder dict of a project plus `extra`; a dict value flattens to dotted keys."""
     out: dict[str, object] = {
@@ -210,6 +203,15 @@ def save_text(path: PathLike, text: str) -> None:
 def save_json(path: PathLike, obj: object) -> None:
     """Write `obj` as indented JSON by a temporary file and a rename."""
     save_text(path, json.dumps(obj, indent=1) + "\n")
+
+
+def kept(project: Project, run: Mapping[str, Any], now: float) -> bool:
+    """True while the keep file of a run holds off the watcher: for its hours from the time it was written."""
+    path = project.state_dir / str(run.get("batch")) / f"{run['run_id']}.keep.json"
+    try:
+        return now < path.stat().st_mtime + float(load_json(path).get("hours") or 0) * 3600
+    except (OSError, ValueError):
+        return False
 
 
 # --- table helpers
@@ -300,7 +302,7 @@ def load_site(path: PathLike) -> Site:
     tools = {n: _build(Tool, t, file, f"tools.{n}", name=n)
              for n, t in _table(raw.get("tools", {}), None, file, "tools").items()}
     hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
-    telegram = _telegram(raw["telegram"], file, None, {f.name for f in fields(Telegram)}) if "telegram" in raw else None
+    telegram = _telegram(raw["telegram"], file) if "telegram" in raw else None
     given = {k: raw[k] for k in ("env", "tool_procs", "host_free_min_gb", "nfs_export") if k in raw}
     if "ntfy" in raw:
         given["ntfy"] = _channel(Ntfy, raw["ntfy"], file, "ntfy", "token_file")
@@ -353,22 +355,17 @@ def _check_tools(names: Mapping[str, object], tools: dict[str, Tool], file: Path
             raise ConfigError(f"{file}: {at} names unknown tool '{name}' (site has: {known})")
 
 
-def _telegram(raw: object, file: Path, base: Telegram | None, allowed: set[str]) -> Telegram:
-    """The [telegram] table of `file`; a key it leaves out keeps its value from `base`."""
-    tg = dict(_table(raw, allowed, file, "telegram"))
-    if "token_file" in tg:
-        if not isinstance(tg["token_file"], str):
-            raise ConfigError(f"{file}: telegram.token_file must be str, not {type(tg['token_file']).__name__}")
-        tg["token_file"] = _path(tg["token_file"], file)
-    elif base is None:
-        tg["token_file"] = _path(str(_default(Telegram, "token_file")), file)
+def _telegram(raw: object, file: Path) -> Telegram:
+    """The [telegram] table of `file`."""
+    tg = dict(_table(raw, {f.name for f in fields(Telegram)}, file, "telegram"))
+    if not isinstance(tg.get("token_file", ""), str):
+        raise ConfigError(f"{file}: telegram.token_file must be str, not {type(tg['token_file']).__name__}")
+    tg["token_file"] = _path(str(tg.get("token_file") or _default(Telegram, "token_file")), file)
     if "commands" in tg:
         tg["commands"] = {n: _build(BotCommand, t, file, f"telegram.commands.{n}", name=n)
                           for n, t in _table(tg["commands"], None, file, "telegram.commands").items()}
-    if base is None:
-        _need(tg, "chat_id", file, "telegram")
-    return _build(Telegram, {**({f.name: getattr(base, f.name) for f in fields(Telegram)} if base else {}), **tg},
-                  file, "telegram")
+    _need(tg, "chat_id", file, "telegram")
+    return _build(Telegram, tg, file, "telegram")
 
 
 # --- edr.toml and tasks.toml
@@ -387,8 +384,6 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     else:
         site = load_site(root / Path(site_path).expanduser())
     values["site_dir"] = str(site.path.parent)
-    if "telegram" in raw:
-        site.telegram = _telegram(raw["telegram"], file, site.telegram, {"token_file", "chat_id", "user_id", "topic_id"})
 
     src = _table(raw.get("source", {}), None, file, "source")
     source = _build(Source, {k: v for k, v in src.items() if k not in ("repo", "worktrees")}, file, "source",
@@ -407,7 +402,6 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         state_dir=_path(raw.get("state_dir", str(_default(Project, "state_dir"))), file, values),
         data=_path(raw.get("data", str(_default(Project, "data"))), file, values),
         run_prefix=raw.get("run_prefix", _default(Project, "run_prefix")),
-        telegram_poll=_flag(raw, "telegram_poll", file),
         source=source,
         sync=_build(Sync, raw.get("sync", {}), file, "sync"),
         runtime=_build(Runtime, raw.get("runtime", {}), file, "runtime"),

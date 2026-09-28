@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import __version__, analysis, board, census, config, home, metrics
 from .guards import Refuse
@@ -33,6 +33,9 @@ from .hosts import HostProbe, floor
 from .model import Placement, Project
 from .notify import Notifier, alerts, make_notifiers
 from .notify.telegram import format as tgfmt
+
+if TYPE_CHECKING:
+    from .cli import Router
 
 log = logging.getLogger(__name__)
 
@@ -65,15 +68,16 @@ class Store:
         log.info("%s %s: %s", actor, kind, text)
 
 
-def notifiers() -> list[Notifier]:
-    """The channels of the default site file, with `edr` in the first line of each message."""
+def notifiers(router: Router | None = None) -> list[Notifier]:
+    """The channels of the default site file, with `edr` in the first line of each message; `router` lets the bot
+    take the commands of every project."""
     try:
         site = config.load_site(config.DEFAULT_SITE)
     except config.ConfigError as e:
         log.warning("no channels: %s", e)
         return []
-    user = SimpleNamespace(project="edr", root=home.root(), data=home.root(), telegram_poll=False, site=site)
-    return make_notifiers(site, user, Store(), None)  # type: ignore[arg-type]
+    user = SimpleNamespace(project="edr", root=home.root(), data=home.root(), site=site)
+    return make_notifiers(site, user, Store(), router)  # type: ignore[arg-type]
 
 
 @dataclass
@@ -216,6 +220,9 @@ def global_board(found: dict[str, Project], taken: dict, now: float) -> str:
     sites = census.host_sites(found)
     probes = {h: p["error"] if "error" in p else HostProbe(**p) for h, p in (taken.get("hosts") or {}).items() if h in sites}
     view = census.host_view(probes, taken.get("runs") or [], {h: floor(sites[h], h) for h in probes}, Placement())
+    # `#n` of the bot counts the runs in the order of this board.
+    Store().set_store("last_board", [[name, r["run_id"]] for name in sorted(rows)
+                                     for r in board.order(rows[name]) if board.is_live(r)])
     return tgfmt.global_board(rows, labels, [r for r in view if r["runs"] or r["note"]], now)
 
 
@@ -227,6 +234,8 @@ def run(notifiers: list[Notifier], once: bool = False) -> int:
         print(f"edr serve: pid {home.holder(path)} serves already")
         return 2
     sup = Supervisor(notifiers)
+    for n in notifiers:
+        n.start()
     _notify("READY=1")
     try:
         while True:
@@ -240,6 +249,8 @@ def run(notifiers: list[Notifier], once: bool = False) -> int:
                 return 0
             time.sleep(max(1.0, CYCLE_S - (time.time() - t0)))
     finally:
+        for n in notifiers:
+            n.stop()
         sup.stop()
         os.close(fd)
 

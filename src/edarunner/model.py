@@ -423,8 +423,6 @@ class Project:
     state_dir: Path = doc("the state directory, on a filesystem every host mounts", Path("~/.edr/{project}"))
     data: Path = doc("the head-node data directory: `edr.db`, `results/`, `board/`", Path("data"))
     run_prefix: str = doc("the run tree prefix under the host scratch", "{user}/edr/{project}")
-    telegram_poll: bool = doc("`false`: this project's watcher sends alerts and the board but does not poll "
-                              "for commands; one project per bot token polls", True)
     env: dict[str, str] = doc("the variables every command of every stage needs, on top of the site `env`; "
                               "a value takes the run placeholders. A `$NAME` or `${NAME}` that the site sets takes "
                               "the site value, so `PATH = \"{root}/.venv/bin:$PATH\"` keeps the site path; a value "

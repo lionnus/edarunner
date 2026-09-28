@@ -43,8 +43,8 @@ class State:
     where the run is or how it ended. A live run gets its state from the heartbeat and the database;
     a finished run from its phase.
     Every change of state writes an event. A state that alerts sends one alert per run and reason,
-    and a new reason edits that alert in place. `edr keep --ack` cancels the pending kill of `hung`
-    and the stop of `host_full`; any keep file holds off the stop of `superseded`.
+    and a new reason edits that alert in place. A keep of N hours holds off the kill of `hung` and
+    the stop of `superseded` for N hours; the full-host stop never waits for a keep.
     """
 
     test: str
@@ -61,14 +61,14 @@ STATES = {
                   "is alive", alert=True),
     "hung": State("the heartbeat is fresh, a stage or task runs, and nothing changed for `hung_s`: phase, step, "
                   "tree size, log tail, task counts, log size, CPU time of the process groups",
-                  "`SIGTERM` to the process groups, only with `kill_hung` and no `ack`", alert=True),
+                  "`SIGTERM` to the process groups, only with `kill_hung` and while no keep holds", alert=True),
     "looping": State("the driver set `looping`: `streak` equal failure signatures in a row", "none", alert=True),
     "over_budget": State("the driver set `over_budget`, or the run ended `OVER_BUDGET`", "none", alert=True),
     "host_full": State("the driver set `host_full`: the free scratch is below the floor of the host",
                        "`stop --now` on the newest run of the host, of any of your projects, once per `grace_s` "
-                       "while the host stays full, unless that run has `ack`", alert=True),
+                       "while the host stays full; a keep does not hold it off", alert=True),
     "superseded": State("a newer batch runs the same label at another source",
-                        "`stop --after-task`, unless the run has a keep file", alert=True),
+                        "`stop --after-task`, while no keep holds", alert=True),
     "orphan": State("a process of the current user that matches `tool_procs` and that no live run owns: its "
                     "`EDR_RUN_ID` names a run of a registered project that ended or whose driver is gone, or an "
                     "unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and "
@@ -95,10 +95,6 @@ _NOTIFY = frozenset(s for s, st in STATES.items() if st.alert)
 
 def _hb(project: Project, run: Row) -> dict:
     return config.load_json(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.json")
-
-
-def _keep(project: Project, run: Row) -> dict:
-    return config.load_json(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.keep.json")
 
 
 def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
@@ -204,13 +200,15 @@ def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons
          now: float, notes: dict) -> bool:
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
     lim, host, run_id = project.limits, run.get("host"), run["run_id"]
+    if config.kept(project, run, now):
+        return False  # the keep holds off every action; the next cycle asks again
     if any(r.startswith("superseded:") for r in reasons):
         stop_path = project.state_dir / str(run.get("batch")) / f"{run_id}.stop"
-        if not _keep(project, run) and not stop_path.exists():
+        if not stop_path.exists():
             launch.stop(ssh, db, run, {}, after_task=True, why=text, state=project.state_dir, actor="watch")
         if state == "superseded":
             return True
-    if state == "hung" and lim.kill_hung and not _keep(project, run).get("ack"):
+    if state == "hung" and lim.kill_hung:
         pgids = _hb(project, run).get("pgids") or []
         for pgid in pgids:
             ssh.kill_pgid(host, pgid, "TERM")
@@ -486,14 +484,12 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
 
 def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], once: bool = False,
                 served: bool = False) -> int:
-    """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed.
+    """A cycle every limits.heartbeat_s. With `once`: 1 when the cycle failed.
 
     A config that stops loading gets one alert per error text, and the cycles go on with the last one
     that loaded and start nothing until the file loads again. Unless the supervisor started it
-    (`served`), the first watcher that takes `serve.lock` keeps it and does the work of the user
-    after each cycle."""
-    for n in notifiers:
-        n.start()
+    (`served`), the first watcher that takes `serve.lock` keeps it, starts to take the commands of
+    the bot, and does the work of the user after each cycle."""
     failed, broken, serve = False, "", None
     try:
         while True:
@@ -517,7 +513,9 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
                 failed = True
-            serve = serve if serve is not None or served else home.lock(home.root() / "serve.lock")
+            if serve is None and not served and (serve := home.lock(home.root() / "serve.lock")) is not None:
+                for n in notifiers:
+                    n.start()  # the holder of serve.lock takes the commands of every project
             if serve is not None:
                 try:
                     census.work(notifiers, own=project)

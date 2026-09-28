@@ -11,33 +11,47 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from helpers_telegram import CHAT, USER, FakeActions, FakeApi, FakeDatabase, make_project, make_site
+from helpers_telegram import CHAT, USER, FakeApi, FakeDatabase, FakeRouter, make_project, make_site
 
 from edarunner import board
 from edarunner.model import BotCommand
-from edarunner.notify import alert_buttons, make_notifiers
+from edarunner.notify import alerts, make_notifiers
 from edarunner.notify.alerts import Alert
 from edarunner.notify.telegram import TelegramBot
 from edarunner.notify.telegram import api as tgapi
 from edarunner.notify.telegram import bot as tgbot
+from edarunner.notify.telegram import buttons as tgbuttons
 from edarunner.notify.telegram import custom as tgcustom
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import BotApi
 from edarunner.notify.telegram.format import LIMIT, fit, pre
 
 
-@pytest.fixture
-def bot(tmp_path, monkeypatch) -> TelegramBot:
-    site = make_site(tmp_path)
-    bots = make_notifiers(site, make_project(tmp_path), FakeDatabase(), FakeActions())
+def make_bot(tmp_path, monkeypatch, names=("demo",), **site) -> TelegramBot:
+    bots = make_notifiers(make_site(tmp_path, **site), make_project(tmp_path), FakeDatabase(),
+                          FakeRouter(make_project(tmp_path), names))
     assert len(bots) == 1 and isinstance(bots[0], TelegramBot)
     monkeypatch.setattr(bots[0], "api", FakeApi())
     return bots[0]
 
 
+@pytest.fixture
+def bot(tmp_path, monkeypatch) -> TelegramBot:
+    return make_bot(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def two(tmp_path, monkeypatch) -> TelegramBot:
+    """A bot over the projects demo and other."""
+    return make_bot(tmp_path, monkeypatch, ("demo", "other"))
+
+
+KEEP = ("stop", "keep6", "keep12", "keep24")
+
+
 def hung(key: str = "run1", about: str = "no progress <3 h", buttons: bool = True) -> Alert:
     return Alert("hung", key, "no progress in", "a@demo", about, todo=[("Stop it:", "edr stop a@demo --why hung")],
-                 buttons=alert_buttons("a@demo") if buttons else [])
+                 buttons=[alerts.button(x, "demo", handle="a@demo", why="hung") for x in KEEP] if buttons else [])
 
 
 def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
@@ -47,55 +61,72 @@ def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
 def last_reply(bot: TelegramBot) -> str:
     """The reply under its bold first line, which names the project."""
     head, _, body = bot.api.of("sendMessage")[-1]["text"].partition("\n")
-    assert head.startswith("<b>demo: ") and head.endswith("</b>")
+    assert re.match(r"<b>(demo|other): .*</b>$", head), head
     return body
 
 
 def test_make_notifiers_needs_a_private_token(tmp_path):
     site = make_site(tmp_path, mode=0o644)
-    assert make_notifiers(site, make_project(tmp_path), FakeDatabase(), FakeActions()) == []
+    assert make_notifiers(site, make_project(tmp_path), FakeDatabase()) == []
     site.telegram.token_file.unlink()
-    assert make_notifiers(site, make_project(tmp_path), FakeDatabase(), FakeActions()) == []
+    assert make_notifiers(site, make_project(tmp_path), FakeDatabase()) == []
     assert make_notifiers(SimpleNamespace(telegram=None), None, None, None) == []
 
 
 @pytest.mark.parametrize("text,call", [
-    ("/status", ("status_text", (None,), {})),
-    ("/status@edr_bot", ("status_text", (None,), {})),
+    ("/status", ("board_text", (), {})),
+    ("/status@edr_bot", ("board_text", (), {})),
     ("/status a@demo", ("status_text", ("a@demo",), {})),
+    ("/status demo", ("status_text", (), {"everything": False})),
+    ("/status demo all", ("status_text", (), {"everything": True})),
     ("/status all", ("status_text", (), {"everything": True})),
+    ("/projects", ("projects_text", (), {})),
     ("/events 5", ("events_text", (5,), {})),
     ("/events 500", ("events_text", (30,), {})),
     ("/events", ("events_text", (8,), {})),
+    ("/events demo 3", ("events_text", (3,), {})),
     ("/hosts", ("hosts_text", (), {})),
     ("/tools", ("tools_text", (), {})),
+    ("/digest", ("digest_text", (), {})),
     ("/keep a@demo 6", ("keep", ("a@demo", 6, "telegram"), {})),
     ("/keep a@demo", ("keep", ("a@demo", 12, "telegram"), {})),
-    ("/ack #3", ("ack", ("#3", "telegram"), {})),
+    ("/keep demo/#3 6", ("keep", ("#3", 6, "telegram"), {})),
     ("/stop a@demo disk full", ("stop_after_task", ("a@demo", "telegram", "disk full"), {})),
     ("/stop a@demo", ("stop_after_task", ("a@demo", "telegram", "stopped from telegram"), {})),
     ("/compare a@demo b_nodw@demo", ("compare_text", (["a@demo", "b_nodw@demo"],), {})),
     ("/metric power_w --source HEAD", ("metric_text", ("power_w", "HEAD"), {})),
-    ("/metric power_w", ("metric_text", ("power_w", None), {})),
+    ("/metric demo power_w", ("metric_text", ("power_w", None), {})),
 ])
 def test_builtin_dispatch(bot, text, call):
     bot.handle_update(msg(text))
-    assert call in bot.actions.calls
+    assert call in bot.router.calls
     out = call[0] + " ok"
     assert last_reply(bot) == (pre(out) if call[0] in ("compare_text", "metric_text") else out)
 
 
+def test_a_handle_in_two_projects_acts_on_neither(two):
+    two.handle_update(msg("/keep both@x 6"))
+    assert two.router.calls == []
+    assert last_reply(two) == "error: both@x: more than one project has it: demo/both@x, other/both@x"
+    two.handle_update(msg("/keep other/both@x 6"))
+    assert two.router.calls == [("keep", ("both@x", 6, "telegram"), {})]
+    two.handle_update(msg("/metric power_w"))
+    assert last_reply(two) == "error: name a project first: demo, other" and len(two.router.calls) == 1
+    two.handle_update(msg("/csv other gabc1234"))
+    assert two.api.of("sendDocument")[-1]["caption"] == "<b>other: csv</b>\ngabc1234"
+
+
 def test_bad_handle_is_an_answer(bot):
     bot.handle_update(msg("/keep 'a;rm' 3"))
-    assert bot.actions.calls == []
+    assert bot.router.calls == []
     assert "error" in last_reply(bot)
 
 
 def test_help_groups_builtins_and_custom(bot):
     bot.handle_update(msg("/nothing"))
-    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo: help</b>\n<b>Look</b>\n/status [handle|all]: ")
+    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo: help</b>\n<b>Look</b>\n/status [project|handle] [all]: ")
     text = last_reply(bot)
-    assert "<pre>" not in text and "/keep &lt;handle&gt; [hours]: add hours, default 12" in text
+    assert "<pre>" not in text and "/keep &lt;handle&gt; [hours]: that many more hours on the budget, default 12" in text
     assert "<b>Custom</b>\n/echo &lt;dir&gt;: echo a dir" in text
     assert [ln for ln in text.splitlines() if ln.startswith("<b>")] == ["<b>Look</b>", "<b>Files</b>", "<b>Act on a run</b>", "<b>Compare</b>", "<b>Help</b>", "<b>Custom</b>"]
 
@@ -127,7 +158,9 @@ def test_custom_without_args_refuses_extra_words(bot):
 
 
 def test_custom_skip_if_renders_placeholders(bot):
-    bot.handle_update(msg("/same demo"))
+    bot.handle_update(msg("/same demo"))  # a first word that names a project picks it
+    assert last_reply(bot) == pre("usage: /same <dir>")
+    bot.handle_update(msg("/same demo demo"))
     assert last_reply(bot) == pre("skipped demo")
     bot.handle_update(msg("/same other"))
     assert last_reply(bot) == pre("ran other")
@@ -135,7 +168,7 @@ def test_custom_skip_if_renders_placeholders(bot):
 
 def test_keep_refuses_a_unicode_digit(bot):
     bot.handle_update(msg("/keep x \u00b2"))
-    assert bot.actions.calls == []
+    assert bot.router.calls == []
     assert last_reply(bot).startswith("error: ")
     assert [e["kind"] for e in bot.db.events] == ["refused"]
 
@@ -162,47 +195,48 @@ def test_custom_dry_run_skip_detach_timeout(bot, monkeypatch):
 def test_allowlist_is_silent_with_one_event(bot):
     bot.handle_update(msg("/status", chat=7))
     bot.handle_update(msg("/status", chat=7))
-    assert bot.api.calls == [] and bot.actions.calls == []
+    assert bot.api.calls == [] and bot.router.calls == []
     assert [e["kind"] for e in bot.db.events] == ["rejected"]
     assert "chat 7" in bot.db.events[0]["text"]
 
 
 def test_chat_id_zero_prints_the_chat_id(tmp_path, monkeypatch, capsys):
-    site = make_site(tmp_path, chat_id=0)
-    b = TelegramBot(site, make_project(tmp_path), FakeDatabase(), FakeActions(), str(site.telegram.token_file))
-    monkeypatch.setattr(b, "api", FakeApi())
+    b = make_bot(tmp_path, monkeypatch, chat_id=0)
     b.handle_update(msg("/status", chat=99))
     assert "chat_id = 99" in capsys.readouterr().err
     assert b.api.calls == []
 
 
-def callback(data: str, chat: int = CHAT, user: int = USER) -> dict:
-    markup = {"inline_keyboard": [[{"text": "ack", "callback_data": "ack:a@demo"}]]}
+def callback(data: str, chat: int = CHAT, user: int = USER, mid: int = 5) -> dict:
+    markup = {"inline_keyboard": [[{"text": "+12h", "callback_data": "keep12:demo"}]]}
     # A press in a group comes from a user id; without user_id only the chat that holds the button is checked.
     return {"update_id": 2, "callback_query": {"id": "cb1", "from": {"id": user}, "data": data,
-                                               "message": {"message_id": 5, "chat": {"id": chat}, "text": "hung a@demo",
+                                               "message": {"message_id": mid, "chat": {"id": chat}, "text": "hung a@demo",
                                                            "entities": [{"offset": 0, "length": 4, "type": "bold"}],
                                                            "reply_markup": markup}}}
 
 
-def test_callback_buttons(bot):
-    bot.handle_update(callback("keep12:a@demo"))
-    assert ("keep", ("a@demo", 12, "telegram"), {}) in bot.actions.calls
-    bot.handle_update(callback("ack:a@demo"))
-    assert ("ack", ("a@demo", "telegram"), {}) in bot.actions.calls
-    answers = bot.api.of("answerCallbackQuery")
+def test_callback_buttons_act_on_the_run_of_their_alert(two):
+    two.router.replies[("demo", 5)] = "run1"
+    two.router.replies[("other", 6)] = "run9"
+    two.handle_update(callback("keep12:demo"))
+    two.handle_update(callback("keep24:other", mid=6))
+    assert two.router.calls == [("keep", ("run1", 12, "telegram"), {}), ("keep", ("run9", 24, "telegram"), {})]
+    answers = two.api.of("answerCallbackQuery")
     assert [a["callback_query_id"] for a in answers] == ["cb1", "cb1"]
-    edits = bot.api.of("editMessageText")
-    assert edits[-1]["message_id"] == 5 and edits[-1]["text"] == "hung a@demo\nack ok"
+    edits = two.api.of("editMessageText")
+    assert edits[0]["message_id"] == 5 and edits[0]["text"] == "hung a@demo\nkeep ok"
     assert edits[-1]["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]  # the bold title stays
     assert edits[-1]["reply_markup"]["inline_keyboard"]  # the buttons stay
-    assert bot.db.events == []  # the action records its own event
-    bot.handle_update(callback("retire:a@demo"))
-    assert bot.api.of("answerCallbackQuery")[-1]["text"] == "unknown button"
-    assert [e["kind"] for e in bot.db.events] == ["refused"]
-    assert len(bot.actions.calls) == 2
-    bot.handle_update(callback("ack:a@demo", chat=7))
-    assert len(bot.actions.calls) == 2
+    assert two.db.events == []  # the action records its own event
+    two.handle_update(callback("retire:demo"))
+    assert two.api.of("answerCallbackQuery")[-1]["text"] == "unknown button"
+    two.handle_update(callback("keep6:demo", mid=7))
+    assert two.api.of("answerCallbackQuery")[-1]["text"].startswith("this alert is older than 7 days")
+    two.handle_update(callback("keep6:nope"))
+    assert [e["kind"] for e in two.db.events] == ["refused"] * 3 and len(two.router.calls) == 2
+    two.handle_update(callback("keep6:demo", chat=7))
+    assert len(two.router.calls) == 2
 
 
 def test_press_by_another_user_needs_no_user_id(bot, caplog):
@@ -211,44 +245,45 @@ def test_press_by_another_user_needs_no_user_id(bot, caplog):
         bot.start()
     bot.stop()
     assert "chat 42 is the only gate" in caplog.text
-    bot.handle_update(callback("ack:a@demo", user=999))
-    assert ("ack", ("a@demo", "telegram"), {}) in bot.actions.calls
+    bot.router.replies[("demo", 5)] = "run1"
+    bot.handle_update(callback("keep6:demo", user=999))
+    assert ("keep", ("run1", 6, "telegram"), {}) in bot.router.calls
     bot.handle_update(msg("/status", user=999))
-    assert last_reply(bot) == "status_text ok"
+    assert last_reply(bot) == "board_text ok"
 
 
-def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
+def test_a_bot_without_a_router_only_sends(tmp_path, monkeypatch):
     site = make_site(tmp_path)
-    project = make_project(tmp_path)
-    project.telegram_poll = False
-    b = TelegramBot(site, project, FakeDatabase(), FakeActions(), str(site.telegram.token_file))
+    b = TelegramBot(site, make_project(tmp_path), FakeDatabase(), None, str(site.telegram.token_file))
     monkeypatch.setattr(b, "api", FakeApi())
     b.start()
     b.stop()
     assert b._thread is None and b.api.of("setMyCommands") == []
+    b.handle_update(msg("/status"))
     b.send(hung())
-    assert len(b.api.of("sendMessage")) == 1 and b.api.of("sendMessage")[0]["reply_markup"] is None
+    [sent] = b.api.of("sendMessage")
+    assert [k["callback_data"] for k in sent["reply_markup"]["inline_keyboard"][0]] == [f"{x}:demo" for x in KEEP]
+    assert b.db.store["telegram"]["replies"]["1"][0] == "run1"  # a press reaches the poller, which finds the run here
 
 
 def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
-    site = make_site(tmp_path, user_id=777)
-    b = TelegramBot(site, make_project(tmp_path), FakeDatabase(), FakeActions(), str(site.telegram.token_file))
-    monkeypatch.setattr(b, "api", FakeApi())
+    b = make_bot(tmp_path, monkeypatch, user_id=777)
+    b.router.replies[("demo", 5)] = "run1"
     b._stop.set()
     with caplog.at_level(logging.WARNING):
         b.start()
     b.stop()
     assert "only gate" not in caplog.text
     b.handle_update(msg("/status", user=USER))
-    b.handle_update(callback("ack:a@demo", user=USER))
+    b.handle_update(callback("keep6:demo", user=USER))
     b.handle_update(msg("/stop a@demo", user=USER))
-    assert b.api.of("sendMessage") == [] and b.api.of("answerCallbackQuery") == [] and b.actions.calls == []
+    assert b.api.of("sendMessage") == [] and b.api.of("answerCallbackQuery") == [] and b.router.calls == []
     assert [e["kind"] for e in b.db.events] == ["rejected"] and "user 12345 in chat 42" in b.db.events[0]["text"]
     b.handle_update(msg("/status", user=777))
-    b.handle_update(callback("ack:a@demo", user=777))
-    assert [c[0] for c in b.actions.calls] == ["status_text", "ack"]
+    b.handle_update(callback("keep6:demo", user=777))
+    assert [c[0] for c in b.router.calls] == ["board_text", "keep"]
     b.handle_update(msg("/status", chat=7, user=777))
-    assert len(b.actions.calls) == 2
+    assert len(b.router.calls) == 2
 
 
 def test_alert_send_edits_a_repeat(bot):
@@ -257,7 +292,8 @@ def test_alert_send_edits_a_repeat(bot):
     assert mid == "1" and sent["disable_notification"] is False
     assert sent["text"] == ("🔴 <b>demo: no progress in</b> <code>a@demo</code>\nno progress &lt;3 h\n\n"
                             "Stop it:\n<code>edr stop a@demo --why hung</code>")
-    assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo", "stop:a@demo"]
+    assert [(b["text"], b["callback_data"]) for b in sent["reply_markup"]["inline_keyboard"][0]] == [
+        ("Stop", "stop:demo"), ("+6h", "keep6:demo"), ("+12h", "keep12:demo"), ("+24h", "keep24:demo")]
     assert bot.send(hung(about="no progress for 3 h", buttons=False)) == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
     assert bot.send(hung("run2")) == "2"
@@ -275,14 +311,14 @@ def test_board_is_created_once_then_edited(bot, tmp_path):
     assert edit["message_id"] == 1 and edit["reply_markup"] is None
     assert re.fullmatch(r"<b>demo: board \d\d:\d\d</b>\nboard v2", edit["text"])
     # A new bot on the same db edits the same message.
-    again = TelegramBot(bot.site, bot.project, bot.db, bot.actions, str(bot.tg.token_file))
+    again = TelegramBot(bot.site, bot.project, bot.db, None, str(bot.tg.token_file))
     again.api = FakeApi()
     again.board("board v3")
     assert again.api.of("sendMessage") == [] and again.api.of("editMessageText")[-1]["message_id"] == 1
-    # /pin unpins the old message and pins a new one.
+    # /pin unpins the old message and pins a new one with the board of every project.
     bot.handle_update(msg("/pin"))
     assert bot.api.of("unpinChatMessage")[-1]["message_id"] == 1
-    assert bot.api.of("pinChatMessage")[-1]["message_id"] == 2
+    assert bot.api.of("pinChatMessage")[-1]["message_id"] == 2 and bot.api.of("sendMessage")[-2]["text"].endswith("board_text ok")
 
 
 def test_api_obeys_429_retry_after(monkeypatch):
@@ -336,7 +372,7 @@ def test_api_retries_idempotent_methods_only(monkeypatch):
 def test_builtin_commands_land_in_events(bot):
     bot.handle_update(msg("/pin"))
     bot.handle_update(msg("/keep 'a;rm' 3"))
-    bot.handle_update(msg("/ack a@demo"))  # the action records its own event
+    bot.handle_update(msg("/keep a@demo 3"))  # the action records its own event
     assert [(e["kind"], e["text"][:6]) for e in bot.db.events] == [("command", "/pin"), ("refused", "/keep ")]
 
 
@@ -396,7 +432,7 @@ def test_every_run_state_has_a_mark():
 def test_a_long_reply_is_cut_at_a_line(bot):
     text = fit("\n".join(f"<i>line {n}</i>" for n in range(1000)))
     assert len(text) <= LIMIT + 2 and text.endswith("</i>\n…")
-    bot.actions.status_text = lambda h=None: "\n".join(["<code>x</code>"] * 1000)
+    bot.router.board_text = lambda: "\n".join(["<code>x</code>"] * 1000)
     bot.handle_update(msg("/status"))
     assert len(bot.api.of("sendMessage")[-1]["text"]) <= LIMIT + 2
 
@@ -411,9 +447,9 @@ def in_topic(update: dict, thread: int) -> dict:
 def test_a_topic_routes_every_message_and_ignores_other_threads(bot, capsys):
     bot.topic = 17
     bot.handle_update(in_topic(msg("/status"), 99))
-    bot.handle_update(in_topic(callback("ack:a@demo"), 99))
+    bot.handle_update(in_topic(callback("keep6:demo"), 99))
     bot.handle_update(msg("/status"))
-    assert bot.api.calls == [] and bot.actions.calls == [] and bot.db.events == []
+    assert bot.api.calls == [] and bot.router.calls == [] and bot.db.events == []
     bot.handle_update(in_topic(msg("/status"), 17))
     assert bot.api.of("sendMessage")[-1]["message_thread_id"] == 17
     bot.send(hung())
@@ -427,7 +463,7 @@ def test_without_a_topic_the_reply_goes_to_the_thread_and_its_id_is_printed(bot,
     bot.handle_update(in_topic(msg("/status"), 99))
     bot.handle_update(in_topic(msg("/status"), 99))
     assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [99, 99]
-    assert capsys.readouterr().err.count("set topic_id = 99 in [telegram] of edr.toml") == 1
+    assert capsys.readouterr().err.count("set topic_id = 99 in [telegram]") == 1
     bot.handle_update(msg("/status"))
     assert bot.api.of("sendMessage")[-1]["message_thread_id"] is None
 
@@ -439,25 +475,24 @@ def reply_to(text: str, msg_id: int) -> dict:
     return u
 
 
-def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
-    mid = int(bot.send(hung()))
+def test_a_reply_to_an_alert_names_its_run(two):
+    mid = int(two.send(hung()))
+    assert list(two.db.store["telegram"]["replies"]) == [str(mid)]
+    two.router.replies[("other", mid)] = "run1"
     for text, call in (("/keep 24", ("keep", ("run1", 24, "telegram"), {})),
-                       ("/keep run1 6", ("keep", ("run1", 6, "telegram"), {})),
-                       ("/ack", ("ack", ("run1", "telegram"), {})),
+                       ("/keep other/run1 6", ("keep", ("run1", 6, "telegram"), {})),
                        ("/stop disk full", ("stop_after_task", ("run1", "telegram", "disk full"), {})),
-                       ("/status", ("status_text", ("run1",), {}))):
-        bot.handle_update(reply_to(text, mid))
-        assert bot.actions.calls[-1] == call, text
-    bot.handle_update(reply_to("/where", mid))
-    assert last_reply(bot) == pre("a@demo run1 hostA:/scratch/edr/demo/run1")
-    bot.handle_update(msg("/where"))
-    assert last_reply(bot) == pre("/where: missing placeholder {handle} in '{handle} {run_id} {host}:{run_root}'")
-    bot.handle_update(reply_to("/ack", 999))
-    assert last_reply(bot).startswith("error: a handle is")
-    monkeypatch.setattr(tgbot.time, "time", lambda: 1e12)
-    bot.handle_update(reply_to("/ack", mid))
-    assert last_reply(bot).startswith("error: a handle is")
-    assert list(bot.db.store["telegram"]["replies"]) == [str(mid)]
+                       ("/status", ("status_text", ("run1",), {})),
+                       ("/metric power_w", ("metric_text", ("power_w", None), {}))):
+        two.handle_update(reply_to(text, mid))
+        assert two.router.calls[-1] == call, text
+    assert last_reply(two) == pre("metric_text ok")
+    two.handle_update(reply_to("/where", mid))
+    assert last_reply(two) == pre("a@demo run1 hostA:/scratch/edr/demo/run1")
+    two.handle_update(msg("/where"))
+    assert last_reply(two) == "error: name a project first: demo, other"
+    two.handle_update(reply_to("/keep", 999))
+    assert last_reply(two).startswith("error: a handle is")
 
 
 def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
@@ -477,22 +512,22 @@ def test_post_sends_one_message_and_says_whether_it_went(bot, monkeypatch):
 def test_files_go_up_as_documents_under_the_limit(bot, tmp_path, monkeypatch):
     bot.handle_update(msg("/log a@demo 3"))
     doc = bot.api.of("sendDocument")[-1]
-    assert bot.actions.calls[-1] == ("log_tail", ("a@demo", 3), {})
+    assert bot.router.calls[-1] == ("log_tail", ("a@demo", 3), {})
     assert doc["files"] == {"document": ("a@demo.log", b"line\n" * 3)}
     assert doc["caption"] == "<b>demo: log</b>\nthe last 3 lines"
     bot.handle_update(msg("/log a@demo"))
-    assert bot.actions.calls[-1] == ("log_tail", ("a@demo", 200), {})
+    assert bot.router.calls[-1] == ("log_tail", ("a@demo", 200), {})
     bot.handle_update(msg("/board"))
     assert last_reply(bot) == "no board files yet; the watcher writes them every cycle"
     for name in ("compare.html", "status.html"):
         (tmp_path / name).write_text(f"<html>{name}</html>")
-        bot.actions.board.append(tmp_path / name)
+        bot.router.acts["demo"].board.append(tmp_path / name)
     bot.handle_update(msg("/board"))
     assert [d["files"]["document"][0] for d in bot.api.of("sendDocument")[-2:]] == ["compare.html", "status.html"]
     bot.handle_update(msg("/csv gabc1234"))
     assert bot.api.of("sendDocument")[-1]["files"] == {"document": ("metrics.csv", b"run_id,source\nr1,gabc1234\n")}
     bot.handle_update(msg("/csv a;b"))
-    assert last_reply(bot) == "usage: /csv &lt;source&gt;"
+    assert last_reply(bot) == "usage: /csv [project] &lt;source&gt;"
     monkeypatch.setattr(tgbot, "MAX_DOCUMENT", 2**20)
     sent = len(bot.api.of("sendDocument"))
     bot.handle_update(msg("/log a@demo 300000"))
@@ -515,46 +550,58 @@ def test_send_document_posts_a_multipart_body(monkeypatch):
     assert b'filename="a@demo.log"\r\nContent-Type: application/octet-stream\r\n\r\nx\n\r\n' in req.data
 
 
-def press(data: str, text: str, edited: float) -> dict:
-    """A press on alert 5 with `text`, last edited at `edited`."""
+def press(data: str, text: str) -> dict:
+    """A press on alert 5 that shows `text`."""
     u = callback(data)
-    u["callback_query"]["message"].update(text=text, edit_date=int(edited))
+    u["callback_query"]["message"]["text"] = text
     return u
 
 
 def test_the_stop_button_asks_and_acts_on_the_second_tap(bot):
-    now = time.time()
-    bot.handle_update(press("stop:a@demo", "hung a@demo", now - 3600))
+    bot.router.replies[("demo", 5)] = "run1"
+    alert_keys = callback("x")["callback_query"]["message"]["reply_markup"]
+    bot.handle_update(press("stop:demo", "hung a@demo"))
     edit = bot.api.of("editMessageText")[-1]
-    assert edit["text"] == "hung a@demo\nStop a@demo?" and bot.actions.calls == []
-    assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == ["stopyes:a@demo", "stopno:a@demo"]
+    assert edit["text"] == "hung a@demo\nStop a@demo after its current task?" and bot.router.calls[-1][0] == "run_info"
+    assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == ["stopyes:demo", "stopno:demo"]
     assert edit["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]
-    bot.handle_update(press("stopno:a@demo", "hung a@demo\nStop a@demo?", now))
+    bot.handle_update(press("stopno:demo", "hung a@demo\nStop a@demo after its current task?"))
     edit = bot.api.of("editMessageText")[-1]
-    assert edit["text"] == "hung a@demo" and bot.actions.calls == []
-    assert edit["reply_markup"]["inline_keyboard"][0][2]["callback_data"] == "stop:a@demo"
-    bot.handle_update(press("stopyes:a@demo", "hung a@demo\nStop a@demo?", now - 601))
-    assert bot.api.of("answerCallbackQuery")[-1]["text"] == "the question expired; press stop again"
-    assert bot.api.of("editMessageText")[-1]["text"] == "hung a@demo" and bot.actions.calls == []
-    bot.handle_update(press("stopyes:a@demo", "hung a@demo\nStop a@demo?", now - 5))
-    assert bot.actions.calls == [("stop_after_task", ("a@demo", "telegram", "stopped from a telegram button"), {})]
+    assert edit["text"] == "hung a@demo" and edit["reply_markup"] == alert_keys
+    bot.handle_update(press("stop:demo", "hung a@demo"))
+    bot.db.store["asked"]["5"]["ts"] -= tgbuttons.CONFIRM_S + 1
+    bot.handle_update(press("stopyes:demo", "hung a@demo\nStop a@demo after its current task?"))
+    assert bot.api.of("answerCallbackQuery")[-1]["text"] == "the question expired; press the button again"
+    assert bot.api.of("editMessageText")[-1]["text"] == "hung a@demo"
+    bot.handle_update(press("stop:demo", "hung a@demo"))
+    bot.handle_update(press("stopyes:demo", "hung a@demo\nStop a@demo after its current task?"))
+    assert bot.router.calls[-1] == ("stop_after_task", ("run1", "telegram", "stopped from a telegram button"), {})
     edit = bot.api.of("editMessageText")[-1]
-    assert edit["text"] == "hung a@demo\nstop_after_task ok" and len(edit["reply_markup"]["inline_keyboard"][0]) == 3
+    assert edit["text"] == "hung a@demo\nstop_after_task ok" and edit["reply_markup"] == alert_keys
+    assert not any(c[0] == "stop_after_task" for c in bot.router.calls[:-1])
+
+
+def test_free_space_asks_and_prunes_the_finished_runs_on_the_host(bot):
+    bot.router.replies[("demo", 5)] = "run1"
+    bot.handle_update(press("free:demo", "disk almost full on hostA"))
+    assert bot.api.of("editMessageText")[-1]["text"].endswith("\nRemove the prune targets of the finished runs on hostA?")
+    bot.handle_update(press("freeyes:demo", "disk almost full on hostA\nRemove the prune targets of the finished runs on hostA?"))
+    assert bot.router.calls[-1] == ("free_space", ("run1", "telegram"), {})
 
 
 def test_the_reply_keyboard_sends_plain_words(bot):
     bot.handle_update(msg("/start"))
     sent = bot.api.of("sendMessage")[-1]
     assert sent["text"].startswith("<b>demo: help</b>\n<b>Look</b>")
-    assert sent["reply_markup"]["keyboard"] == [[{"text": "Status"}, {"text": "Hosts"}],
+    assert sent["reply_markup"]["keyboard"] == [[{"text": "Status"}, {"text": "Projects"}, {"text": "Hosts"}],
                                                 [{"text": "Events"}, {"text": "Tools"}, {"text": "Digest"}]]
     assert sent["reply_markup"]["is_persistent"] is True
-    for word, call in (("Status", "status_text"), ("hosts", "hosts_text"), (" Events ", "events_text"), ("Tools", "tools_text"),
-                       ("Digest", "digest_text")):
+    for word, call in (("Status", "board_text"), ("projects", "projects_text"), ("hosts", "hosts_text"),
+                       (" Events ", "events_text"), ("Tools", "tools_text"), ("Digest", "digest_text")):
         bot.handle_update(msg(word))
-        assert bot.actions.calls[-1][0] == call
+        assert bot.router.calls[-1][0] == call
     bot.handle_update(msg("status please"))
-    assert bot.actions.calls[-1][0] == "digest_text"
+    assert bot.router.calls[-1][0] == "digest_text"
     bot.handle_update(msg("/keyboard off"))
     assert bot.api.of("sendMessage")[-1]["reply_markup"] == {"remove_keyboard": True}
     bot.handle_update(msg("/keyboard"))
@@ -584,4 +631,4 @@ def test_a_command_message_gets_a_reaction(bot, monkeypatch):
 
     monkeypatch.setattr(bot.api, "call", no_reactions)
     bot.handle_update(msg("/status"))
-    assert bot.actions.calls[-1][0] == "status_text"
+    assert bot.router.calls[-1][0] == "board_text"
