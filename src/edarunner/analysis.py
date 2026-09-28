@@ -555,3 +555,36 @@ def parameters_view(runs: list[Row], rows: list[Row]) -> RenderableType:
     """One line per parameter that differs, with the value of each run, and a blank line under it."""
     return Group(board.table(["parameter", *names(runs).values()], [[p["key"], *p["value"].values()] for p in rows],
                              styles={"parameter": "bold"}), Text(""))
+
+
+# task fields
+
+def field_clashes(rows: list[Row]) -> list[Row]:
+    """The task ids that ran with more than one set of fields, from rows of the task_fields table: {task, sets:
+    [{fields, runs}]}, where `runs` holds the run ids of one set."""
+    by_task: dict[str, dict[str, dict[str, str]]] = {}
+    for r in rows:
+        by_task.setdefault(r["task"], {}).setdefault(r["run_id"], {})[r["key"]] = r["value"]
+    out = []
+    for task, runs in sorted(by_task.items()):
+        sets: dict[tuple, Row] = {}
+        for run_id, fields in runs.items():
+            sets.setdefault(tuple(sorted(fields.items())), {"fields": fields, "runs": []})["runs"].append(run_id)
+        if len(sets) > 1:
+            out.append({"task": task, "sets": list(sets.values())})
+    return out
+
+
+def clash_text(clash: Row, handles: dict[str, str], shown: int = 5) -> str:
+    """One line for a task that ran with several sets of fields: each set by the fields that differ, and its runs,
+    the first `shown` of them by name."""
+    sets = clash["sets"]
+    keys = [k for k in sorted({k for s in sets for k in s["fields"]}) if len({s["fields"].get(k) for s in sets}) > 1]
+
+    def runs(ids: list[str]) -> str:
+        names = [handles.get(i, i) for i in ids]
+        return board.join(names) if len(names) <= shown else f"{', '.join(names[:shown])} and {len(names) - shown} more"
+
+    return f"task {clash['task']} ran with {len(sets)} sets of fields: " + "; ".join(
+        " ".join(f'{k}="{s["fields"][k]}"' if k in s["fields"] else f"{k} unset" for k in keys) + f" in {runs(s['runs'])}"
+        for s in sets)

@@ -759,6 +759,7 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
         runs = [r for r in c.db.runs(batch=a.batch) if not a.source or r["source"] in a.source]
     out, lines = [], []
     inst = ("part", "instance", "depth", "value", "local", "cells")
+    clashes = analysis.field_clashes(c.db.task_fields())
     for run in runs:
         old = {(m["stage"], m["step"], m["task"], m["name"]): m for m in c.db.metrics(run_ids=[run["run_id"]])}
         held: dict[tuple, set] = {}
@@ -794,10 +795,13 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
                     c.db.add_metric(r, replace=True)
                 c.db.remove_metrics(drop)
                 c.db.add_event("user", run["run_id"], "extract", text + (f"; {metrics.failure_text(failed)}" if failed else ""))
-        out.append({"run_id": run["run_id"], **n, "failures": failed})
+        out.append({"run_id": run["run_id"], **n, "failures": failed,
+                    "clashes": [x for x in clashes if any(run["run_id"] in s["runs"] for s in x["sets"])]})
         lines.append(f"{run['run_id']}: {text}" + (" (dry)" if a.dry_run else ""))
         if failed:
             lines.append("  " + metrics.failure_text(failed, "\n  "))
+    names = board.handles(c.db.runs())
+    lines += [f"warning: {analysis.clash_text(x, names)}" for x in clashes if any(x in o["clashes"] for o in out)]
     c.emit("\n".join(lines) or "no runs", out)
     return Exit.DONE if runs else Exit.NOTHING
 
@@ -937,6 +941,8 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
     db_path = project.data / "edr.db"
     if fs := network_fs(db_path.parent):
         warnings.append(f"{db_path} is on a network filesystem ({fs}); journal_mode DELETE, not WAL")
+    names = board.handles(c.db.runs())
+    warnings += [analysis.clash_text(x, names) for x in analysis.field_clashes(c.db.task_fields())]
     text = Text("\n").join([*(Text.assemble(("warning", "yellow"), f": {w}") for w in warnings), text])
     c.emit(text, {"problems": problems, "warnings": warnings, "hosts": hosts, "batches": [b.batch for b in batches]})
     return Exit.REFUSED if problems else Exit.DONE
@@ -1129,7 +1135,10 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
         if rc != 0:
             raise Refuse(f"{a.host}:{root} is not a directory")
     results = _results_dir(c, a.run_id, a.results) if a.results else None
-    tasks = {t: config.resolve_task(c.project, t) for t in a.tasks or []}
+    if a.task_fields and not a.tasks:
+        raise Refuse("--task-fields needs --tasks")
+    given = config.load_tasks(Path(a.task_fields).expanduser(), c.project.site)[0] if a.task_fields else {}
+    tasks = {t: given.get(t) or config.resolve_task(c.project, t) for t in a.tasks or []}
     params = dict(a.param or [])
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
                source=a.source, dirty=int("-dirty" in a.source), host=a.host or "", root=root or None,
@@ -1154,6 +1163,8 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
         c.db.upsert_run(row)
         c.db.set_parameters(a.run_id, {**{k: row[k] for k in ("config", "build_tag", "source") if row[k]}, **params},
                             "import")
+        c.db.set_task_fields(a.run_id, [(t, k, v, "import" if t in given else "resolver")
+                                        for t, task in tasks.items() for k, v in task.fields.items()])
         if results:
             rows = _import_results(c, row, results, spec)
             failed = metrics.failures(rows)
@@ -1183,12 +1194,14 @@ def _results_dir(c: Ctx, run_id: str, text: str) -> Path:
 
 def _import_spec(project: Project, row: Row, tasks: dict, params: dict[str, str]) -> dict[str, Any]:
     """The spec of an imported run in the format of `launch`: the run, its vars from the `vars.<name>` parameters,
-    and each task group with the tasks and their directories. It renders no command, since edr ran none."""
+    and each task group with the tasks, their directories and their fields. It renders no command, since edr ran
+    none."""
     job_vars = {k[5:]: v for k, v in params.items() if k.startswith("vars.")}
     values = config.placeholders(project, **{k: v for k, v in row.items() if isinstance(v, (str, int, float))}, vars=job_vars)
     groups = [{"name": name, "tasks": [
         {"id": t.id, "dir": os.path.normpath(os.path.join(
-            row["root"] or "", config.render(st.task_dir, {**values, **{f"task.{k}": v for k, v in t.fields.items()}})))}
+            row["root"] or "", config.render(st.task_dir, {**values, **{f"task.{k}": v for k, v in t.fields.items()}}))),
+         "fields": t.fields}
         for t in tasks.values()]} for name, st in project.stages.items() if st.is_group and tasks]
     return {"schema": 1, "project": project.project, **{k: row[k] for k in ("run_id", "batch", "label", "config")},
             "vars": job_vars, "host": row["host"], "root": row["root"], "stages": groups}
@@ -1982,6 +1995,10 @@ def _parser() -> argparse.ArgumentParser:
         --dry-run prints the counts and writes nothing. With --json, data
         holds for each run run_id, the counts, and failures: the count and
         the first error of each failing metric.
+
+        A task id that ran with other fields in another run gets a warning:
+        line with the fields that differ and up to five runs of each set.
+        --json lists these under clashes of each run, with every run.
         """, write=True, exits={Exit.NOTHING: "no run matches"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")
@@ -2066,7 +2083,9 @@ def _parser() -> argparse.ArgumentParser:
         Loads the project, the site, user.toml and every batch under jobs/,
         imports every hook, checks the driver file, probes every host once, names every tool
         the head node lacks, and plans every batch with those probes. It prints
-        one problem: line per fault, or an ok: line with the counts.
+        one problem: line per fault, or an ok: line with the counts. A
+        warning: line names each task id of the database that ran with more
+        than one set of fields, with up to five runs of each set.
         """, exits={Exit.REFUSED: "a problem was found"})
     command("register", "link the project into the registry", """
         Writes the link ~/.edr/projects/<project> to the project directory,
@@ -2235,13 +2254,20 @@ def _parser() -> argparse.ArgumentParser:
         KILLED:<signal>. A run whose driver died is FAILED:<stage>, with the
         stage it died in.
 
+        Each task takes its fields from tasks.toml, as a launch would, and
+        the task_fields table records them with the origin resolver. When a
+        task ran with other fields than tasks.toml gives today, pass them with
+        --task-fields FILE: a file in the form of tasks.toml, whose
+        [tasks.<id>] table replaces the fields of that task and is recorded
+        with the origin import.
+
         Import writes the spec <state_dir>/<batch>/<run id>.spec.json in the
-        format of launch, with every task group and the directory of each
-        task, so a later edr extract reads every imported task. The task
-        counts of the run give a task whose files gave a value and no failed
-        row as done, and any other task as failed. A batch holds one source:
-        the launch or import that makes a batch sets it, and import refuses a
-        run of another source there.
+        format of launch, with every task group and the directory and fields
+        of each task, so a later edr extract reads every imported task with
+        the fields it ran with. The task counts of the run give a task whose
+        files gave a value and no failed row as done, and any other task as
+        failed. A batch holds one source: the launch or import that makes a
+        batch sets it, and import refuses a run of another source there.
         """, write=True)
     s.add_argument("--run-id", required=True, dest="run_id", help="the run id; it must start with YYYYMMDD_HHMM_")
     s.add_argument("--label", required=True, help="the label of the run")
@@ -2254,6 +2280,8 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--root", metavar="PATH", help="the tree on the host")
     s.add_argument("--results", metavar="DIR", help="collected files in the run layout; linked as data/results/<run id>")
     s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks whose files the results hold")
+    s.add_argument("--task-fields", dest="task_fields", metavar="FILE",
+                   help="a file in the form of tasks.toml with the fields that the tasks ran with")
     s.add_argument("--batch", default="imported", help="the batch to record it in; default imported")
     s.add_argument("--phase", default="done", help="the phase the run ended with, as the driver writes it; default done")
     s.add_argument("--build-tag", dest="build_tag", metavar="TAG", help="the build tag of the run")
@@ -2262,15 +2290,16 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
     s = command("export", "a frozen snapshot of one or more sources", """
         Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-        metrics.csv, parameters.csv and the collected files of one run per
-        label and source, the newest run by start time that ended done, else
-        the newest run. --source matches the source tag exactly and may be
-        given more than once. The manifest lists the exported runs whose phase
-        is not done under incomplete, the other runs of each label and source
-        under skipped, and each dirty source under dirty_sources, whose diff
-        goes to sources/<tag>/source.diff. log/ and *.log stay out unless you
-        pass --with-logs. It refuses a DIR that exists and is not empty.
-        docs/guides/results.md explains the layout.
+        metrics.csv, parameters.csv, task_fields.csv, instances.csv and the
+        collected files of one run per label and source, the newest run by
+        start time that ended done, else the newest run. --source matches the
+        source tag exactly and may be given more than once. The manifest lists
+        the exported runs whose phase is not done under incomplete, the other
+        runs of each label and source under skipped, and each dirty source
+        under dirty_sources, whose diff goes to sources/<tag>/source.diff.
+        log/ and *.log stay out unless you pass --with-logs. It refuses a DIR
+        that exists and is not empty. docs/guides/results.md explains the
+        layout.
 
         --mlflow DIR writes the project database into a local MLflow tracking store
         in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run

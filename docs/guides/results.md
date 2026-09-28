@@ -15,6 +15,7 @@ batch, every number and every action.
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id`, the cores the run reserved |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
 | `parameters` | key and origin of a run | the parameters of the run as text, each with its origin; [Run identity](#run-identity) lists them |
+| `task_fields` | key of a task of a run | the fields the task ran with, as text, each with its origin; [Tasks as data](#tasks-as-data) lists them |
 | `metrics` | number | run, stage, step, task, name, canonical name, value after `scale`, unit, the source file or the error of a failed row, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
@@ -127,7 +128,8 @@ and an export carries these commands in the `record` of each run, so a
 netlist path or a clock period that the command line sets stays visible.
 `edr compare` prints the parameters that differ between the runs it
 compares; [Compare runs side by side](#compare-runs-side-by-side) shows
-the block.
+the block. The fields of each task of a run belong to its identity as
+well; [Tasks as data](#tasks-as-data) describes them.
 
 ## Which run a command takes
 
@@ -820,6 +822,7 @@ exports/3f9a2c1/
   runs.csv
   metrics.csv
   parameters.csv
+  task_fields.csv
   instances.csv
   sources/<tag>/source.diff   the diff of each dirty source
   <label>/...                 the collected files of that run
@@ -827,11 +830,12 @@ exports/3f9a2c1/
 
 | File | Holds |
 |---|---|
-| `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
+| `manifest.json` | `producer`, `created`, `schema` (3), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
 | `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended,batch,dirty,tree_id,retired`; `retired` is 1 for a run that was retired, or whose batch was |
 | `parameters.csv` | `run_id,label,source,key,value,origin`, the rows of the `parameters` table for each exported run |
+| `task_fields.csv` | `run_id,label,source,task,key,value,origin`, the rows of the `task_fields` table for each exported run |
 | `sources/<tag>/source.diff` | the copy of `data/sources/<tag>/source.diff` for each dirty source |
-| `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file,record`; `record` marks the [step of record](#stage-of-record) |
+| `metrics.csv` | `run_id,label,config,build_tag,source,host,stage,step,task,metric,canonical,value,unit,source_file,record`; `build_tag` and `host` are those of the run, and `record` marks the [step of record](#stage-of-record) |
 | `instances.csv` | `run_id,label,source,stage,step,task,metric,part,instance,depth,value,local,cells,unit`, the rows of the `instances` table for each exported run; join it to `metrics.csv` on run, stage, step, task and metric to keep the step of record |
 | `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; `<label>@<source>/` when the runs come from more than one tag |
 
@@ -902,8 +906,8 @@ An analysis should never read the live database, because the database
 changes with every watcher cycle and a number you quote must stay the
 number you read. Instead, the analysis keeps one snapshot per
 source under its own `data/`, pinned by the source tag. Every table and
-figure comes from `runs.csv`, `metrics.csv`, `parameters.csv` and
-`instances.csv` of that snapshot:
+figure comes from `runs.csv`, `metrics.csv`, `parameters.csv`,
+`task_fields.csv` and `instances.csv` of that snapshot:
 
 ```
 report/
@@ -924,6 +928,91 @@ netlist, belongs to `data/results/` on the head node, not to a snapshot.
 Leave it out of `collect`, name it under `collect_on_request`, and fetch
 it with `edr continue <handle> --collect <name>` or `edr retire --collect`
 when you need it; [cleanup.md](cleanup.md#keep-the-large-files) shows both.
+
+## Tasks as data
+
+A task group runs one command per task, and the fields of the task fill
+its placeholders, such as `{task.kernel}`, `{task.test}` and
+`{task.args}` of the demo's `tasks.toml`. The same fields say what a
+number of the task means: two energies compare only when both kernels
+did the same work, and the fields give that work.
+
+Each run records the fields of each task as the task ran, in the
+`task_fields` table, one row per run, task and key, with its origin:
+
+| Origin | Written by |
+|---|---|
+| `spec` | the watcher, from the fields that `launch` wrote into the run's spec |
+| `resolver` | `edr import`, from `tasks.toml` as it is at the import |
+| `import` | `edr import --task-fields FILE`, for a task that ran with other fields |
+
+`launch` resolves each task once, through its `[tasks.<id>]` table or
+the `[pattern]` resolver, and writes the fields into the spec.
+Extraction fills `{task.<key>}` in the `file` of a metric from these
+fields, so an edit of `tasks.toml` after the launch changes neither the
+fields of a run nor the files its metrics read.
+
+An import resolves each task through `tasks.toml` as it is at the
+import, and a task of an old run may have run with other fields under
+the same id. Write the fields it ran with into a file in the form of
+`tasks.toml`, and pass it with `--task-fields`:
+
+```toml
+# ran.toml: k_big ran with a limit that tasks.toml no longer gives
+[tasks.k_big]
+kernel = "softmax"
+test = "SOFTMAX_R197"
+args = "ROWS=197 LIMIT=-4.0"
+```
+
+```sh
+edr import --run-id 20260830_0000_base_base_gabc1234 --label base --source abc1234 \
+    --results /archive/base --tasks k_small k_big --task-fields ran.toml
+```
+
+`k_big` takes its table from the file, with the origin `import`.
+`k_small` is not in the file and takes the fields of `tasks.toml`, with
+the origin `resolver`. The directory of each task and the files of its
+metrics follow from these fields. Only the `[tasks.<id>]` tables of the
+file count, and a table of a task that `--tasks` does not name is
+ignored, so the `tasks.toml` of an old commit also works as the file:
+`git show <commit>:tasks.toml > ran.toml`.
+
+A task id that ran with two sets of fields gives numbers that look
+comparable and are not. `edr extract` warns about each such task of the
+runs it reads, and `edr check` about every such task of the database,
+with the fields that differ and the runs of each set:
+
+```
+warning: task k_big ran with 2 sets of fields: args="ROWS=197 LIMIT=-4.0" in base@imported; args="ROWS=197" in a@sweep1
+```
+
+The line names up to five runs of each set; `edr extract --json` lists
+every run under `clashes`.
+
+Give a task a new id when its fields change, so that each id names one
+set of fields.
+
+`edr export` writes the rows of each exported run to `task_fields.csv`.
+The analysis joins that file to `metrics.csv` on `run_id` and `task`,
+and computes a number per unit of work itself, such as the energy per
+output of a GEMM of the demo:
+
+```python
+import csv
+
+fields = {}
+for r in csv.DictReader(open("task_fields.csv")):
+    fields.setdefault((r["run_id"], r["task"]), {})[r["key"]] = r["value"]
+for m in csv.DictReader(open("metrics.csv")):
+    f = fields.get((m["run_id"], m["task"]), {})
+    if m["metric"] == "energy_nj" and m["value"] and f.get("kernel") == "gemm":
+        args = dict(kv.split("=") for kv in f["args"].split())
+        print(m["label"], m["task"], float(m["value"]) * 1e3 / (int(args["M"]) * int(args["N"])), "pJ per output")
+```
+
+A field per number, such as `m = 64` next to `args`, saves the analysis
+the parsing of `args`.
 
 ## Coverage of a demand list
 

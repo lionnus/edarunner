@@ -578,8 +578,8 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
     (demo / "data" / "results" / a / "reports" / "3" / "area.rpt").write_text("i_top 1000.0\n")
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--csv")
     lines = out.splitlines()
-    assert code == 0 and lines[0].startswith("run_id,label,config,source,stage,step,task,metric") and len(lines) == 3
-    assert lines[1].startswith(f"{a},a,demo,abc1234,synth,3,,area_cell_um2,design__instance__area,1000.0,u,")
+    assert code == 0 and lines[0].startswith("run_id,label,config,build_tag,source,host,stage,step,task,metric") and len(lines) == 3
+    assert lines[1].startswith(f"{a},a,demo,,abc1234,local,synth,3,,area_cell_um2,design__instance__area,1000.0,u,")
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--stage", "pnr")
     assert code == 2 and out == "no metrics\n"
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--step", "3")
@@ -622,7 +622,7 @@ def test_two_runs_of_a_label_in_one_batch_are_named_apart(demo: Path, capsys, tm
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--source", "abc1234", "--source", dirty_tag, "--labels", "a", "--out", str(exp))
     manifest = json.loads((exp / "manifest.json").read_text())
-    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 4 files\n"
+    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 5 files\n"
     assert [r["run_id"] for r in manifest["runs"]] == [clean, dirty] and manifest["sources"] == ["abc1234", dirty_tag]
 
 
@@ -640,7 +640,7 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
         assert [m["unit"] for m in db.metrics(run_ids=[a])] == ["u"] and db.events() == []
     code, out, _ = edr(capsys, "--json", "extract", "--source", "abc1234")
     assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 2, "changed": 1, "unchanged": 0, "failed": 0,
-                                                      "removed": 0, "kept": 0, "failures": {}}]
+                                                      "removed": 0, "kept": 0, "failures": {}, "clashes": []}]
     with Database(demo / "data" / "edr.db") as db:
         assert {(m["name"], m["value"], m["unit"]) for m in db.metrics(run_ids=[a])} == {
             ("area_cell_um2", 1000.0, "um2"), ("wns_ns", -0.03, "ns"), ("setup_violations", 3.0, "paths")}
@@ -1296,7 +1296,7 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     link = demo / "data" / "results" / run_id
     assert code == 0 and "4 metrics" in out and link.is_symlink() and link.resolve() == src.resolve()
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--csv")
-    got = {ln.split(",")[7]: ln.split(",")[9] for ln in out.splitlines()[1:]}
+    got = {ln.split(",")[9]: ln.split(",")[11] for ln in out.splitlines()[1:]}
     assert code == 0 and got == {"area_cell_um2": "1000.0", "power_w": "0.25", "window_ns": "3400.0", "energy_nj": "850.0"}
     with Database(demo / "data" / "edr.db") as db:
         row = db.run(run_id)
@@ -1370,6 +1370,46 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
     with Database(demo / "data" / "edr.db") as db:
         got = {(m["task"], m["name"]): m["value"] for m in db.metrics(run_ids=[run_id])}
     assert (got[("k_big", "power_w")], got[("k_big", "energy_nj")], got[("k_bad", "power_w")]) == (0.5, 1700.0, 0.125)
+
+
+def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(demo: Path, capsys, tmp_path: Path) -> None:
+    src = tmp_path / "legacy"
+    for test in ("GEMM_M64_N64", "SOFTMAX_OLD"):
+        (src / "simulation" / "tests" / "demo" / test / "power" / "reports").mkdir(parents=True)
+        (src / "simulation" / "tests" / "demo" / test / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
+    # k_big ran under an older test name and with a limit that tasks.toml no longer gives; k_gone did not run.
+    ran = tmp_path / "ran.toml"
+    ran.write_text('[tasks.k_big]\nkernel = "softmax"\ntest = "SOFTMAX_OLD"\nargs = "ROWS=197 LIMIT=-4.0"\n\n'
+                   '[tasks.k_gone]\nkernel = "x"\n')
+    old, new = "20260830_0900_ref_demo_gabc1234", "20260830_0901_ref2_demo_gabc1234"
+    base = ["import", "--config", "demo", "--source", "abc1234", "--results", str(src), "--batch", "legacy"]
+    assert edr(capsys, *base, "--run-id", old, "--label", "ref", "--task-fields", str(ran))[0] == 1  # no --tasks
+    assert edr(capsys, *base, "--run-id", old, "--label", "ref", "--tasks", "k_big", "--task-fields", str(tmp_path / "no.toml"))[0] == 1
+    code, out, _ = edr(capsys, *base, "--run-id", old, "--label", "ref", "--tasks", "k_small", "k_big", "--task-fields", str(ran))
+    assert code == 0
+    spec = json.loads((bdir(demo, "legacy") / f"{old}.spec.json").read_text())
+    assert [(t["id"], t["dir"], t["fields"]["test"]) for st in spec["stages"] for t in st["tasks"]] == [
+        ("k_small", "simulation/tests/demo/GEMM_M64_N64", "GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_OLD", "SOFTMAX_OLD")]
+    with Database(demo / "data" / "edr.db") as db:
+        assert [(f["task"], f["key"], f["value"], f["origin"]) for f in db.task_fields([old])] == [
+            ("k_big", "args", "ROWS=197 LIMIT=-4.0", "import"), ("k_big", "kernel", "softmax", "import"),
+            ("k_big", "test", "SOFTMAX_OLD", "import"), ("k_small", "args", "M=64 N=64", "resolver"),
+            ("k_small", "kernel", "gemm", "resolver"), ("k_small", "test", "GEMM_M64_N64", "resolver")]
+        # The numbers of k_big come from the directory of the test it ran as.
+        assert {m["task"] for m in db.metrics(run_ids=[old], name="power_w")} == {"k_small", "k_big"}
+    code, out, _ = edr(capsys, "extract", "--batch", "legacy", "--dry-run")
+    assert code == 0 and "warning" not in out
+    # A second run of k_big with the fields that tasks.toml gives today: one task id, two sets of fields.
+    assert edr(capsys, *base, "--run-id", new, "--label", "ref2", "--tasks", "k_big")[0] == 0
+    warning = ('task k_big ran with 2 sets of fields: args="ROWS=197 LIMIT=-4.0" test="SOFTMAX_OLD" in ref@legacy; '
+               'args="ROWS=197" test="SOFTMAX_R197" in ref2@legacy')
+    code, out, _ = edr(capsys, "extract", "ref2@legacy", "--dry-run")
+    assert code == 0 and out.splitlines()[-1] == f"warning: {warning}"
+    code, out, _ = edr(capsys, "--json", "extract", "ref2@legacy", "--dry-run")
+    (clash,) = json.loads(out)["data"][0]["clashes"]
+    assert clash["task"] == "k_big" and [s["runs"] for s in clash["sets"]] == [[old], [new]]
+    code, out, _ = edr(capsys, "--json", "check")
+    assert code == 0 and json.loads(out)["data"]["warnings"] == [warning]
 
 
 def test_coverage_says_where_each_row_of_a_demand_is(demo: Path, capsys, tmp_path: Path) -> None:

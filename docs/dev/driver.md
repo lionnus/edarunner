@@ -81,8 +81,10 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
 `steps`, `progress`, `budget`, `retry` and `tools`. A task group holds
 `parallel`, `prepare`, `after_each`, `budget`, `tools` and `tasks`, each
-task with `id`, `cmd`, `dir`, `needs`, `budget` and, when its own
-`needs` names tools, `tools`. A `tools` entry is `{"name", "seats",
+task with `id`, `cmd`, `dir`, `fields`, `needs`, `budget` and, when its
+own `needs` names tools, `tools`. `fields` holds the fields of the task
+that filled its strings; the watcher writes them into `task_fields`, and
+the driver does not read them. A `tools` entry is `{"name", "seats",
 "probe", "leases"}`: the seats needed, the probe argv, rendered, and the
 lease directory `~/.edr/leases/<tool>/`, which the launch creates; a
 tool without a probe is not in the list. The driver leases a seat as the
@@ -93,8 +95,8 @@ pid, the host, the time and the budget.
 `edr import` writes a spec of the same format for a run that edarunner
 did not start: `schema`, the identity keys, `vars` from the
 `vars.<name>` parameters of the import, `host`, `root`, and `stages`
-with each task group as `name` and `tasks`, each task with `id` and
-`dir`. It holds no command, and no driver reads it; `extract` takes the
+with each task group as `name` and `tasks`, each task with `id`, `dir`
+and `fields`. It holds no command, and no driver reads it; `extract` takes the
 tasks of a run without a heartbeat from it.
 
 A change to the spec changes `launch._spec`, the driver and

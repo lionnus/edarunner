@@ -288,6 +288,8 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     if not rec.get("params"):
         for origin, params in _parameters(run, spec).items():
             db.set_parameters(run["run_id"], params, origin)
+        db.set_task_fields(run["run_id"], [(t, k, v, "spec") for t, f in collect.spec_task_fields(spec).items()
+                                           for k, v in f.items()])
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, len(new))
 
@@ -310,12 +312,14 @@ def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict |
 
     A step is finished when `step_runs` holds it and a later step of the run, whatever the status of
     its stage. `tasks` maps a task id to its phase, by default from the heartbeat. A run without a
-    heartbeat, such as an imported one, takes every stage and every task of its spec. An unknown
-    task is an event of `actor`; None writes no event.
+    heartbeat, such as an imported one, takes every stage and every task of its spec. A task takes
+    its fields from the spec, else from tasks.toml. An unknown task is an event of `actor`; None
+    writes no event.
     """
     spec = collect.load_spec(project, run) if spec is None else spec
     only = collect.spec_stages(spec)
     task_dirs = collect.spec_task_dirs(spec, str(run.get("root") or hb.get("root") or ""))
+    fields = collect.spec_task_fields(spec)
     if tasks is None:
         tasks = {t: e.get("phase") for t, e in (hb.get("tasks") or {}).items()}
     if not hb:
@@ -323,6 +327,9 @@ def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict |
     done: dict[str, Task] = {}
     for t, p in tasks.items():
         if p != "done":
+            continue
+        if t in fields:
+            done[t] = Task(id=t, fields=fields[t])
             continue
         try:
             done[t] = config.resolve_task(project, t)

@@ -72,6 +72,8 @@ def test_export_one_source(world, tmp_path):
     config.save_json(project.state_dir / "demo" / f"{RUN_A}.spec.json",
                      {"record": {"edarunner": "9.9", "driver_sha256": "ab12", "tools": {"fc": "V-2023.12"}}})
     db.upsert_stage_run({"run_id": RUN_A, "stage": "synth", "status": "done", "started": 100, "ended": 150})
+    db.set_task_fields(RUN_A, [("k_small", "args", "M=8 N=8", "spec"), ("k_small", "kernel", "gemm", "spec")])
+    db.set_task_fields(RUN_A_OLD, [("k_small", "args", "M=4", "resolver")])
     out = tmp_path / "paper" / "export"
     manifest = export.export(project, db, ["aaa111"], out)
 
@@ -86,10 +88,10 @@ def test_export_one_source(world, tmp_path):
                       "commands": []}
     assert manifest["runs"][1]["record"]["tools"] == {} and manifest["runs"][1]["record"]["ended"] is None
     assert manifest["sources"] == ["aaa111"] and manifest["project"] == "demo"
-    assert manifest["schema"] == 2 and manifest["producer"].startswith("edarunner ")
+    assert manifest["schema"] == 3 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [{"run_id": RUN_B, "label": "b_nodw", "source": "aaa111", "phase": "stage:pnr"}]
     assert manifest["skipped"] == [{"run_id": RUN_A_OLD, "label": "a", "source": "aaa111", "phase": "done"}]
-    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0, "instances.csv": 2}
+    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0, "task_fields.csv": 2, "instances.csv": 2}
     assert manifest["dirty_sources"] == [] and manifest["ge_um2"] is None
     assert json.loads((out / "manifest.json").read_text()) == manifest
 
@@ -101,10 +103,14 @@ def test_export_one_source(world, tmp_path):
     assert list(metrics[0]) == export.METRIC_COLUMNS
     assert {m["run_id"] for m in metrics} == {RUN_A}
     area = next(m for m in metrics if m["metric"] == "area_cell_um2")
-    assert (area["label"], area["stage"], area["step"], area["canonical"], area["value"], area["source_file"]) == (
-        "a", "synth", "3", "design__instance__area", "1000.0", "reports/3/area.rpt")
+    assert (area["label"], area["host"], area["stage"], area["step"], area["canonical"], area["value"], area["source_file"]) == (
+        "a", "local", "synth", "3", "design__instance__area", "1000.0", "reports/3/area.rpt")
     power = next(m for m in metrics if m["metric"] == "power_w")
     assert (power["task"], power["step"], power["unit"]) == ("k_small", "", "W")
+    fields = _read_csv(out / "task_fields.csv")
+    assert list(fields[0]) == export.TASK_FIELD_COLUMNS
+    assert [tuple(f.values()) for f in fields] == [(RUN_A, "a", "aaa111", "k_small", "args", "M=8 N=8", "spec"),
+                                                   (RUN_A, "a", "aaa111", "k_small", "kernel", "gemm", "spec")]
     instances = _read_csv(out / "instances.csv")
     assert list(instances[0]) == export.INSTANCE_COLUMNS
     assert [(i["run_id"], i["stage"], i["task"], i["metric"], i["part"], i["instance"], i["depth"], i["value"], i["unit"])
@@ -151,7 +157,7 @@ def test_dry_run_writes_nothing(world, tmp_path, capsys):
     manifest = export.export(project, db, ["aaa111"], out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
-    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "instances.csv", "a/reports/3/area.rpt",
+    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv", "instances.csv", "a/reports/3/area.rpt",
                      "a/sim/power/reports/power.csv", "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
     real = export.export(project, db, ["aaa111"], out)
@@ -164,8 +170,8 @@ def test_with_logs_copies_the_logs(world, tmp_path):
     manifest = export.export(project, db, ["aaa111"], out, labels=["a"], with_logs=True)
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
-    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "instances.csv", "a/log/synth.log",
-                                                       "a/reports/3/area.rpt", "a/reports/3/run.log",
+    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv",
+                                                       "instances.csv", "a/log/synth.log", "a/reports/3/area.rpt", "a/reports/3/run.log",
                                                        "a/sim/power/reports/power.csv"]
 
 

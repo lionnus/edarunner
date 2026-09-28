@@ -320,6 +320,9 @@ An import records what you tell it, and nothing it would have to guess:
 - Each `--param KEY=VALUE` writes a parameter with the origin `import`,
   such as `vars.netlist_stage=11` for the netlist that a power run read.
   `edr compare` prints it when it differs between the runs it compares.
+- Each task of `--tasks` takes its fields from `tasks.toml` as it is at
+  the import. `--task-fields FILE` gives the fields of a task that ran
+  with others; [results.md](results.md#tasks-as-data) shows the file.
 - `--phase` is a phase that the driver ends a run with, as the table in
   [Phases](#phases) lists; any other text is refused. A run whose
   driver died is `FAILED:<stage>`, with the stage it died in.
@@ -327,7 +330,8 @@ An import records what you tell it, and nothing it would have to guess:
   skipped, so `INCOMPLETE:0f0s` is refused.
 
 The import writes a spec into the state directory, in the format that
-`launch` writes, with each task group, its tasks and their directories.
+`launch` writes, with each task group, its tasks and their directories
+and fields.
 A later `edr extract` reads every task of that spec, so a task whose
 file did not parse at the import gets its numbers once the file is
 fixed. The task counts of the run give a task whose files gave a value

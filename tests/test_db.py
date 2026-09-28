@@ -78,6 +78,14 @@ def test_upsert_then_update(tmp_path):
         assert [(r["key"], r["value"], r["origin"]) for r in db.parameters(RUN_A)] == [
             ("DW", "2", "import"), ("DW", "0", "spec"), ("name", "x", "spec")]
 
+        db.set_task_fields(RUN_A, [("k_old", "args", "M=4", "resolver")])
+        db.set_task_fields(RUN_B, [("k_small", "args", "M=8", "spec")])
+        # A second write replaces every task field of the run.
+        db.set_task_fields(RUN_A, [("k_small", "kernel", "gemm", "import"), ("k_small", "args", "M=8", "import")])
+        assert [(r["task"], r["key"], r["value"], r["origin"]) for r in db.task_fields([RUN_A])] == [
+            ("k_small", "args", "M=8", "import"), ("k_small", "kernel", "gemm", "import")]
+        assert [r["run_id"] for r in db.task_fields()] == [RUN_A, RUN_A, RUN_B]
+
         db.add_artifact({"run_id": RUN_A, "path": "reports/3/area.rpt", "bytes": 10, "class": "report"})
         db.add_artifact({"run_id": RUN_A, "path": "reports/3/area.rpt", "bytes": 12})
         assert db.conn.execute("SELECT bytes, class FROM artifacts").fetchall()[0][:] == (12, "report")
@@ -152,6 +160,7 @@ def test_metrics_by_source(tmp_path):
         rows = db.metrics(sources=["aaa111"])
         assert [(r["run_id"], r["name"], r["value"], r["label"]) for r in rows] == [
             (RUN_A, "power_w", 0.25, "a"), (RUN_A, "area_cell_um2", 1000.0, "a"), (RUN_B, "area_cell_um2", 1010.0, "b_nodw")]
+        assert (rows[0]["host"], rows[0]["build_tag"]) == ("local", None)
         assert [r["value"] for r in db.metrics(sources=["bbb222"])] == [2000.0]
         assert len(db.metrics(sources=["aaa111", "bbb222"])) == 4 and db.metrics(sources=[]) == []
         assert [r["run_id"] for r in db.metrics(name="design__instance__area", step=3)] == [RUN_A, RUN_B, RUN_C]

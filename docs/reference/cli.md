@@ -389,6 +389,10 @@ of a run in one transaction, with an extract event of the same text.
 holds for each run run_id, the counts, and failures: the count and
 the first error of each failing metric.
 
+A task id that ran with other fields in another run gets a warning:
+line with the fields that differ and up to five runs of each set.
+--json lists these under clashes of each run, with every run.
+
 | Flag | Meaning |
 |---|---|
 | `[handle]` | label@batch, label@source, a run id prefix, or #n from the last board |
@@ -522,7 +526,9 @@ edr check [--json]
 Loads the project, the site, user.toml and every batch under jobs/,
 imports every hook, checks the driver file, probes every host once, names every tool
 the head node lacks, and plans every batch with those probes. It prints
-one problem: line per fault, or an ok: line with the counts.
+one problem: line per fault, or an ok: line with the counts. A
+warning: line names each task id of the database that ran with more
+than one set of fields, with up to five runs of each set.
 
 | Flag | Meaning |
 |---|---|
@@ -791,7 +797,7 @@ one before.
 ## import
 
 ```
-edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --source SOURCE [--host HOST] [--started TIME] [--ended TIME] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--param KEY=VALUE] [--why WHY]
+edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] --source SOURCE [--host HOST] [--started TIME] [--ended TIME] [--root PATH] [--results DIR] [--tasks ID [ID ...]] [--task-fields FILE] [--batch BATCH] [--phase PHASE] [--build-tag TAG] [--param KEY=VALUE] [--why WHY]
 ```
 
 Records a run that edr did not start, such as one you ran by hand. With
@@ -813,13 +819,20 @@ or was skipped, FAILED:&lt;stage&gt;, OVER_BUDGET:&lt;stage&gt;, STOPPED or
 KILLED:&lt;signal&gt;. A run whose driver died is FAILED:&lt;stage&gt;, with the
 stage it died in.
 
+Each task takes its fields from tasks.toml, as a launch would, and
+the task_fields table records them with the origin resolver. When a
+task ran with other fields than tasks.toml gives today, pass them with
+--task-fields FILE: a file in the form of tasks.toml, whose
+[tasks.&lt;id&gt;] table replaces the fields of that task and is recorded
+with the origin import.
+
 Import writes the spec &lt;state_dir&gt;/&lt;batch&gt;/&lt;run id&gt;.spec.json in the
-format of launch, with every task group and the directory of each
-task, so a later edr extract reads every imported task. The task
-counts of the run give a task whose files gave a value and no failed
-row as done, and any other task as failed. A batch holds one source:
-the launch or import that makes a batch sets it, and import refuses a
-run of another source there.
+format of launch, with every task group and the directory and fields
+of each task, so a later edr extract reads every imported task with
+the fields it ran with. The task counts of the run give a task whose
+files gave a value and no failed row as done, and any other task as
+failed. A batch holds one source: the launch or import that makes a
+batch sets it, and import refuses a run of another source there.
 
 | Flag | Meaning |
 |---|---|
@@ -835,6 +848,7 @@ run of another source there.
 | `--root PATH` | the tree on the host |
 | `--results DIR` | collected files in the run layout; linked as data/results/&lt;run id&gt; |
 | `--tasks ID ...` | the tasks whose files the results hold |
+| `--task-fields FILE` | a file in the form of tasks.toml with the fields that the tasks ran with |
 | `--batch BATCH` | the batch to record it in; default imported |
 | `--phase PHASE` | the phase the run ended with, as the driver writes it; default done |
 | `--build-tag TAG` | the build tag of the run |
@@ -848,15 +862,16 @@ edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--
 ```
 
 Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-metrics.csv, parameters.csv and the collected files of one run per
-label and source, the newest run by start time that ended done, else
-the newest run. --source matches the source tag exactly and may be
-given more than once. The manifest lists the exported runs whose phase
-is not done under incomplete, the other runs of each label and source
-under skipped, and each dirty source under dirty_sources, whose diff
-goes to sources/&lt;tag&gt;/source.diff. log/ and *.log stay out unless you
-pass --with-logs. It refuses a DIR that exists and is not empty.
-docs/guides/results.md explains the layout.
+metrics.csv, parameters.csv, task_fields.csv, instances.csv and the
+collected files of one run per label and source, the newest run by
+start time that ended done, else the newest run. --source matches the
+source tag exactly and may be given more than once. The manifest lists
+the exported runs whose phase is not done under incomplete, the other
+runs of each label and source under skipped, and each dirty source
+under dirty_sources, whose diff goes to sources/&lt;tag&gt;/source.diff.
+log/ and *.log stay out unless you pass --with-logs. It refuses a DIR
+that exists and is not empty. docs/guides/results.md explains the
+layout.
 
 --mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
