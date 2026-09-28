@@ -63,6 +63,7 @@ def test_make_notifiers_needs_a_private_token(tmp_path):
     ("/status", ("status_text", (None,), {})),
     ("/status@edr_bot", ("status_text", (None,), {})),
     ("/status a@demo", ("status_text", ("a@demo",), {})),
+    ("/status all", ("status_text", (), {"everything": True})),
     ("/events 5", ("events_text", (5,), {})),
     ("/events 500", ("events_text", (30,), {})),
     ("/events", ("events_text", (8,), {})),
@@ -92,7 +93,7 @@ def test_bad_handle_is_an_answer(bot):
 
 def test_help_groups_builtins_and_custom(bot):
     bot.handle_update(msg("/nothing"))
-    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo: help</b>\n<b>Look</b>\n/status [handle]: ")
+    assert bot.api.of("sendMessage")[-1]["text"].startswith("<b>demo: help</b>\n<b>Look</b>\n/status [handle|all]: ")
     text = last_reply(bot)
     assert "<pre>" not in text and "/keep &lt;handle&gt; [hours]: add hours, default 12" in text
     assert "<b>Custom</b>\n/echo &lt;dir&gt;: echo a dir" in text

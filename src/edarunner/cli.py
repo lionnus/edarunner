@@ -360,12 +360,14 @@ class Actions:
         launch.stop(c.ssh, c.db, row, {}, after_task=True, why=why, state=c.project.state_dir, actor=actor)
         return f"{board.handle(row)} stops after its task"
 
-    def status_text(self, handle: str | None = None) -> str:
-        """The board, or the state, stage, step, host, age, next command and last log line of one run."""
+    def status_text(self, handle: str | None = None, everything: bool = False) -> str:
+        """The board, with `everything` every finished run; or the state, stage, step, host, age, next command
+        and last log line of one run."""
         if handle is None:
             rows = self.c.rows()
             self.c.save_board(rows)
-            return tgfmt.board(rows, totals=metrics.step_totals(self.c.project))
+            return tgfmt.board(rows, totals=metrics.step_totals(self.c.project),
+                               names=analysis.step_names(self.c.project), everything=everything)
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.db.run(row["run_id"]) or row

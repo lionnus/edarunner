@@ -351,8 +351,9 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     assert (bdir(demo) / f"{b}.stop").exists()
     with Database(demo / "data" / "edr.db") as db:
         assert {e["actor"] for e in db.events()} == {"telegram"} and len(db.events()) == 3
-    assert acts.status_text().splitlines() == ["🟢 <code>b_nodw@demo</code> synth 2/4, 0m", "⚪ <code>a@demo</code> done, 0m",
-                                               "<i>1 running, 1 done</i>"]
+    assert acts.status_text().splitlines() == [
+        "<b>Running</b>", "🟢 <code>b_nodw@demo</code> synth 2/4 elaborate, 1m", "", "<b>Finished in the last 24 hours</b>",
+        "⚪ <code>a@demo</code> done, ended 0m ago", "", "<i>1 running, 1 done</i>", "<i>🟢 running, ⚪ done</i>"]
     with Database(demo / "data" / "edr.db") as db:
         assert len(db.get_store("last_board")) == 2
     one = acts.status_text("b_nodw@demo").splitlines()

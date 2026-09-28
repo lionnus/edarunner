@@ -181,21 +181,37 @@ survives a restart of the watcher.
 
 The board is one message, pinned once and edited silently on every
 watcher cycle. Its first line holds the project name and the time of the
-last edit. Under it, each run has one line: the mark, the handle, the
-state and the age. A running run shows its stage in place of the state,
-and a live run also shows its step out of the total. Live runs come
-first. The last line, in italics, holds the count per state:
+last edit. Under it come two sections, each with one line per run: the
+mark, the handle in monospace, which a tap copies, and what the run
+does.
+
+- Running: the live runs, the worst state first. A line holds the state
+  when it is not `running`, the stage with its step of the total and the
+  step name, and the time since the run started. A stage with steps
+  shows `starting` until the first step.
+- Finished in the last 24 hours: the state and when the run ended. The
+  older runs fold into one line, `and N older runs: /status all`, and
+  `/status all` lists every run.
+
+The last two lines, in italics, hold the count per state and a legend
+that names each mark of the message in plain words:
 
 ```
 demo: board 14:05
-🔴 a@demo dead, synth 3/13, 1h
-🟢 c@demo pnr 4/13, 0m
-⚪ b@demo done, 1h
-1 dead, 1 running, 1 done
+Running
+🔴 a@demo dead, synth 3/13 elaborate, 5h
+🟢 c@demo pnr 9/13 route_opt, 3h
+
+Finished in the last 24 hours
+⚪ b@demo done, ended 1h ago
+and 4 older runs: /status all
+
+1 dead, 1 running, 5 done
+🔴 dead (driver gone), 🟢 running, ⚪ done
 ```
 
-The board shows at most 30 runs and then a line `… and N more`. When
-no run is live, a line `nothing live` comes before the counts. The board's
+Each section shows at most 30 runs and then a line `… and N more`.
+When no run is live, the Running section says `nothing live`. The board's
 message id lives in the database's `store` table under `telegram`, so a
 restart edits the same message.
 `/pin` unpins the old message and pins a new one at the bottom of the

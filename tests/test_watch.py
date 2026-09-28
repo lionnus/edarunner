@@ -53,7 +53,7 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     assert sorted(env.notifier.sent) == sorted([("superseded", rid("a")), ("dead", rid("d")), ("looping", rid("l")),
                                                 ("over_budget", rid("o")), ("host_full", rid("f"))])
     assert len(env.notifier.boards) == 1
-    assert env.notifier.boards[0].splitlines()[0] == "🔴 <code>d@demo</code> dead, synth 1/4, 3m"
+    assert env.notifier.boards[0].splitlines()[:2] == ["<b>Running</b>", "🔴 <code>d@demo</code> dead, synth 1/4 analyze, 1h"]
     looping = env.notifier.alerts[rid("l")]
     assert (looping.title, looping.who, looping.todo[0][1]) == ("same failure again in", "l@demo",
                                                                 "edr stop l@demo --why looping")

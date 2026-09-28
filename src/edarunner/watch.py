@@ -456,7 +456,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     areas = analysis.last_areas(db, [r["run_id"] for r in rows])
     config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, db.metrics(), plotly, areas,
                                                                 analysis.step_names(project)))
-    text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project))
+    text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
     for n in notifiers:
         n.board(text)
 
