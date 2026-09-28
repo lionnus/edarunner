@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from helpers_results import QOR, demo_qor
+from helpers_results import POWER, POWER_NO_BLK, QOR, SUITE, demo_qor
 
 from edarunner.metrics import extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
@@ -194,6 +194,37 @@ def test_a_regex_reads_one_block_of_a_report_and_names_its_line(tmp_path):
                     "last": (-0.031, "qor.rpt:25"), "min": (-0.087, "qor.rpt:18"), "max": (0.004, "qor.rpt:11"),
                     "fails": (253.0, "qor.rpt:12"), "none": (None, rows["none"][1])}
     assert rows["none"][1].startswith("qor.rpt: no match")
+
+
+def test_an_optional_metric_a_hook_without_a_number_and_a_where_with_placeholders(tmp_path):
+    run = results_tree(tmp_path / "results")
+    tests = run / "simulation" / "tests" / "demo"
+    (tests / "GEMM_M64_N64" / "power" / "reports" / "power.csv").write_text(POWER)
+    (tests / "SOFTMAX_R197" / "power" / "reports" / "power.csv").write_text(POWER_NO_BLK)
+    (tests / "GEMM_M64_N64" / "power" / "phases.json").write_text(json.dumps({"window_ns": 3400, "trace": {"cycles": 2}}))
+    (run / "bench.csv").write_text(SUITE)
+    project = demo_project(tmp_path)
+    (tmp_path / "hooks" / "trace.py").write_text("import json\n\ndef cycles(path):\n"
+                                                 "    return json.load(open(path)).get('trace', {}).get('cycles')\n")
+    blk = {"where": {"phase": "WHOLE", "instance": "u_blk_b"}, "column": "total_w"}
+    power, phases = "{task_dir}/power/reports/power.csv", "{task_dir}/power/phases.json"
+    project.metrics = {m.name: m for m in (
+        Metric(name="blk_w", stage=["power"], file=power, csv=blk),
+        Metric(name="blk_opt_w", stage=["power"], file=power, csv=blk, optional=True),
+        Metric(name="cycles", stage=["power"], file="bench.csv", csv={"where": {"name": "{task.test}"}, "column": "cycles"}),
+        Metric(name="trace_cycles", stage=["power"], file=phases, python="hooks/trace.py:cycles"),
+        Metric(name="trace_opt", stage=["power"], file=phases, json="trace.cycles", optional=True),
+        Metric(name="typ_opt", stage=["synth"], step="*", file="reports/{step}/qor.rpt", optional=True,
+               regex=r"^Scenario\s+'func_typ'\n(?:.*\n)*?Critical Path Slack:\s+(\S+)"),
+    )}
+    rows = extract(project, RUN, tmp_path / "results", demo_tasks())
+    assert {(r["name"], r["task"]): r["value"] for r in rows} == {
+        ("blk_w", "k_small"): 0.02, ("blk_w", "k_big"): None, ("blk_opt_w", "k_small"): 0.02,
+        ("cycles", "k_small"): 4100.0, ("cycles", "k_big"): 9800.0, ("trace_cycles", "k_small"): 2.0,
+        ("trace_opt", "k_small"): 2.0}
+    assert by_name(rows, "blk_w")[1]["source_file"] == (
+        "simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE', 'instance': 'u_blk_b'}")
+    assert by_name(rows, "cycles")[0]["source_file"] == "bench.csv"
 
 
 @pytest.mark.parametrize("rule, value, verdict", [

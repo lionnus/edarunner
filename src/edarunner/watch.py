@@ -278,7 +278,8 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     # No new file does not mean no new metric: a file can arrive before its step or stage counts as
     # finished. Extraction is idempotent, so run it.
     rows = extract_run(project, db, run, hb, spec, tasks)
-    new = [r for r in rows if r["value"] is not None and db.add_metric(r)]
+    with db.conn:  # one commit for the rows of the run
+        new = [r for r in rows if db.add_metric(r)]
     if new:
         db.add_event("watch", run["run_id"], "metrics", _added(new))
     if not rec.get("params"):
@@ -289,13 +290,14 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
 
 
 def _added(rows: list[dict]) -> str:
-    """The text of a metrics event, such as `6 new: area_cell_um2, wns_ns at pnr 8, 9`."""
-    at = []
-    for stage in dict.fromkeys(r["stage"] for r in rows):
-        steps = sorted({r["step"] for r in rows if r["stage"] == stage and r["step"] is not None})
-        tasks = sorted({r["task"] for r in rows if r["stage"] == stage and r["task"]})
+    """The text of a metrics event, such as `6 new: area_cell_um2, wns_ns at pnr 8, 9`, then the metrics that failed."""
+    new, at = [r for r in rows if r["value"] is not None], []
+    for stage in dict.fromkeys(r["stage"] for r in new):
+        steps = sorted({r["step"] for r in new if r["stage"] == stage and r["step"] is not None})
+        tasks = sorted({r["task"] for r in new if r["stage"] == stage and r["task"]})
         at.append(" ".join([stage, ", ".join(map(str, steps + tasks))]).rstrip())
-    return f"{len(rows)} new: {', '.join(sorted({r['name'] for r in rows}))} at {'; '.join(at)}"
+    text = f"{len(new)} new: {', '.join(sorted({r['name'] for r in new}))} at {'; '.join(at)}" if new else ""
+    return "; ".join(t for t in (text, metrics.failure_text(metrics.failures(rows))) if t)
 
 
 def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict | None = None,

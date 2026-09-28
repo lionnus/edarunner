@@ -320,6 +320,9 @@ def run_text(d: Row) -> str:
         for m in d["metrics"]:
             where = f"`{m['stage']}`" + (f" step {m['step']}" if m.get("step") is not None else "") + (
                 f" task `{m['task']}`" if m.get("task") else "")
+            if m["value"] is None:
+                out.append(f"- `{m.get('canonical') or m['name']}` failed at {where}: {m.get('source_file')}")
+                continue
             value = f"{m['value']:g}" if isinstance(m["value"], (int, float)) else str(m["value"])
             out.append(f"- `{m.get('canonical') or m['name']}` is {value}{' ' + m['unit'] if m.get('unit') else ''}"
                        f" at {where}.")

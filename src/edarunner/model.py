@@ -325,7 +325,9 @@ class Metric:
     passed: `step_runs` holds the step and a later step of the run. There, a report of a step that
     the run never recorded, as in a copied tree, gives no row. A `step = "*"` metric gives one row
     per step directory found, under the stage that owns that step number. A file that does not
-    parse gives a row with an empty value and the error in `source_file`; the extraction goes on.
+    parse gives a failed row: an empty value and the error in `source_file`; the extraction goes
+    on. A missing file gives no row, and so does a `python` hook that returns None, for a file where
+    the number does not apply.
     """
 
     name: str
@@ -338,9 +340,11 @@ class Metric:
     reduce: str = doc("how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum "
                       "names the line of its first value", "first")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
-                                        "`where`", None, shown="one of the five")
+                                        "`where`, whose values take the placeholders of `file`", None,
+                                        shown="one of the five")
     json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
-    python: str = doc("a hook that gets the file path and returns a number", "", shown="one of the five")
+    python: str = doc("a hook that gets the file path and returns a number, or None where the number does not "
+                      "apply", "", shown="one of the five")
     area_hier: int = doc("the deepest instance depth to keep from a hierarchical area report, of Synopsys "
                          "`report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is "
                          "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
@@ -358,6 +362,8 @@ class Metric:
         "`from`. `edr compare`, compare.html, the MLflow export and the `record` column of metrics.csv take that "
         "step, and a run without one is named missing. The stage needs `steps`, and the metric needs `step`", None,
         shown="unset")
+    optional: bool = doc("a file without the number gives no row instead of a failed one: no match of `regex`, "
+                         "no row of `csv` that matches `where`, no key of `json`", False)
 
     def verdict(self, value: float | None) -> str | None:
         """`FAIL` when `value` breaks the `pass` rule, `pass` when it meets it; None without a rule or a value."""

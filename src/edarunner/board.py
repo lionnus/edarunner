@@ -339,8 +339,9 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
     if metrics:
         parts += [Text(""), Text("metrics", style="bold"), table(
             ["stage", "step", "task", "name", "value", "unit"],
-            [[m.get("stage"), m.get("step"), m.get("task"), m.get("canonical") or m.get("name"), m.get("value"),
-              m.get("unit")] for m in metrics], right=("step", "value"))]
+            [[m.get("stage"), m.get("step"), m.get("task"), m.get("canonical") or m.get("name"),
+              f"failed: {m.get('source_file')}" if m.get("value") is None else m["value"], m.get("unit")]
+             for m in metrics], right=("step", "value"))]
     if tail:
         parts += [Text(""), Text("log tail", style="bold"), Text(tail.rstrip())]
     return Group(*parts)

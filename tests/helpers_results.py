@@ -32,3 +32,19 @@ QOR = report_qor(("func_fast", "reg2reg", {"Worst Hold Violation": "-0.002", "No
                  ("func_slow", "in2reg_default", {"Critical Path Slack": "0.004", "No. of Violating Paths": 0}),
                  ("func_slow", "reg2out", {"Critical Path Slack": "-0.087", "No. of Violating Paths": 41}),
                  ("func_slow", "reg2reg", {"Critical Path Slack": "-0.031", "No. of Violating Paths": 212}))
+
+
+# A tidy per-instance power report: the whole window, then a trace slice. A build without the block u_blk_b
+# gives POWER_NO_BLK.
+POWER = """\
+phase,instance,total_w
+WHOLE,top,0.2500
+WHOLE,u_lane_0,0.1000
+WHOLE,u_blk_b,0.0200
+TRACE_0,top,0.3100
+TRACE_0,u_lane_0,0.1500
+"""
+POWER_NO_BLK = "".join(ln + "\n" for ln in POWER.splitlines() if "u_blk_b" not in ln)
+
+# The cycle counts of a bench suite, one row per test.
+SUITE = "name,cycles\nGEMM_M64_N64,4100\nSOFTMAX_R197,9800\n"

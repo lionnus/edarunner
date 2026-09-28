@@ -160,6 +160,23 @@ def test_metrics_by_source(tmp_path):
         assert db.metrics(run_ids=[]) == []
 
 
+def test_a_failed_row_takes_a_value_and_a_removed_row_takes_its_area_rows(tmp_path):
+    top = {"instance": "<top>", "depth": 0, "area": 5.0, "local_area": 1.0, "cells": None}
+    with Database(tmp_path / "edr.db") as db:
+        _seed(db)
+        key = {"run_id": RUN_A, "stage": "synth", "step": 3, "name": "area_um2"}
+        assert db.add_metric({**key, "value": None, "source_file": "reports/3/area.rpt: no match"})
+        assert not db.add_metric({**key, "value": None, "source_file": "reports/3/area.rpt: another error"})
+        assert db.add_metric({**key, "value": 5.0, "source_file": "reports/3/area.rpt",
+                              "instances": [top, {**top, "instance": "u_a", "depth": 1, "area": 4.0}]})
+        assert not db.add_metric({**key, "value": 6.0})
+        assert [(m["value"], m["source_file"]) for m in db.metrics()] == [(5.0, "reports/3/area.rpt")]
+        assert db.add_metric({**key, "value": 7.0, "instances": [{**top, "area": 7.0}]}, replace=True)
+        assert [(a["instance"], a["area"]) for a in db.area()] == [("<top>", 7.0)]
+        db.remove_metrics([{**key, "task": ""}])
+        assert db.metrics() == [] and db.area() == []
+
+
 def test_events(tmp_path):
     with Database(tmp_path / "edr.db") as db:
         ids = [db.add_event("user", RUN_A if i % 2 else None, "note", f"e{i}") for i in range(5)]

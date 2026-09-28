@@ -171,6 +171,20 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 12
 
 
+def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) -> None:
+    hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
+    root = Path(hb["root"])
+    for n, text in enumerate(("i_top 1000.0\n", "garbage\n")):
+        (root / "reports" / str(n)).mkdir(parents=True)
+        (root / "reports" / str(n) / "area.rpt").write_text(text)
+    env.cycle()
+    rows = {r["step"]: (r["value"], r["source_file"]) for r in env.db.metrics(run_ids=[hb["run_id"]])}
+    assert rows[0] == (1000.0, "reports/0/area.rpt:1") and rows[1][0] is None
+    assert rows[1][1].startswith("reports/1/area.rpt: no match for")
+    (text,) = [e["text"] for e in env.db.events() if e["kind"] == "metrics"]
+    assert text == f"1 new: area_cell_um2 at synth 0; area_cell_um2: 1 failed: {rows[1][1]}"
+
+
 def test_without_step_runs_only_a_done_stage_keeps_its_steps(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="FAILED:pnr", exit=5, stage="pnr", step=4, step_name="cts",
                        stages={"synth": {"status": "done", "exit": 0}, "pnr": {"status": "failed", "exit": 5}})

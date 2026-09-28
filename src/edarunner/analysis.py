@@ -228,8 +228,11 @@ def verdict(project: Project | None, m: Row) -> str | None:
     return metric.verdict(m.get("value")) if metric else None
 
 
-def mark(cell: object, verdict: str | None) -> object:
-    """A value cell, with FAIL next to a value that breaks its pass rule."""
+def mark(cell: object, verdict: str | None, source: str | None = None) -> object:
+    """A value cell, with FAIL next to a value that breaks its pass rule; `failed: <source>` for a row without a value,
+    whose source is the error."""
+    if cell is None and source is not None:
+        return f"failed: {source}"
     return f"{cell} FAIL" if verdict == "FAIL" else cell
 
 
@@ -308,8 +311,8 @@ def over_steps_view(rows: list[Row]) -> RenderableType:
         return "no metric with a step"
     keys = sorted({k for r in rows for k in r["value"]})
     head = ["stage", "step", "name", *keys]
-    body = [[r["stage"], r["step"], r["step_name"], *[mark(_fmt(r["value"].get(k)), r["verdict"].get(k)) for k in keys]]
-            for r in rows]
+    body = [[r["stage"], r["step"], r["step_name"],
+             *[mark(_fmt(r["value"].get(k)), r["verdict"].get(k), r["source_file"].get(k)) for k in keys]] for r in rows]
     if any(v for r in rows for v in r["verdict"].values()):
         head.append("verdict")
         for line, r in zip(body, rows):

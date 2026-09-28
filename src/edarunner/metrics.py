@@ -72,31 +72,46 @@ def _area_openroad(text: str) -> list[dict]:
     return rows
 
 
-def parse_file(metric: Metric, path: Path, project_root: Path) -> tuple[float, int | None]:
-    """Parse one value from `path` with the parser of `metric`; the line is that of a regex value, else None."""
+def parse_file(metric: Metric, path: Path, project_root: Path,
+               values: dict[str, object] | None = None) -> tuple[float, int | None] | None:
+    """Parse one value from `path` with the parser of `metric`, and the line of a regex value. None means no row: a
+    python hook returned None, or `metric` is optional and the file has no match, row or key for it.
+
+    `values` fills the placeholders of a csv `where`, as they fill `file`.
+    """
     if metric.regex:
         return _regex(metric, path.read_text())
     if metric.csv:
-        where = metric.csv.get("where") or {}
+        where = {k: config.render(str(v), values or {}) for k, v in (metric.csv.get("where") or {}).items()}
         with path.open(newline="") as fh:
             for rec in csv.DictReader(fh):
-                if all(rec.get(k) == str(v) for k, v in where.items()):
+                if all(rec.get(k) == v for k, v in where.items()):
                     return float(rec[str(metric.csv["column"])]), None
-        raise ValueError(f"no row matches {where}")
+        return _absent(metric, f"no row matches {where}")
     if metric.json:
         obj = json.loads(path.read_text())
-        for key in metric.json.split("."):
-            obj = obj[int(key)] if isinstance(obj, list) else obj[key]
+        try:
+            for key in metric.json.split("."):
+                obj = obj[int(key)] if isinstance(obj, list) else obj[key]
+        except (KeyError, IndexError):
+            return _absent(metric, f"no key {metric.json}")
         return float(obj), None
     if metric.python:
         fn, _ = load_hook(project_root, metric.python)
-        return float(fn(path)), None
+        value = fn(path)
+        return None if value is None else (float(value), None)
     if metric.area_hier:
         return parse_area_hier(path.read_text(errors="replace"))[0]["area"], None
     raise ValueError(f"metric {metric.name} has no parser")
 
 
-def _regex(metric: Metric, text: str) -> tuple[float, int]:
+def _absent(metric: Metric, error: str) -> None:
+    """No row for an optional metric, else a failed one."""
+    if not metric.optional:
+        raise ValueError(error)
+
+
+def _regex(metric: Metric, text: str) -> tuple[float, int] | None:
     """Group 1 of every match, reduced to one value, with the line that value is on."""
     found: list[tuple[float, int]] = []
     line, pos = 1, 0
@@ -106,12 +121,40 @@ def _regex(metric: Metric, text: str) -> tuple[float, int]:
         line, pos = line + text.count("\n", pos, m.start(1)), m.start(1)
         found.append((value, line))
     if not found:
-        raise ValueError(f"no match for {metric.regex!r}")
+        return _absent(metric, f"no match for {metric.regex!r}")
     if metric.reduce == "sum":
         return sum(v for v, _ in found), found[0][1]
     if metric.reduce in ("min", "max"):
         return (min if metric.reduce == "min" else max)(found, key=lambda f: f[0])
     return found[-1]  # `first` stops after one match
+
+
+def source_path(source_file: str) -> str:
+    """The file of a row's `source_file`, without the `:line` of a regex value."""
+    path, _, line = source_file.rpartition(":")
+    return path if line.isdigit() else source_file
+
+
+def defines(project: Project, row: dict) -> bool:
+    """Whether a metric of `project` still gives rows like `row`: it exists, reads the row's stage, and a numbered
+    step of the row belongs to that stage."""
+    metric = project.metrics.get(row["name"])
+    return (metric is not None and row["stage"] in metric.stage
+            and (row["step"] is None or row["step"] in owned_steps(project).get(row["stage"], range(0))))
+
+
+def failures(rows: list[dict]) -> dict[str, dict]:
+    """{metric name: {"count", "first"}} of the rows that failed; `first` is the error of the first one."""
+    out: dict[str, dict] = {}
+    for r in rows:
+        if r["value"] is None:
+            out.setdefault(r["name"], {"count": 0, "first": r["source_file"]})["count"] += 1
+    return out
+
+
+def failure_text(failed: dict[str, dict], sep: str = "; ") -> str:
+    """`name: n failed: first error` per metric of `failures`."""
+    return sep.join(f"{name}: {f['count']} failed: {f['first']}" for name, f in failed.items())
 
 
 def extract(project: Project, run: dict, results_dir: Path, tasks: dict[str, Task],
@@ -176,7 +219,10 @@ def _extract_one(
                 value, source = instances[0]["area"], rel
                 instances = [i for i in instances if i["depth"] <= metric.area_hier]
             else:
-                value, line = parse_file(metric, path, project.root)
+                got = parse_file(metric, path, project.root, values if step is None else {**values, "step": step})
+                if got is None:
+                    continue
+                value, line = got
                 source = rel if line is None else f"{rel}:{line}"
         except Exception as e:  # a parse error is a row, never a crash
             value, source = None, f"{rel}: {e}"
