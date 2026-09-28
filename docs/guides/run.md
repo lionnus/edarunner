@@ -1,9 +1,9 @@
 # Run and follow a batch
 
-How do I start a sweep and keep an eye on it? This page writes a batch,
-launches it, reads the board, keeps a watcher behind it, and acts on a
-single run. It assumes a project that `edr check` accepts;
-[project.md](project.md) sets one up.
+This page shows how to start a sweep and follow it: you write a batch,
+launch it, read the board, keep a watcher running, and act on a single
+run. It assumes a project that `edr check` accepts, which
+[project.md](project.md) sets up.
 
 ## Write a batch
 
@@ -85,7 +85,7 @@ proposes. A heartbeat file keeps its last phase after the driver dies,
 so use `--live` before you trust a running count.
 
 `edr hosts` shows the load and the free resources of each host, and
-`edr tools` the free licence seats.
+`edr tools` shows the free licence seats.
 
 ### Phases
 
@@ -121,7 +121,8 @@ changed, the row says `skipped`.
 
 The watcher collects the results, extracts the metrics, starts queued
 jobs and sends the alerts, so it should run as long as the project
-does. As a systemd user service, with the unit that `edr init` wrote:
+does. To run it as a systemd user service, install the unit that
+`edr init` wrote:
 
 ```sh
 cp edr-watch.service ~/.config/systemd/user/edr-myflow.service

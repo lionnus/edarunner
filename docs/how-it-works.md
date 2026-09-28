@@ -2,8 +2,8 @@
 
 This page follows one run from a commit of your flow to the numbers in the
 database. After it you know which machine does what, which files move
-where, and what edarunner does on its own and what it leaves to you. The
-module that does each step is named in parentheses, for the day you want
+where, and what edarunner does on its own and what it leaves to you. Each
+step names the module that implements it in parentheses, in case you want
 to read the code.
 
 ## The machines
@@ -12,12 +12,12 @@ to read the code.
 
 The **head node** is the machine you work on. It runs `edr`, the command
 you type, and `edr watch`, the one long-running process per project. The
-project directory lives there, where you run `edr`, and with it the
-project database, one SQLite file `data/edr.db` on the head node that
-holds every run, the checked-out copies of your source and the results
-collected from the hosts. The site file lives there too, in
-`~/.config/edarunner/`, a clone of the site repository that every
-project and every user of the lab shares.
+project directory is where you run `edr`. It holds the project database,
+a single SQLite file `data/edr.db` that records every run, as well as the
+checked-out copies of your source and the results collected from the
+hosts. The site file is on the head node too, in `~/.config/edarunner/`.
+That directory is a clone of the site repository, which every project and
+every user of the lab shares.
 
 A **compute host** is a machine that runs the flow. The site file lists
 the hosts under `[hosts]`, and the name `local` stands for the head node
@@ -79,9 +79,10 @@ from its configuration name and overrides, and names each run
 `<date>_<label>_<build_tag>_g<src>` by default. The first launch pins
 the date in `<state_dir>/sweep1/RUN_DATE`, so runs of the batch that
 start later, after the stagger or from the queue, keep the same date; a
-plan before that first launch shows the current time. A job with `host = "auto"` goes
-to a host with enough free cores, RAM and disk and with every tool the
-job needs (`hosts.place`); when no host fits, the job is queued. Every
+plan before that first launch shows the current time. A job with
+`host = "auto"` goes to a host with enough free cores, RAM and disk and
+with every tool the job needs (`hosts.place`); when no host fits, the job
+is queued. Every
 string of the job is then rendered into a spec. A placeholder without a
 value stops the plan with an error that names it.
 
@@ -138,8 +139,8 @@ Next, `launch` writes the spec through a temporary file and a rename,
 records the run and a `launch` event in the database, and starts the
 driver. On an ssh host it runs `setsid nohup python3 <driver> <spec>`,
 so the driver starts in its own session and never shares one with your
-shell (`backend.SshBackend.submit`). Under a scheduler, `launch` submits a job
-instead (`schedulers.py`). Runs start `stagger_s` seconds apart. A job
+shell (`backend.SshBackend.submit`). Under a scheduler, `launch` submits
+a job instead (`schedulers.py`). Runs start `stagger_s` seconds apart. A job
 that no host fits is recorded as `queued` for the watcher to start
 later.
 
@@ -153,8 +154,9 @@ the run tree with the environment of the stages. This is the step that
 builds the flow's environment on the host, such as `uv sync --frozen`.
 Its output goes to `log/setup.log`, and a failure ends the run as
 `FAILED:runtime` before any stage waits for a licence seat
-(`Driver.setup_runtime`). [guides/project.md](guides/project.md#the-runtime-step)
-shows how to write it.
+(`Driver.setup_runtime`).
+[guides/project.md](guides/project.md#the-runtime-step) shows how to
+write it.
 
 ### Stages and steps
 
@@ -163,10 +165,10 @@ one command of the flow. The driver starts it as `/bin/bash -c "<cmd>"`
 in a new session, with standard input from `/dev/null` and the output
 appended to `log/<stage>.log` in the run tree (`Driver.spawn`). Since
 every stage has its own session and process group, a signal to a tool's
-group never reaches your shell. While the
-command runs, the driver runs the stage's `progress` command every 5
-seconds and takes the first number it prints as the current step, so the
-board can say `pnr 4/13` inside a single tool session.
+group never reaches your shell. While the command runs, the driver runs
+the stage's `progress` command every 5 seconds and takes the first
+number it prints as the current step, so the board can say `pnr 4/13`
+inside a single tool session.
 
 A stage whose `needs.tools` names a tool with a probe waits at a gate
 first, with the phase `gate:<stage>`. The driver runs the probe, takes
@@ -185,8 +187,8 @@ A stage with `foreach = "tasks"` is a task group: its command runs once
 per task, `parallel` at a time, each in its own directory with its own
 log and budget. The tasks come from a queue of files in the state
 directory, and a task is claimed by a rename, so two drivers that share
-a queue share one pool. A failed task is never hidden. The group counts
-every failure, and a run with a failed or skipped task ends
+a queue share one pool. The group counts every failed task, and a run
+with a failed or skipped task ends
 `INCOMPLETE:<n>f<m>s` with exit 8, never `done`. After `limits.streak`
 failures in a row with the same signature, the last log line with its
 digits removed, the group sets `looping` and claims nothing more
@@ -329,8 +331,9 @@ a run whose results are not collected yet (`cli._refuse_shared_root`).
 `--batch` retires every run of a batch and writes the `RETIRED` file,
 which keeps the watcher and the board away from the batch. It then
 removes the batch's checked-out source unless a batch that is not
-retired uses the same source; that tree passes the guard too. [guides/cleanup.md](guides/cleanup.md)
-covers retire, prune and the archive of large files.
+retired uses the same source; that tree passes the guard too.
+[guides/cleanup.md](guides/cleanup.md) covers retire, prune and the
+archive of large files.
 
 ### Where the results end up
 
@@ -348,9 +351,9 @@ check` warns when the database sits on such a filesystem (`db.Database`,
 `cli.cmd_check`). A local `data/` is still the better place, because the
 watcher and each `edr` call take a file lock there.
 
-`edr metrics --design` and `edr export` select one source tag at a
-time and match it exactly, so two versions of the design never end up
-in one table (`cli.cmd_metrics`,
-`export._select`). `edr export` writes a snapshot, a frozen directory
-with a manifest, and an analysis reads that snapshot instead of the live
-database. [guides/results.md](guides/results.md) shows the commands.
+`edr metrics --design` and `edr export` select one source tag at a time
+and match it exactly, so two versions of the design never end up in one
+table (`cli.cmd_metrics`, `export._select`). `edr export` writes a
+snapshot, a frozen directory with a manifest, and an analysis reads that
+snapshot instead of the live database.
+[guides/results.md](guides/results.md) shows the commands.

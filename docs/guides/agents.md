@@ -1,9 +1,9 @@
 # Operate it with an agent
 
-Can a Claude session or a script run the farm for me? Yes, through `edr`
-alone. This page shows what an agent reads at the start of a session,
-how it calls `edr`, and how it reports back to your phone. The rules the
-agent follows are in
+A Claude session or a script can run the farm, as long as it works
+through `edr` alone. This page shows what an agent reads at the start of
+a session, how it calls `edr`, and how it reports back to your phone.
+The rules the agent follows are in
 [AGENTS.md](https://github.com/lionnus/edarunner/blob/main/AGENTS.md) at
 the root of the repository.
 
@@ -23,8 +23,8 @@ finds them.
 seen it: the source and its checked-out trees, the stages, the hosts
 with the marks of their last probe, the tool seats, the runs per batch,
 every run that needs a decision with the command the triage proposes,
-and the last ten events. `edr brief --run <handle>` tells the story of
-one run; [debug.md](debug.md#read-the-story-of-the-run) shows it.
+and the last ten events. `edr brief --run <handle>` prints the history
+of one run; [debug.md](debug.md#read-the-history-of-the-run) shows it.
 
 A Claude Code session reads the briefing before its first prompt when
 the project's `.claude/settings.json` runs it as a `SessionStart` hook.
@@ -48,11 +48,11 @@ Every command takes `--json` and prints one object:
 {"code": 0, "data": {}, "output": "the text a person would see"}
 ```
 
-`code` is the exit code: 0 done, 1 refused or bad input, 2 nothing to
-do, 3 some hosts failed. A command can refine a code, such as 3 on
-`edr stop` when the driver is still alive;
-[reference/cli.md](../reference/cli.md) lists the codes of each command.
-The agent acts on `data` and quotes `output` when it reports.
+`code` is the exit code: 0 means done, 1 means a refusal or bad input, 2
+means there was nothing to do, and 3 means some hosts failed. A command
+can refine a code, such as 3 on `edr stop` when the driver is still
+alive; [reference/cli.md](../reference/cli.md) lists the codes of each
+command. The agent acts on `data` and quotes `output` when it reports.
 
 Every command that writes takes `--dry-run`, which prints every path and
 every command and writes nothing. `edr stop` and `edr retire` refuse to

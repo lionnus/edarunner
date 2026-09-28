@@ -1,10 +1,10 @@
 # Clean up the hosts
 
-How do I free the scratch disks without losing a result? This page
-retires runs and batches, prunes the large parts of a tree, keeps the
-files you may need later on the head node, and starts a rerun from that
-archive. edr removes none of your files on its own, so every step here is a command
-you run.
+This page shows how to free the scratch disks without losing a result.
+You retire runs and batches, prune the large parts of a tree, keep the
+files you may need later on the head node, and start a rerun from that
+archive. edr removes none of your files on its own, so every step here
+is a command you run.
 
 ## Collect first
 

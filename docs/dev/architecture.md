@@ -1,18 +1,20 @@
 # Architecture
 
-This page helps you find the module that owns a behaviour, and follows
+This page helps you find the module that owns a behaviour, and it follows
 one run through the code from `plan` to `export`.
 
 ## Three programs
 
-- `edr`, the controller: Python 3.11 or newer, the standard library plus
-  `rich`, on the head node. `src/edarunner/`.
-- `edr_driver.py`, the driver: a single file for Python 3.6 or newer,
-  standard library only, copied to the state directory at launch. It runs one run
-  and never imports the package. `src/edarunner/driver/`; [driver.md](driver.md)
-  has the protocol.
-- `edr watch`, the controller as a long-running process on the head
-  node, with the Telegram bot as a thread inside it.
+- `edr` is the controller. It runs on the head node under Python 3.11 or
+  newer, uses the standard library plus `rich`, and lives in
+  `src/edarunner/`.
+- `edr_driver.py` is the driver, a single file for Python 3.6 or newer
+  that uses only the standard library. Launch copies it to the state
+  directory. It runs one run and never imports the package. The source is
+  in `src/edarunner/driver/`, and [driver.md](driver.md) describes the
+  protocol.
+- `edr watch` is the controller running as a long-lived process on the
+  head node, with the Telegram bot as a thread inside it.
 
 No module knows an EDA tool. The project config names the commands, the
 report files and the numbers in them.

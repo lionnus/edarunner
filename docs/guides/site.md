@@ -1,9 +1,8 @@
 # Describe your machines
 
-Which machines may edarunner use, and what do they have? The site file
-answers that. After this page you have a site file with your hosts, your
-tools and their licence seats, or a scheduler, and you know what each
-host needs.
+The site file tells edarunner which machines it may use and what they
+have. This page sets one up with your hosts, your tools and their
+licence seats, or with a scheduler, and lists what each host needs.
 
 ![How a flow plugs in: the core, the project file and the private site file](../diagrams/site-layer.svg)
 
@@ -28,7 +27,7 @@ a repository when a second person joins. The
 [edarunner-example](https://github.com/lionnus/edarunner-example)
 repository has a `site/` directory in the shape of such a repository,
 which a lab copies once. Keep secrets such as a bot token out of the
-repository: list their files in its `.gitignore`.
+repository by listing their files in its `.gitignore`.
 
 ```toml
 schema = 1

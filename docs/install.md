@@ -1,8 +1,8 @@
 # Get started
 
 This page installs `edr` and runs a real OpenROAD flow with it on one
-machine. After it you have seen a run go from a commit to the numbers in
-the database, and you know where to go next.
+machine. By the end you will have seen a run go from a commit to the
+numbers in the database, and you will know which page to read next.
 
 ## Install
 

@@ -1,9 +1,9 @@
 # Get alerts on your phone
 
-How do I learn that a run died without watching the board? This page sets
-up the alert channels, Telegram, ntfy and mail, and shows what the
-Telegram bot can do from the phone: the pinned board, the buttons on an
-alert, the commands and your own commands.
+`edr watch` can tell you on your phone that a run died, so you don't have to
+watch the board. This page sets up the three alert channels (Telegram, ntfy
+and mail) and shows what the Telegram bot can do from the phone: the pinned
+board, the buttons on an alert, the commands and your own commands.
 
 ## Channels
 
@@ -130,8 +130,9 @@ reply is formatted text: one short line per item, a run handle in
 monospace, and a count or a note in italics. A tap on a handle copies
 it, so you can paste it into `/status <handle>`.
 
-The first line is `<project>: <title>`. Each run line starts with one mark for its state;
-[reference/states.md](../reference/states.md) lists them.
+The first line is `<project>: <title>`. Each run line starts with one
+mark for its state; [reference/states.md](../reference/states.md) lists
+them.
 
 A `<pre>` block holds only text whose width the bot does not control:
 the last log line of `/status <handle>`, the columns of `/compare` and
@@ -162,8 +163,8 @@ for the run, in monospace. The alert carries three inline buttons:
 | stop | `stop:<handle>` | asks first, then `edr stop <handle> --after-task` |
 
 The bot answers every press, appends the result to the alert text, and
-keeps the buttons. A press records one event in the project database: the `keep` or the
-`stop` event of the action, with the actor `telegram`.
+keeps the buttons. Each press records one event in the project database,
+the `keep` or `stop` event of that action, with the actor `telegram`.
 
 The stop button acts only on a second tap. The first tap adds the line
 `Stop <handle>?` to the alert and shows two buttons, `Yes, stop` and
@@ -175,11 +176,11 @@ survives a restart of the watcher.
 ### The board
 
 The board is one message, pinned once and edited silently on every
-watcher cycle. Its first line holds the project name and the time of
-the last edit. Under it, each run has one line: the mark, the handle,
-the state and the age. A running run shows its stage in place of the
-state, and a live run also shows its step out of the total. Live runs come first. The last line, in italics, holds
-the count per state:
+watcher cycle. Its first line holds the project name and the time of the
+last edit. Under it, each run has one line: the mark, the handle, the
+state and the age. A running run shows its stage in place of the state,
+and a live run also shows its step out of the total. Live runs come
+first. The last line, in italics, holds the count per state:
 
 ```
 demo: board 14:05
@@ -190,15 +191,17 @@ demo: board 14:05
 ```
 
 The board shows at most 30 runs and then a line `… and N more`. When
-no run is live, a line `nothing live` comes before the counts. Its message id lives in the
-database's `store` table under `telegram`, so a restart edits the same message.
+no run is live, a line `nothing live` comes before the counts. The board's
+message id lives in the database's `store` table under `telegram`, so a
+restart edits the same message.
 `/pin` unpins the old message and pins a new one at the bottom of the
 chat.
 
 ### Built-in commands
 
-[reference/bot.md](../reference/bot.md) lists every built-in command with its arguments.
-A handle is `label@batch`, a run id prefix, or `#n` from the last board.
+[reference/bot.md](../reference/bot.md) lists every built-in command
+with its arguments. A handle is `label@batch`, a run id prefix, or `#n`
+from the last board.
 
 `/status <handle>` shows the mark, the handle and the state, then the
 stage and step, the host and the age, the proposed command in monospace,
@@ -241,9 +244,10 @@ run = ["tmux", "new-session", "-d", "-s", "claude-{project}-{dir}", "-c", "{root
 reply = "session claude-{project}-{dir} started; open the Claude app"
 ```
 
-[reference/bot.md](../reference/bot.md) lists every key, the placeholders a string
-renders, and the regex gate on every argument. Write each regex as an
-allowlist of the exact values you expect, as the `claude` example does.
+[reference/bot.md](../reference/bot.md) lists every key, the
+placeholders a string renders, and the regex gate on every argument.
+Write each regex as an allowlist of the exact values you expect, as the
+`claude` example does.
 
 A command with `detach` is watched for 5 seconds after the start. When
 it ends in that window, the reply is `ended with rc N: <last output
@@ -362,9 +366,10 @@ up:
    group to stderr. A group id is negative. Put it in `chat_id` and
    restart the watcher again.
 
-The table in `edr.toml` replaces `token_file`, `chat_id`, `user_id` and `topic_id`
-of the site for this project only; the custom commands stay in
-`site.toml`. Keep `telegram_poll = true` in a project with its own bot.
+The table in `edr.toml` replaces `token_file`, `chat_id`, `user_id` and
+`topic_id` of the site for this project only; the custom commands stay
+in `site.toml`. Keep `telegram_poll = true` in a project with its own
+bot.
 
 ### Topics: one group, one thread per project
 
@@ -430,10 +435,10 @@ starttls = true                                     # the default
 password_file = "~/.config/edarunner/smtp.password" # without it there is no login
 ```
 
-The login name is `user`, or the `from` address without it. A mail goes
-out per alert, per daily digest and per `edr notify`. The watcher never
-mails the board. Send it with `edr notify --board`, or as plain text with
-`edr notify "$(edr status)"`.
+The login name is `user`, or the `from` address when `user` is not set. A
+mail goes out per alert, per daily digest and per `edr notify`. The
+watcher never mails the board. Send it with `edr notify --board`, or as
+plain text with `edr notify "$(edr status)"`.
 
 ## The daily digest
 
@@ -489,8 +494,8 @@ edr notify --digest               # the daily digest now
 ```
 
 It sends through every channel that is on, so ntfy and mail get the
-message too. It exits 1 when no channel is configured or a send failed. It runs from
-any directory below `edr.toml`.
+message too. It exits 1 when no channel is configured or a send failed.
+It runs from any directory below `edr.toml`.
 
 A Claude Code hook can call `edr notify`, so that a session reports to
 your phone; [agents.md](agents.md#report-to-the-phone) shows the hooks.
