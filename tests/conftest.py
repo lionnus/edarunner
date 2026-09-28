@@ -23,6 +23,14 @@ def no_telegram(monkeypatch):
     monkeypatch.setattr(api, "urlopen", refuse)
 
 
+@pytest.fixture(autouse=True)
+def user_root(tmp_path: Path, monkeypatch) -> Path:
+    """Every test has its own user root, so no test reads or writes the registry, the leases or the locks of ~/.edr."""
+    monkeypatch.setenv("EDR_HOME", str(tmp_path / ".edr"))
+    monkeypatch.delenv("EDR_PROJECT", raising=False)
+    return tmp_path / ".edr"
+
+
 @pytest.fixture
 def demo(tmp_path: Path, monkeypatch) -> Path:
     """The demo copied under tmp_path/edr (the safety marker), its scratch and HOME under tmp_path, cwd in the copy."""

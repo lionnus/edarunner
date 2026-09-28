@@ -31,7 +31,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, analysis, board, brief, checkout, collect, config, export, launch, metrics, runid, sync, watch
+from . import __version__, analysis, board, brief, checkout, collect, config, export, home, launch, metrics, runid, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, network_fs
@@ -59,6 +59,8 @@ def _since(text: str) -> int:
     return int(time.time() - secs)
 
 
+# These commands link the project into the registry, so the commands that span projects find it.
+_REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "tools", "metrics", "compare", "runtime", "check", "notify", "plan"})
 
@@ -75,12 +77,27 @@ class Ctx:
     @property
     def project(self) -> Project:
         if self._project is None:
-            cwd = Path(os.getcwd())
-            root = next((p for p in (cwd, *cwd.parents) if (p / "edr.toml").is_file()), None)
-            if root is None:
-                raise Refuse(f"no edr.toml in {cwd} or above; run edr init")
-            self._project = config.load_project(root)
+            self._project = config.load_project(self.project_dir())
         return self._project
+
+    def project_dir(self) -> Path:
+        """The directory of the project -P names, else EDR_PROJECT, else the first edr.toml in the current directory or above.
+
+        EDR_PROJECT is refused inside the directory of another project, so a shell variable never acts on the wrong one."""
+        cwd = Path(os.getcwd())
+        here = next((p for p in (cwd, *cwd.parents) if (p / "edr.toml").is_file()), None)
+        pick = getattr(self.a, "project", None)
+        name = pick or os.environ.get("EDR_PROJECT")
+        if not name:
+            if here is None:
+                raise Refuse(f"no edr.toml in {cwd} or above; run edr init")
+            return here
+        target = home.owner(name)
+        if target is None:
+            raise Refuse(f"no registered project {name}; edr register in its directory adds it")
+        if not pick and here is not None and Path(os.path.realpath(here)) != target:
+            raise Refuse(f"EDR_PROJECT={name} is {target}, but {cwd} is inside the project {here}; pass -P {name} or unset it")
+        return target
 
     @property
     def db(self) -> Database:
@@ -709,6 +726,8 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
         elif known is None:
             warnings.append(f"licence {name}: cannot ask {project.site.scheduler.backend} whether it is defined")
     problems += [p for p in c.ssh.check_local() if p not in problems]
+    if why := home.clash(project.project, project.root):
+        problems.append(why)
     probes = {r["host"]: HostProbe(**r) for r in hosts if "error" not in r}
     for b in batches:
         bad = [f"{b.batch}: job {j.label} names unknown host {j.host}" for j in b.jobs
@@ -1127,6 +1146,24 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     return watch.run_forever(project, c.ssh, c.db, notifiers, once=a.once)
 
 
+def cmd_register(c: Ctx, a: argparse.Namespace) -> int:
+    """Link the project into the registry of the user root."""
+    p = c.project
+    new = home.register(p.project, p.root, a.dry_run)
+    c.emit(f"{'link' if new else 'already linked:'} {home.link(p.project)} -> {p.root}" + (" (dry)" if a.dry_run else ""),
+           {"project": p.project, "root": str(p.root), "new": new})
+    return Exit.DONE if new else Exit.NOTHING
+
+
+def cmd_unregister(c: Ctx, a: argparse.Namespace) -> int:
+    """Remove the link of the project from the registry."""
+    p = c.project
+    gone = home.unregister(p.project, p.root, a.dry_run)
+    c.emit(f"remove {home.link(p.project)}" + (" (dry)" if a.dry_run else "") if gone else f"{p.project} is not registered",
+           {"project": p.project, "removed": gone})
+    return Exit.DONE if gone else Exit.NOTHING
+
+
 def cmd_notify(c: Ctx, a: argparse.Namespace) -> int:
     """Send one message, the board or the digest through every configured notifier."""
     if (a.text is not None) + a.board + a.digest != 1:
@@ -1202,7 +1239,13 @@ def _parser() -> argparse.ArgumentParser:
                                 "and export snapshots.",
                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=_d(f"""
         edr finds edr.toml in the current directory or a parent, so it works from
-        anywhere below the project. Without one it refuses.
+        anywhere below the project. Without one it refuses. -P NAME, or the
+        variable EDR_PROJECT, picks a registered project from any directory
+        instead; EDR_PROJECT is refused inside the directory of another project.
+        The registry is ~/.edr/projects/, or projects/ under EDR_HOME: one link
+        per project name to its directory. launch, continue, track, import and
+        watch write the link, and a name that belongs to another directory
+        stops them.
 
         --json, before the command as in edr --json status or after it, prints
         one object instead of the text:
@@ -1236,6 +1279,7 @@ def _parser() -> argparse.ArgumentParser:
         handle or --batch.
         """))
     p.add_argument("--json", action="store_true", help="print the result as JSON")
+    p.add_argument("-P", "--project", metavar="NAME", help="the registered project NAME, from any directory")
     p.add_argument("--version", action="version", version=f"edr {__version__}", help="print the version and exit")
     p.set_defaults(dry_run=False)
     sub = p.add_subparsers(dest="command", metavar="command", required=True)
@@ -1445,6 +1489,18 @@ def _parser() -> argparse.ArgumentParser:
         the head node lacks, and plans every batch with those probes. It prints
         one problem: line per fault, or an ok: line with the counts.
         """, exits={Exit.REFUSED: "a problem was found"})
+    command("register", "link the project into the registry", """
+        Writes the link ~/.edr/projects/<project> to the project directory,
+        so the commands that span projects find it. launch, continue, track,
+        import and watch write it too. A name that belongs to another
+        directory is refused; a link to a directory that no longer holds that
+        project is replaced.
+        """, write=True, exits={Exit.NOTHING: "the link exists"})
+    command("unregister", "remove the link of the project from the registry", """
+        Removes the link ~/.edr/projects/<project> and nothing else: the
+        state, the database and the run trees stay. A link that names another
+        project directory is refused.
+        """, write=True, exits={Exit.NOTHING: "the project is not registered"})
     s = command("checkout", "check out a ref as a clone, or a dirty tree as a snapshot", """
         Fetches the repository, then makes a detached local clone of ref (default source.ref) at
         <worktrees>/<short hash>, and clones each source.nested repository into
@@ -1670,6 +1726,8 @@ def main(argv: list[str] | None = None) -> int:
     c, buf = Ctx(a), io.StringIO()
     try:
         with contextlib.redirect_stdout(buf) if a.json else contextlib.nullcontext():
+            if a.command in _REGISTERS and not a.dry_run:
+                home.register(c.project.project, c.project.root)
             code = a.fn(c, a)
     except (Refuse, ConfigError, checkout.CheckoutError, runid.GitError) as e:
         print(f"edr: {e}", file=sys.stderr)

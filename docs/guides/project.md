@@ -12,7 +12,11 @@ A project is a directory with an `edr.toml` in it. `tasks.toml`, one
 `jobs/<batch>.toml` per batch and `hooks/` for any Python or shell
 helpers sit next to it, and `edr` writes the database, the collected
 results and the boards under `data/`. `edr` works from any directory
-below `edr.toml` and sees that project only.
+below `edr.toml` and sees that project only. From any other directory,
+`edr -P <name>` or the variable `EDR_PROJECT` picks a project by its
+name. The names come from the registry, one link per project under
+`~/.edr/projects/`, which `launch`, `continue`, `track`, `import` and
+`watch` write; `edr register` writes the link by hand.
 
 Put the project on the head node, inside the work it belongs to, and
 run `edr` there. A paper project, for example, keeps `edr/` at its root,
@@ -23,6 +27,9 @@ in `edr.toml` is relative to the file.
 Set `project` in `edr.toml` to a name that says what the project is.
 `edr init` takes the name of the directory, which may be only `edr`, and
 the name appears in the state directory, the run trees and every alert.
+Two directories cannot share a name, since they would share the state
+directory and the run trees: a command that would register the second
+one refuses and names the first, and `edr check` reports it.
 
 Whether the directory goes into git is your choice. To version it,
 commit `edr.toml`, `tasks.toml`, `jobs/`, `hooks/` and
