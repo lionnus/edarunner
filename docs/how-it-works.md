@@ -477,7 +477,11 @@ filesystem under `data/` when it opens. On NFS, SMB, 9p and FUSE it uses
 the DELETE journal with `synchronous=FULL`, and WAL elsewhere; `edr
 check` warns when the database sits on such a filesystem (`db.Database`,
 `cli.cmd_check`). A local `data/` is still the better place, because the
-watcher and each `edr` call take a file lock there.
+watcher and each `edr` call take a file lock there. A writer waits up to
+30 s for the lock of another, and the watcher, `edr import` and `edr
+extract` write the metric rows of a run in one transaction. `edr
+metrics`, `compare`, `runtime`, `events` and `coverage` open the
+database read-only and create no file next to it (`cli._READ_ONLY`).
 
 `edr metrics --source` and `edr export` match each source tag exactly,
 and read several tags only when each has its own `--source`, so two
