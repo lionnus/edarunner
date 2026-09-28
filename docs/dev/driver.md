@@ -49,7 +49,7 @@ heartbeat; the head node reads the heartbeat.
   <batch>/
     RUN_DATE                      the pinned date, YYYYMMDD_HHMM
     RETIRED                       exists once the batch is retired
-    <run_id>.spec.json            the driver's input
+    <run_id>.spec.json            the driver's input, or the spec of an import
     <run_id>.json                 the heartbeat
     <run_id>.driver.log           stdout and stderr of the driver itself
     <run_id>.stop                 the stop file
@@ -89,6 +89,13 @@ tool without a probe is not in the list. The driver leases a seat as the
 file `<project>.<run_id>.<stage>.<n>`, or `<project>.<run_id>.<stage>.<task>.<n>`
 for a task, whose body holds the project, the run id, the stage, the
 pid, the host, the time and the budget.
+
+`edr import` writes a spec of the same format for a run that edarunner
+did not start: `schema`, the identity keys, `vars` from the
+`vars.<name>` parameters of the import, `host`, `root`, and `stages`
+with each task group as `name` and `tasks`, each task with `id` and
+`dir`. It holds no command, and no driver reads it; `extract` takes the
+tasks of a run without a heartbeat from it.
 
 A change to the spec changes `launch._spec`, the driver and
 `tests/test_driver.py` in the same commit. `tests/helpers_driver.py`
