@@ -211,7 +211,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert ("- 🔴 `local`: 0.2 of 4 cores, 6 of 8 GB RAM and 90 of 100 GB scratch are free. No run can start there: "
             "0.2 cores free, a run needs 1. Your runs there: demo 1, using 3.5 cores, 1 GB RAM and 2 GB scratch. "
             "Your runs use 3.5 of its 3.8 busy cores.") in out
-    assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
+    assert "Batch `demo` has 3 runs: 1 failed, 1 running and 1 done. Its source is `abc1234` (lag unknown)." in out
     assert "2 sources are checked out under" in out
     assert "\n- `abc1234`, used by batch `demo`\n- `def5678`, used by no batch\n" in out
     assert "One run has not finished:" in out and "`c@demo` is running in stage `synth` at step 2 (elaborate) on `local`" in out
@@ -222,6 +222,29 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert code == 0 and {"project", "root", "repo", "sources", "backend", "stages", "hosts", "tools", "batches",
                           "live", "decisions", "events", "read", "docs"} <= data.keys()
     assert data["hosts"]["hosts"][0]["start"] is False and [d["handle"] for d in data["decisions"]] == ["b@demo", "a@demo"]
+
+
+def test_brief_names_the_sources_of_a_batch_and_how_far_each_lags_the_ref(demo: Path, capsys) -> None:
+    subprocess.run(["bash", "setup.sh"], cwd=demo, check=True, capture_output=True)
+    repo = demo / "repo"
+    old = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    for n in (1, 2):
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q",
+                        "--allow-empty", "-m", f"c{n}"], check=True)
+    new = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = f"{old}-dirty-0badc0de"
+    for label, source in (("a", old), ("b", dirty), ("c", new), ("d", "deadbee")):
+        seed(demo, label, "done", source=source)
+    seed(demo, "e", "done", source=new, batch="next")
+    code, out, _ = edr(capsys, "brief")
+    lag = {old: "2 commits behind `HEAD`", dirty: "2 commits behind `HEAD`", new: "0 commits behind `HEAD`",
+           "deadbee": "lag unknown"}
+    assert code == 0 and ("Batch `demo` has 4 runs: 4 done. Its sources are " + board.join(
+        [f"`{s}` ({lag[s]})" for s in sorted(lag)]) + ".") in out
+    assert f"Batch `next` has 1 run: 1 done. Its source is `{new}` (0 commits behind `HEAD`)." in out
+    data = json.loads(edr(capsys, "--json", "brief")[1])["data"]
+    assert data["ref"] == "HEAD" and data["batches"][0]["sources"] == [
+        {"source": s, "behind": {old: 2, dirty: 2, new: 0}.get(s)} for s in sorted(lag)]
 
 
 def test_brief_proposes_nothing_for_a_retired_run(demo: Path, capsys) -> None:

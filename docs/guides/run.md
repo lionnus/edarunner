@@ -71,6 +71,7 @@ edr status                    # the board
 edr status --live             # asks each host whether the driver exists
 edr status base@sweep1        # one run: stages, steps, metrics, log tail
 edr status --triage           # every run not running, with one proposed command
+edr status --metric area_um2  # a column with the area of each run at its step of record
 edr events --run base@sweep1  # the history of one run, with the reason of every action
 ```
 
@@ -94,6 +95,8 @@ so use `--live` before you trust a running count.
 the hosts where a run can start first, and `edr tools` shows the free
 licence seats. `edr status --all` prints the board of every registered
 project, and `edr projects` lists the projects with their watchers.
+[results.md](results.md#an-overview-of-runs) shows the board with
+metrics, `--source` and `--csv`.
 
 ### Phases
 

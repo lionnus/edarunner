@@ -21,10 +21,12 @@ finds them.
 
 `edr brief` prints the project as Markdown for a reader who has never
 seen it: the source and its checked-out trees, the stages, the hosts
-with the marks of their last probe, the tool seats, the runs per batch,
-every run that needs a decision with the command the triage proposes,
-and the last ten events. `edr brief --run <handle>` prints the history
-of one run; [debug.md](debug.md#read-the-history-of-the-run) shows it.
+with the marks of their last probe, the tool seats, the runs per batch
+with the source tags of their runs and how many commits each tag lags
+behind `[source] ref`, every run that needs a decision with the command
+the triage proposes, and the last ten events. `edr brief --run <handle>`
+prints the history of one run;
+[debug.md](debug.md#read-the-history-of-the-run) shows it.
 
 A Claude Code session reads the briefing before its first prompt when
 the project's `.claude/settings.json` runs it as a `SessionStart` hook.

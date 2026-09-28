@@ -504,21 +504,75 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         rows = _all_rows(a)
         c.emit(board.wide(rows), {"runs": rows})
         return Exit.DONE
+    if a.metric and (a.narrow or a.triage):
+        raise Refuse("--metric adds columns to the wide board; drop --narrow and --triage")
     code = Exit.DONE
     while True:
-        rows = c.rows(a.batch or os.environ.get("EDR_BATCH"))
+        rows = [r for r in c.rows(a.batch or os.environ.get("EDR_BATCH")) if not a.source or r.get("source") in a.source]
         if a.live:
             code = max(code, _mark_live(c, rows))
         c.save_board(rows)
+        mets, missing = _record_rows(c, rows, a.metric) if a.metric else ([], [])
+        data = {"runs": rows, "metrics": mets, "missing": missing} if a.metric else {"runs": rows}
+        lines = "\n".join(analysis.missing_lines(missing))
+        if a.csv and not a.json:
+            sys.stdout.write(_status_csv(rows, mets))
+            if lines:
+                print(lines, file=sys.stderr)
+            c.data = data
+            return code
         totals = metrics.step_totals(c.project)
+        lacking = {(m["metric"], m["run_id"]) for m in missing}
+        extra = {m["metric"]: {r["run_id"]: "missing" if (m["metric"], r["run_id"]) in lacking else analysis.cell(m, r["run_id"])
+                               for r in rows} for m in mets}
         text = _triage(c, rows) if a.triage else board.narrow_text(rows, totals=totals) if a.narrow else board.wide(
-            rows, totals=totals)
+            rows, totals=totals, extra=extra)
+        if lines:
+            text = Group(text, Text(lines, style="bold"))
         if a.watch and not a.json:
             c.console.clear()
-        c.emit(text, {"runs": rows})
+        c.emit(text, data)
         if not a.watch or a.json:
             return code
         time.sleep(c.project.limits.heartbeat_s)
+
+
+def _record_rows(c: Ctx, runs: list[Row], names: list[str]) -> tuple[list[Row], list[Row]]:
+    """A row per metric of `names`, shaped as a row of `analysis.side_by_side`: the value, stage, step, source file and
+    verdict of each run at its step of record, else at its own last step; and the runs that lack the step of record,
+    each named by its handle.
+
+    `analysis.pick_step` takes one run at a time, so a metric without `record` is at the last step of each run. A name
+    matches a metric or a canonical name. The rows of a task are left out, since a task group has a value per task."""
+    out, missing, everyone, ids = [], [], c.db.runs(), [r["run_id"] for r in runs]
+    for name in names:
+        by: dict[str, list[Row]] = {}
+        for m in c.db.metrics(name=name, run_ids=ids):
+            if not m.get("task"):
+                by.setdefault(m["run_id"], []).append(m)
+        found = sorted({m["name"] for ms in by.values() for m in ms})
+        if len(found) > 1:
+            raise Refuse(f"{name} names the metrics {board.join(found)}; pass one of them")
+        row: Row = {"metric": found[0] if found else name, **{k: {} for k in ("value", "stage", "step", "source_file",
+                                                                               "verdict")}}
+        for r in runs:
+            chosen, lack = analysis.pick_step(c.project, [r], by.get(r["run_id"], []))
+            missing += [{**m, "label": board.handle(r, everyone)} for m in lack]
+            for rid, m in chosen.items():
+                for k in ("value", "stage", "step", "source_file"):
+                    row[k][rid] = m.get(k)
+                row["verdict"][rid] = analysis.verdict(c.project, m)
+        out.append(row)
+    return out, missing
+
+
+def _status_csv(runs: list[Row], mets: list[Row]) -> str:
+    """The board rows as CSV, with the value, stage, step and verdict of each metric of `_record_rows`."""
+    head = ["run_id", "label", "batch", "source", "host", "state", "phase",
+            *[f"{m['metric']}{k}" for m in mets for k in ("", "_stage", "_step", "_verdict")]]
+    body = [[r["run_id"], r.get("label"), r.get("batch"), r.get("source"), r.get("host"), board.state_of(r), r.get("phase"),
+             *[m[k].get(r["run_id"]) for m in mets for k in ("value", "stage", "step", "verdict")]] for r in board.order(runs)]
+    return export.to_csv(head, body).decode()
 
 
 def _all_rows(a: argparse.Namespace) -> list[Row]:
@@ -1650,8 +1704,11 @@ def _parser() -> argparse.ArgumentParser:
         probe from the host_samples table and the tools with the seats their
         probe reports. The state follows: the runs per batch and state, the
         live runs, every run the triage proposes a command for with that
-        command, and the last ten events. It ends with the project's CLAUDE.md
-        and AGENTS.md, when they exist, and the documentation.
+        command, and the last ten events. Each batch names the source tags
+        of its runs and how many commits each one lags behind [source] ref;
+        a dirty tag counts from the commit it starts from. It ends with the
+        project's CLAUDE.md and AGENTS.md, when they exist, and the
+        documentation.
 
         With --run, it prints the history of one run instead: its identity,
         its stage and step times from stage_runs and step_runs, its events with
@@ -1685,9 +1742,25 @@ def _parser() -> argparse.ArgumentParser:
 
         --all prints the board of every registered project in one table, with
         the project in the first column; it needs no project directory.
+
+        --metric NAME (repeatable) adds a column per metric to the board: the
+        value of each run at its step of record, else at its own last step,
+        with FAIL when it breaks the pass rule, and the stage and step. A run
+        that lacks its step of record shows missing, and a line under the
+        board names the steps it has. --source (repeatable) keeps the runs of
+        those source tags. --csv writes the board as CSV: run_id, label,
+        batch, source, host, state and phase, then per metric its value,
+        stage, step and verdict; the missing lines go to stderr. --json
+        gives each metric as a row of compare --json, with the value, stage,
+        step, source file and verdict of each run by run id, and the missing
+        runs.
         """, exits={Exit.HOSTS: "with --live, a host did not answer"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH, else every batch")
+    s.add_argument("--source", action="append", metavar="SOURCE", help="the runs of the exact source tag; repeatable")
+    s.add_argument("--metric", action="append", metavar="NAME",
+                   help="a column with this metric at the step of record, by name or canonical name; repeatable")
+    s.add_argument("--csv", action="store_true", help="the board as CSV on stdout")
     s.add_argument("--narrow", action="store_true", help="48 columns, two lines per live run, for an ssh app on a phone")
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s seconds; Ctrl-C ends it")
     s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")

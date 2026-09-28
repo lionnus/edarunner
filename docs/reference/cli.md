@@ -121,8 +121,11 @@ and the tools it needs, then the hosts with the marks of their last
 probe from the host_samples table and the tools with the seats their
 probe reports. The state follows: the runs per batch and state, the
 live runs, every run the triage proposes a command for with that
-command, and the last ten events. It ends with the project's CLAUDE.md
-and AGENTS.md, when they exist, and the documentation.
+command, and the last ten events. Each batch names the source tags
+of its runs and how many commits each one lags behind [source] ref;
+a dirty tag counts from the commit it starts from. It ends with the
+project's CLAUDE.md and AGENTS.md, when they exist, and the
+documentation.
 
 With --run, it prints the history of one run instead: its identity,
 its stage and step times from stage_runs and step_runs, its events with
@@ -141,7 +144,7 @@ session with the briefing; docs/guides/agents.md shows the hook.
 ## status
 
 ```
-edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [--all] [handle]
+edr status [--json] [--batch B] [--source SOURCE] [--metric NAME] [--csv] [--narrow] [--watch] [--live] [--triage] [--digest] [--all] [handle]
 ```
 
 Without a handle, status prints the board: one line per run of every
@@ -166,11 +169,26 @@ and failed counts appears only for a run with a task group.
 --all prints the board of every registered project in one table, with
 the project in the first column; it needs no project directory.
 
+--metric NAME (repeatable) adds a column per metric to the board: the
+value of each run at its step of record, else at its own last step,
+with FAIL when it breaks the pass rule, and the stage and step. A run
+that lacks its step of record shows missing, and a line under the
+board names the steps it has. --source (repeatable) keeps the runs of
+those source tags. --csv writes the board as CSV: run_id, label,
+batch, source, host, state and phase, then per metric its value,
+stage, step and verdict; the missing lines go to stderr. --json
+gives each metric as a row of compare --json, with the value, stage,
+step, source file and verdict of each run by run id, and the missing
+runs.
+
 | Flag | Meaning |
 |---|---|
 | `[handle]` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--json` | the same as edr --json status |
 | `--batch B` | one batch; default EDR_BATCH, else every batch |
+| `--source SOURCE` | the runs of the exact source tag; repeatable |
+| `--metric NAME` | a column with this metric at the step of record, by name or canonical name; repeatable |
+| `--csv` | the board as CSV on stdout |
 | `--narrow` | 48 columns, two lines per live run, for an ssh app on a phone |
 | `--watch` | redraw every heartbeat_s seconds; Ctrl-C ends it |
 | `--live` | ask each host whether the driver exists; a gone driver shows dead |

@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from . import analysis, board, census, watch
+from . import analysis, board, census, checkout, runid, watch
 from .hosts import HostProbe, floor
 from .model import SCHEDULERS, Project
 
@@ -51,12 +51,24 @@ def _cap(text: str) -> str:
 
 # gathering
 
-def _sources(project: Project, batches: list[Row]) -> list[Row]:
-    """The checked-out trees under the worktrees directory, each with the batches that use it."""
+def _sources(project: Project, runs: list[Row]) -> list[Row]:
+    """The checked-out trees under the worktrees directory, each with the batches whose runs use it."""
     wt = project.source.worktrees
     tags = sorted(p.name for p in wt.iterdir() if p.is_dir()) if wt.is_dir() else []
-    return [{"tag": t, "path": str(wt / t), "batches": [b["batch"] for b in batches if b.get("source") == t]}
+    return [{"tag": t, "path": str(wt / t), "batches": sorted({r["batch"] for r in runs if r.get("source") == t})}
             for t in tags]
+
+
+def _behind(project: Project, tag: str) -> int | None:
+    """The commits of the tracking ref `[source] ref` that the source `tag` lacks, a dirty tag counted on the commit it
+    starts from; None when the tag is no commit hash or git cannot count them."""
+    base = tag.split("-dirty")[0]
+    if not checkout.SOURCE_RE.match(base):
+        return None
+    try:
+        return int(runid.git("rev-list", "--count", f"{base}..{project.source.ref}", cwd=project.source.repo))
+    except runid.GitError:
+        return None
 
 
 def _stages(project: Project) -> list[Row]:
@@ -93,21 +105,23 @@ def project_data(c: Any, tools: list[Row]) -> Row:
     """Everything the project briefing says, as one dict; `c` is the command context of cli.py."""
     project, now = c.project, time.time()
     rows = board.order(c.rows())
-    batches, everyone = c.db.batches(), c.db.runs()
+    everyone = c.db.runs()
     runs = [_state_row(r, c.heartbeat(r) if board.is_live(r) else {}, now, everyone) for r in rows]
     per_batch: dict[str, Counter] = {}
     for r in runs:
         per_batch.setdefault(r["batch"], Counter())[r["state"]] += 1
+    tags = {b: sorted({r["source"] for r in rows if r["batch"] == b and r.get("source")}) for b in per_batch}
+    lag = {t: _behind(project, t) for t in {t for ts in tags.values() for t in ts}}
     names = board.handles(everyone)
     events = [{**e, "run": names.get(e["run_id"], e["run_id"] or "")} for e in c.db.events(n=EVENTS)]
     read = [str(project.root / f) for f in ("CLAUDE.md", "AGENTS.md") if (project.root / f).is_file()]
     return {
         "project": project.project, "root": str(project.root), "repo": str(project.source.repo),
-        "worktrees": str(project.source.worktrees), "sources": _sources(project, batches),
+        "ref": project.source.ref, "worktrees": str(project.source.worktrees), "sources": _sources(project, everyone),
         "backend": project.site.scheduler.backend, "stages": _stages(project),
         "hosts": _hosts(project), "tools": tools,
-        "batches": [{"batch": b, "source": next((x.get("source") for x in batches if x["batch"] == b), None),
-                     "states": dict(n)} for b, n in per_batch.items()],
+        "batches": [{"batch": b, "sources": [{"source": t, "behind": lag[t]} for t in tags[b]], "states": dict(n)}
+                    for b, n in per_batch.items()],
         "live": [r for r in runs if board.is_live({"phase": r["phase"]}) and r["state"] != "queued"],
         "decisions": [r for r in runs if r["command"]],
         "events": events, "read": read, "docs": DOCS_URL,
@@ -237,8 +251,11 @@ def project_text(d: Row, now: float | None = None) -> str:
     else:
         for b in d["batches"]:
             n = sum(b["states"].values())
-            src = f" on source `{b['source']}`" if b.get("source") else ""
-            out.append(f"Batch `{b['batch']}`{src} has {n} {'run' if n == 1 else 'runs'}: {_states(b['states'])}.")
+            tags = [f"`{s['source']}` (" + ("lag unknown" if s["behind"] is None else
+                                           f"{_count(s['behind'], 'commit')} behind `{d['ref']}`") + ")"
+                    for s in b["sources"]]
+            src = f" Its {'source is' if len(tags) == 1 else 'sources are'} {board.join(tags)}." if tags else ""
+            out.append(f"Batch `{b['batch']}` has {n} {'run' if n == 1 else 'runs'}: {_states(b['states'])}.{src}")
         out.append("")
         if d["live"]:
             out += [f"{_cap(_count(len(d['live']), 'run has', 'runs have'))} not finished:", ""]
