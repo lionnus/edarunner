@@ -507,10 +507,11 @@ def _unstarted(db: Database, run_id: str, live: Live, why: str, dry_run: bool) -
 
 
 def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
-          dry_run: bool = False, backend: Backend | None = None) -> dict[str, str]:
+          dry_run: bool = False, backend: Backend | None = None, start: bool = True) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing.
 
-    The backend answers once per cycle for the drivers of every live run."""
+    The backend answers once per cycle for the drivers of every live run. Without `start` the cycle
+    resumes and launches nothing."""
     now = time.time() if now is None else now
     backend = backend or make_backend(project.site, ssh)
     progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
@@ -547,7 +548,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         db.upsert_run({"run_id": hb["run_id"], "state": state})
         actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
         _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
-        if state == "dead":
+        if state == "dead" and start:
             _resume(project, ssh, backend, db, run, hb, progress, now)
     for o in [] if backend.name in SCHEDULERS else orphans(project, ssh, db):
         states[o["key"]] = "orphan"
@@ -558,7 +559,8 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     sweep_leases(project, db, heartbeats, states, now, dry_run)
     if dry_run:
         return states
-    _launch_queued(project, ssh, db)
+    if start:
+        _launch_queued(project, ssh, db)
     _boards(project, backend, db, notifiers, now)
     digest = Digest(project, db)
     if digest.due(now):
@@ -574,24 +576,32 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
 
 
 def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], once: bool = False) -> int:
-    """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed."""
+    """A cycle every limits.heartbeat_s; the notifier threads start once. With `once`: 1 when the cycle failed.
+
+    A config that stops loading gets one alert per error text, and the cycles go on with the last one
+    that loaded and start nothing until the file loads again."""
     for n in notifiers:
         n.start()
-    failed = False
+    failed, broken = False, ""
     try:
         while True:
             t0 = time.time()
             try:
                 # A watcher runs for weeks; the config it read at start must not rule every cycle.
-                project = config.load_project(project.root)
+                try:
+                    project, broken = config.load_project(project.root), ""
+                except config.ConfigError as e:
+                    failed = True
+                    if str(e) != broken:
+                        broken = str(e)
+                        log.error("config not loadable, watching on the last good one: %s", e)
+                        for n in notifiers:
+                            n.send(alerts.config_alert(project, broken))
                 ssh = Ssh(project.site)
                 for n in notifiers:
                     if hasattr(n, "project"):
                         n.project = project
-                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh))
-            except config.ConfigError as e:  # a config edit mid-way: skip this cycle, keep the service
-                log.error("config not loadable, cycle skipped: %s", e)
-                failed = True
+                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken)
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
                 failed = True

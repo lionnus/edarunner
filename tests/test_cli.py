@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -17,7 +18,7 @@ from pathlib import Path
 import pytest
 from helpers_cli import DATE, bdir, dead_pid, edr, seed
 
-from edarunner import board, cli, config, launch, watch
+from edarunner import board, cli, config, home, launch, watch
 from edarunner import db as db_mod
 from edarunner.db import Database
 from edarunner.guards import Refuse
@@ -172,7 +173,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     (demo / "wt" / "def5678").mkdir(parents=True)
     with Database(demo / "data" / "edr.db") as db:
         db.add_event("user", a, "launch", "local /x")
-        db.add_host_samples(int(time.time()) - 60, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
+        db.add_host_samples(int(time.time()) - 600, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
                                                               "free_ram_gb": 6, "total_gb": 100, "free_gb": 90}})
     (demo / "AGENTS.md").write_text("notes\n")
     code, out, _ = edr(capsys, "brief")
@@ -180,7 +181,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     assert code == 0 and heads == ["## The flow", "## The site", "## The state", "## Read more"]
     assert "- `synth` runs one command through 4 steps, collects `reports/` and needs the tool `demo`." in out
     assert "- `power` is a task group that runs 2 tasks at a time" in out
-    assert "`local` at the probe 60 seconds ago: cores 🔴, ram 🟢, scratch 🟢." in out
+    assert "`local` at the probe 10 minutes ago: cores 🔴, ram 🟢, scratch 🟢." in out
     assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
     assert "2 sources are checked out under" in out
     assert "\n- `abc1234`, used by batch `demo`\n- `def5678`, used by no batch\n" in out
@@ -644,6 +645,59 @@ def test_watch_check_dry_and_once(demo: Path, capsys) -> None:
     assert code == 0 and (state.parent / "watch.json").exists()
     assert b"b_nodw" in (demo / "data" / "board" / "status.html").read_bytes()
     assert edr(capsys, "watch", "--check")[0] == 0
+
+
+def test_a_second_watcher_of_a_project_exits_2(demo: Path, capsys) -> None:
+    lock = config.load_project(demo).state_dir / "watch.lock"
+    fd = home.lock(lock)
+    assert fd is not None and home.lock(lock) is None
+    code, out, _ = edr(capsys, "watch", "--once")
+    assert code == 2 and f"pid {os.getpid()} watches demo already" in out and not (demo / "data" / "board").exists()
+    os.close(fd)
+    assert edr(capsys, "watch", "--once")[0] == 0 and home.lock(lock) is not None
+
+
+def test_register_links_the_project_and_refuses_a_second_directory(demo: Path, capsys, tmp_path: Path,
+                                                                   user_root: Path, monkeypatch) -> None:
+    link = user_root / "projects" / "demo"
+    assert edr(capsys, "register", "--dry-run")[0] == 0 and not link.exists()
+    code, out, _ = edr(capsys, "register")
+    assert code == 0 and link.resolve() == demo.resolve() and edr(capsys, "register")[0] == 2
+    twin = tmp_path / "edr" / "twin"
+    shutil.copytree(demo, twin, ignore=shutil.ignore_patterns("data"))
+    monkeypatch.chdir(twin)
+    why = f"the project name demo belongs to {demo.resolve()}; rename `project` in {twin / 'edr.toml'}"
+    for argv in (["register"], ["unregister"], ["launch", "demo"], ["watch", "--once"]):
+        code, _, err = edr(capsys, *argv)
+        assert code == 1 and why in err, argv
+    code, out, _ = edr(capsys, "check")
+    assert code == 1 and why in out
+    assert not (twin / "data").exists() and not (config.load_project(twin).state_dir / "watch.json").exists()
+    monkeypatch.chdir(demo)
+    assert edr(capsys, "unregister")[0] == 0 and not link.exists() and edr(capsys, "unregister")[0] == 2
+    (demo / "edr.toml").write_text((demo / "edr.toml").read_text().replace('project = "demo"', 'project = "moved"'))
+    link.symlink_to(demo)  # a link whose directory now holds another project frees the name
+    monkeypatch.chdir(twin)
+    assert edr(capsys, "register")[0] == 0 and link.resolve() == twin.resolve()
+
+
+def test_a_project_by_name_from_any_directory(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
+    seed(demo, "a", "done")
+    assert edr(capsys, "register")[0] == 0
+    monkeypatch.chdir(tmp_path)
+    code, out, _ = edr(capsys, "-P", "demo", "status")
+    assert code == 0 and "done" in out
+    code, _, err = edr(capsys, "-P", "nope", "status")
+    assert code == 1 and "no registered project nope" in err
+    monkeypatch.setenv("EDR_PROJECT", "demo")
+    assert edr(capsys, "status")[0] == 0
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "edr.toml").write_text('project = "other"\n')
+    monkeypatch.chdir(other)
+    code, _, err = edr(capsys, "status")
+    assert code == 1 and f"inside the project {other}" in err
+    assert edr(capsys, "-P", "demo", "status")[0] == 0
 
 
 def _edr_bytes(demo: Path, *argv: str, **env: str) -> bytes:

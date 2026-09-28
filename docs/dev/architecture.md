@@ -26,6 +26,7 @@ report files and the numbers in them.
 | `model.py` | the dataclasses every module shares: `Project`, `Site`, `Stage`, `Metric`, `Task`, `Job`, `Batch`; nothing here reads a file |
 | `config.py` | loading and validation of the four TOML files, the type check against the model, placeholders, hooks |
 | `guards.py` | `assert_safe_target`, `assert_run_id` and `Refuse` |
+| `home.py` | the user root `~/.edr` or `EDR_HOME`: the registry of the projects and the process locks |
 | `runid.py` | the git calls, the source tag, the run id template |
 | `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe, placement, the head-node check |

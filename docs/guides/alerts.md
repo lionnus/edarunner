@@ -33,6 +33,7 @@ other message is `<project>: <kind>`.
 | alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; `hung`, `looping`, `over_budget`, `host_full` and `superseded` also get the keep, ack and stop buttons | one push per change, with the next command, and the button commands with three copy buttons | one mail per change, with the next command and the button commands |
 | alert: `orphan` | the watcher | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
 | alert: `watch` | `edr watch --check` | one message | one urgent push | one mail |
+| alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
 | `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |
 | `board` | the watcher every cycle | one pinned message, edited in place | none | none |
 | `board` on request | `edr notify --board` | one new message | one low push | one mail |
@@ -640,6 +641,21 @@ project: /home/me/myflow
 Run one cycle that writes nothing; it prints the error that stops the watcher:
 edr watch --dry-run
 Then restart the watcher service.
+```
+
+`config`: a project file stopped loading while the watcher runs. The
+watcher goes on with the last config that loaded, and the alert comes
+again only when the error text changes.
+
+```
+🔴 demo: config does not load
+The watcher goes on with the last config that loaded. It reads the heartbeats, sends the alerts and collects the results, but it resumes and launches nothing until the file loads again.
+
+project: /home/me/myflow
+/home/me/myflow/edr.toml: unknown key 'limits.stale'
+
+See every problem of the project files:
+edr check
 ```
 
 ## ntfy
