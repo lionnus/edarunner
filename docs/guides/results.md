@@ -19,7 +19,7 @@ batch, every number and every action.
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
 | `store` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and under `telegram` the message ids and the forum topic of the project |
-| `area` | instance of a hierarchical area report | run, stage, step, metric name, instance path, depth, area with the children, local area, cell count; the source file is the metric's |
+| `instances` | instance and part of an `area_hier` or `table` metric | run, stage, step, task, metric name, part, instance path, depth, value with the children, local value, cell count; the source file is the metric's |
 | `step_runs` | step of a run | stage, step number, the unix time the step started, from the driver's `step_times` |
 | `host_samples` | host and watcher cycle | cores, load, RAM and scratch total and in use, GPUs and busy GPUs; 30 days are kept |
 | `run_samples` | heartbeat of a run | CPU percent and RSS of the run's process groups, tree size, free disk |
@@ -83,7 +83,7 @@ unit = "ns"
 `scale` multiplies each value when it is extracted, so the database holds
 the number in the unit that `unit` names. Every view, `--json`, the export
 and MLflow get that number, and a `pass` rule compares it. An `area_hier`
-metric scales its rows of the `area` table as well. A changed `scale`
+or `table` metric scales its rows of the `instances` table as well. A changed `scale`
 reaches the rows already in the database when `edr extract` runs; see
 [Extract again](#extract-again).
 
@@ -206,11 +206,11 @@ $ edr extract base@g8
 ```
 
 A row counts as changed when its value, canonical name, unit or source
-file differs, or when its area rows differ, and `extract` replaces it.
+file differs, or when its instance rows differ, and `extract` replaces it.
 A row written by an earlier parser therefore gets the source file of the
 current one.
 
-A row that the extraction no longer gives is removed with its area rows
+A row that the extraction no longer gives is removed with its instance rows
 when it is a failed row, when no metric defines it any more, or when the
 extraction read its stage and task. That covers the rows of a metric you
 deleted from `edr.toml`, the instances below a smaller `area_hier` depth,
@@ -393,8 +393,8 @@ build comes from the step its area comes from.
 
 ## A number the flow does not print
 
-A metric has one of five parsers: `regex`, `csv`, `json`, `python` or
-`area_hier`. A number that comes from other numbers, such as an energy
+A metric has one of six parsers: `regex`, `csv`, `json`, `python`,
+`area_hier` or `table`. A number that comes from other numbers, such as an energy
 from a power and a window, needs a `python` hook. The hook gets the path
 of `file` and reads the other files itself:
 
@@ -471,48 +471,179 @@ A `python` hook decides for itself. It returns None when the number does
 not apply to the file, such as a trace number of a task without a trace,
 and it raises an exception when the file is wrong.
 
-## Hierarchical area
+## Per-instance numbers
 
-A metric with `area_hier = <depth>` reads a hierarchical area report,
-Synopsys `report_area -hierarchy` or the OpenROAD area by hierarchy. Its
-value is the top area. Each instance down to that depth becomes a row of
-the `area` table: the top is `<top>` at depth 0, and a child is its path
-from the top. A depth of 3 or 4 is usually enough to compare the main
-blocks; the leaf levels of a large design add millions of rows.
+Some numbers come per instance: the area of each block from a
+hierarchical area report, or the power of each block in each phase of a
+power run. Two parsers read such a file into the `instances` table, one
+row per run, stage, step, task, metric, part and instance. A part is a
+phase, a trace slice or a scenario; an area report has none. A row holds
+the instance path, its depth with the top at 0, the value with the
+children, the local value without them when the file has it, and the
+cell count of an area report. The metric row itself holds the value of
+the top, so every view that shows one number per run reads it as usual.
+
+`area_hier = <depth>` reads Synopsys `report_area -hierarchy` or the
+OpenROAD area by hierarchy. The top is `<top>` at depth 0, a child is
+its path from the top, and each instance down to that depth becomes a
+row:
 
 ```toml
-[metrics.area_hier_um2]
-stage = ["pnr"]
+[metrics.area_um2]
+stage = ["pnr", "export"]
 step = "*"
 file = "flow/runs/{tree_id}/reports/{step}/area_hier.rpt"
-area_hier = 4
+area_hier = 3
 unit = "um2"
-canonical = "design__instance__area"
+record = { stage = "pnr", from = 11 }
 ```
 
-`edr metrics --source <source> --instance i_top/i_streamer --depth 3` prints
-the area rows of that subtree. `edr compare A B --area --depth 2` puts the
-blocks of two or more runs side by side, each at its
-[step of record](#stage-of-record), or at the deepest step that every run
-has when the area metric has no `record`. The header names the stage and
-step of each run:
+`table` reads a tidy CSV with one row per instance and part, such as the
+power of each block in the whole window and in each trace slice:
 
 ```
-$ edr compare base@g8 lanes16@g7 lanes4@g7 --area --depth 2 --instance i_top
-area um2 at depth 2
-instance        base (pnr 12)  lanes16 (pnr 12)  lanes4 (pnr 12)  Δ lanes16     Δ %  Δ lanes4     Δ %
-i_top/i_engine        96580.1           96092.1          95942.9       -488   -0.5%    -637.2   -0.7%
-i_top/i_accum         36583.7           36169.4          36001.1     -414.3   -1.1%    -582.6   -1.6%
-i_top/i_lanes         32453.8           19234.8           9372.4     -13219  -40.7%  -23081.4  -71.1%
-i_top/i_stream        14592.5           14738.5          14395.8        146   +1.0%    -196.7   -1.3%
-<top>                  208030            193919           182996   -14111.4   -6.8%  -25034.2  -12.0%
-base: flow/runs/<run>/reports/12/area_hier.rpt
+phase,instance,full,depth,total_w
+WHOLE,chip,chip,0,0.2500
+WHOLE,i_top,chip/i_top,1,0.2400
+WHOLE,u_core,chip/i_top/u_core,2,0.1250
 ...
+TRACE_0,chip,chip,0,0.3100
 ```
+
+```toml
+[metrics.power_inst_w]
+stage = "power"
+file = "{task_dir}/power/reports/inst.csv"
+table = { instance = "full", value = "total_w", depth = "depth", part = "phase", where = { phase = ["WHOLE", "TRACE_*"] }, top = { phase = "WHOLE", depth = "0" }, max_depth = 3 }
+unit = "W"
+```
+
+`instance`, `value`, `depth`, `part` and `local` name the columns of the
+file. The value of the metric comes from the first row that `top`
+matches, here the design total of the whole window, and its
+`source_file` names the line of that row. The rows that `where` matches,
+down to depth `max_depth`, are stored. A value of `where` or `top` is a
+glob or a list of globs. Without `depth`, the depth is the count of `/`
+in the path. Give `instance` a column of full paths: a leaf name such as
+`u_reg` repeats under every lane, and an instance that repeats within a
+part gives a failed row.
+
+`edr metrics --source <source> --instance GLOB --depth N` prints the
+stored rows. The glob runs over the path, and `*` also matches `/`:
+
+```
+$ edr metrics --source 3f9a2c1 --metric area_um2 --instance '*/u_add'
+label  source   stage  step  task  metric    part  instance           depth  value  local  cells  unit
+base   3f9a2c1  pnr      12        area_um2        i_top/u_sum/u_add      3  12800      0      -  um2
+```
+
+### Compare instances
+
+`edr compare A B --instances` puts the instances of one metric side by
+side, each run at the [step of record](#stage-of-record) of the metric,
+or at the deepest step that every run has when the metric has no
+`record`. It prints one row per instance at `--depth` (default 1), then
+three rows: `<sum>` adds up the rows shown, `<other>` is the top less
+that sum, and `<top>` is the total, printed once. At depth 0, `<top>` is
+the only row. The rows shown and `<other>` always add up to the top:
+
+```
+$ edr compare base@g8 noadd@g8 --instances --metric area_um2 --depth 2
+area_um2 in um2 at depth 2
+instance      base (pnr 12)  noadd (pnr 12)  Δ noadd     Δ %
+i_top/u_core         102400          102400        0   +0.0%
+i_top/u_sum           51200           38400   -12800  -25.0%
+i_top/u_vec           25600           25600        0   +0.0%
+<sum>                179200          166400   -12800   -7.1%
+<other>               25600           25600        0   +0.0%
+<top>                204800          192000   -12800   -6.2%
+base: reports/12/area_hier.rpt
+noadd: reports/12/area_hier.rpt
+```
+
+`--instance GLOB` keeps the instances whose path matches. An instance
+that a run lacks counts as 0 there, so its delta is its full value, and
+its percent reads `gone`, or `new` when the first run lacks it:
+
+```
+$ edr compare base@g8 noadd@g8 --instances --metric area_um2 --depth 3 --instance 'i_top/u_sum/*'
+area_um2 in um2 at depth 3
+instance           base (pnr 12)  noadd (pnr 12)  Δ noadd      Δ %
+i_top/u_sum/u_add          12800               -   -12800     gone
+<sum>                      12800               0   -12800  -100.0%
+<other>                   192000          192000        0    +0.0%
+<top>                     204800          192000   -12800    -6.2%
+```
+
+A task metric needs `--task`. `--part` picks the part; without it, the
+view takes the part that `top` names, the whole window here:
+
+```
+$ edr compare base@g8 noadd@g8 --instances --metric power_inst_w --task k_small --depth 2
+power_inst_w in W at depth 2, task k_small, part WHOLE
+instance            base  noadd  Δ noadd     Δ %
+chip/i_top/u_core  0.125  0.125        0   +0.0%
+chip/i_top/u_sum   0.062  0.048   -0.014  -22.6%
+chip/i_top/u_vec   0.031  0.031        0   +0.0%
+<sum>              0.218  0.204   -0.014   -6.4%
+<other>            0.032  0.032        0   +0.0%
+<top>               0.25  0.236   -0.014   -5.6%
+```
+
+When the runs have more than one instance metric, the command refuses
+and names them, so that `--metric` picks one. It also refuses a task
+that no run has and a part that a run lacks, and lists the ones there
+are. `--csv` writes the instance column and one column per run, the
+three rows at the end included, and `--json` adds the delta of each
+row.
+
+An area in um2 prints in gate equivalents with `--unit kGE` or
+`--unit MGE`, in `edr compare` and in `edr metrics`, and `--json` and
+`--csv` then hold the same numbers under that unit. Set the area of one
+gate equivalent of your library in `edr.toml`; an export records it in
+its manifest:
+
+```toml
+ge_um2 = 0.2
+```
+
+### How deep to store
+
+Store depth 3 at every step: the top, the blocks and their main parts.
+Each deeper level multiplies the rows, and most of the deep rows are the
+cells of regular arrays that no number reads. A made-up design with 40
+instances down to depth 3 and 3,000 below it, in 20 runs of 10 steps
+each, stores 8,000 rows at depth 3 and 608,000 at depth 8.
+
+A table stores its rows once per task and part, so it grows faster than
+an area report. Let `where` keep only the parts that your tables read,
+and lower `max_depth` for the levels you need only now and then: those
+still come from the file on demand, as below.
+
+A number from a deeper level comes from the report on demand. A
+`--depth` deeper than the rows in the database reads the file that the
+metric row of each run cites, from `data/results/`, at the step of
+record. Say the four lanes of a lane bank sit at depth 5:
+
+```
+$ edr compare base@g8 noadd@g8 --instances --metric area_um2 --depth 5 --instance '*/u_lane_*' --unit kGE
+area_um2 in kGE at depth 5
+instance                             base (pnr 12)  noadd (pnr 12)  Δ noadd    Δ %
+i_top/u_vec/u_bank/u_lanes/u_lane_0             32              32        0  +0.0%
+i_top/u_vec/u_bank/u_lanes/u_lane_1             32              32        0  +0.0%
+i_top/u_vec/u_bank/u_lanes/u_lane_2             32              32        0  +0.0%
+i_top/u_vec/u_bank/u_lanes/u_lane_3             32              32        0  +0.0%
+<sum>                                          128             128        0  +0.0%
+<other>                                        896             832      -64  -7.1%
+<top>                                         1024             960      -64  -6.2%
+```
+
+A table works the same way: a `--depth` deeper than its `max_depth`
+reads the CSV, with every part, also the ones that `where` left out.
 
 ## Compare runs side by side
 
-`edr compare A B` without `--area` prints one row per task and metric:
+`edr compare A B` without `--instances` prints one row per task and metric:
 the value of each run with its stage and step, and the delta and the
 percent of each run to the first. Each run is at its
 [step of record](#stage-of-record), or at the deepest step that every
@@ -537,7 +668,7 @@ wns_ns        -0.056 (pnr 11)  -0.038 (pnr 11)      0.018  +32.1%
 When the runs come from more than one source tag, each column is
 `label@source`, a line above the table names the tags, and `--json` sets
 `mixed_sources`. Two runs with the same name get a prefix of their run
-ids after it. `--area` names its columns the same way.
+ids after it. `--instances` names its columns the same way.
 
 ```
 $ edr compare base@3f9a2c1 base@3f9a2c1-dirty-7b21c0d9 --stage pnr --step 12 --metric cells
@@ -689,17 +820,19 @@ exports/3f9a2c1/
   runs.csv
   metrics.csv
   parameters.csv
+  instances.csv
   sources/<tag>/source.diff   the diff of each dirty source
   <label>/...                 the collected files of that run
 ```
 
 | File | Holds |
 |---|---|
-| `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
+| `manifest.json` | `producer`, `created`, `schema` (2), `project`, `sources`, `runs` (id, label, config, build tag, source, host, phase, and a `record`), `tables` with the row counts, `ge_um2` with the gate equivalent of the project or `null`, `dirty_sources` with the base, the nested commits and the sha256 of the diff of each dirty source, `files` with path, size and sha256, `incomplete` with every exported run whose phase is not `done`, and `skipped` with the other runs of each label and source; an entry of `incomplete` or `skipped` holds the run id, label, source and phase |
 | `runs.csv` | `run_id,label,config,build_tag,source,host,phase,started,ended,batch,dirty,tree_id,retired`; `retired` is 1 for a run that was retired, or whose batch was |
 | `parameters.csv` | `run_id,label,source,key,value,origin`, the rows of the `parameters` table for each exported run |
 | `sources/<tag>/source.diff` | the copy of `data/sources/<tag>/source.diff` for each dirty source |
 | `metrics.csv` | `run_id,label,config,source,stage,step,task,metric,canonical,value,unit,source_file,record`; `record` marks the [step of record](#stage-of-record) |
+| `instances.csv` | `run_id,label,source,stage,step,task,metric,part,instance,depth,value,local,cells,unit`, the rows of the `instances` table for each exported run; join it to `metrics.csv` on run, stage, step, task and metric to keep the step of record |
 | `<label>/` | `data/results/<run_id>/` of that run, without `log/` and `*.log` unless `--with-logs`; `<label>@<source>/` when the runs come from more than one tag |
 
 `--source` may be given more than once, for a table that needs a done
@@ -760,7 +893,7 @@ The MLflow UI gives a sortable runs table with a search syntax, a compare
 page with parallel coordinates, scatter, box and contour plots, a
 parameter diff, and a chart of each metric over its steps. It shows the
 last value of a metric, not its source file, and it has no view of the
-hierarchical area, of the runtime per step side by side, or of the hosts.
+instances, of the runtime per step side by side, or of the hosts.
 Those stay with `edr compare`, `edr runtime` and the board.
 
 ## An analysis reads snapshots
@@ -769,8 +902,8 @@ An analysis should never read the live database, because the database
 changes with every watcher cycle and a number you quote must stay the
 number you read. Instead, the analysis keeps one snapshot per
 source under its own `data/`, pinned by the source tag. Every table and
-figure comes from `runs.csv`, `metrics.csv` and `parameters.csv` of
-that snapshot:
+figure comes from `runs.csv`, `metrics.csv`, `parameters.csv` and
+`instances.csv` of that snapshot:
 
 ```
 report/

@@ -1,4 +1,4 @@
-"""analysis.py and the commands over it: area, the step of record, metrics per step, runtime, host and run samples."""
+"""analysis.py and the commands over it: instances, the step of record, metrics per step, runtime, host and run samples."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from helpers_cli import edr, seed
-from helpers_results import area_hier
+from helpers_results import TREE, area_hier, area_report, power_table
 
 from edarunner import analysis, board, config, export, metrics
 from edarunner.db import Database
@@ -53,16 +53,16 @@ Some other section
 
 def test_parse_synopsys_hierarchy_with_a_wrapped_name() -> None:
     rows = metrics.parse_area_hier(SYNOPSYS)
-    assert [(r["instance"], r["depth"], r["area"]) for r in rows] == [
+    assert [(r["instance"], r["depth"], r["value"]) for r in rows] == [
         ("<top>", 0, 1000.0), ("i_top", 1, 990.0), ("i_top/i_engine", 2, 700.0),
         ("i_top/i_a_very_long_instance_name_that_wraps_onto_the_next_line", 2, 280.0),
         ("i_top/i_engine/i_lane", 3, 100.0)]
-    assert rows[2]["local_area"] == 700.0 and rows[2]["cells"] is None
+    assert rows[2]["local"] == 700.0 and rows[2]["cells"] is None and {r["part"] for r in rows} == {""}
 
 
 def test_parse_openroad_hierarchy_by_indentation() -> None:
     rows = metrics.parse_area_hier(OPENROAD)
-    assert [(r["instance"], r["depth"], r["area"], r["local_area"], r["cells"]) for r in rows] == [
+    assert [(r["instance"], r["depth"], r["value"], r["local"], r["cells"]) for r in rows] == [
         ("<top>", 0, 500.0, 20.0, 50), ("i_soc", 1, 480.0, 30.0, 45),
         ("i_soc/gen_bank[0].i_sram", 2, 150.0, 150.0, 11), ("i_soc/i_core", 2, 300.0, 300.0, 30)]
     with pytest.raises(ValueError):
@@ -94,35 +94,126 @@ def _extract(root: Path, run_id: str, reports: dict[int, str]) -> None:
             db.add_metric(row)
 
 
-def test_area_rows_filter_and_compare(demo: Path, capsys) -> None:
+def test_instance_rows_filter_and_compare(demo: Path, capsys) -> None:
     _area_metric(demo)
     a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
     _extract(demo, a, {2: SYNOPSYS, 3: SYNOPSYS})
     _extract(demo, b, {2: SYNOPSYS.replace("700.000", "630.000").replace("1000.000", "930.000")})
     with Database(demo / "data" / "edr.db") as db:
-        assert {r["depth"] for r in db.area()} == {0, 1, 2}  # area_hier = 2 keeps depth 2 at most
+        assert {r["depth"] for r in db.instances()} == {0, 1, 2}  # area_hier = 2 keeps depth 2 at most
         assert db.metrics(name="area_hier_um2", step=2, run_ids=[a])[0]["value"] == 1000.0
     code, out, _ = edr(capsys, "--json", "metrics", "--source", "abc1234", "--instance", "i_top/i_engine")
     rows = json.loads(out)["data"]
     assert code == 0 and {r["instance"] for r in rows} == {"i_top/i_engine"}
     assert rows[0]["source_file"] == "reports/2/area_hier.rpt" and rows[0]["unit"] == "um2"
     # b has step 2 only, so both runs are compared at step 2, the last step both have.
-    code, out, _ = edr(capsys, "compare", a, b, "--area", "--depth", "2")
+    code, out, _ = edr(capsys, "compare", a, b, "--instances", "--depth", "2")
     lines = out.splitlines()
-    assert code == 0 and lines[0] == "area um2 at depth 2"
+    assert code == 0 and lines[0] == "area_hier_um2 in um2 at depth 2"
     engine = next(ln for ln in lines if ln.startswith("i_top/i_engine"))
     assert engine.split() == ["i_top/i_engine", "700", "630", "-70", "-10.0%"]
     assert next(ln for ln in lines if ln.startswith("<top>")).split()[-1] == "-7.0%"
     assert lines[1].split()[:7] == ["instance", "a", "(synth", "2)", "b", "(synth", "2)"]
     assert "a: reports/2/area_hier.rpt" in out
-    code, out, _ = edr(capsys, "--json", "compare", a, b, "--area", "--depth", "1")
+    code, out, _ = edr(capsys, "--json", "compare", a, b, "--instances", "--depth", "1")
     data = json.loads(out)["data"]
-    assert [r["instance"] for r in data["rows"]] == ["i_top"] and data["rows"][0]["delta"] == {b: 0.0}
-    assert edr(capsys, "compare", a, b, "--area", "--depth", "5")[0] == 2
+    assert [r["instance"] for r in data["rows"]] == ["i_top", "<sum>", "<other>", "<top>"]
+    assert data["rows"][0]["delta"] == {b: 0.0} and data["rows"][2]["value"] == {a: 10.0, b: -60.0}
+    # The report holds depth 3 at most, so depth 5 reads it and finds nothing.
+    assert edr(capsys, "compare", a, b, "--instances", "--depth", "5")[1] == "no instance rows\n"
     with Database(demo / "data" / "edr.db") as db:
         last = analysis.last_areas(config.load_project(demo), db, [a, b, "nothing"], max_depth=1)
     assert set(last) == {a, b} and (last[a]["step"], last[b]["step"]) == (3, 2)
     assert last[a]["rows"] == [["<top>", 0, 1000.0], ["i_top", 1, 990.0]]
+
+
+def _instances_project(root: Path) -> None:
+    """ge_um2, an area metric that stores depth 3, and a table metric on the power CSV of each task: the whole window
+    and the trace slices down to depth 3, the value from the top of the whole window."""
+    toml = root / "edr.toml"
+    toml.write_text(toml.read_text().replace("run_prefix =", "ge_um2 = 0.5\nrun_prefix =") + """
+[metrics.area_hier_um2]
+stage = "pnr"
+step = "*"
+file = "reports/{step}/area_hier.rpt"
+area_hier = 3
+unit = "um2"
+
+[metrics.inst_w]
+stage = "power"
+file = "{task_dir}/power/reports/inst.csv"
+table = { instance = "full", value = "total_w", depth = "depth", part = "phase", where = { phase = ["WHOLE", "TRACE_*"] }, top = { phase = "WHOLE", depth = "0" }, max_depth = 3 }
+unit = "W"
+""")
+
+
+def _extract_files(root: Path, run_id: str, files: dict[str, str]) -> None:
+    """Write `files` into the collected results of the run and extract its metrics with the task k_small done."""
+    for rel, text in files.items():
+        path = root / "data" / "results" / run_id / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    project = config.load_project(root)
+    with Database(project.data / "edr.db") as db:
+        for row in metrics.extract(project, db.run(run_id), project.data / "results", {"k_small": project.tasks["k_small"]}):
+            db.add_metric(row)
+
+
+def test_instances_side_by_side(demo: Path, capsys, tmp_path: Path) -> None:
+    # beta lacks the adder u_add. The store keeps depth 3; the four lanes sit at depth 5.
+    _instances_project(demo)
+    alpha, beta = seed(demo, "alpha", "done"), seed(demo, "beta", "done")
+    parts = {"WHOLE": 0.25, "TRACE_0": 0.5, "TRACE_1": 0.125, "IDLE": 0.01}
+    for run, tree in ((alpha, TREE), (beta, [r for r in TREE if "u_add" not in r[0]])):
+        _extract_files(demo, run, {"reports/5/area_hier.rpt": area_report(1024.0, tree),
+                                   "simulation/tests/demo/GEMM_M64_N64/power/reports/inst.csv": power_table(tree, parts)})
+    with Database(demo / "data" / "edr.db") as db:
+        held = db.instances(run_ids=[alpha])
+        top = db.metrics(run_ids=[alpha], name="inst_w")[0]
+        assert export.export(config.load_project(demo), db, ["abc1234"], tmp_path / "exp")["ge_um2"] == 0.5
+    assert max(r["depth"] for r in held) == 3 and {r["part"] for r in held} == {"", "WHOLE", "TRACE_0", "TRACE_1"}
+    assert (top["value"], top["source_file"]) == (0.25, "simulation/tests/demo/GEMM_M64_N64/power/reports/inst.csv:2")
+
+    def compare(*args: str, first: str = alpha) -> tuple[int, dict]:
+        code, out, _ = edr(capsys, "--json", "compare", first, beta if first == alpha else alpha, "--instances", *args)
+        data = json.loads(out)["data"]
+        return code, {r["instance"]: r["value"][first] for r in data["rows"]} | {"": data}
+
+    # The children and <other> add up to the top.
+    code, rows = compare("--metric", "area_hier_um2", "--depth", "2")
+    assert code == 0 and list(rows)[:-1] == ["i_top/u_core", "i_top/u_sum", "i_top/u_vec", "<sum>", "<other>", "<top>"]
+    assert (rows["<sum>"], rows["<other>"], rows["<top>"]) == (896.0, 128.0, 1024.0)
+    # The adder that beta lacks counts 0 there and shows its full delta, gone one way and new the other.
+    for first, cells in ((alpha, ["64", "-", "-64", "gone"]), (beta, ["-", "64", "64", "new"])):
+        out = edr(capsys, "compare", first, beta if first == alpha else alpha, "--instances", "--metric", "area_hier_um2",
+                  "--depth", "3", "--instance", "i_top/u_sum/*")[1]
+        assert next(ln for ln in out.splitlines() if ln.startswith("i_top/u_sum/u_add")).split()[1:] == cells
+    # Depth 5 reads the report; a glob over the four lanes gives their sum, and kGE divides by ge_um2.
+    code, rows = compare("--metric", "area_hier_um2", "--depth", "5", "--instance", "*/u_lane_*", "--unit", "kGE")
+    data = rows.pop("")
+    assert code == 0 and data["unit"] == "kGE" and "delta" not in data["runs"][0] and rows == pytest.approx(
+        {**{f"i_top/u_vec/u_bank/u_lanes/u_lane_{k}": 0.064 for k in range(4)}, "<sum>": 0.256, "<other>": 1.792, "<top>": 2.048})
+    # The table: the whole window by default, the part that `top` names.
+    code, rows = compare("--metric", "inst_w", "--task", "k_small", "--depth", "2")
+    assert code == 0 and rows.pop("")["part"] == "WHOLE" and rows == pytest.approx(
+        {"chip/i_top/u_core": 0.125, "chip/i_top/u_sum": 0.0625, "chip/i_top/u_vec": 0.03125, "<sum>": 0.21875,
+         "<other>": 0.03125, "<top>": 0.25})
+    code, rows = compare("--metric", "inst_w", "--task", "k_small", "--part", "TRACE_1", "--depth", "3", "--instance", "*/u_add")
+    assert code == 0 and rows["chip/i_top/u_sum/u_add"] == 0.0078125 and rows[""]["rows"][0]["delta"] == {beta: -0.0078125}
+    # `where` stored no IDLE row, but the CSV holds them, and depth 4 reads it.
+    assert "name one with --part: TRACE_0, TRACE_1, WHOLE" in edr(capsys, "compare", alpha, beta, "--instances", "--metric",
+                                                              "inst_w", "--task", "k_small", "--part", "IDLE")[2]
+    code, rows = compare("--metric", "inst_w", "--task", "k_small", "--part", "IDLE", "--depth", "4")
+    assert code == 0 and rows["chip/i_top/u_vec/u_bank/u_lanes"] == pytest.approx(0.00125)
+    # Two instance metrics need --metric, a task metric needs --task, and --task needs --instances.
+    assert "name one instance metric with --metric: area_hier_um2, inst_w" in edr(capsys, "compare", alpha, beta, "--instances")[2]
+    assert "name one with --task: k_small" in edr(capsys, "compare", alpha, beta, "--instances", "--metric", "inst_w")[2]
+    assert "need --instances" in edr(capsys, "compare", alpha, beta, "--task", "k_small")[2]
+    out = edr(capsys, "compare", alpha, beta, "--instances", "--metric", "area_hier_um2", "--csv")[1]
+    assert out.splitlines()[:2] == ["instance,alpha (pnr 5),beta (pnr 5)", "i_top,960.0,960.0"]
+    out = edr(capsys, "--json", "metrics", "--source", "abc1234", "--metric", "area_hier_um2", "--instance", "*/u_add",
+              "--unit", "kGE")[1]
+    assert [(r["label"], r["value"], r["unit"]) for r in json.loads(out)["data"]] == [("alpha", pytest.approx(0.128), "kGE")]
 
 
 def test_extract_fills_the_area_rows_of_an_old_run(demo: Path, capsys) -> None:
@@ -130,12 +221,12 @@ def test_extract_fills_the_area_rows_of_an_old_run(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     _extract(demo, a, {2: SYNOPSYS})
     with Database(demo / "data" / "edr.db") as db:
-        db.conn.execute("DELETE FROM area")
+        db.conn.execute("DELETE FROM instances")
         db.conn.commit()
     code, out, _ = edr(capsys, "extract", "a@demo")
     assert code == 0 and out == f"{a}: 0 new, 1 changed, 0 unchanged, 0 failed, 0 removed\n"
     with Database(demo / "data" / "edr.db") as db:
-        assert {r["depth"] for r in db.area()} == {0, 1, 2}
+        assert {r["depth"] for r in db.instances()} == {0, 1, 2}
     assert edr(capsys, "extract", "a@demo")[1] == f"{a}: 0 new, 0 changed, 1 unchanged, 0 failed, 0 removed\n"
 
 
@@ -182,11 +273,11 @@ def test_each_run_at_its_step_of_record(demo: Path, capsys, tmp_path: Path) -> N
         for step in steps:
             _metric(demo, run, "wns_ns", step, -0.01 * step, stage="pnr")
 
-    code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--depth", "1")
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--instances", "--depth", "1")
     lines = out.splitlines()
     assert code == 0 and lines[1].split()[:7] == ["instance", "alpha", "(pnr", "12)", "beta", "(pnr", "11)"]
     assert next(ln for ln in lines if ln.startswith("<top>")).split() == ["<top>", "1200", "3300", "2100", "+175.0%"]
-    code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--depth", "0")
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--instances", "--depth", "0")
     assert code == 0 and [ln.split()[0] for ln in out.splitlines()].count("<top>") == 1
     # The area is at the step of record of each run; wns_ns has no `record`, so both runs are at step 11, which both have.
     code, out, _ = edr(capsys, "compare", alpha, beta, gamma)
@@ -195,12 +286,12 @@ def test_each_run_at_its_step_of_record(demo: Path, capsys, tmp_path: Path) -> N
                                       "-", "-"]
     assert lines[3][:7] == ["wns_ns", "-0.11", "(pnr", "11)", "-0.11", "(pnr", "11)"]
     assert out.splitlines()[-1] == "missing: gamma has pnr steps 8 to 9"
-    code, out, _ = edr(capsys, "--json", "compare", alpha, gamma, "--area")
+    code, out, _ = edr(capsys, "--json", "compare", alpha, gamma, "--instances")
     data = json.loads(out)["data"]
     assert code == 2 and [r["run_id"] for r in data["runs"]] == [alpha]
     assert data["missing"] == [{"run_id": gamma, "label": "gamma", "metric": "area_hier_um2", "task": "", "stage": "pnr",
                                 "steps": [8, 9]}]
-    code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--step", "12")
+    code, out, _ = edr(capsys, "compare", alpha, beta, "--instances", "--step", "12")
     assert code == 2 and out.splitlines()[-1] == "missing: beta has pnr steps 9, 11"
     # Another stage than the record stage takes the deepest step the runs share there.
     code, out, _ = edr(capsys, "compare", alpha, beta, "--stage", "export")

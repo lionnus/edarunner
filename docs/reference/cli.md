@@ -309,7 +309,7 @@ gives tool, free, total, hosts (host to version) and note.
 ## metrics
 
 ```
-edr metrics [--json] [--source SOURCE] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
+edr metrics [--json] [--source SOURCE] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance GLOB] [--depth N] [--unit {kGE,MGE}]
 ```
 
 Prints every metric of the sources with its label, source, stage, step,
@@ -328,10 +328,14 @@ column when a metric has a pass rule: FAIL when a value of that step
 breaks its rule. With --metric, it prints that one metric, its change
 from the step before and its source file.
 
---instance or --depth prints the area rows of an area_hier metric
-instead: label, source, stage, step, instance, depth, area with the
-children, local area without them, and the cell count when the report
-has one. --instance takes that instance and every instance below it.
+--instance or --depth prints the instance rows of an area_hier or
+table metric instead: label, source, stage, step, task, metric, part,
+instance, depth, the value with the children, the local value without
+them, the cell count when the report has one, and the unit. --instance
+is a glob over the path, in which * also matches /.
+
+--unit kGE or MGE prints an area in um2 in gate equivalents, by the
+ge_um2 key of edr.toml.
 
 | Flag | Meaning |
 |---|---|
@@ -343,8 +347,9 @@ has one. --instance takes that instance and every instance below it.
 | `--stage S` | the metrics of one stage |
 | `--step N` | the metrics of one step number |
 | `--csv` | CSV on stdout |
-| `--instance PATH` | the area rows of this instance and every instance below it |
-| `--depth N` | the area rows at this depth; the top is 0 |
+| `--instance GLOB` | the instance rows whose path matches the glob |
+| `--depth N` | the instance rows at this depth; the top is 0 |
+| `--unit {kGE,MGE}` | an area in um2 in kGE or MGE, by ge_um2 |
 
 | Exit | Meaning |
 |---|---|
@@ -365,8 +370,8 @@ a later one. A run without a heartbeat, such as an imported one, is
 read for every stage and for every task of its spec.
 
 New rows are added. A row is replaced when its value, canonical name,
-unit or source file has changed, or when its area rows differ. A row
-that the extraction no longer gives is removed with its area rows when
+unit or source file has changed, or when its instance rows differ. A row
+that the extraction no longer gives is removed with its instance rows when
 it is a failed row, when no metric defines it at its stage and step,
 or when the extraction read its stage and task. A value whose file is gone is
 kept and counted. A value of a stage or task that the extraction did
@@ -399,10 +404,10 @@ the first error of each failing metric.
 ## compare
 
 ```
-edr compare [--json] [--area] [--metric NAME] [--depth N] [--instance PATH] [--stage S] [--step N] HANDLE [HANDLE ...]
+edr compare [--json] [--instances] [--metric NAME] [--task TASK] [--part PART] [--depth N] [--instance GLOB] [--csv] [--unit {kGE,MGE}] [--stage S] [--step N] HANDLE [HANDLE ...]
 ```
 
-Puts two or more runs side by side. Without --area, it prints one row
+Puts two or more runs side by side. Without --instances, it prints one row
 per task and metric: the value of each run with its stage and step,
 and the delta and the percent of each run to the first. A metric
 with `record` shows each run at its step of record, the deepest step
@@ -414,11 +419,25 @@ rule of its metric shows FAIL next to it. --metric (repeatable) and
 --stage narrow the rows; --json keeps the source file and the
 verdict of every value and lists the missing runs.
 
---area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
-column per run with its stage and step in the header, and the delta
-and the percent of each run to the first. Each run is at the step
-the rules above give for the area metric. The source file of each
-run is printed under the table.
+--instances puts the instances of one area_hier or table metric side
+by side: one row per instance at --depth (default 1; the top is 0),
+one column per run with its stage and step in the header, and the
+delta and the percent of each run to the first. --instance keeps the
+instances whose path matches a glob, in which * also matches /. An
+instance that a run lacks counts as 0 there, and its percent reads
+new or gone. Below the instances come &lt;sum&gt;, the sum of the rows
+shown, &lt;other&gt;, the top less that sum, and &lt;top&gt;; at depth 0 only
+&lt;top&gt;. Each run is at the step the rules above give for the metric.
+--task names the task of a task metric, and --part the part, such as
+a phase or a trace slice; without --part, the part that the metric's
+top names. When the runs have several instance metrics, --metric names
+one. A --depth deeper than the rows in the database reads the report or
+table that the metric row of each run cites. --csv writes the
+instance and the value of each run, the three rows at the end included.
+The source file of each run is printed under the table.
+
+--unit kGE or MGE prints an area in um2 in gate equivalents, by the
+ge_um2 key of edr.toml.
 
 A column is named by the label, or by label@source when the runs come
 from more than one source; then a line above the table names the
@@ -434,10 +453,14 @@ recorded it. --json lists them under parameters.
 |---|---|
 | `HANDLE ...` | label@batch, label@source, a run id prefix, or #n from the last board |
 | `--json` | the same as edr --json compare |
-| `--area` | the hierarchical area per instance |
+| `--instances` | the instances of one metric side by side |
 | `--metric NAME` | this metric, by name or canonical name; repeatable |
-| `--depth N` | the instance depth; default 1 |
-| `--instance PATH` | only this instance and the instances below it |
+| `--task TASK` | with --instances: the task of a task metric |
+| `--part PART` | with --instances: the part, such as a phase; default: the part of top |
+| `--depth N` | with --instances: the instance depth; default 1 |
+| `--instance GLOB` | with --instances: the instances whose path matches the glob |
+| `--csv` | with --instances: CSV on stdout |
+| `--unit {kGE,MGE}` | an area in um2 in kGE or MGE, by ge_um2 |
 | `--stage S` | this stage only; another stage than the record stage takes the deepest step the runs share |
 | `--step N` | every run at this step number |
 

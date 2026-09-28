@@ -50,7 +50,7 @@
 <text class="m" x="54" y="256" xml:space="preserve">cmd  progress  steps  collect  collect_on_request  needs  budget</text>
 <rect class="box" x="40" y="280" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="302">Each metric</text>
-<text class="m" x="54" y="320" xml:space="preserve">file + regex | csv | json | python | area_hier</text>
+<text class="m" x="54" y="320" xml:space="preserve">file + regex | csv | json | python | area_hier | table</text>
 <rect class="box" x="40" y="344" width="504" height="52" rx="7"/>
 <text class="t" x="54" y="366">Shared environment</text>
 <text class="m" x="54" y="384">[env]</text>

@@ -71,12 +71,12 @@ DEFAULT_USER = "~/.config/edarunner/user.toml"
 # `${VAR}` belongs to the shell, so a `$` before the brace is not a placeholder.
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
-    "schema", "project", "site", "state_dir", "data", "run_prefix",
+    "schema", "project", "site", "state_dir", "data", "run_prefix", "ge_um2",
     "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "host_free_min_gb", "hosts", "tools", "nfs_export",
               "telegram", "scheduler"}
-_EXTRACTORS = ("regex", "csv", "json", "python", "area_hier")
+_EXTRACTORS = ("regex", "csv", "json", "python", "area_hier", "table")
 _REDUCE = ("first", "last", "min", "max", "sum")
 
 
@@ -416,6 +416,9 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     metrics = {n: _metric(n, t, stages, file)
                for n, t in _table(raw.get("metrics", {}), None, file, "metrics").items()}
     tasks, resolver = _load_tasks(root / "tasks.toml", site)
+    ge_um2 = raw.get("ge_um2", _default(Project, "ge_um2"))
+    if "ge_um2" in raw and not (type(ge_um2) in (int, float) and ge_um2 > 0):
+        raise ConfigError(f"{file}: ge_um2 is the area of one gate equivalent in um2, a number above 0")
     return Project(
         root=root,
         project=name,
@@ -423,6 +426,7 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         state_dir=_path(raw.get("state_dir", str(_default(Project, "state_dir"))), file, values),
         data=_path(raw.get("data", str(_default(Project, "data"))), file, values),
         run_prefix=raw.get("run_prefix", _default(Project, "run_prefix")),
+        ge_um2=float(ge_um2),
         source=source,
         sync=_build(Sync, raw.get("sync", {}), file, "sync"),
         runtime=_build(Runtime, raw.get("runtime", {}), file, "runtime"),
@@ -493,6 +497,13 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         raise ConfigError(f"{file}: {at} needs exactly one of {', '.join(_EXTRACTORS)}")
     if "area_hier" in raw and not (type(raw["area_hier"]) is int and raw["area_hier"] >= 1):
         raise ConfigError(f"{file}: {at}.area_hier is the deepest depth to keep, a number from 1")
+    if "table" in raw:
+        t = _table(raw["table"], {"instance", "value", "depth", "part", "local", "where", "top", "max_depth"}, file, f"{at}.table")
+        if not (t.get("instance") and t.get("value") and _table(t.get("top", {}), None, file, f"{at}.table.top")):
+            raise ConfigError(f"{file}: {at}.table needs instance, value and top")
+        _table(t.get("where", {}), None, file, f"{at}.table.where")
+        if "max_depth" in t and not (type(t["max_depth"]) is int and t["max_depth"] >= 0):
+            raise ConfigError(f"{file}: {at}.table.max_depth is the deepest depth to keep, a number from 0")
     if not (raw.get("file") and raw["stage"]):
         raise ConfigError(f"{file}: {at} needs file and stage")
     if "reduce" in raw and ("regex" not in raw or raw["reduce"] not in _REDUCE):

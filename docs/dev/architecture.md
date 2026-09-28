@@ -41,7 +41,7 @@ report files and the numbers in them.
 | `serve.py` | `edr serve`: the watcher process of each project with its restarts and the kill of a stuck one, the global board, `serve.json`, `--check`, the systemd notify and watchdog, the unit with its pinned install |
 | `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the work of the user: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
-| `metrics.py` | the five parsers with the hierarchical area report, extraction |
+| `metrics.py` | the six parsers with the hierarchical area report and the per-instance table, extraction |
 | `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |
 | `mlflow_export.py` | `edr export --mlflow`: the project database as a local MLflow tracking store; imports `mlflow` only when called |
 | `db.py` | the project database: the SQLite schema, upserts, queries, `board.json` |
@@ -84,7 +84,7 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    and the task queue in the state directory.
 5. `watch.cycle` ingests the heartbeats into `runs`, `stage_runs`,
    `step_runs` and `run_samples`, classifies, acts, collects into
-   `data/results`, extracts metrics into `metrics` and `area`, writes
+   `data/results`, extracts metrics into `metrics` and `instances`, writes
    `parameters` from the spec, resumes, launches queued rows, keeps the host probes in
    `host_samples`, and writes the boards.
 6. `export.export` takes one run per label and source tag by `db.pick`
@@ -101,12 +101,12 @@ Four tables hold what the analysis views read. Each has one writer.
 
 | Table | Writer | Key |
 |---|---|---|
-| `area` | `Database.add_metric`, from the `instances` of an `area_hier` metric row | run, stage, step, metric name, instance; a unique index maps a missing step to -1 |
+| `instances` | `Database.add_metric`, from the `instances` of an `area_hier` or `table` metric row | run, stage, step, task, metric name, part, instance; a unique index maps a missing step to -1 |
 | `step_runs` | `watch.ingest`, from the heartbeat's `step_times` | run, stage, step |
 | `run_samples` | `watch.ingest`, one row per heartbeat `updated` | run, time |
 | `host_samples` | `watch._boards`, one row per host that answered, 30 days kept | host, time |
 
 `analysis.py` reads them and never writes. The source of every number
-stays with it: `area` joins the metric row for its `source_file`, and a
+stays with it: `instances` joins the metric row for its `source_file`, and a
 runtime row names `stage_runs`, `step_runs` or the file and line of a
 `step_log`.

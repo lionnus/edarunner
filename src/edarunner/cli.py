@@ -711,40 +711,40 @@ def _metrics_csv(rows: list[Row]) -> str:
     return export.to_csv(export.METRIC_COLUMNS, [export.metric_row(m) for m in rows]).decode()
 
 
-def _area_table(rows: list[Row]) -> Table | str:
-    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m["instance"], m["depth"], board.num(m["area"]),
-             board.num(m.get("local_area")), m.get("cells")] for m in rows]
-    return board.table(["label", "source", "stage", "step", "instance", "depth", "area", "local", "cells"], body,
-                       styles={"label": "bold", "source": "dim"},
-                       right=("step", "depth", "area", "local", "cells")) if rows else "no area rows"
+def _instances_table(rows: list[Row]) -> Table | str:
+    head = ["label", "source", "stage", "step", "task", "metric", "part", "instance", "depth", "value", "local", "cells", "unit"]
+    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m["task"], m["name"], m["part"], m["instance"],
+             m["depth"], board.num(m["value"]), board.num(m.get("local")), m.get("cells"), m.get("unit")] for m in rows]
+    return board.table(head, body, styles={"label": "bold", "source": "dim"},
+                       right=("step", "depth", "value", "local", "cells")) if rows else "no instance rows"
 
 
 def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
-    """The metrics of the sources, as a table or CSV; with --instance or --depth, their area rows."""
+    """The metrics of the sources, as a table or CSV; with --instance or --depth, their instance rows."""
     if a.instance is not None or a.depth is not None:
         run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
-        rows = c.db.area(run_ids=run_ids, sources=a.source, stage=a.stage, step=a.step, instance=a.instance,
-                         depth=a.depth)
-        c.emit(_area_table(rows), rows)
+        rows = c.db.instances(run_ids=run_ids, sources=a.source, stage=a.stage, step=a.step, name=a.metric,
+                              depth=a.depth, instance=a.instance)
+        analysis.to_ge(c.project, a.unit, rows, ("value", "local"))
+        c.emit(_instances_table(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
     if not a.source and not a.run:
         raise Refuse("metrics needs --source or --run")
     run_ids = [c.resolve(a.run)["run_id"]] if a.run else None
     if a.over:
-        if not run_ids:
-            raise Refuse("--over steps needs --run")
+        if not run_ids or a.unit:
+            raise Refuse("--over steps needs --run and takes no --unit")
         rows = analysis.over_steps(c.project, c.db.metrics(run_ids=run_ids, stage=a.stage, name=a.metric))
         c.emit(analysis.over_steps_view(rows), rows)
         return Exit.DONE if rows else Exit.NOTHING
     # The step of record needs every step of a run, so --step filters after the mark.
     rows = analysis.mark_record(c.project, c.db.metrics(sources=a.source, stage=a.stage, name=a.metric, run_ids=run_ids))
-    rows = [m for m in rows if a.step is None or m.get("step") == a.step]
+    rows = [{**m, "verdict": analysis.verdict(c.project, m)} for m in rows if a.step is None or m.get("step") == a.step]
+    analysis.to_ge(c.project, a.unit, rows)
     if a.csv and not a.json:
         sys.stdout.write(_metrics_csv(rows))
         c.data = rows
     else:
-        for m in rows:
-            m["verdict"] = analysis.verdict(c.project, m)
         c.emit(_metrics_table(rows), rows)
     return Exit.DONE if rows else Exit.NOTHING
 
@@ -758,20 +758,20 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
     else:
         runs = [r for r in c.db.runs(batch=a.batch) if not a.source or r["source"] in a.source]
     out, lines = [], []
+    inst = ("part", "instance", "depth", "value", "local", "cells")
     for run in runs:
         old = {(m["stage"], m["step"], m["task"], m["name"]): m for m in c.db.metrics(run_ids=[run["run_id"]])}
-        areas: dict[tuple, set] = {}
-        for x in c.db.area(run_ids=[run["run_id"]]):
-            areas.setdefault((x["stage"], x["step"], x["name"]), set()).add(
-                (x["instance"], x["depth"], x["area"], x["local_area"], x["cells"]))
+        held: dict[tuple, set] = {}
+        for x in c.db.instances(run_ids=[run["run_id"]]):
+            held.setdefault((x["stage"], x["step"], x["task"], x["name"]), set()).add(tuple(x[k] for k in inst))
         n = dict.fromkeys(("new", "changed", "unchanged", "failed", "removed", "kept"), 0)
         rows = watch.extract_run(c.project, c.db, run, c.heartbeat(run), actor=None if a.dry_run else "user")
         write = []
         for r in rows:
-            m = old.pop((r["stage"], r["step"], r["task"], r["name"]), None)
-            area = {(i["instance"], i["depth"], i["area"], i["local_area"], i["cells"]) for i in r.get("instances") or []}
+            key = (r["stage"], r["step"], r["task"], r["name"])
+            m = old.pop(key, None)
             same = (m is not None and all(m[k] == r[k] for k in ("value", "canonical", "unit", "source_file"))
-                    and area == areas.get((r["stage"], r["step"], r["name"]), set()))
+                    and {tuple(i[k] for k in inst) for i in r.get("instances") or []} == held.get(key, set()))
             n["failed" if r["value"] is None else "new" if m is None else "unchanged" if same else "changed"] += 1
             if not same:
                 write.append(r)
@@ -804,7 +804,9 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
 
 def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
     """Two or more runs side by side, each at its step of record, under a line that names the sources when they
-    differ and a table of the parameters that differ."""
+    differ and a table of the parameters that differ; with --instances, the instances of one metric."""
+    if not a.instances and (a.csv or any(v is not None for v in (a.task, a.part, a.depth, a.instance))):
+        raise Refuse("--task, --part, --depth, --instance and --csv need --instances")
     runs = [c.resolve(h) for h in a.handles]
     sources = sorted({str(r.get("source")) for r in runs})
     mixed = len(sources) > 1
@@ -815,15 +817,33 @@ def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
         head += [analysis.parameters_view(runs, params)] if params else []
         return Group(*head, view) if head else view
 
-    if a.area:
-        picked, rows, missing = analysis.area_delta(c.project, c.db, runs, a.depth, a.instance, a.stage, a.step)
-        c.emit(shown(analysis.area_view(picked, rows, a.depth, missing)),
-               {"runs": picked, "depth": a.depth, "rows": rows, "missing": missing, "mixed_sources": mixed,
-                "parameters": params})
+    if a.instances:
+        have = c.db.instance_names([r["run_id"] for r in runs])
+        want = [n for n in have if not a.metric or {n, getattr(c.project.metrics.get(n), "canonical", n)} & set(a.metric)]
+        if not have:
+            c.emit("no instance rows", {"runs": [], "rows": []})
+            return Exit.NOTHING
+        if len(want) != 1:
+            raise Refuse(f"name one instance metric with --metric: {', '.join(have)}")
+        view = analysis.instance_delta(c.project, c.db, runs, want[0], a.task or "", a.part, 1 if a.depth is None else a.depth,
+                                       a.instance, a.stage, a.step)
+        if a.unit:
+            if view["unit"] != "um2":
+                raise Refuse(f"--unit {a.unit} converts um2, and {want[0]} is in {view['unit'] or 'no unit'}")
+            analysis.to_ge(c.project, a.unit, [*view["runs"], *view["rows"]], ("value", "delta"))
+            view["unit"] = a.unit
+        rows, missing = view["rows"], view["missing"]
+        if a.csv and not a.json:
+            body = [[t["instance"], *[t["value"][p["run_id"]] for p in view["runs"]]] for t in rows]
+            sys.stdout.write(export.to_csv(["instance", *analysis.run_heads(view["runs"])], body).decode())
+            c.data = view
+        else:
+            c.emit(shown(analysis.instances_view(view)), {**view, "mixed_sources": mixed, "parameters": params})
     else:
         mets = [m for m in c.db.metrics(run_ids=[r["run_id"] for r in runs], stage=a.stage)
                 if not a.metric or m["name"] in a.metric or m.get("canonical") in a.metric]
         rows, missing = analysis.side_by_side(c.project, runs, mets, a.stage, a.step)
+        analysis.to_ge(c.project, a.unit, rows, ("value", "delta"))
         c.emit(shown(analysis.side_by_side_view(runs, rows, missing)),
                {"runs": runs, "rows": rows, "missing": missing, "mixed_sources": mixed, "parameters": params})
     return Exit.DONE if rows and not missing else Exit.NOTHING
@@ -1914,10 +1934,14 @@ def _parser() -> argparse.ArgumentParser:
         breaks its rule. With --metric, it prints that one metric, its change
         from the step before and its source file.
 
-        --instance or --depth prints the area rows of an area_hier metric
-        instead: label, source, stage, step, instance, depth, area with the
-        children, local area without them, and the cell count when the report
-        has one. --instance takes that instance and every instance below it.
+        --instance or --depth prints the instance rows of an area_hier or
+        table metric instead: label, source, stage, step, task, metric, part,
+        instance, depth, the value with the children, the local value without
+        them, the cell count when the report has one, and the unit. --instance
+        is a glob over the path, in which * also matches /.
+
+        --unit kGE or MGE prints an area in um2 in gate equivalents, by the
+        ge_um2 key of edr.toml.
         """, exits={Exit.NOTHING: "no metric row"})
     s.add_argument("--source", action="append", metavar="SOURCE",
                    help="the exact source tag of the runs, as in the run id; repeatable")
@@ -1927,8 +1951,9 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--stage", metavar="S", help="the metrics of one stage")
     s.add_argument("--step", type=int, metavar="N", help="the metrics of one step number")
     s.add_argument("--csv", action="store_true", help="CSV on stdout")
-    s.add_argument("--instance", metavar="PATH", help="the area rows of this instance and every instance below it")
-    s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
+    s.add_argument("--instance", metavar="GLOB", help="the instance rows whose path matches the glob")
+    s.add_argument("--depth", type=int, metavar="N", help="the instance rows at this depth; the top is 0")
+    s.add_argument("--unit", choices=list(analysis.GE), help="an area in um2 in kGE or MGE, by ge_um2")
     s = command("extract", "extract the metrics of runs again from their collected files", """
         Extracts every metric in edr.toml again from the files collected for
         each run under data/results, and makes the rows of the run match the
@@ -1939,8 +1964,8 @@ def _parser() -> argparse.ArgumentParser:
         read for every stage and for every task of its spec.
 
         New rows are added. A row is replaced when its value, canonical name,
-        unit or source file has changed, or when its area rows differ. A row
-        that the extraction no longer gives is removed with its area rows when
+        unit or source file has changed, or when its instance rows differ. A row
+        that the extraction no longer gives is removed with its instance rows when
         it is a failed row, when no metric defines it at its stage and step,
         or when the extraction read its stage and task. A value whose file is gone is
         kept and counted. A value of a stage or task that the extraction did
@@ -1962,7 +1987,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--batch", metavar="B", help="every run of the batch")
     s.add_argument("--source", action="append", metavar="SOURCE", help="every run of the exact source tag; repeatable")
     s = command("compare", "two or more runs side by side", """
-        Puts two or more runs side by side. Without --area, it prints one row
+        Puts two or more runs side by side. Without --instances, it prints one row
         per task and metric: the value of each run with its stage and step,
         and the delta and the percent of each run to the first. A metric
         with `record` shows each run at its step of record, the deepest step
@@ -1974,11 +1999,25 @@ def _parser() -> argparse.ArgumentParser:
         --stage narrow the rows; --json keeps the source file and the
         verdict of every value and lists the missing runs.
 
-        --area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
-        column per run with its stage and step in the header, and the delta
-        and the percent of each run to the first. Each run is at the step
-        the rules above give for the area metric. The source file of each
-        run is printed under the table.
+        --instances puts the instances of one area_hier or table metric side
+        by side: one row per instance at --depth (default 1; the top is 0),
+        one column per run with its stage and step in the header, and the
+        delta and the percent of each run to the first. --instance keeps the
+        instances whose path matches a glob, in which * also matches /. An
+        instance that a run lacks counts as 0 there, and its percent reads
+        new or gone. Below the instances come <sum>, the sum of the rows
+        shown, <other>, the top less that sum, and <top>; at depth 0 only
+        <top>. Each run is at the step the rules above give for the metric.
+        --task names the task of a task metric, and --part the part, such as
+        a phase or a trace slice; without --part, the part that the metric's
+        top names. When the runs have several instance metrics, --metric names
+        one. A --depth deeper than the rows in the database reads the report or
+        table that the metric row of each run cites. --csv writes the
+        instance and the value of each run, the three rows at the end included.
+        The source file of each run is printed under the table.
+
+        --unit kGE or MGE prints an area in um2 in gate equivalents, by the
+        ge_um2 key of edr.toml.
 
         A column is named by the label, or by label@source when the runs come
         from more than one source; then a line above the table names the
@@ -1991,10 +2030,14 @@ def _parser() -> argparse.ArgumentParser:
         recorded it. --json lists them under parameters.
         """, exits={Exit.NOTHING: "no row to compare, or a run lacks its step of record or the --step"})
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
-    s.add_argument("--area", action="store_true", help="the hierarchical area per instance")
+    s.add_argument("--instances", action="store_true", help="the instances of one metric side by side")
     s.add_argument("--metric", action="append", metavar="NAME", help="this metric, by name or canonical name; repeatable")
-    s.add_argument("--depth", type=int, default=1, metavar="N", help="the instance depth; default 1")
-    s.add_argument("--instance", metavar="PATH", help="only this instance and the instances below it")
+    s.add_argument("--task", metavar="TASK", help="with --instances: the task of a task metric")
+    s.add_argument("--part", metavar="PART", help="with --instances: the part, such as a phase; default: the part of top")
+    s.add_argument("--depth", type=int, metavar="N", help="with --instances: the instance depth; default 1")
+    s.add_argument("--instance", metavar="GLOB", help="with --instances: the instances whose path matches the glob")
+    s.add_argument("--csv", action="store_true", help="with --instances: CSV on stdout")
+    s.add_argument("--unit", choices=list(analysis.GE), help="an area in um2 in kGE or MGE, by ge_um2")
     s.add_argument("--stage", metavar="S", help="this stage only; another stage than the record stage takes the "
                                                   "deepest step the runs share")
     s.add_argument("--step", type=int, metavar="N", help="every run at this step number")

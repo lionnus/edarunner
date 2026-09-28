@@ -43,7 +43,9 @@ def world(tmp_path, monkeypatch):
     for run_id, value in ((RUN_A_OLD, 900.0), (RUN_A, 1000.0), (RUN_C, 2000.0)):
         db.add_metric({"run_id": run_id, "stage": "synth", "step": 3, "name": "area_cell_um2", "canonical": "design__instance__area",
                         "value": value, "unit": "um2", "source_file": "reports/3/area.rpt"})
-    db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.25, "unit": "W"})
+    top = {"part": "WHOLE", "instance": "top", "depth": 0, "value": 0.25, "local": None, "cells": None}
+    db.add_metric({"run_id": RUN_A, "stage": "power", "task": "k_small", "name": "power_w", "value": 0.25, "unit": "W",
+                   "instances": [top, {**top, "instance": "top/u_a", "depth": 1, "value": 0.1}]})
     results = project.data / "results"
     (results / RUN_A / "reports" / "3").mkdir(parents=True)
     (results / RUN_A / "reports" / "3" / "area.rpt").write_text("i_top 1000.0\n")
@@ -87,7 +89,8 @@ def test_export_one_source(world, tmp_path):
     assert manifest["schema"] == 2 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [{"run_id": RUN_B, "label": "b_nodw", "source": "aaa111", "phase": "stage:pnr"}]
     assert manifest["skipped"] == [{"run_id": RUN_A_OLD, "label": "a", "source": "aaa111", "phase": "done"}]
-    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0} and manifest["dirty_sources"] == []
+    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0, "instances.csv": 2}
+    assert manifest["dirty_sources"] == [] and manifest["ge_um2"] is None
     assert json.loads((out / "manifest.json").read_text()) == manifest
 
     runs = _read_csv(out / "runs.csv")
@@ -102,6 +105,11 @@ def test_export_one_source(world, tmp_path):
         "a", "synth", "3", "design__instance__area", "1000.0", "reports/3/area.rpt")
     power = next(m for m in metrics if m["metric"] == "power_w")
     assert (power["task"], power["step"], power["unit"]) == ("k_small", "", "W")
+    instances = _read_csv(out / "instances.csv")
+    assert list(instances[0]) == export.INSTANCE_COLUMNS
+    assert [(i["run_id"], i["stage"], i["task"], i["metric"], i["part"], i["instance"], i["depth"], i["value"], i["unit"])
+            for i in instances] == [(RUN_A, "power", "k_small", "power_w", "WHOLE", "top", "0", "0.25", "W"),
+                                    (RUN_A, "power", "k_small", "power_w", "WHOLE", "top/u_a", "1", "0.1", "W")]
 
     assert (out / "a" / "reports" / "3" / "area.rpt").read_text() == "i_top 1000.0\n"
     assert (out / "a" / "sim" / "power" / "reports" / "power.csv").read_text() == POWER_HIER
@@ -143,8 +151,8 @@ def test_dry_run_writes_nothing(world, tmp_path, capsys):
     manifest = export.export(project, db, ["aaa111"], out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
-    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "a/reports/3/area.rpt", "a/sim/power/reports/power.csv",
-                     "b_nodw/reports/0/power.csv"]
+    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "instances.csv", "a/reports/3/area.rpt",
+                     "a/sim/power/reports/power.csv", "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
     real = export.export(project, db, ["aaa111"], out)
     assert [(f["path"], f["sha256"]) for f in manifest["files"]] == [(f["path"], f["sha256"]) for f in real["files"]]
@@ -156,7 +164,7 @@ def test_with_logs_copies_the_logs(world, tmp_path):
     manifest = export.export(project, db, ["aaa111"], out, labels=["a"], with_logs=True)
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
-    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "a/log/synth.log",
+    assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "instances.csv", "a/log/synth.log",
                                                        "a/reports/3/area.rpt", "a/reports/3/run.log",
                                                        "a/sim/power/reports/power.csv"]
 

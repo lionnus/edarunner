@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from helpers_results import POWER, POWER_NO_BLK, QOR, SUITE, area_hier, demo_qor
+from helpers_results import POWER, POWER_NO_BLK, QOR, SUITE, TREE, area_hier, demo_qor, power_table
 
 from edarunner.metrics import extract
 from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
@@ -138,7 +138,7 @@ def test_scale_multiplies_each_value_at_extraction(tmp_path):
     assert {r["task"]: r["value"] for r in by_name(rows, "window_ns")} == {"k_small": 48213.0, "k_big": 48213.0}
     (area,) = by_name(rows, "area_mm2")
     assert area["value"] == pytest.approx(1234.5e-6)
-    assert [(i["instance"], round(i["area"] * 1e6, 3)) for i in area["instances"]] == [("<top>", 1234.5), ("i_top", 1222.155)]
+    assert [(i["instance"], round(i["value"] * 1e6, 3)) for i in area["instances"]] == [("<top>", 1234.5), ("i_top", 1222.155)]
 
 
 def test_python_parser_and_fixed_step(tmp_path):
@@ -244,6 +244,36 @@ def test_an_optional_metric_a_hook_without_a_number_and_a_where_with_placeholder
     assert by_name(rows, "blk_w")[1]["source_file"] == (
         "simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE', 'instance': 'u_blk_b'}")
     assert by_name(rows, "cycles")[0]["source_file"] == "bench.csv"
+
+
+def test_a_table_stores_the_rows_of_where_down_to_its_depth_and_takes_its_value_from_top(tmp_path):
+    run = tmp_path / "results" / RUN_ID
+    run.mkdir(parents=True)
+    # 12 rows per part: the IDLE rows come first, so the WHOLE top is on line 14.
+    (run / "inst.csv").write_text(power_table(TREE, {"IDLE": 0.01, "WHOLE": 0.25, "TRACE_0": 0.5}))
+    (run / "leaf.csv").write_text("phase,instance,total_w\nWHOLE,top,1\nWHOLE,u_a,0.5\nWHOLE,u_a,0.4\n")
+    table = {"instance": "full", "value": "total_w", "depth": "depth", "part": "phase", "where": {"phase": ["WHOLE", "TRACE_*"]},
+             "top": {"phase": "WHOLE", "depth": "0"}, "max_depth": 2}
+    project = demo_project(tmp_path)
+    project.metrics = {m.name: m for m in (
+        Metric(name="inst", stage=["synth"], file="inst.csv", table=table),
+        Metric(name="slice", stage=["synth"], file="inst.csv",
+               table={"instance": "full", "value": "total_w", "where": {"phase": "TRACE_0"}, "top": {"full": "chip", "phase": "TRACE_0"}}),
+        Metric(name="leaf", stage=["synth"], file="leaf.csv", table={"instance": "instance", "value": "total_w", "top": {"instance": "top"}}),
+        Metric(name="nolocal", stage=["synth"], file="inst.csv", table={**table, "local": "local_w"}),
+        Metric(name="notop", stage=["synth"], file="inst.csv", table={**table, "top": {"phase": "BUSY"}}, optional=True),
+    )}
+    rows = {r["name"]: r for r in extract(project, RUN, tmp_path / "results", {})}
+    assert (rows["inst"]["value"], rows["inst"]["source_file"]) == (0.25, "inst.csv:14")
+    assert sorted((i["part"], i["depth"], i["instance"]) for i in rows["inst"]["instances"] if i["part"] == "WHOLE") == [
+        ("WHOLE", 0, "chip"), ("WHOLE", 1, "chip/i_top"), ("WHOLE", 2, "chip/i_top/u_core"), ("WHOLE", 2, "chip/i_top/u_sum"),
+        ("WHOLE", 2, "chip/i_top/u_vec")]
+    assert {i["part"] for i in rows["inst"]["instances"]} == {"WHOLE", "TRACE_0"}
+    # Without a part and a depth column, the part is empty and the depth counts the `/` of the path.
+    assert rows["slice"]["value"] == 0.5 and {(i["part"], i["depth"]) for i in rows["slice"]["instances"]} == {("", d) for d in range(6)}
+    assert rows["leaf"]["value"] is None and rows["leaf"]["source_file"].endswith("instance u_a repeats in part ''; name a column of unique paths")
+    assert rows["nolocal"]["value"] is None and rows["nolocal"]["source_file"] == "inst.csv: no column local_w"
+    assert "notop" not in rows
 
 
 @pytest.mark.parametrize("rule, value, verdict", [

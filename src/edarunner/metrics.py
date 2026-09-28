@@ -7,6 +7,7 @@ import itertools
 import json
 import re
 import time
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from . import config
@@ -18,10 +19,11 @@ _NUM = re.compile(r"-?\d+(\.\d*)?([eE][-+]?\d+)?$")
 
 
 def parse_area_hier(text: str) -> list[dict]:
-    """One row per instance of a hierarchical area report: instance, depth, area, local_area, cells.
+    """One row per instance of a hierarchical area report: instance, depth, part, value, local, cells.
 
-    The top is `<top>` at depth 0; a child's instance is its path from the top, `/` separated.
-    `area` includes the children, `local_area` does not. `cells` is None when the report has no count.
+    The top is `<top>` at depth 0; a child's instance is its path from the top, `/` separated. `value` is the area
+    with the children, `local` the area without them, and `part` is empty. `cells` is None when the report has no
+    count.
     """
     if "Hierarchical Area Report" in text:
         return _area_openroad(text)
@@ -46,8 +48,8 @@ def _area_synopsys(text: str) -> list[dict]:
         name, nums = words[0], [float(w) for w in words[1:6]]
         words = []
         top = not rows
-        rows.append({"instance": TOP if top else name, "depth": 0 if top else name.count("/") + 1,
-                     "area": nums[0], "local_area": round(sum(nums[2:5]), 6), "cells": None})
+        rows.append({"instance": TOP if top else name, "depth": 0 if top else name.count("/") + 1, "part": "",
+                     "value": nums[0], "local": round(sum(nums[2:5]), 6), "cells": None})
     return rows
 
 
@@ -65,11 +67,50 @@ def _area_openroad(text: str) -> list[dict]:
             depth = (len(ln) - len(ln.lstrip(" "))) // 2
             name = words[0].replace("\\", "")
             path = path[:max(depth - 1, 0)] + ([name] if depth else [])
-            rows.append({"instance": "/".join(path) if depth else TOP, "depth": depth, "area": float(words[1]),
-                         "local_area": float(words[11]), "cells": int(float(words[6]))})
+            rows.append({"instance": "/".join(path) if depth else TOP, "depth": depth, "part": "", "value": float(words[1]),
+                         "local": float(words[11]), "cells": int(float(words[6]))})
         elif started and words and not words[0].startswith("-"):
             break
     return rows
+
+
+def parse_instances(metric: Metric, path: Path, keep: bool = True) -> tuple[tuple[float, int | None] | None, list[dict]]:
+    """The value of an `area_hier` or `table` metric with the line of the `top` row of a table, and the instance
+    rows of the file, as `parse_area_hier` gives them, each value times `scale`. `keep` keeps the rows the metric
+    stores: of a hierarchy down to its depth, of a table those that `where` matches down to `max_depth`; without it,
+    every row. The value is None when the metric is optional and no row matches `top`.
+    """
+    f = metric.scale
+    if metric.area_hier:
+        rows = [{**r, "value": r["value"] * f, "local": r["local"] * f} for r in parse_area_hier(path.read_text(errors="replace"))]
+        return (rows[0]["value"], None), [r for r in rows if not keep or r["depth"] <= metric.area_hier]
+    t = metric.table or {}
+    where, top, cols = t.get("where") or {}, t["top"], {k: str(t[k]) for k in ("instance", "value", "depth", "part", "local") if k in t}
+    got, rows, seen = None, [], set()
+    with path.open(newline="") as fh:
+        reader = csv.DictReader(fh)
+        lack = sorted({*cols.values(), *where, *top} - set(reader.fieldnames or []))
+        if lack:
+            raise ValueError(f"no column {', '.join(lack)}")
+        for rec in reader:
+            inst = rec[cols["instance"]]
+            row = {"instance": inst, "depth": int(rec[cols["depth"]]) if "depth" in cols else inst.count("/"),
+                   "part": rec[cols["part"]] if "part" in cols else "", "value": float(rec[cols["value"]]) * f,
+                   "local": float(rec[cols["local"]]) * f if "local" in cols else None, "cells": None}
+            if got is None and _match(rec, top):
+                got = row["value"], reader.line_num
+            if keep and not (_match(rec, where) and row["depth"] <= t.get("max_depth", row["depth"])):
+                continue
+            if (row["part"], inst) in seen:
+                raise ValueError(f"instance {inst} repeats in part '{row['part']}'; name a column of unique paths")
+            seen.add((row["part"], inst))
+            rows.append(row)
+    return got or _absent(metric, f"no row matches top {top}"), rows
+
+
+def _match(rec: dict, where: dict) -> bool:
+    """Whether the value of each column of `where` matches its glob or one of its list of globs."""
+    return all(any(fnmatchcase(rec.get(k) or "", str(g)) for g in (v if isinstance(v, list) else [v])) for k, v in where.items())
 
 
 def parse_file(metric: Metric, path: Path, project_root: Path,
@@ -100,8 +141,6 @@ def parse_file(metric: Metric, path: Path, project_root: Path,
         fn, _ = load_hook(project_root, metric.python)
         value = fn(path)
         return None if value is None else (float(value), None)
-    if metric.area_hier:
-        return parse_area_hier(path.read_text(errors="replace"))[0]["area"], None
     raise ValueError(f"metric {metric.name} has no parser")
 
 
@@ -214,16 +253,15 @@ def _extract_one(
         rel = str(path.relative_to(run_dir))
         instances = None
         try:
-            if metric.area_hier:
-                instances = [{**i, "area": i["area"] * metric.scale, "local_area": i["local_area"] * metric.scale}
-                             for i in parse_area_hier(path.read_text(errors="replace")) if i["depth"] <= metric.area_hier]
-                value, source = instances[0]["area"], rel
+            if metric.area_hier or metric.table:
+                got, instances = parse_instances(metric, path)
             else:
                 got = parse_file(metric, path, project.root, values if step is None else {**values, "step": step})
-                if got is None:
-                    continue
-                value, line = got[0] * metric.scale, got[1]
-                source = rel if line is None else f"{rel}:{line}"
+                got = got and (got[0] * metric.scale, got[1])
+            if got is None:
+                continue
+            value, line = got
+            source = rel if line is None else f"{rel}:{line}"
         except Exception as e:  # a parse error is a row, never a crash
             value, source = None, f"{rel}: {e}"
         row = _row(run_id, stage_name, step, task_id, metric, value, source, now)

@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import time
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +30,9 @@ CREATE TABLE IF NOT EXISTS host_samples(host TEXT, ts INTEGER, cores INTEGER, lo
   scratch_gb REAL, scratch_used_gb REAL, gpus INTEGER, gpus_busy INTEGER, PRIMARY KEY(host, ts));
 CREATE TABLE IF NOT EXISTS run_samples(run_id TEXT, ts INTEGER, cpu_pct REAL, rss_gb REAL, tree_gb REAL, disk_free_gb REAL,
   PRIMARY KEY(run_id, ts));
-CREATE TABLE IF NOT EXISTS area(run_id TEXT, stage TEXT, step INTEGER, name TEXT, instance TEXT, depth INTEGER, area REAL,
-  local_area REAL, cells INTEGER);
-CREATE UNIQUE INDEX IF NOT EXISTS area_key ON area(run_id, stage, ifnull(step, -1), name, instance);
+CREATE TABLE IF NOT EXISTS instances(run_id TEXT, stage TEXT, step INTEGER, task TEXT, name TEXT, part TEXT, instance TEXT,
+  depth INTEGER, value REAL, local REAL, cells INTEGER);
+CREATE UNIQUE INDEX IF NOT EXISTS instances_key ON instances(run_id, stage, ifnull(step, -1), task, name, part, instance);
 """
 
 _PK = {
@@ -193,11 +194,11 @@ class Database:
         self.conn.commit()
 
     def add_metric(self, row: Row, replace: bool = False) -> bool:
-        """Insert one metric, and its `instances` into the area table; the caller commits. Returns True when the row
-        went in or took the new value.
+        """Insert one metric, and its `instances` into the instances table; the caller commits. Returns True when the
+        row went in or took the new value.
 
         A present row keeps its value, but a failed row, whose value is empty, takes a new value. The instance rows go
-        in even when the metric was present, so a new area metric fills an old run. `replace` overwrites a present
+        in even when the metric was present, so a new instance metric fills an old run. `replace` overwrites a present
         metric and replaces its instance rows.
         """
         r = {"task": "", "step": None, "canonical": "", "unit": "", "source_file": "", "extracted_at": _now(), **row}
@@ -210,8 +211,7 @@ class Database:
                 "WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?" + ("" if replace else " AND value IS NULL"),
                 (r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key)).rowcount
         if replace:
-            self.conn.execute("DELETE FROM area WHERE run_id=? AND stage=? AND step IS ? AND name=?",
-                              (r["run_id"], r["stage"], r["step"], r["name"]))
+            self.conn.execute("DELETE FROM instances WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?", key)
         cur = self.conn.execute(
             "INSERT INTO metrics(run_id, stage, step, task, name, canonical, value, unit, source_file, extracted_at) "
             "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS "
@@ -219,18 +219,16 @@ class Database:
             (*key, r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key),
         )
         self.conn.executemany(
-            "INSERT OR IGNORE INTO area(run_id, stage, step, name, instance, depth, area, local_area, cells) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [(r["run_id"], r["stage"], r["step"], r["name"], i["instance"], i["depth"], i["area"], i["local_area"],
-              i["cells"]) for i in r.get("instances") or []])
+            "INSERT OR IGNORE INTO instances(run_id, stage, step, task, name, part, instance, depth, value, local, cells) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(*key, i["part"], i["instance"], i["depth"], i["value"], i["local"], i["cells"]) for i in r.get("instances") or []])
         return cur.rowcount == 1 or filled == 1
 
     def remove_metrics(self, rows: list[Row]) -> None:
-        """Delete metric rows and the area rows of their metric; the caller commits."""
+        """Delete metric rows and their instance rows; the caller commits."""
         keys = [(r["run_id"], r["stage"], r["step"], r["task"], r["name"]) for r in rows]
-        self.conn.executemany("DELETE FROM metrics WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?", keys)
-        self.conn.executemany("DELETE FROM area WHERE run_id=? AND stage=? AND step IS ? AND name=?",
-                              [(k[0], k[1], k[2], k[4]) for k in keys])
+        for table in ("metrics", "instances"):
+            self.conn.executemany(f"DELETE FROM {table} WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?", keys)
 
     def set_step_times(self, run_id: str, times: dict[str, dict[str, int]]) -> None:
         """Write the start time of each step, {stage: {step: unix time}}; a resumed step replaces its time."""
@@ -406,28 +404,32 @@ class Database:
             args,
         )
 
-    def area(self, run_ids: list[str] | None = None, sources: list[str] | None = None, stage: str | None = None,
-             step: int | None = None, instance: str | None = None, depth: int | None = None) -> list[Row]:
-        """Area rows with the run's label and source and the metric's source_file and unit.
-
-        `instance` matches that instance and every one below it.
-        """
+    def instances(self, run_ids: list[str] | None = None, sources: list[str] | None = None, stage: str | None = None,
+                  step: int | None = None, task: str | None = None, name: str | None = None, depth: int | None = None,
+                  instance: str | None = None) -> list[Row]:
+        """Instance rows with the run's label and source and the metric's source_file and unit. `instance` is a glob
+        over the path, in which `*` also matches `/`."""
         where, args = ["1"], []
-        for cond, val in (("a.stage=?", stage), ("a.step=?", step), ("a.depth=?", depth)):
+        for cond, val in (("i.stage=?", stage), ("i.step=?", step), ("i.task=?", task), ("i.name=?", name),
+                          ("i.depth=?", depth)):
             if val is not None:
                 where.append(cond)
                 args.append(val)
-        if instance is not None:
-            where.append("(a.instance=? OR substr(a.instance, 1, ?)=?)")
-            args += [instance, len(instance) + 1, instance + "/"]
-        _within(where, args, ("r.source", sources), ("a.run_id", run_ids))
-        return self._rows(
-            "SELECT a.*, r.label, r.source, m.source_file, m.unit FROM area a JOIN runs r ON r.run_id=a.run_id "
-            "LEFT JOIN metrics m ON m.run_id=a.run_id AND m.stage=a.stage AND m.step IS a.step AND m.task='' "
-            "AND m.name=a.name "
-            f"WHERE {' AND '.join(where)} ORDER BY a.run_id, a.stage, a.step, a.name, a.area DESC",
+        _within(where, args, ("r.source", sources), ("i.run_id", run_ids))
+        rows = self._rows(
+            "SELECT i.*, r.label, r.source, m.source_file, m.unit FROM instances i JOIN runs r ON r.run_id=i.run_id "
+            "LEFT JOIN metrics m ON m.run_id=i.run_id AND m.stage=i.stage AND m.step IS i.step AND m.task=i.task "
+            "AND m.name=i.name "
+            f"WHERE {' AND '.join(where)} ORDER BY i.run_id, i.stage, i.step, i.task, i.name, i.part, i.value DESC",
             args,
         )
+        return [r for r in rows if instance is None or fnmatchcase(r["instance"], instance)]
+
+    def instance_names(self, run_ids: list[str]) -> list[str]:
+        """The metrics with instance rows in the runs."""
+        where, args = [], []
+        _within(where, args, ("run_id", run_ids))
+        return [r["name"] for r in self._rows(f"SELECT DISTINCT name FROM instances WHERE {where[0]} ORDER BY name", args)]
 
     def batches(self) -> list[Row]:
         """Every batch in creation order."""
