@@ -472,7 +472,10 @@ the diff of each dirty source (`watch._parameters`,
 `checkout._snapshot`). The `instances` table holds the per-instance rows
 of an area report or a per-instance CSV, down to the depth the metric
 keeps; `edr compare --instances` reads a deeper level from the collected
-file itself (`metrics.parse_instances`, `analysis.instance_delta`).
+file itself (`metrics.parse_instances`, `analysis.instance_delta`). The
+`task_fields` table holds the fields each task of a run ran with, from
+the spec or from `edr import`, and an export writes them to
+`task_fields.csv`.
 
 Only the head node opens the database. SQLite's WAL journal does not
 work on a network filesystem, so the database reads the type of the
