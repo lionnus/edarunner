@@ -271,23 +271,37 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     res = collect.collect_run(project, ssh, db, run, hb, host=host)
     if res.failures:
         db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
-    # No new file does not mean no new metric: a broad collect path copies a stage's reports while it
-    # runs, and the stage becomes eligible only when it ends. Extraction is idempotent, so run it.
+    # No new file does not mean no new metric: a file can arrive before its step or stage counts as
+    # finished. Extraction is idempotent, so run it.
     rows = extract_run(project, db, run, hb, spec, tasks)
-    n = sum(db.add_metric(r) for r in rows if r["value"] is not None)
+    new = [r for r in rows if r["value"] is not None and db.add_metric(r)]
+    if new:
+        db.add_event("watch", run["run_id"], "metrics", _added(new))
     if not rec.get("params"):
         db.set_parameters(run["run_id"], _parameters(project, run), "spec")
         rec["params"] = True
-    log.info("%s: %d files, %d new metrics", run["run_id"], res.files, n)
+    log.info("%s: %d files, %d new metrics", run["run_id"], res.files, len(new))
+
+
+def _added(rows: list[dict]) -> str:
+    """The text of a metrics event, such as `6 new: area_cell_um2, wns_ns at pnr 8, 9`."""
+    at = []
+    for stage in dict.fromkeys(r["stage"] for r in rows):
+        steps = sorted({r["step"] for r in rows if r["stage"] == stage and r["step"] is not None})
+        tasks = sorted({r["task"] for r in rows if r["stage"] == stage and r["task"]})
+        at.append(" ".join([stage, ", ".join(map(str, steps + tasks))]).rstrip())
+    return f"{len(rows)} new: {', '.join(sorted({r['name'] for r in rows}))} at {'; '.join(at)}"
 
 
 def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict | None = None,
                 tasks: dict[str, str] | None = None, actor: str | None = "watch") -> list[dict]:
-    """The metric rows of a run from its collected files: the done tasks, and the stages that ended done.
+    """The metric rows of a run from its collected files: the done tasks, the stages that exited 0, and
+    the finished steps of every other stage.
 
-    `tasks` maps a task id to its phase, by default from the heartbeat. A run without a heartbeat,
-    such as an imported one, takes every stage and the tasks its metric rows already name. An
-    unknown task is an event of `actor`; None writes no event.
+    A step is finished when `step_runs` holds it and a later step of the run, whatever the status of
+    its stage. `tasks` maps a task id to its phase, by default from the heartbeat. A run without a
+    heartbeat, such as an imported one, takes every stage and the tasks its metric rows already
+    name. An unknown task is an event of `actor`; None writes no event.
     """
     spec = collect.load_spec(project, run) if spec is None else spec
     only = collect.spec_stages(spec)
@@ -308,13 +322,17 @@ def extract_run(project: Project, db: Database, run: Row, hb: dict, spec: dict |
                 done[t] = Task(id=t, fields={"id": t})
             elif actor:
                 db.add_event(actor, run["run_id"], "extract", f"unknown task {t}: {e}")
-    # A failed stage can leave a stale report from a copied tree: a one-command stage counts
-    # only with status done, and a task group counts per task with phase done.
+    # A stage that exited 0 (done, or over budget without a kill) ran all its steps, and a task group
+    # counts per task with phase done. Any other stage keeps its finished steps only: a copied tree
+    # can hold a stale report of a step this run never started.
     status = _stages(hb)
-    eligible = {n for n, st in project.stages.items() if (only is None or n in only)
-                and (st.is_group or status.get(n, {}).get("status") == "done")}
-    return metrics.extract(project, run, project.data / "results", done, stages=eligible if hb else None,
+    whole = {n for n, st in project.stages.items() if st.is_group or status.get(n, {}).get("status") == "done"
+             or status.get(n, {}).get("exit") == 0}
+    finished = set(sorted({r["step"] for r in db.step_runs(run["run_id"])})[:-1])
+    eligible = {n for n, st in project.stages.items() if (only is None or n in only) and (n in whole or st.steps)}
+    rows = metrics.extract(project, run, project.data / "results", done, stages=eligible if hb else None,
                            task_dirs=task_dirs)
+    return [r for r in rows if not hb or r["stage"] in whole or r["step"] in finished]
 
 
 def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict,

@@ -79,12 +79,13 @@ def collect_run(
     run: dict,
     heartbeat: dict,
     dry_run: bool = False,
-    step_final_s: int = 600,
     host: str = "",
 ) -> CollectResult:
     """Copy log/ and the collect paths of every finished stage and task of `run` into data/results.
 
-    `host` is where the tree is read, as the backend names it; empty means the run's host."""
+    Of a running stage with steps, it copies the numbered directories under its collect paths that
+    are below the step of the heartbeat. `host` is where the tree is read, as the backend names it;
+    empty means the run's host."""
     spec = load_spec(project, run)
     only = spec_stages(spec)
     c = _Copier(project, ssh, db, run, heartbeat, dry_run, spec_task_dirs(spec, str(run.get("root") or "")), spec.get("vars"),
@@ -96,10 +97,10 @@ def collect_run(
     paths = ["log/"]
     for name in finished:
         paths += c.render(project.stages[name], project.stages[name].collect, tasks)
-    stage = project.stages.get(running or "")
-    if stage and stage.steps:
+    stage, step = project.stages.get(running or ""), heartbeat.get("step")
+    if stage and stage.steps and step is not None:
         for entry in c.render(stage, stage.collect, tasks):
-            paths += c.final_steps(entry, step_final_s)
+            paths += c.final_steps(entry, step)
     c.copy_all(paths, "always")
     return c.result
 
@@ -192,15 +193,16 @@ class _Copier:
         values["task_dir"] = self.task_dirs.get(tid) or render(stage.task_dir, values)
         return values
 
-    def final_steps(self, entry: str, step_final_s: int) -> list[str]:
-        """The step directories under `entry` on the host older than `step_final_s`."""
+    def final_steps(self, entry: str, step: int) -> list[str]:
+        """The numbered directories under `entry` on the host below `step`, the step that runs now."""
         top = shlex.quote(posixpath.join(self.root, entry))
-        cmd = f"find {top} -mindepth 1 -maxdepth 1 -type d -mmin +{step_final_s // 60} 2>/dev/null"
-        rc, out, err = self.ssh.run(self.host, cmd)
+        rc, out, err = self.ssh.run(self.host, f"find {top} -mindepth 1 -maxdepth 1 -type d 2>/dev/null")
         if rc == 255:
             self.result.failures.append(f"{self.host}: {err.strip() or 'no answer'}")
             return []
-        return [posixpath.relpath(p.strip(), self.root) + "/" for p in out.splitlines() if p.strip()]
+        dirs = [p.strip() for p in out.splitlines()]
+        return [posixpath.relpath(d, self.root) + "/" for d in dirs
+                if (n := posixpath.basename(d)).isdecimal() and int(n) < step]
 
     def copy_all(self, paths: list[str], klass: str) -> None:
         """Copy every distinct path; an empty entry is a counted failure."""

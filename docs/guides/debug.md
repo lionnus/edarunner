@@ -139,11 +139,14 @@ first. The watcher kills a hung run only when `kill_hung` is set, and
 
 ### A metric is missing
 
-The watcher extracts a metric only from a stage that ended `done`, and
-only from a file that `collect` copied to the head node. Check that the
-file is under `data/results/<run_id>/` at the path that the metric's
-`file` names. After you fix a metric definition, `edr extract` reads the
-collected files again; [results.md](results.md#extract-again) shows it.
+The watcher extracts a metric from a task that ended `done`, a stage
+that exited 0, or a step that the run has passed, and only from a file
+that `collect` copied to the head node. Check that the file is under
+`data/results/<run_id>/` at the path that the metric's `file` names. A
+step counts as passed once `step_runs` holds a later step of the run;
+`edr runtime <handle>` lists the step start times. After you fix a
+metric definition, `edr extract` reads the collected files again;
+[results.md](results.md#extract-again) shows it.
 
 ## Resume a run that died
 
