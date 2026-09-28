@@ -132,7 +132,10 @@ loginctl enable-linger "$USER"     # the service survives a logout and a reboot
 ```
 
 Without systemd, `tmux new -d -s edr-myflow 'edr watch'` does the same
-job. Either way, a cron line tells you when the watcher stopped:
+job. One watcher runs per project: a second one, the loop or
+`edr watch --once`, finds `<state_dir>/watch.lock` taken, names the pid
+of the first and exits 2. Either way, a cron line tells you when the
+watcher stopped:
 
 ```
 */10 * * * * cd ~/myflow && edr watch --check

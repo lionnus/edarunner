@@ -234,10 +234,12 @@ from the host. `edr status --live` asks the hosts directly
 
 ### The watcher's cycle
 
-`edr watch` runs a cycle every `heartbeat_s` seconds (`watch.cycle`). It
-reloads the project files at the start of each cycle, so an edit takes
-effect without a restart, and a file that does not load skips the cycle
-and keeps the service up. edr never deletes a file of yours on its own:
+`edr watch` runs a cycle every `heartbeat_s` seconds (`watch.cycle`).
+One watcher runs per project: it holds `<state_dir>/watch.lock`, and a
+second one exits 2 and names the pid of the first. The watcher reloads
+the project files at the start of each cycle, so an edit takes effect
+without a restart, and a file that does not load skips the cycle and
+keeps the service up. edr never deletes a file of yours on its own:
 the only files the watcher removes are expired seat leases in the state
 directory. One cycle does this, in order:
 

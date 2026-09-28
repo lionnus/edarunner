@@ -647,6 +647,16 @@ def test_watch_check_dry_and_once(demo: Path, capsys) -> None:
     assert edr(capsys, "watch", "--check")[0] == 0
 
 
+def test_a_second_watcher_of_a_project_exits_2(demo: Path, capsys) -> None:
+    lock = config.load_project(demo).state_dir / "watch.lock"
+    fd = home.lock(lock)
+    assert fd is not None and home.lock(lock) is None
+    code, out, _ = edr(capsys, "watch", "--once")
+    assert code == 2 and f"pid {os.getpid()} watches demo already" in out and not (demo / "data" / "board").exists()
+    os.close(fd)
+    assert edr(capsys, "watch", "--once")[0] == 0 and home.lock(lock) is not None
+
+
 def test_register_links_the_project_and_refuses_a_second_directory(demo: Path, capsys, tmp_path: Path,
                                                                    user_root: Path, monkeypatch) -> None:
     link = user_root / "projects" / "demo"

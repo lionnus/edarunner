@@ -825,6 +825,10 @@ Telegram bot as a thread when the site file configures it. --once runs one cycle
 reads and classifies every run, prints the states and writes nothing.
 docs/how-it-works.md explains the cycle.
 
+A watcher holds &lt;state_dir&gt;/watch.lock while it runs, so a second
+watcher of the project, the loop or --once, exits 2 and names the pid
+of the first.
+
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | print what would happen and write nothing |
@@ -835,3 +839,4 @@ docs/how-it-works.md explains the cycle.
 | Exit | Meaning |
 |---|---|
 | 1 | with --once, the cycle failed or the config did not load; with --check, watch.json is older than three cycles |
+| 2 | another process watches the project |

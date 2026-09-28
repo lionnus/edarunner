@@ -1,11 +1,13 @@
-"""The user root, `~/.edr` or `EDR_HOME`, and the registry of the projects in it.
+"""The user root, `~/.edr` or `EDR_HOME`: the registry of the projects and the process locks.
 
 `projects/<name>` is a link to the directory of each project, so the commands that span
-projects find them.
+projects find them. A lock is an `flock` that a process holds until it exits; the lock file
+holds its pid.
 """
 
 from __future__ import annotations
 
+import fcntl
 import os
 import tomllib
 from pathlib import Path
@@ -74,3 +76,24 @@ def unregister(name: str, directory: Path, dry_run: bool = False) -> bool:
         path.unlink()
     return True
 
+
+def lock(path: Path) -> int | None:
+    """Take the flock of `path` for this process and write its pid into the file; None while another process holds it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode())
+    return fd
+
+
+def holder(path: Path) -> str:
+    """The pid in a lock file, or `?`."""
+    try:
+        return path.read_text().strip() or "?"
+    except OSError:
+        return "?"

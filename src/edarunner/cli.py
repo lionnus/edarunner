@@ -1140,10 +1140,17 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
     if a.dry_run:
         watch.cycle(project, c.ssh, c.db, [], dry_run=True, backend=c.backend)
         return Exit.DONE
-    notifiers = _notifiers(c)
     if a.check:
-        return watch.check(project, notifiers)
-    return watch.run_forever(project, c.ssh, c.db, notifiers, once=a.once)
+        return watch.check(project, _notifiers(c))
+    path = project.state_dir / "watch.lock"
+    fd = home.lock(path)
+    if fd is None:
+        print(f"edr watch: pid {home.holder(path)} watches {project.project} already")
+        return Exit.NOTHING
+    try:
+        return watch.run_forever(project, c.ssh, c.db, _notifiers(c), once=a.once)
+    finally:
+        os.close(fd)
 
 
 def cmd_register(c: Ctx, a: argparse.Namespace) -> int:
@@ -1709,8 +1716,13 @@ def _parser() -> argparse.ArgumentParser:
         --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
         reads and classifies every run, prints the states and writes nothing.
         docs/how-it-works.md explains the cycle.
+
+        A watcher holds <state_dir>/watch.lock while it runs, so a second
+        watcher of the project, the loop or --once, exits 2 and names the pid
+        of the first.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
-                                              "with --check, watch.json is older than three cycles"})
+                                              "with --check, watch.json is older than three cycles",
+                                Exit.NOTHING: "another process watches the project"})
     s.add_argument("--once", action="store_true", help="one cycle; exit 1 when it failed")
     s.add_argument("--check", action="store_true", help="exit 1 when watch.json is older than three cycles")
     return p
