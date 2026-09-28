@@ -101,12 +101,12 @@ def _step(m: Row) -> int:
     return -1 if m.get("step") is None else int(m["step"])
 
 
-def _state_row(r: Row, hb: dict, now: float, everyone: list[Row]) -> Row:
+def _state_row(c: Any, r: Row, hb: dict, now: float, everyone: list[Row]) -> Row:
     state = r["state"] if r.get("state") in ("retired", "abandoned") else board.state_of(r)
     return {"handle": board.handle(r, everyone), "run_id": r["run_id"], "batch": r["batch"], "state": state,
             "phase": r.get("phase"), "stage": r.get("stage"), "step": r.get("step"), "step_name": hb.get("step_name"),
             "host": r.get("host"), "age_s": None if r.get("updated") is None else int(now - r["updated"]),
-            "command": board.triage_cmd(r, state, hb if state == "dead" else {}, everyone)}
+            "command": board.triage_cmd(r, state, hb if state == "dead" else {}, everyone, c.left(r, state))}
 
 
 def project_data(c: Any, tools: list[Row]) -> Row:
@@ -114,7 +114,7 @@ def project_data(c: Any, tools: list[Row]) -> Row:
     project, now = c.project, time.time()
     rows = board.order(c.rows())
     everyone = c.db.runs()
-    runs = [_state_row(r, c.heartbeat(r) if board.is_live(r) else {}, now, everyone) for r in rows]
+    runs = [_state_row(c, r, c.heartbeat(r) if board.is_live(r) else {}, now, everyone) for r in rows]
     per_batch: dict[str, Counter] = {}
     for r in runs:
         per_batch.setdefault(r["batch"], Counter())[r["state"]] += 1
@@ -143,7 +143,7 @@ def project_data(c: Any, tools: list[Row]) -> Row:
 def run_data(c: Any, row: Row, file_host: str) -> Row:
     """Everything the history of one run says, as one dict; `row` carries the state the board gives it."""
     now, hb, everyone = time.time(), c.heartbeat(row), c.db.runs()
-    state = _state_row(row, hb, now, everyone)
+    state = _state_row(c, row, hb, now, everyone)
     names = board.handles(everyone)
     events = [{**e, "run": names.get(e["run_id"], e["run_id"])} for e in c.db.events(run_id=row["run_id"], n=1000)]
     last: dict[tuple, Row] = {}

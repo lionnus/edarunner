@@ -95,6 +95,29 @@ def test_a_run_that_ended_at_the_end_of_a_stage_offers_the_stages_left(env: Env)
     assert stopped.buttons == [] and stopped.about == "A stop ended the run in stage power."
 
 
+def test_a_group_that_held_tasks_back_offers_them(env: Env) -> None:
+    done = {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}
+    tasks = {t: {"stage": "power", "phase": p} for t, p in (("k_a", "done"), ("k_b", "done"), ("k_c", "held"), ("k_d", "held"))}
+    h = env.heartbeat("h", phase="STOPPED", exit=10, stage="power", tasks=tasks,
+                      stages={n: done for n in ("synth", "pnr", "export", "power")})
+    spec = {"stages": [{"name": n} for n in ("synth", "pnr", "export", "power")]}
+    (env.project.state_dir / "demo" / f"{h['run_id']}.spec.json").write_text(json.dumps(spec))
+    assert env.cycle() == {rid("h"): "stopped"}
+    a = env.notifier.alerts[rid("h")]
+    assert [b[:2] for b in a.buttons] == [("Continue", "continue:demo")]
+    assert a.about == "A stop ended the run in stage power. It did not run the tasks k_c and k_d of power."
+    assert a.todo[1][0].startswith("Continue runs the tasks k_c and k_d of power as one new run on local, in the tree ")
+
+
+def test_a_task_row_takes_the_stage_of_its_task(env: Env) -> None:
+    """A run that goes on after its task group keeps the rows of the group's tasks under that group."""
+    hb = env.heartbeat("x", phase="stage:export", stage="export",
+                       tasks={"k_a": {"stage": "power", "phase": "done", "started": 1, "ended": 2, "exit": 0}})
+    env.cycle()
+    assert [tuple(r) for r in env.db.conn.execute("SELECT stage, task, status FROM stage_runs WHERE run_id=? AND task!=''",
+                                                   (hb["run_id"],))] == [("power", "k_a", "done")]
+
+
 def keep(env: Env, hb: dict, hours: float, at: float = NOW) -> None:
     """The keep file of `hours` for the run of `hb`, written at `at`."""
     path = env.project.state_dir / "demo" / f"{hb['run_id']}.keep.json"

@@ -5,8 +5,8 @@ args = "M=64 N=64"
 
 [tasks.k_big]
 kernel = "softmax"
-test = "SOFTMAX_R197"
-args = "ROWS=197"
+test = "SOFTMAX_N512"
+args = "N=512"
 budget = { hours = 2 }
 
 [tasks.k_bad]

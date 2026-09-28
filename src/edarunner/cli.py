@@ -253,6 +253,14 @@ class Ctx:
         """The heartbeat of a run, or {} when the driver wrote none."""
         return config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.json")
 
+    def left(self, row: Row, state: str) -> list[str]:
+        """The stages that `edr continue` runs on the tree of a run that ended over its budget, for the triage; none
+        for another run, or when continue refuses."""
+        if state != "over_budget" or board.is_live(row):
+            return []
+        left, _, why = launch.stages_left(self.project, self.db, row)
+        return [] if why else left
+
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""
         if rows:
@@ -453,7 +461,7 @@ class Actions:
         row = self.c.resolve(handle)
         self.c.refresh(str(row["batch"]))
         row = self.c.db.run(row["run_id"]) or row
-        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs())
+        return tgfmt.run_detail(row, self.c.heartbeat(row), time.time(), self.c.db.runs(), self.c.left(row, board.state_of(row)))
 
     def events_text(self, n: int) -> str:
         """The last `n` events, newest first."""
@@ -659,7 +667,7 @@ def _triage(c: Ctx, rows: list[Row]) -> Text | str:
     lines, everyone = [], c.db.runs()
     for r in board.order(rows):
         state = board.state_of(r)
-        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {}, everyone)
+        cmd = board.triage_cmd(r, state, c.heartbeat(r) if state == "dead" else {}, everyone, c.left(r, state))
         if cmd is None:
             continue
         lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ",
@@ -1074,9 +1082,9 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
             c.db.add_event("user", run_id, "collect", f"{a.collect}: {res.files} files, {len(res.failures)} failed")
         c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
         return Exit.HOSTS if res.failures else Exit.DONE
-    stages = a.stage
+    stages, held = a.stage, []
     if not stages:
-        stages, why = launch.stages_left(project, c.db, row)
+        stages, held, why = launch.stages_left(project, c.db, row)
         if why:
             raise Refuse(f"{h}: {why}")
         if not stages:
@@ -1095,7 +1103,9 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
     job = jobs.get(label) or Job(label=str(row["label"]), config=str(row.get("config") or ""))
     job.reuse, job.stages, job.host = {"run_id": run_id}, stages, a.on or "auto"
     if a.tasks:
-        job.tasks = a.tasks
+        job.tasks, held = a.tasks, []
+    # The first stage runs its held tasks alone, and a later task group every task of the job.
+    job.tasks = [*job.tasks, *(t for t in held if t not in job.tasks)]
     for s in stages if a.parallel else []:
         project.stages[s].parallel = a.parallel
     # The run joins the batch of the tree it continues; its label and the time keep its id apart.
@@ -1112,18 +1122,20 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
     if p.problems:
         c.emit("\n".join(f"{p.run_id}: problem: {x}" for x in p.problems), {"problems": p.problems})
         return Exit.REFUSED
+    if held:
+        p.spec["stages"][0]["tasks"] = [t for t in p.spec["stages"][0]["tasks"] if t["id"] in held]
     if a.from_:
         if not p.spec["stages"][0].get("resume"):
             raise Refuse(f"stage {stages[0]} has no resume command; --from needs one")
         p.spec["start_at"]["checkpoint"] = a.from_
     driver = sync.publish_driver(state, launch.DRIVER_SRC, a.dry_run)
     spec_path = launch.write_spec(state, batch.batch, p, driver, a.dry_run)
-    c.emit(f"{p.run_id}: {', '.join(stages)} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
+    c.emit(f"{p.run_id}: {board.left_text(stages, held)} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
            {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
     if a.dry_run:
         return Exit.DONE
     c.db.upsert_run({**launch.run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
-    c.db.add_event(actor, p.run_id, "continue", f"{' '.join(stages)} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
+    c.db.add_event(actor, p.run_id, "continue", f"{board.left_text(stages, held)} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
     launch.submit(c.backend, c.db, project, p.run_id, p.host, spec_path, driver)
     return Exit.DONE
 

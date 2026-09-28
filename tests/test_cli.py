@@ -162,6 +162,24 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     assert code == 1
 
 
+def test_the_triage_stops_a_live_run_over_its_budget_and_continues_one_that_ended(demo: Path, capsys) -> None:
+    seed(demo, "b_nodw", "stage:pnr", state="over_budget")
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    z = seed(demo, "z", "OVER_BUDGET:power")
+    ran(demo, z, "OVER_BUDGET:power", {n: ("done", 0) for n in DEMO_STAGES})  # power is the last stage
+    code, out, _ = edr(capsys, "status", "--triage")
+    assert code == 0 and "    edr stop b_nodw@demo --why over-budget\n" in out and "    edr continue a@demo\n" in out
+    assert "z@demo" not in out  # no stage left, so nothing to propose
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert [(d["handle"], d["command"]) for d in decisions] == [
+        ("b_nodw@demo", "edr stop b_nodw@demo --why over-budget"), ("a@demo", "edr continue a@demo")]
+    assert "The triage proposes `edr continue a@demo`." in edr(capsys, "brief", "--run", "a@demo")[1]
+    assert "The triage proposes nothing for it." in edr(capsys, "brief", "--run", "z@demo")[1]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo") and "<code>edr " not in acts.status_text("z@demo")
+
+
 def test_events_filters(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "events")
     assert code == 2 and out == "no events\n"
@@ -696,7 +714,7 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
         (results / "reports" / str(n)).mkdir(parents=True)
         (results / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
         (results / "reports" / str(n) / "qor.rpt").write_text(demo_qor(n))
-    for test, whole in (("GEMM_M64_N64", "WHOLE,0.250\n"), ("SOFTMAX_R197", "")):
+    for test, whole in (("GEMM_M64_N64", "WHOLE,0.250\n"), ("SOFTMAX_N512", "")):
         power = results / "simulation" / "tests" / "demo" / test / "power"
         (power / "reports").mkdir(parents=True)
         (power / "reports" / "power.csv").write_text("phase,total_w\n" + whole)
@@ -711,8 +729,8 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
                 ("power", None, "k_gone", "window_ns", 3400.0, "ns", "", "simulation/tests/demo/GEMM_M64_N64/power/phases.json")):
             db.add_metric({"run_id": a, "stage": stage, "step": step, "task": task, "name": name, "value": value,
                            "unit": unit, "canonical": canonical, "source_file": source})
-    failures = ("  power_w: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches "
-                "{'phase': 'WHOLE'}\n  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: "
+    failures = ("  power_w: 1 failed: simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv: no row matches "
+                "{'phase': 'WHOLE'}\n  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_N512/power/phases.json: "
                 "power.csv has no WHOLE row\n")
     # pnr owns steps 4 and 5, so its row at step 3 goes; the file of step 1 is gone, so its row stays. The run has
     # passed no pnr step and k_gone is no task, so the extraction reads neither: their values stay, a failure goes.
@@ -720,7 +738,7 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
     assert code == 0 and out == f"{a}: 9 new, 1 changed, 0 unchanged, 2 failed, 2 removed, 1 kept without a file (dry)\n" + failures
     code, out, _ = edr(capsys, "--json", "extract", "a@demo")
     assert json.loads(out)["data"][0]["failures"]["power_w"] == {
-        "count": 1, "first": "simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE'}"}
+        "count": 1, "first": "simulation/tests/demo/SOFTMAX_N512/power/reports/power.csv: no row matches {'phase': 'WHOLE'}"}
     with Database(demo / "data" / "edr.db") as db:
         rows = {(m["stage"], m["step"], m["task"], m["name"]): (m["value"], m["source_file"]) for m in db.metrics()}
         assert db.events()[-1]["text"] == ("9 new, 1 changed, 0 unchanged, 2 failed, 2 removed, 1 kept without a file; "
@@ -730,7 +748,7 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
     assert rows[("synth", 1, "", "area_cell_um2")] == (1001.0, "reports/1/area.rpt:1") and len(rows) == 15
     assert rows[("pnr", 4, "", "area_cell_um2")][0] == 1004.0 and rows[("power", None, "k_gone", "window_ns")][0] == 3400.0
     out = edr(capsys, "metrics", "--source", "abc1234")[1]
-    assert "failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: power.csv has no WHOLE row" in out
+    assert "failed: simulation/tests/demo/SOFTMAX_N512/power/phases.json: power.csv has no WHOLE row" in out
     toml = demo / "edr.toml"
     text = toml.read_text()
     toml.write_text(text[:text.index("# A slack can print")] + text[text.index("[metrics.power_w]"):])
@@ -774,7 +792,7 @@ def test_extract_reads_parameters_from_the_files_and_flags_runs_that_contradict_
         (results / "log" / "synth.log").write_text(f"step 0 setup\nset ENABLE_X 1; set LANES {lanes};\n{'.' * 40}\nset EXTRA 1;\n")
         (results / "reports").mkdir()
         (results / "reports" / "build.rpt").write_text(f"built at 12:00\ncommit: {design}\n")
-    for test in ("GEMM_M64_N64", "SOFTMAX_R197"):  # k_small and k_big ran one test under two names
+    for test in ("GEMM_M64_N64", "SOFTMAX_N512"):  # k_small and k_big ran one test under two names
         power = demo / "data" / "results" / c / "simulation" / "tests" / "demo" / test / "power"
         (power / "reports").mkdir(parents=True)
         (power / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.25\n")
@@ -1013,6 +1031,50 @@ def test_continue_follows_the_tree_across_its_runs(demo: Path, capsys) -> None:
     assert code == 0 and "_a.export-power.2_demo_g" in stages_of(out)[0]
 
 
+def test_continue_runs_exactly_the_tasks_a_group_held_back(demo: Path, capsys) -> None:
+    (demo / "tasks.toml").write_text((demo / "tasks.toml").read_text() + "".join(
+        f'\n[tasks.{t}]\nkernel = "gemm"\ntest = "{t.upper()}"\nargs = ""\n' for t in ("k_c", "k_d")))
+    jobs = demo / "jobs" / "demo.toml"
+    jobs.write_text(jobs.read_text().replace('tasks = ["k_small", "k_big"]', 'tasks = ["k_small", "k_big", "k_c", "k_d"]'))
+
+    def group(done: tuple[str, ...], held: tuple[str, ...]) -> dict:
+        """The task entries of a power group as the driver writes them after a stop."""
+        return {**{t: {"stage": "power", "phase": "done", "started": 110, "ended": 120, "exit": 0} for t in done},
+                **{t: {"stage": "power", "phase": "held"} for t in held}}
+
+    def tasks_of(out: str) -> list[tuple[str, list[str]]]:
+        return [(s["name"], [t["id"] for t in s["tasks"]]) for s in json.loads(out)["data"]["spec"]["stages"]]
+
+    a = seed(demo, "a", "STOPPED")
+    ran(demo, a, "STOPPED", {n: ("done", 0) for n in DEMO_STAGES})
+    beat(demo, a, tasks=group(("k_small", "k_big"), ("k_c", "k_d")))
+    edr(capsys, "status")
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--dry-run")
+    assert code == 0 and tasks_of(out) == [("power", ["k_c", "k_d"])]
+    assert f"\n{stages_of(out)[0]}: the tasks k_c and k_d of power on local " in edr(capsys, "continue", "a@demo", "--dry-run")[1]
+    code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--tasks", "k_small", "--dry-run")
+    assert code == 0 and tasks_of(out) == [("power", ["k_small"])]
+    # The run that continues the tree starts k_c and holds k_d back again; the tree then holds k_d alone.
+    root = json.loads((bdir(demo) / f"{a}.json").read_text())["root"]
+    x = seed(demo, "a.power", "STOPPED", date="20260926_1300")
+    ran(demo, x, "STOPPED", {"power": ("done", 0)}, names=("power",), t0=200, tree=root)
+    beat(demo, x, tasks=group(("k_c",), ("k_d",)))
+    edr(capsys, "status")
+    jobs.write_text(jobs.read_text().replace(', "k_d"]', "]"))  # a held task runs also when the job drops it
+    for handle in ("a@demo", "a.power@demo"):
+        code, out, _ = edr(capsys, "--json", "continue", handle, "--dry-run")
+        assert code == 0 and tasks_of(out) == [("power", ["k_d"])]
+
+
+def test_only_a_task_group_holds_tasks(demo: Path, capsys) -> None:
+    b = seed(demo, "b_nodw", "OVER_BUDGET:synth")
+    ran(demo, b, "OVER_BUDGET:synth", {"synth": ("over_budget", 0)}, names=("synth", "pnr"))
+    beat(demo, b, tasks={"k_small": {"phase": "skipped"}})  # an entry without a stage lands under synth
+    edr(capsys, "status")
+    code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
+    assert code == 0 and stages_of(out)[1] == ["pnr"]
+
+
 def test_continue_without_stage_refuses_a_stage_that_did_not_end_with_exit_0(demo: Path, capsys) -> None:
     c = seed(demo, "c", "FAILED:pnr")
     ran(demo, c, "FAILED:pnr", {"synth": ("done", 0), "pnr": ("failed", 1)})
@@ -1042,12 +1104,12 @@ def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monke
     acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
     root = json.loads((bdir(demo) / f"{a}.json").read_text())["root"]
     note = acts.continue_run("a@demo", "telegram")
-    assert note == f"{submitted[0]}: export, power on local {root}" and "_a.export-power_" in submitted[0]
+    assert note == f"{submitted[0]}: export and power on local {root}" and "_a.export-power_" in submitted[0]
     with pytest.raises(Refuse, match="a.export-power@demo on the same tree has not ended"):
         acts.continue_run("a@demo", "telegram")  # a second tap starts no second run on the tree
     with Database(demo / "data" / "edr.db") as db:
         assert [(e["actor"], e["run_id"], e["kind"], e["text"]) for e in db.events()] == [
-            ("telegram", submitted[0], "continue", f"export power on {a}")]
+            ("telegram", submitted[0], "continue", f"export and power on {a}")]
     assert len(submitted) == 1
 
 
@@ -1424,7 +1486,7 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
     src = tmp_path / "legacy" / run_id
     tests = src / "simulation" / "tests" / "demo"
     # k_small parses; power.csv of k_big has no WHOLE row; k_bad has no file at all.
-    for test, text in (("GEMM_M64_N64", "phase,total_w\nWHOLE,0.250\n"), ("SOFTMAX_R197", "phase,total_w\n")):
+    for test, text in (("GEMM_M64_N64", "phase,total_w\nWHOLE,0.250\n"), ("SOFTMAX_N512", "phase,total_w\n")):
         (tests / test / "power" / "reports").mkdir(parents=True)
         (tests / test / "power" / "reports" / "power.csv").write_text(text)
         (tests / test / "power" / "phases.json").write_text('{"window_ns": 3400}')
@@ -1442,7 +1504,7 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
     spec = json.loads((bdir(demo, "legacy") / f"{run_id}.spec.json").read_text())
     assert spec["vars"] == {"netlist_stage": "11"} and not any("cmd" in st for st in spec["stages"])
     assert [(t["id"], t["dir"]) for st in spec["stages"] for t in st["tasks"]] == [
-        ("k_small", "simulation/tests/demo/GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_R197"),
+        ("k_small", "simulation/tests/demo/GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_N512"),
         ("k_bad", "simulation/tests/demo/BAD")]
     with Database(demo / "data" / "edr.db") as db:
         row = db.run(run_id)
@@ -1471,7 +1533,7 @@ def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> N
         assert (db.run("20260830_0902_ref3_demo_gdef5678")["dirty"], db.run("20260830_0901_ref2_demo_gabc1234-dirty")[
             "started"], db.run("20260830_0901_ref2_demo_gabc1234-dirty")["updated"]) == (0, None, None)
     # Once its files are fixed, a later extract reads every task of the spec, also the one without a row.
-    (tests / "SOFTMAX_R197" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
+    (tests / "SOFTMAX_N512" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
     (tests / "BAD" / "power" / "reports").mkdir(parents=True)
     (tests / "BAD" / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.125\n")
     assert edr(capsys, "extract", "ref@legacy")[0] == 0
@@ -1487,7 +1549,7 @@ def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(dem
         (src / "simulation" / "tests" / "demo" / test / "power" / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.5\n")
     # k_big ran under an older test name and with a limit that tasks.toml no longer gives; k_gone did not run.
     ran = tmp_path / "ran.toml"
-    ran.write_text('[tasks.k_big]\nkernel = "softmax"\ntest = "SOFTMAX_OLD"\nargs = "ROWS=197 LIMIT=-4.0"\n\n'
+    ran.write_text('[tasks.k_big]\nkernel = "softmax"\ntest = "SOFTMAX_OLD"\nargs = "N=512 LIMIT=-4.0"\n\n'
                    '[tasks.k_gone]\nkernel = "x"\n')
     old, new = "20260830_0900_ref_demo_gabc1234", "20260830_0901_ref2_demo_gabc1234"
     base = ["import", "--config", "demo", "--source", "abc1234", "--results", str(src), "--batch", "legacy"]
@@ -1500,7 +1562,7 @@ def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(dem
         ("k_small", "simulation/tests/demo/GEMM_M64_N64", "GEMM_M64_N64"), ("k_big", "simulation/tests/demo/SOFTMAX_OLD", "SOFTMAX_OLD")]
     with Database(demo / "data" / "edr.db") as db:
         assert [(f["task"], f["key"], f["value"], f["origin"]) for f in db.task_fields([old])] == [
-            ("k_big", "args", "ROWS=197 LIMIT=-4.0", "import"), ("k_big", "kernel", "softmax", "import"),
+            ("k_big", "args", "N=512 LIMIT=-4.0", "import"), ("k_big", "kernel", "softmax", "import"),
             ("k_big", "test", "SOFTMAX_OLD", "import"), ("k_small", "args", "M=64 N=64", "resolver"),
             ("k_small", "kernel", "gemm", "resolver"), ("k_small", "test", "GEMM_M64_N64", "resolver")]
         # The numbers of k_big come from the directory of the test it ran as.
@@ -1509,8 +1571,8 @@ def test_import_records_task_fields_and_a_task_with_two_sets_of_fields_warns(dem
     assert code == 0 and "warning" not in out
     # A second run of k_big with the fields that tasks.toml gives today: one task id, two sets of fields.
     assert edr(capsys, *base, "--run-id", new, "--label", "ref2", "--tasks", "k_big")[0] == 0
-    warning = ('task k_big ran with 2 sets of fields: args="ROWS=197 LIMIT=-4.0" test="SOFTMAX_OLD" in ref@legacy; '
-               'args="ROWS=197" test="SOFTMAX_R197" in ref2@legacy')
+    warning = ('task k_big ran with 2 sets of fields: args="N=512 LIMIT=-4.0" test="SOFTMAX_OLD" in ref@legacy; '
+               'args="N=512" test="SOFTMAX_N512" in ref2@legacy')
     code, out, _ = edr(capsys, "extract", "ref2@legacy", "--dry-run")
     assert code == 0 and out.splitlines()[-1] == f"warning: {warning}"
     code, out, _ = edr(capsys, "--json", "extract", "ref2@legacy", "--dry-run")

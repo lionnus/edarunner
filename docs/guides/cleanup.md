@@ -129,7 +129,7 @@ A job can start from the archive of an earlier run through `restore` on
 label = "base"
 config = "base"
 stages = ["power"]
-tasks = ["softmax_197"]
+tasks = ["k_big"]
 reuse = { label = "base", latest = true, restore = "power_inputs" }
 ```
 

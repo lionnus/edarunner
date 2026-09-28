@@ -205,7 +205,7 @@ and the alert of a run that ended with stages left carries Continue:
 | Stop | asks once more, then `edr stop <handle> --after-task` |
 | +6h, +12h, +24h | `edr keep <handle> --hours 6`, 12 or 24: that many more hours on the budget of the running stage or task, and for as long the watcher neither kills the run as `hung` nor stops it as `superseded` |
 | Free space | asks once more, then `edr retire --host <host> --prune <names>` with every prune name of the project: it removes the prune targets of the finished runs of the project on the full host, except those of a run whose tree has stages left |
-| Continue | asks once more, then `edr continue <handle>`: it runs the stages left on the tree of the run as one new run, on the same host |
+| Continue | asks once more, then `edr continue <handle>`: it runs the stages left on the tree of the run as one new run, on the same host; a task group that held tasks back runs only those |
 
 A keep never holds off the stop of a full host. A full scratch disk
 blocks every other user of the host, so after `grace_s` the watcher
@@ -215,7 +215,8 @@ since the driver has sent `SIGTERM` to the stage already. Such a stage
 did not end with exit 0, so its run gets no Continue either: the stage
 would start over, and `edr continue` needs `--stage` and a checkpoint
 with `--from` for it. Each alert says in one line what its buttons do;
-the line of Continue names the stages, the host and the tree.
+the line of Continue names the stages, or the held tasks of a task
+group, the host and the tree.
 
 The `callback_data` of a button names the action and the project, such
 as `keep6:demo`, and the run is the one of the alert: the watcher that

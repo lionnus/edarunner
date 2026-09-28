@@ -423,12 +423,11 @@ mailed.
 placeholder `{task.<key>}` in the strings of a task group.
 
 ```toml
-[tasks.softmax_197]
+[tasks.k_big]
 kernel = "softmax"
-args = "ROWS=197 COLS=197"
-test = "SOFTMAX_R197_C197"
-needs = { disk_gb = 60 }
-budget = { hours = 8 }
+test = "SOFTMAX_N512"
+args = "N=512"
+budget = { hours = 2 }
 ```
 
 | Key | Meaning | Default |

@@ -39,7 +39,8 @@ BUTTONS = {
              "asks once more, then removes the prune targets of the finished runs of the project on the full host; a "
              "run whose tree has stages left keeps them"),
     "continue": ("Continue", "edr continue {handle}", "asks once more, then runs the stages the tree of the run has "
-                                                     "left as one new run on that tree"),
+                                                     "left as one new run on that tree; a task group that held tasks "
+                                                     "back runs only those"),
 }
 
 
@@ -117,17 +118,17 @@ def _after(project: Project) -> str:
 
 
 def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: dict, now: float,
-              left: list[str] | None = None, runs: list[Row] | None = None) -> Alert:
+              left: list[str] | None = None, runs: list[Row] | None = None, held: list[str] | None = None) -> Alert:
     """The alert of a run in `state`; `reasons` are what `watch.classify` found, `left` the stages that
-    `edr continue` runs next on the tree of a run that ended, and `runs` the runs of the project, so the handle
-    in the alert names this run alone.
+    `edr continue` runs next on the tree of a run that ended, `held` the held tasks of the first of them, and
+    `runs` the runs of the project, so the handle in the alert names this run alone.
 
     A live run that is `hung`, `looping`, `over_budget` or `superseded` gets Stop, +6h, +12h and +24h.
     A live run on a full host gets Stop, and Free space when the project declares prune targets; a
     keep does not hold off the full-host stop, since a full disk blocks every other user of the
-    host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages left on its
-    tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show each
-    button as a command line. A run that ended `done` gets the opt-in alert `done`, without log lines."""
+    host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages or held tasks
+    left on its tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show
+    each button as a command line. A run that ended `done` gets the opt-in alert `done`, without log lines."""
     h, lim = board.handle(run, runs), project.limits
     host = str(hb.get("host") or run.get("host") or "-")
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
@@ -222,7 +223,7 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
         a.about = "The run ended done" + (f" after {board.hm(hb['elapsed_s'])}" if hb.get("elapsed_s") else "") + "."
         a.todo = [("See its numbers:", f"edr metrics --run {h}")]
     if left:
-        stages, root = board.join(left), str(hb.get("root") or run.get("root") or "-")
+        stages, root = board.left_text(left, held or []), str(hb.get("root") or run.get("root") or "-")
         a.about += f" It did not run {stages}."
         a.todo = [("Run the stages left on the same tree:", f"edr continue {h}"),
                   (f"Continue runs {stages} as one new run on {host}, in the tree {root}. On Telegram it asks once "

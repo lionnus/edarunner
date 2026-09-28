@@ -240,31 +240,37 @@ def _fresh(job: Job) -> bool:
     return not job.reuse or bool(job.reuse.get("restore"))
 
 
-def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[list[str], str]:
-    """The stages the tree of `run` has left, and why `edr continue` without `--stage` does not run them, or "".
+def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[list[str], list[str], str]:
+    """The stages the tree of `run` has left, the held tasks of the first of them, and why `edr continue` without
+    `--stage` does not run them, or "".
 
     The tree holds every run with the root of `run`. Its stages are those that the specs of these runs list, in
-    the order of edr.toml, and the newest row of a stage says whether it ended with exit 0. The stages left
-    follow the last stage that did. A run without a spec, such as an imported one, adds no stage.
+    the order of edr.toml, and the newest row of a stage says whether it ended with exit 0. A task is held when a
+    run on the tree held it back or skipped it, and no run on the tree started it. The stages left follow the last
+    stage that ended with exit 0 and holds no task. A run without a spec, such as an imported one, adds no stage.
     """
     everyone = db.runs()
     runs = [r for r in everyone if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
     names = {n for r in runs for n in collect.spec_stages(collect.load_spec(project, r)) or []}
-    rows = sorted((s for r in runs for s in db.stage_runs(r["run_id"]) if not s["task"]),
-                  key=lambda s: (s["started"] or 0, s["ended"] or 0))
-    last = {s["stage"]: s for s in rows}
+    rows = [s for r in runs for s in db.stage_runs(r["run_id"])]
+    last = {s["stage"]: s for s in sorted((s for s in rows if not s["task"]), key=lambda s: (s["started"] or 0, s["ended"] or 0))}
     order = [n for n in project.stages if n in names]
-    ok = [i for i, n in enumerate(order) if n in last and last[n]["exit"] == 0]
+    began = {(s["stage"], s["task"]) for s in rows if s["status"] not in ("held", "skipped")}
+    held = {n: sorted({s["task"] for s in rows if s["task"] and s["stage"] == n and (n, s["task"]) not in began})
+            for n in order if n in last and project.stages[n].is_group}
+    ok = [i for i, n in enumerate(order) if n in last and last[n]["exit"] == 0 and not held.get(n)]
     left = order[ok[-1] + 1:] if ok else order
+    tasks = held.get(left[0], []) if left else []
     if live := [board.handle(r, everyone) for r in runs if board.is_live(r)]:
-        return left, f"{live[0]} on the same tree has not ended"
-    if not left or left[0] not in last:
-        return left, ""
+        return left, tasks, f"{live[0]} on the same tree has not ended"
+    # A first stage that ended with exit 0 is left for its held tasks alone.
+    if not left or left[0] not in last or last[left[0]]["exit"] == 0:
+        return left, tasks, ""
     first, s = left[0], last[left[0]]
     ended = s["status"] + ("" if s["exit"] is None else f", exit {s['exit']}")
     hint = (f", and a checkpoint with --from, since {first} can delete the checkpoints it needs when it runs from its "
             "start" if project.stages[first].resume else "")
-    return left, f"stage {first} did not end with exit 0 ({ended}); name the stages with --stage{hint}"
+    return left, tasks, f"stage {first} did not end with exit 0 ({ended}); name the stages with --stage{hint}"
 
 
 def _check_overrides(project: Project, job: Job, names: list[str]) -> list[str]:

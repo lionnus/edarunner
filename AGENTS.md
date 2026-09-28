@@ -63,7 +63,8 @@ Before you run it, check the following:
 | `queued` | `edr hosts` shows a host that fits |
 | `stale` | nothing; the command only asks the host |
 | `dead` | keep `--from`; without it the stage starts from its first step and can destroy the checkpoints it needs |
-| `hung`, `looping`, `over_budget` | the log tail in `edr status <handle>` |
+| `hung`, `looping`, `over_budget` of a live run | the log tail in `edr status <handle>` |
+| `over_budget` of a run that ended | `edr continue <handle> --dry-run` names the stages and tasks you expect |
 | `host_full` | `edr hosts`; one stop frees the host |
 | `superseded` | the newer batch is the one you want |
 | `done` | `edr metrics --source <source>` looks complete |

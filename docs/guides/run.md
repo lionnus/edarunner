@@ -204,6 +204,9 @@ after it. A keep written while the stage runs clears that mark, and the
 run goes on as usual. In the same way, `stop --after-task` during a
 one-command stage ends the run `STOPPED` once that stage is over. Either
 way the stages after it are left, and `edr continue <handle>` runs them.
+A task group in the same spot lets its running tasks finish and starts
+no new one. The driver records each task it did not start as `held`, and
+`edr continue <handle>` runs those tasks and the stages after the group.
 
 ## More work on an existing tree
 
@@ -224,6 +227,15 @@ over its budget: the call above runs export and power. If that new run
 goes over its budget in export, `edr continue base@sweep1` runs power
 alone.
 
+A task group that ended with exit 0 still counts as left while it has
+held tasks: tasks that a run on the tree held back or skipped for lack
+of disk, and that no run on the tree has started. `continue` runs only
+those tasks in that group, and every task of the job in a task group
+after it. Say `base` was stopped while power ran `k_small` and `k_big`,
+with two more tasks waiting: `edr continue base@sweep1` runs those two.
+A task that failed was started, so it is not held; name it with
+`--stage power --tasks <id>` to run it again.
+
 `continue` refuses to guess in two cases. While a run on the tree has
 not ended, such as a continue that is still running, a second call
 starts nothing. And when the first stage left started but did not end
@@ -238,10 +250,7 @@ edr continue base@sweep1 --stage pnr export power --from cts
 
 `--stage` takes one or more stages and runs them in the order given, and
 `--from` fills `{checkpoint}` in the resume command of the first one.
-When no stage is left, `continue` says so and exits 2. A task group that
-stopped taking tasks, after a stop or at its budget, still ends with
-exit 0, so `continue` counts it as done; run its other tasks with
-`--stage <group> --tasks <id>...`.
+When no stage is left, `continue` says so and exits 2.
 
 The new run joins the batch of the old one, so `retire --batch` takes
 both. It has its own id and heartbeat, with the time of the call as its
@@ -255,8 +264,8 @@ made that run. `--tasks` names the tasks, `--parallel` the width, and
 `--on` another host when the tree is reachable there.
 
 On the phone, the alert of a run that ended `OVER_BUDGET` or `STOPPED`
-with stages left has a Continue button that does the same;
-[alerts.md](alerts.md#alerts) shows it.
+with stages or held tasks left has a Continue button that does the same,
+and its text names the held tasks; [alerts.md](alerts.md#alerts) shows it.
 
 A job in a batch file runs stages on the tree of an earlier run through
 `reuse`:
@@ -266,7 +275,7 @@ A job in a batch file runs stages on the tree of an earlier run through
 label = "base"
 config = "base"
 stages = ["power"]
-tasks = ["softmax_197"]
+tasks = ["k_big"]
 reuse = { label = "base", latest = true }
 ```
 

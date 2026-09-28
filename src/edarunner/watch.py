@@ -47,7 +47,9 @@ class State:
     for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
     the stop of `superseded` for N hours; the full-host stop never waits for a keep.
     The triage proposes no retire for a run without a tree, such as one imported with `--results`,
-    since a retire would only mark its row. When another run has the same label and batch, the
+    since a retire would only mark its row. For a run that ended `OVER_BUDGET` it proposes
+    `edr continue` while the tree has stages or held tasks that `edr continue` runs without
+    `--stage`, and nothing when it has none. When another run has the same label and batch, the
     command names the run by the shortest unique prefix of its run id instead of `<label>@<batch>`.
     """
 
@@ -143,8 +145,8 @@ def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> None:
             db.set_step_times(hb["run_id"], hb["step_times"])
         db.add_run_sample(hb)
         for tid, t in (hb.get("tasks") or {}).items():
-            db.upsert_stage_run({"run_id": hb["run_id"], "stage": hb.get("stage") or "", "task": tid, "status": t.get("phase"),
-                                     **{k: t.get(k) for k in _TASK_KEYS}})
+            db.upsert_stage_run({"run_id": hb["run_id"], "stage": t.get("stage") or hb.get("stage") or "", "task": tid,
+                                 "status": t.get("phase"), **{k: t.get(k) for k in _TASK_KEYS}})
 
 
 # classify
@@ -237,9 +239,9 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
-            left, why = launch.stages_left(project, db, run) if ended else ([], "")
+            left, held, why = launch.stages_left(project, db, run) if ended else ([], [], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs())
+            alert = alerts.run_alert(project, run, state, reasons, _hb(project, run), now, [] if why else left, db.runs(), held=held)
             ids = [n.send(alert) for n in wanted(notifiers, state)]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:

@@ -115,7 +115,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
         fields = [(f["run_id"], f["task"], f["key"], f["value"], f["origin"]) for f in db.task_fields()]
     assert (ids["b_nodw"], "DW", "0") in params and (ids["a"], "source", source) in params
     # The launched run records the fields each task ran with; b_nodw has no task.
-    assert fields == [(ids["a"], t, k, v, "spec") for t, f in (("k_big", {"args": "ROWS=197", "kernel": "softmax", "test": "SOFTMAX_R197"}),
+    assert fields == [(ids["a"], t, k, v, "spec") for t, f in (("k_big", {"args": "N=512", "kernel": "softmax", "test": "SOFTMAX_N512"}),
                                                                 ("k_small", {"args": "M=64 N=64", "kernel": "gemm", "test": "GEMM_M64_N64"}))
                       for k, v in f.items()]
     code, out, _ = edr(capsys, "--json", "compare", "a@demo", "b_nodw@demo")
