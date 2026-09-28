@@ -493,11 +493,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     rows = [r for r in db.runs() if r["batch"] not in retired]
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
                                                            db.host_samples(int(now) - 86400)))
-    parameters = db.parameters()
-    plotly = board.PLOTLY_FILE if (bdir / board.PLOTLY_FILE).is_file() else board.PLOTLY_URL
-    areas = analysis.last_areas(project, db, [r["run_id"] for r in rows])
-    config.save_text(bdir / "compare.html", board.compare_html(rows, parameters, analysis.mark_record(project, db.metrics()),
-                                                                plotly, areas, analysis.step_names(project)))
+    config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
     for n in notifiers if pin else []:
         n.board(text)

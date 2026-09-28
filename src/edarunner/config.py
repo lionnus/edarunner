@@ -526,6 +526,8 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
         raise ConfigError(f"{file}: {at}.reduce needs regex and is one of {', '.join(_REDUCE)}")
     if raw.get("scale") == 0:
         raise ConfigError(f"{file}: {at}.scale is a factor other than 0")
+    if raw.get("better", "lower") not in ("lower", "higher"):
+        raise ConfigError(f'{file}: {at}.better is "lower" or "higher"')
     rule = raw.pop("pass", "")
     try:
         if rule != "":

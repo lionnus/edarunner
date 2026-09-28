@@ -559,6 +559,13 @@ def test_files_go_up_as_documents_under_the_limit(bot, tmp_path, monkeypatch):
     assert [d["files"]["document"][0] for d in bot.api.of("sendDocument")[-2:]] == ["compare.html", "status.html"]
     bot.handle_update(msg("/csv gabc1234"))
     assert bot.api.of("sendDocument")[-1]["files"] == {"document": ("metrics.csv", b"run_id,source\nr1,gabc1234\n")}
+    # /compare sends its text as a message, since a caption holds 1024 characters, then the page opened on the runs.
+    bot.handle_update(msg("/compare a@demo b_nodw@demo"))
+    assert ("compare_page", (["a@demo", "b_nodw@demo"],), {}) in bot.router.calls
+    assert [m for m, _ in bot.api.calls if m.startswith("send")][-2:] == ["sendMessage", "sendDocument"]
+    assert last_reply(bot) == pre("compare_text ok")
+    doc = bot.api.of("sendDocument")[-1]
+    assert doc["files"] == {"document": ("compare.html", b"<html>compare</html>")} and doc["caption"] == "<b>demo: compare</b>"
     bot.handle_update(msg("/csv a;b"))
     assert last_reply(bot) == "usage: /csv [project] &lt;source&gt;"
     monkeypatch.setattr(tgbot, "MAX_DOCUMENT", 2**20)

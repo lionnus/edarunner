@@ -270,6 +270,17 @@ def last_areas(project: Project | None, db: Database, run_ids: list[str], max_de
     return out
 
 
+def compare_page(project: Project, db: Database, tick: list[str] | None = None,
+                 plotly_src: str = board.PLOTLY_URL) -> str:
+    """compare.html over every run of the project, with a mark on a retired run or a run of a retired batch; `tick`
+    names the runs it opens on, as `board.compare_html` takes them."""
+    retired = {b["batch"] for b in db.batches() if b.get("retired")}
+    runs = [{**r, "retired": int(r.get("state") == "retired" or r.get("batch") in retired)} for r in db.runs()]
+    return board.compare_html(runs, db.parameters(), mark_record(project, db.metrics()), plotly_src,
+                              last_areas(project, db, [r["run_id"] for r in runs]), step_names(project), tick,
+                              {n: m.better for n, m in project.metrics.items() if m.better})
+
+
 def run_heads(picked: list[Row]) -> list[str]:
     """The column name of each run: its name, with its stage and step."""
     col = names(picked)

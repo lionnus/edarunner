@@ -352,6 +352,26 @@ def test_compare_names_the_sources_when_they_differ(demo: Path, capsys) -> None:
     assert list(analysis.names(twins).values()) == ["a 20261001", "a 20261002_0900_a", "b"]
 
 
+def test_the_compare_page_holds_every_run_and_opens_on_the_runs_of_compare_html(demo: Path, capsys, tmp_path: Path) -> None:
+    old, gone, live = seed(demo, "a", "done", batch="old"), seed(demo, "b", "done", state="retired"), seed(demo, "c", "done")
+    with Database(demo / "data" / "edr.db") as db:
+        db.mark_batch_retired("old")
+    page = tmp_path / "page" / "compare.html"
+    code, _, err = edr(capsys, "compare", "c@demo", "a@old", "--html", str(page))
+
+    def block(name: str) -> object:
+        return json.loads(page.read_text().split(f'id="edr-{name}">')[1].split("</script>")[0])
+
+    # A retired run and a run of a retired batch are on the page with a mark.
+    assert code == 2 and err.endswith(f"wrote {page}\n") and f'<script src="{board.PLOTLY_URL}">' in page.read_text()
+    assert {r["run_id"]: r["retired"] for r in block("runs")} == {old: 1, gone: 1, live: 0}
+    assert block("tick") == {"runs": [live, old], "named": True}
+    assert block("better") == {"area_cell_um2": "lower", "wns_ns": "higher", "energy_nj": "lower"}
+    (page.parent / board.PLOTLY_FILE).write_text("// a local copy\n")
+    assert edr(capsys, "compare", live, "--html", str(page))[0] == 2
+    assert f'<script src="{board.PLOTLY_FILE}">' in page.read_text() and block("tick") == {"runs": [live], "named": True}
+
+
 def test_metrics_over_the_steps_of_one_run(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     _metric(demo, a, "wns_ns", 1, -0.3)

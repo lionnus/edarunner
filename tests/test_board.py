@@ -142,6 +142,7 @@ def _json_blocks(page):
 
 def _compare_input():
     rows = board_rows()[:3]
+    rows[0]["retired"] = 1
     parameters = [{"run_id": r["run_id"], "key": k, "value": v, "source": "config"}
               for r in rows for k, v in (("DW", "0"), ("LANES", "8"), ("note", "a</script>b"))]
     metrics = []
@@ -156,6 +157,9 @@ def _compare_input():
         metrics += [{"run_id": r["run_id"], "stage": "synth", "step": s, "task": "", "name": "wns_ns", "canonical": "",
                      "value": 0.05 + 0.01 * i if s == 2 else 0.04, "unit": "ns", "record": int(s == 2 and i != 2)}
                     for s in (2, 3)]
+        # A slack whose sign differs between the second and the third run.
+        metrics += [{"run_id": r["run_id"], "stage": "synth", "step": None, "task": "", "name": "slack_ns", "canonical": "",
+                     "value": (0.03, -0.01, 0.02)[i], "unit": "ns"}]
     return rows, parameters, metrics
 
 
@@ -164,13 +168,28 @@ def test_compare_html_without_plotly():
     page = board.compare_html(rows, parameters, metrics, None)
     assert "<script src=" not in page
     blocks = _json_blocks(page)
-    assert set(blocks) == {"edr-runs", "edr-parameters", "edr-metrics", "edr-areas", "edr-steps"}
+    assert set(blocks) == {"edr-runs", "edr-parameters", "edr-metrics", "edr-areas", "edr-steps", "edr-tick", "edr-better"}
     assert [r["run_id"] for r in blocks["edr-runs"]] == [RUN["run1"], RUN["fail"], RUN["done"]]
     assert blocks["edr-runs"][1]["state"] == "incomplete" and "core-h" in blocks["edr-runs"][0]
     assert blocks["edr-parameters"] == parameters and blocks["edr-metrics"] == metrics
+    assert blocks["edr-tick"] == {"runs": [RUN["done"]], "named": False} and blocks["edr-better"] == {}
     assert "</script>b" not in page.split("<h3>")[0].split("edr-parameters")[1]
     with_plotly = board.compare_html(rows, parameters, metrics, "plotly-2.35.2.min.js")
     assert '<script src="plotly-2.35.2.min.js"></script>' in with_plotly
+
+
+def test_compare_html_ticks_two_done_runs_of_the_newest_source_one_per_label():
+    # The run ids sort against the start times, so only a start time says which run is the newest.
+    runs = [board_row("done", label, phase, run_id=run_id, source=source, started=NOW - age)
+            for run_id, label, source, phase, age in (("r1", "a", "gnew", "done", 100), ("r2", "a", "gnew", "done", 200),
+                                                      ("r3", "b", "gnew", "done", 300), ("r4", "c", "gold", "done", 900),
+                                                      ("r5", "d", "gnew", "FAILED:pnr", 50))]
+    blocks = _json_blocks(board.compare_html(runs, [], [], None))
+    assert blocks["edr-tick"] == {"runs": ["r3", "r1"], "named": False}
+    # label@source in the URL hash names the run that db.pick takes, the newest run that ended done.
+    assert {r["run_id"]: r["pick"] for r in blocks["edr-runs"]} == {"r1": 1, "r2": 0, "r3": 1, "r4": 1, "r5": 1}
+    named = _json_blocks(board.compare_html(runs, [], [], None, tick=["r4", "r2"], better={"area": "lower"}))
+    assert named["edr-tick"] == {"runs": ["r4", "r2"], "named": True} and named["edr-better"] == {"area": "lower"}
 
 
 _NODE_STUB = r"""
@@ -180,12 +199,14 @@ const els = {}; const el = () => ({ innerHTML: '', value: '', hidden: false, che
 global.document = { getElementById: id => id in blocks ? { textContent: blocks[id] } : (els[id] ??= el()),
                     querySelector: s => (els[s] ??= el()) };
 global.matchMedia = () => ({ matches: false });
+global.location = { hash: process.argv[3] || '' };
 const PLOTS = {}; if (process.argv[2]) global.Plotly = { react: (id, data) => { PLOTS[id] = data; } };
 eval(page.match(/<script>([\s\S]*?)<\/script>/)[1]);
 console.log(JSON.stringify({ runs: els['#runs'].innerHTML, cmp: els['#cmp'].innerHTML, plots: els['#plots'].hidden,
                              traj: els['#traj'].innerHTML, sc: els['#sc'].innerHTML, area: els['#areat'].innerHTML,
                              areas: els['#areas'].textContent, ad: els['#ad'].innerHTML, pm: els['#pm'].innerHTML,
-                             parts: (PLOTS.phasep || []).map(t => t.name) }));
+                             parts: (PLOTS.phasep || []).map(t => t.name), folded: !els['#rd'].open,
+                             lost: els['#lost'].textContent }));
 """
 
 
@@ -196,34 +217,58 @@ def test_compare_script_runs_without_plotly(tmp_path):
                            "rows": [["<top>", 0, 100.0 + i], ["i_top", 1, 90.0 + i], ["i_top/x", 2, 50.0 * (i + 1)]]}
              for i, r in enumerate(rows[:2])}
     page = tmp_path / "compare.html"
-    page.write_text(board.compare_html(rows, parameters, metrics, None, areas, {3: "synth"}))
-    out = subprocess.run(["node", "-e", _NODE_STUB, page.as_posix()], capture_output=True, text=True, timeout=60)
-    assert out.returncode == 0, out.stderr
-    got = json.loads(out.stdout)
+    page.write_text(board.compare_html(rows, parameters, metrics, None, areas, {3: "synth"}, [RUN["run1"], RUN["fail"]],
+                                       {"area_cell_um2": "lower", "slack_ns": "higher", "window_fs": "higher"}))
+
+    def run(plotly: str = "", hash_: str = "") -> dict:
+        out = subprocess.run(["node", "-e", _NODE_STUB, page.as_posix(), plotly, hash_], capture_output=True, text=True,
+                             timeout=60)
+        assert out.returncode == 0, out.stderr
+        return json.loads(out.stdout)
+
+    got = run()
     assert got["plots"] is True
     assert "<th>DW</th>" in got["runs"] and "a&lt;/script&gt;b" in got["runs"] and RUN["fail"] in got["runs"]
-    # One filter box per column, and the first two runs ticked.
-    assert got["runs"].count('<input class="f"') == 10 and got["runs"].count(" checked>") == 2
-    assert got["cmp"].startswith("<tr><th>metric</th><th>c</th><th>b_nodw</th></tr>")
-    # A row carries the project's metric name, and a value prints as board.num prints it.
-    assert ('<td>area_cell_um2</td><td>1031 <small>synth 3</small></td>'
-            '<td>1032 <small>synth 3</small> <small class="up">+0.1%</small></td>') in got["cmp"]
-    assert "<td>power_A[k_small]</td><td>0.2</td><td>0.3 <small class=\"up\">+50.0%</small>" in got["cmp"]
-    assert "<td>window_fs[k_small]</td><td>48213000001</td><td>48213000002 <small class=\"up\">+0.0%</small>" in got["cmp"]
-    assert "<tr><td>wns_ns</td><td>0.06 <small>synth 2</small></td><td> <small>missing</small></td></tr>" in got["cmp"]
-    assert "design__instance__area" not in got["cmp"]
+    # One filter box per column, the named runs ticked, the runs table folded, and the retired run marked.
+    assert got["runs"].count('<input class="f"') == 10 and got["runs"].count(" checked>") == 2 and got["folded"]
+    assert f'<span title="{RUN["done"]}">a</span> <small>retired</small>' in got["runs"]
+    # A name may break after an underscore, and the header of a run is label@source.
+    assert "<td>area_<wbr>cell_<wbr>um2 <small>" in got["cmp"] and "<th>b_<wbr>nodw<wbr><small>@gaaa111</small></th>" in got["cmp"]
+    cmp = got["cmp"].replace("<wbr>", "")
+    assert cmp.startswith("<tr><th>metric</th><th>c<small>@gaaa111</small></th><th>b_nodw<small>@gaaa111</small></th></tr>")
+    # The rows go by task, the metrics without a task first, each with its unit.
+    assert re.findall(r'<tr(?: class="task")?><td[^>]*>(.*?)</td>', cmp) == [
+        "flow", "area_cell_um2 <small>um2</small>", "slack_ns <small>ns</small>", "wns_ns <small>ns</small>", "k_small",
+        "power_A <small>W</small>", "power_B <small>W</small>", "power_total <small>W</small>", "window_fs <small>fs</small>"]
+    # A value prints as board.num prints it, and only a metric with `better` gets a colour: red for worse, green for
+    # better. Across a sign change, the difference takes the place of the percent.
+    assert ('<td>area_cell_um2 <small>um2</small></td><td>1031 <small>synth 3</small></td>'
+            '<td>1032 <small>synth 3</small> <small class="worse">+0.1%</small></td>') in cmp
+    assert '<td>slack_ns <small>ns</small></td><td>-0.01</td><td>0.02 <small class="better">+0.03</small></td>' in cmp
+    assert '<td>power_A <small>W</small></td><td>0.2</td><td>0.3 <small>+50.0%</small></td>' in cmp
+    assert ('<td>window_fs <small>fs</small></td><td>48213000001</td>'
+            '<td>48213000002 <small class="better">+0.0%</small></td>') in cmp
+    assert '<td>wns_ns <small>ns</small></td><td>0.06 <small>synth 2</small></td><td> <small>missing</small></td>' in cmp
+    assert "design__instance__area" not in cmp
     assert got["traj"] == '<option value="area_cell_um2">area_cell_um2</option><option value="wns_ns">wns_ns</option>'
     assert got["sc"].startswith('<option value="label" selected>label</option>')
     assert got["pm"].startswith('<option value="area_cell_um2" selected>')
     assert got["ad"] == '<option value="1" selected>1</option><option value="2">2</option>'
     assert "<tr><td>i_top</td><td>91</td><td>90</td><td>-1</td><td>-1.1%</td></tr>" in got["area"]
     assert "<tr><td>&lt;top&gt;</td><td>101</td><td>100</td><td>-1</td><td>-1.0%</td></tr>" in got["area"]
-    # The area selects follow the board order, where the second run comes first.
+    # The area delta opens on the ticked run with an area report, then on the next run with one.
     assert got["areas"] == "A: synth step 3, reports/3/1.rpt; B: synth step 3, reports/3/0.rpt"
     # With Plotly, the power parts are the metrics whose canonical name is power__* without power__total.
-    out = subprocess.run(["node", "-e", _NODE_STUB, page.as_posix(), "plotly"], capture_output=True, text=True, timeout=60)
-    assert out.returncode == 0, out.stderr
-    assert json.loads(out.stdout)["parts"] == ["power_A", "power_B"]
+    assert run("plotly")["parts"] == ["power_A", "power_B"]
+    # The URL hash ticks its runs in its order and names a handle that no run has.
+    got = run("", "#runs=b_nodw@gaaa111,a@gaaa111,zz@x")
+    assert got["cmp"].replace("<wbr>", "").startswith(
+        "<tr><th>metric</th><th>b_nodw<small>@gaaa111</small></th><th>a<small>@gaaa111</small></th></tr>")
+    assert got["lost"] == "no run is named zz@x" and got["folded"] and got["runs"].count(" checked>") == 2
+    # Without named runs, the runs table is open on the default ticks.
+    page.write_text(board.compare_html(rows, parameters, metrics, None, areas))
+    got = run()
+    assert not got["folded"] and got["runs"].count(" checked>") == 1 and got["lost"] == ""
 
 
 def test_rows_from_db(tmp_path):

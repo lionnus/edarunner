@@ -383,6 +383,9 @@ class Metric:
         shown="unset")
     optional: bool = doc("a file without the number gives no row instead of a failed one: no match of `regex`, "
                          "no row of `csv` that matches `where`, no key of `json`", False)
+    better: str = doc("`\"lower\"` or `\"higher\"`: the direction in which the number improves, such as lower for an area "
+                      "and higher for a slack. compare.html colours a change that way green and the other way red; a "
+                      "metric without the key gets no colour", "", shown="unset")
 
     def verdict(self, value: float | None) -> str | None:
         """`FAIL` when `value` breaks the `pass` rule, `pass` when it meets it; None without a rule or a value."""

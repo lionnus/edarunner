@@ -259,25 +259,26 @@ class TelegramBot(Notifier):
             log.debug("telegram: %s", e)
 
     def _reply(self, r: Reply, thread: int | None = None) -> bool:
-        """Send a reply under the bold first line, into the thread of the command.
+        """Send a reply under the bold first line, into the thread of the command: the body as a message, or with files
+        as the caption of each. A <pre> body goes as a message before the files, since a caption holds 1024 characters.
 
         True when every part went out; a file over MAX_DOCUMENT goes out as a line that says so.
         """
         ok, name = True, r.project or self.project.project
+        if r.kind == "pre" or not r.documents:
+            body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
+            full = fmt.head(name, r.title) + "\n" + body
+            ok = self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full),
+                            markup=r.markup, thread_id=thread) is not None
+        caption = fmt.head(name, r.title) + (f"\n{fmt.esc(r.body)}" if r.body and r.kind != "pre" else "")
         for d in r.documents:
             if len(d.data) > MAX_DOCUMENT:
                 ok = False
                 self._reply(Reply(r.title, f"{d.name}: {len(d.data) / 2**20:.1f} MB is over the limit of "
                                            f"{MAX_DOCUMENT // 2**20} MB", project=r.project), thread)
                 continue
-            caption = fmt.head(name, r.title) + (f"\n{fmt.esc(r.body)}" if r.body else "")
             ok &= self._call(self.api.send_document, self.chat_id, d.name, d.data, caption, thread_id=thread) is not None
-        if r.documents:
-            return ok
-        body = fmt.pre(r.body) if r.kind == "pre" else r.body if r.kind == "html" else fmt.esc(r.body)
-        full = fmt.head(name, r.title) + "\n" + body
-        return self._call(self.api.send_message, self.chat_id, full if r.kind == "pre" else fmt.fit(full),
-                          markup=r.markup, thread_id=thread) is not None
+        return ok
 
     def _press(self, q: dict) -> None:
         """Answer a button press and rewrite its alert."""

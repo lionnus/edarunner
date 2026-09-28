@@ -79,6 +79,7 @@ regex = '^i_top\s+(\S+)'
 unit = "um2"
 canonical = "design__instance__area"
 record = { stage = "pnr", from = 5 }
+better = "lower"
 
 # qor.rpt has one block per scenario and path group, the hold scenario
 # func_fast first. Each match starts at a block of the setup scenario
@@ -91,6 +92,7 @@ regex = '''^Scenario\s+'func_slow'\n(?:.*\n)*?Critical Path Slack:\s+(\S+)'''
 reduce = "min"
 unit = "ns"
 canonical = "timing__setup__ws"
+better = "higher"
 
 # A slack can print as -0.000 while paths still fail, so the pass rule
 # sits on the count of failing setup paths.
@@ -121,3 +123,4 @@ stage = "power"
 file = "{task_dir}/power/phases.json"
 python = "hooks/energy.py:energy_nj"
 unit = "nJ"
+better = "lower"

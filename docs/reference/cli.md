@@ -441,7 +441,7 @@ line with the fields that differ and up to five runs of each set.
 ## compare
 
 ```
-edr compare [--json] [--instances] [--metric NAME] [--task TASK] [--part PART] [--depth N] [--instance GLOB] [--csv] [--unit {kGE,MGE}] [--stage S] [--step N] [--ref H] [--base H] HANDLE [HANDLE ...]
+edr compare [--json] [--instances] [--metric NAME] [--task TASK] [--part PART] [--depth N] [--instance GLOB] [--csv] [--unit {kGE,MGE}] [--stage S] [--step N] [--ref H] [--base H] [--html FILE] HANDLE [HANDLE ...]
 ```
 
 Puts two or more runs side by side. Without --instances, it prints one row
@@ -497,6 +497,11 @@ the runs gives the value of each run: the config, the build tag, an
 override, vars.&lt;name&gt; or nested.&lt;name&gt;, as the launch or the import
 recorded it. --json lists them under parameters.
 
+--html FILE also writes compare.html to FILE, the page the watcher
+writes to data/board/, opened on the runs of the handles with the
+first as the base of every percent. It loads Plotly from
+plotly.min.js next to FILE when that file exists, else from the CDN.
+
 | Flag | Meaning |
 |---|---|
 | `HANDLE ...` | label@batch, label@source, a run id prefix, or #n from the last board |
@@ -513,6 +518,7 @@ recorded it. --json lists them under parameters.
 | `--step N` | every run at this step number |
 | `--ref H` | the runs as rows, with the percent against this run: label@batch, label@source, a run id prefix, or #n from the last board |
 | `--base H` | the runs as rows, with the percent against this run: label@batch, label@source, a run id prefix, or #n from the last board |
+| `--html FILE` | also write compare.html, opened on these runs, to FILE |
 
 | Exit | Meaning |
 |---|---|

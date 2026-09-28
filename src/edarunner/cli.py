@@ -488,15 +488,23 @@ class Actions:
         return _metrics_csv(analysis.mark_record(self.c.project, self.c.db.metrics(sources=[source]))).encode()
 
     def compare_text(self, handles: list[str]) -> str:
-        """The rows of `edr compare`, one block per metric: its name, then one `name value (stage step)` line per
-        run, the name of `analysis.names`; the runs that lack the step of record at the end."""
+        """The rows of `edr compare` for one message, one block per metric and the metrics without a task first: the
+        metric and its unit, then one `name value (stage step) percent` line per run, with the name of
+        `analysis.names` and the percent against the first run. The runs that lack the step of record close the text,
+        and the blocks that do not fit give way to a line `… N more rows`."""
         runs = [self.c.resolve(h) for h in handles]
         rows, missing = analysis.side_by_side(self.c.project, runs, self.c.db.metrics(run_ids=[r["run_id"] for r in runs]))
-        col, out = analysis.names(runs), []
+        col, first, blocks = analysis.names(runs), runs[0]["run_id"], []
         for r in rows:
-            out.append((r["metric"] + (f"[{r['task']}]" if r["task"] else ""))[:40])
-            out += board.cols(["", ""], [["  " + col[i], analysis.cell(r, i)] for i in col]).splitlines()[1:]
-        return "\n".join(out + analysis.missing_lines(missing)) or "no metrics"
+            name, unit = r["metric"] + (f"[{r['task']}]" if r["task"] else ""), f" {r['unit']}" if r["unit"] else ""
+            lines = board.cols(["", "", ""], [["  " + col[i], analysis.cell(r, i), "" if i == first else
+                                              analysis._pct(r["value"].get(i), r["value"].get(first)) or ""] for i in col])
+            blocks.append("\n".join([name[:40 - len(unit)] + unit, *lines.splitlines()[1:]]))
+        return tgfmt.first_rows(blocks, analysis.missing_lines(missing)) or "no metrics"
+
+    def compare_page(self, handles: list[str]) -> bytes:
+        """compare.html over every run of the project, opened on the runs of `handles`."""
+        return analysis.compare_page(self.c.project, self.c.db, [self.c.resolve(h)["run_id"] for h in handles]).encode()
 
     def metric_text(self, name: str, source: str | None) -> str:
         """`label source step value` per metric row."""
@@ -913,6 +921,10 @@ def cmd_compare(c: Ctx, a: argparse.Namespace) -> int:
             differ = analysis.ranked(rows, ids, ref, base)
             c.emit(shown(analysis.ranked_view(runs, ids, rows, ref, base, differ, missing)),
                    {**data, "ref": ref, "base": base, "ranks_differ": differ})
+    if a.html:
+        page = Path(a.html)
+        config.save_text(page, analysis.compare_page(c.project, c.db, ids, board.plotly_src(page.parent)))
+        print(f"wrote {page}", file=sys.stderr)
     return Exit.DONE if rows and not missing else Exit.NOTHING
 
 
@@ -2160,6 +2172,11 @@ def _parser() -> argparse.ArgumentParser:
         the runs gives the value of each run: the config, the build tag, an
         override, vars.<name> or nested.<name>, as the launch or the import
         recorded it. --json lists them under parameters.
+
+        --html FILE also writes compare.html to FILE, the page the watcher
+        writes to data/board/, opened on the runs of the handles with the
+        first as the base of every percent. It loads Plotly from
+        plotly.min.js next to FILE when that file exists, else from the CDN.
         """, exits={Exit.NOTHING: "no row to compare, or a run lacks its step of record or the --step"})
     s.add_argument("handles", nargs="+", metavar="HANDLE", help=HANDLE)
     s.add_argument("--instances", action="store_true", help="the instances of one metric side by side")
@@ -2175,6 +2192,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--step", type=int, metavar="N", help="every run at this step number")
     s.add_argument("--ref", metavar="H", help="the runs as rows, with the percent against this run: " + HANDLE)
     s.add_argument("--base", metavar="H", help="the runs as rows, with the percent against this run: " + HANDLE)
+    s.add_argument("--html", metavar="FILE", help="also write compare.html, opened on these runs, to FILE")
     s = command("runtime", "stage, step and task times", """
         With one handle, runtime prints the times of one run: a row per stage
         attempt from the stage_runs table, a row per step under it, and one
