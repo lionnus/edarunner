@@ -598,16 +598,16 @@ def test_metrics_and_export(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--step", "3")
     assert code == 0 and "wns_ns" in out
     assert edr(capsys, "metrics", "--source", "abc")[0] == 2  # exact match, not a prefix
-    exp = tmp_path / "exp"
-    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--out", str(exp), "--dry-run")
-    assert code == 0 and not exp.exists() and "reports/3/area.rpt" in out
-    code, out, _ = edr(capsys, "--json", "export", "--source", "abc1234", "--out", str(exp))
+    exp = demo / "exports" / "abc1234"
+    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--out", "exports/abc1234", "--dry-run")
+    assert code == 0 and not exp.exists() and "metrics.csv" in out and "area.rpt" not in out
+    code, out, _ = edr(capsys, "--json", "export", "--source", "abc1234", "--out", "exports/abc1234", "--files", "--with", "reports/*/*.rpt")
     manifest = json.loads(out)["data"]
-    assert code == 0 and manifest == json.loads((exp / "manifest.json").read_text()) and (exp / "a" / "reports" / "3" / "area.rpt").exists()
+    assert code == 0 and manifest == json.loads((exp / "manifest.json").read_text()) and (exp / a / "reports" / "3" / "area.rpt").exists()
     code, _, err = edr(capsys, "export", "--source", "abc1234", "--out", str(exp))
     assert code == 1 and "not empty" in err
     with Database(demo / "data" / "edr.db") as db:
-        assert [e["kind"] for e in db.events()] == ["export"]
+        assert [(e["kind"], e["text"]) for e in db.events()] == [("export", f"abc1234 -> {exp}")]
 
 
 def test_two_runs_of_a_label_in_one_batch_are_named_apart(demo: Path, capsys, tmp_path: Path) -> None:
@@ -1411,8 +1411,8 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     assert edr(capsys, *base, "--results", str(other))[0] == 1  # never replaces a linked tree
     assert edr(capsys, "continue", "ref@imported", "--stage", "power", "--tasks", "k_small", "--on", "local", "--dry-run")[0] == 1
     exp = tmp_path / "exp"
-    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--out", str(exp))
-    assert code == 0 and (exp / "ref" / "reports" / "3" / "area.rpt").is_file()
+    code, out, _ = edr(capsys, "export", "--source", "abc1234", "--out", str(exp), "--files")
+    assert code == 0 and (exp / run_id / "reports" / "3" / "area.rpt").is_file()
 
 
 def test_import_records_what_it_is_told(demo: Path, capsys, tmp_path: Path) -> None:
