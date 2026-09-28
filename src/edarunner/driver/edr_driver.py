@@ -174,6 +174,9 @@ class Driver(object):
             spec = json.load(f)
         self.spec = spec
         self.run_id = spec["run_id"]
+        self.project = spec["project"]
+        # The lease key of the run: a run id is unique in its project only.
+        self.key = "%s.%s" % (self.project, self.run_id)
         self.root = spec["root"]
         self.state_file = spec["state_file"]
         self.queue_dir = spec["queue_dir"]
@@ -479,7 +482,7 @@ class Driver(object):
         # type: (dict, str, int, object) -> float
         """Write `seats` lease files <key>.<n> by a temporary file and a rename; return their time."""
         ts = time.time()
-        body = json.dumps({"run_id": self.run_id, "key": key, "stage": self.hb.get("stage"), "pid": os.getpid(),
+        body = json.dumps({"project": self.project, "run_id": self.run_id, "key": key, "stage": self.hb.get("stage"), "pid": os.getpid(),
                            "host": self.spec.get("host"), "ts": ts,
                            "budget_s": float(hours) * 3600 if hours is not None else None})
         d = tool["leases"]
@@ -504,7 +507,7 @@ class Driver(object):
                     pass
 
     def gate(self, st):
-        """Wait until the stage's tools have the seats, and lease them under <run_id>.<stage>."""
+        """Wait until the stage's tools have the seats, and lease them under <project>.<run_id>.<stage>."""
         tools = st.get("tools")
         if not tools:
             return
@@ -513,7 +516,7 @@ class Driver(object):
         t0, last = time.time(), None
         gate_max = float(self.limits.get("gate_max_s") or 0)
         while True:
-            why = self.take(tools, self.run_id + "." + name, st.get("budget") or {})
+            why = self.take(tools, self.key + "." + name, st.get("budget") or {})
             if why != last:
                 sys.stderr.write("gate %s: %s\n" % (name, "wait for " + why if why else "open"))
                 last = why
@@ -664,7 +667,7 @@ class Driver(object):
             sys.stderr.write("after_each skipped for %s: no dir\n" % tid)
         elif after:
             self.run_wait(after.replace("{task_dir}", task.get("dir") or ""), cwd, log)
-        self.release("%s.%s.%s" % (self.run_id, st["name"], tid))
+        self.release("%s.%s.%s" % (self.key, st["name"], tid))
         streak = int(self.limits.get("streak") or 0)
         with self.lock:
             c = self.hb["counts"]
@@ -746,7 +749,7 @@ class Driver(object):
                         self.hb["counts"]["skipped"] += 1
                     self.record_task(tid, "skipped")
                     continue
-                key = "%s.%s.%s" % (self.run_id, name, tid)
+                key = "%s.%s.%s" % (self.key, name, tid)
                 why = self.take(task.get("tools") or tools, key, task.get("budget") or budget)
                 with self.lock:
                     self.hb["gate"] = why
@@ -791,7 +794,7 @@ class Driver(object):
             try:
                 if "tasks" in st:
                     # A task takes its own lease; the stage lease only opened the gate.
-                    self.release(self.run_id + "." + st["name"])
+                    self.release(self.key + "." + st["name"])
                     self.record_stage(st["name"], "running", attempt=1, started=int(time.time()), ended=None, exit=None)
                     self.run_group(st)
                     self.record_stage(st["name"], "done", ended=int(time.time()), exit=0)

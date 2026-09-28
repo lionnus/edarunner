@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, board, checkout, collect, config, hosts, sync
+from . import __version__, board, checkout, collect, config, home, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, NotFound
@@ -112,13 +112,8 @@ def _budget(base: Budget, over: Budget | None) -> dict[str, Any]:
 def _tools(project: Project, needs: dict[str, int], values: dict[str, object]) -> list[dict[str, Any]]:
     """The gate of a stage or task: name, seats, the rendered probe argv and the lease directory of each needed tool with a probe."""
     return [{"name": n, "seats": seats, "probe": [config.render(a, values) for a in project.site.tools[n].probe],
-             "leases": str(lease_dir(project.state_dir, n))}
+             "leases": str(home.root() / "leases" / n)}
             for n, seats in needs.items() if project.site.tools[n].probe]
-
-
-def lease_dir(state: Path, tool: str) -> Path:
-    """The directory of the seat leases of one tool, shared by every run of the project."""
-    return Path(state) / "leases" / tool
 
 
 def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:

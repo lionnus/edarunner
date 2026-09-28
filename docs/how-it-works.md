@@ -33,9 +33,11 @@ The **shared filesystem** is a directory that the head node and every
 host mount at the same path: the state directory, `~/.edr/<project>` by
 default. It holds the copies of the driver, one spec per run that tells
 the driver what to do, and the heartbeat file that the driver writes
-back. The stop and keep files, the task queues and the licence-seat
-leases lie there too. The head node never needs a connection to a
-running driver; it reads the files.
+back. The stop and keep files and the task queues lie there too. The
+licence-seat leases lie in `~/.edr/leases/`, which the drivers of all
+your projects share, so the hosts must mount `~/.edr` as well (`EDR_HOME`
+moves it). The head node never needs a connection to a running driver;
+it reads the files.
 
 An alert leaves the head node over outbound HTTPS or SMTP, to Telegram,
 ntfy or mail. None of them is required.
@@ -174,9 +176,11 @@ A stage whose `needs.tools` names a tool with a probe waits at a gate
 first, with the phase `gate:<stage>`. The driver runs the probe, takes
 the first number as the free seats, and subtracts the seats that other
 drivers leased in the last `lease_s` seconds. When enough seats are
-left, it writes one lease file per seat under `<state_dir>/leases/<tool>/`
+left, it writes one lease file per seat under `~/.edr/leases/<tool>/`
 by a rename, and counts again; when an older lease of another run now
-leaves too few seats, it backs off. Of two drivers that read the same
+leaves too few seats, it backs off. The directory is the same for every
+project of the user, and a lease file starts with the project and the
+run id, so the drivers of two projects never take the same last seat. Of two drivers that read the same
 free seat, the later one therefore waits (`Driver.take`). The driver
 polls every 5 seconds up to `gate_max_s` and then fails the stage with
 exit 4. It removes its leases when the stage ends, on every exit path
@@ -243,8 +247,8 @@ text, and the watcher goes on with the last config that loaded: it
 still reads the heartbeats, alerts and collects, but it resumes and
 launches nothing until the file loads again (`watch.run_forever`). edr
 never deletes a file of yours on its own:
-the only files the watcher removes are expired seat leases in the state
-directory. One cycle does this, in order:
+the only files the watcher removes are expired seat leases of its
+project in `~/.edr/leases/`. One cycle does this, in order:
 
 1. It reads the heartbeat of every run in every batch without a
    `RETIRED` file, and writes the runs, their stages and steps and a
@@ -284,9 +288,9 @@ directory. One cycle does this, in order:
    directory or command line of the process holds `/<project>/<run_id>`
    under the safety marker. A process without `EDR_RUN_ID` is owned
    when its working directory or command line holds the safety marker.
-8. It removes a seat lease whose run is dead, retired or has left the
-   stage, or that is older than the stage budget, and writes a `lease`
-   event with the reason (`watch.sweep_leases`).
+8. It removes a seat lease of this project whose run is dead, retired
+   or has left the stage, or that is older than the stage budget, and
+   writes a `lease` event with the reason (`watch.sweep_leases`).
 9. A queued job starts when a host now fits it, one per batch per cycle.
 10. It writes `data/board/`, edits the pinned Telegram board, sends the
     daily digest when it is due, and writes `<state_dir>/watch.json`,

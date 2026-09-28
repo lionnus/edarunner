@@ -95,7 +95,7 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     assert "FIRST_STAGE={checkpoint}" in synth["resume"] and synth["cwd"] == root
     assert synth["needs"] == {"cores": 1, "disk_gb": 0.1} and synth["steps"] == ["setup", "analyze", "elaborate", "synth"]
     assert synth["tools"] == [{"name": "demo", "seats": 1, "probe": ["bash", f"{root}/flow/seats.sh"],
-                               "leases": f"{tmp_path}/state/leases/demo"}]
+                               "leases": f"{tmp_path}/.edr/leases/demo"}]
     assert synth["budget"] == {"hours": 1, "disk_gb": 1} and synth["retry"] == {"match": "licen[cs]e", "wait_s": 1, "max": 2}
     assert "retry" not in pnr and "tools" not in export and "cmd" not in power
     assert power["parallel"] == 2 and power["after_each"] == "rm -f {task_dir}/wave.vcd"
@@ -134,7 +134,7 @@ def test_plan_reports_problems(env) -> None:
     assert b.problems == ["overrides given, but no stage of the job uses {overrides}"]
 
 
-def test_plan_needs_the_tools_of_the_host(env) -> None:
+def test_plan_needs_the_tools_of_the_host(env, tmp_path: Path) -> None:
     project, batch, ssh, db = env
     synth_only(batch)
     project.stages["synth"].cmd += " TOOL={tool.demo.version}"
@@ -155,7 +155,7 @@ def test_plan_needs_the_tools_of_the_host(env) -> None:
     (p,) = launch.plan(project, batch, ssh, db, date=DATE)
     small, big = p.spec["stages"][0]["tasks"]
     assert "tools" not in small and big["tools"] == [{"name": "demo", "seats": 2, "probe": ["bash", f"{p.root}/flow/seats.sh"],
-                                                               "leases": str(project.state_dir / "leases" / "demo")}]
+                                                               "leases": str(tmp_path / ".edr" / "leases" / "demo")}]
 
 
 def test_build_tag_default_and_hook(env, tmp_path: Path) -> None:
@@ -235,13 +235,13 @@ def test_launch_local_runs_synth_to_done(env, tmp_path: Path) -> None:
     assert Path(spec["driver"]).parent == tmp_path / "state" / "bin" and Path(spec["driver"]).is_file()
     assert [s["name"] for s in spec["stages"]] == ["synth"]
     assert spec["record"]["edarunner"] == edarunner.__version__ and len(spec["record"]["driver_sha256"]) == 64
-    assert (tmp_path / "state" / "leases" / "demo").is_dir()
+    assert (tmp_path / ".edr" / "leases" / "demo").is_dir()
     assert (Path(row["root"]) / "flow" / "flow.sh").exists()
     assert db.run(run_id)["state"] == "running" and db.batches()[0]["batch"] == "demo"
     assert [e["kind"] for e in db.events(run_id=run_id)] == ["launch"]
     hb = wait_for({"state_file": str(state / f"{run_id}.json")}, lambda h: h["phase"] == "done", timeout=60)
     assert hb["exit"] == 0 and (Path(row["root"]) / "reports" / "3" / "qor.rpt").exists()
-    assert list((tmp_path / "state" / "leases" / "demo").iterdir()) == []
+    assert list((tmp_path / ".edr" / "leases" / "demo").iterdir()) == []
     again = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path / "again"))
     assert not again[0]["started"] and "already launched" in again[0]["problems"][0]
 

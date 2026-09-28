@@ -141,7 +141,7 @@ class Ctx:
         name = name or os.environ.get("EDR_BATCH")
         if name:
             return name
-        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name not in ("bin", "leases")]
+        dirs = [p for p in self.project.state_dir.glob("*") if p.is_dir() and p.name != "bin"]
         if not dirs:
             raise Refuse(f"no batch given and no batch directory in {self.project.state_dir}")
         return max(dirs, key=lambda p: p.stat().st_mtime).name

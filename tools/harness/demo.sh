@@ -83,6 +83,8 @@ wait_for() {  # label regex timeout_s
 
 run_demo() {
     make_project
+    # The jobs see WORK only, so the seat leases of the user root must lie there too.
+    export EDR_HOME=$WORK/edr-home
     cd "$WORK/demo"
     "$EDR" check && pass "edr check" || fail "edr check"
     "$EDR" checkout HEAD >/dev/null

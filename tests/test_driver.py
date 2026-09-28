@@ -354,18 +354,18 @@ def _load_driver():
     return mod
 
 
-def _two_drivers(tmp_path: Path, free: int):
+def _two_drivers(tmp_path: Path, free: int, projects=("demo", "demo"), run_ids=(RUN_ID, RUN_ID + "_b")):
     """Two drivers of two runs that share one probe value and one lease directory."""
     mod = _load_driver()
     seats = tmp_path / "seats"
     seats.write_text(f"{free} 10\n")
-    tool = {"name": "sim", "seats": 1, "probe": ["cat", str(seats)], "leases": str(tmp_path / "state" / "leases" / "sim")}
+    tool = {"name": "sim", "seats": 1, "probe": ["cat", str(seats)], "leases": str(tmp_path / ".edr" / "leases" / "sim")}
     out = []
-    for run_id in (RUN_ID, RUN_ID + "_b"):
+    for project, run_id in zip(projects, run_ids):
         spec = render_spec(tmp_path, stages=("synth",))
-        spec["run_id"] = run_id
-        spec["state_file"] = str(Path(spec["state_file"]).with_name(run_id + ".json"))
+        spec.update(project=project, run_id=run_id, state_file=str(tmp_path / "state" / project / f"{run_id}.json"))
         path = Path(spec["state_file"]).with_suffix(".spec.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(spec))
         d = mod.Driver(str(path))
         d.hb["stage"] = "synth"
@@ -375,19 +375,26 @@ def _two_drivers(tmp_path: Path, free: int):
 
 def test_second_driver_waits_for_a_seat_the_first_leased(tmp_path: Path) -> None:
     (a, b), tools, leases = _two_drivers(tmp_path, free=1)
-    assert a.take(tools, a.run_id + ".synth", {"hours": 2}) is None
-    lease = json.loads((leases / f"{RUN_ID}.synth.0").read_text())
-    assert (lease["run_id"], lease["stage"], lease["pid"], lease["host"], lease["budget_s"]) == (
-        RUN_ID, "synth", os.getpid(), "local", 7200.0)
-    assert b.take(tools, b.run_id + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
-    assert os.listdir(leases) == [f"{RUN_ID}.synth.0"]
+    assert a.take(tools, a.key + ".synth", {"hours": 2}) is None
+    lease = json.loads((leases / f"demo.{RUN_ID}.synth.0").read_text())
+    assert (lease["project"], lease["run_id"], lease["stage"], lease["pid"], lease["host"], lease["budget_s"]) == (
+        "demo", RUN_ID, "synth", os.getpid(), "local", 7200.0)
+    assert b.take(tools, b.key + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
+    assert os.listdir(leases) == [f"demo.{RUN_ID}.synth.0"]
     a.release()
-    assert b.take(tools, b.run_id + ".synth", {}) is None and os.listdir(leases) == [f"{RUN_ID}_b.synth.0"]
+    assert b.take(tools, b.key + ".synth", {}) is None and os.listdir(leases) == [f"demo.{RUN_ID}_b.synth.0"]
+
+
+def test_a_run_of_another_project_with_the_same_id_waits_too(tmp_path: Path) -> None:
+    (a, b), tools, leases = _two_drivers(tmp_path, free=1, projects=("alpha", "beta"), run_ids=(RUN_ID, RUN_ID))
+    assert a.take(tools, a.key + ".synth", {}) is None
+    assert b.take(tools, b.key + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
+    assert os.listdir(leases) == [f"alpha.{RUN_ID}.synth.0"]
 
 
 def test_the_later_of_two_drivers_that_saw_one_seat_backs_off(tmp_path: Path) -> None:
     (a, b), tools, leases = _two_drivers(tmp_path, free=1)
-    assert a.take(tools, a.run_id + ".synth", {}) is None
+    assert a.take(tools, a.key + ".synth", {}) is None
     real, calls = b.others, []
 
     def blind(tool, key, now):
@@ -396,16 +403,16 @@ def test_the_later_of_two_drivers_that_saw_one_seat_backs_off(tmp_path: Path) ->
         return [] if len(calls) == 1 else real(tool, key, now)
 
     b.others = blind
-    assert b.take(tools, b.run_id + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
-    assert os.listdir(leases) == [f"{RUN_ID}.synth.0"] and b.leases == {}
+    assert b.take(tools, b.key + ".synth", {}) == "sim: 1 free, 1 held by others, 1 needed"
+    assert os.listdir(leases) == [f"demo.{RUN_ID}.synth.0"] and b.leases == {}
 
 
 def test_a_lease_older_than_lease_s_no_longer_counts(tmp_path: Path) -> None:
     (a, b), tools, leases = _two_drivers(tmp_path, free=1)
-    a.take(tools, a.run_id + ".synth", {})
-    path = leases / f"{RUN_ID}.synth.0"
+    a.take(tools, a.key + ".synth", {})
+    path = leases / f"demo.{RUN_ID}.synth.0"
     path.write_text(json.dumps(dict(json.loads(path.read_text()), ts=time.time() - 601)))
-    assert b.take(tools, b.run_id + ".synth", {}) is None
+    assert b.take(tools, b.key + ".synth", {}) is None
 
 
 def test_leases_vanish_at_stage_end(tmp_path: Path) -> None:
@@ -413,7 +420,7 @@ def test_leases_vanish_at_stage_end(tmp_path: Path) -> None:
     leases = Path(spec["stages"][0]["tools"][0]["leases"])
     proc = start(spec)
     wait_for(spec, lambda h: h["phase"] == "stage:synth")
-    assert os.listdir(leases) == [f"{RUN_ID}.synth.0"]
+    assert os.listdir(leases) == [f"demo.{RUN_ID}.synth.0"]
     wait_for(spec, lambda h: h["phase"] == "stage:export")
     assert os.listdir(leases) == []
     assert finish(proc, spec)[0] == 0
@@ -495,7 +502,7 @@ def test_runtime_failure_ends_the_run_before_a_seat(tmp_path: Path) -> None:
     assert (rc, hb["phase"], hb["exit"]) == (5, "FAILED:runtime", 5)
     assert list(hb["stages"]) == ["setup"] and not (root / "log" / "synth.log").exists()
     assert (hb["stages"]["setup"]["status"], hb["stages"]["setup"]["exit"]) == ("failed", 3)
-    assert not (tmp_path / "state" / "leases" / "demo").exists()
+    assert not (tmp_path / ".edr" / "leases" / "demo").exists()
     assert "broken" in (root / "log" / "setup.log").read_text() and not (root / ".edr-runtime").exists()
 
 

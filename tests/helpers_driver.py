@@ -45,7 +45,7 @@ def render_spec(tmp_path: Path, stages=STAGES, tasks=("k_small", "k_big"), confi
     if not (root / "flow").exists():
         shutil.copytree(DEMO / "flow", root / "flow")
     ph = {"root": str(root), "run_id": RUN_ID, "config": config, "overrides": overrides}
-    tool = dict(TOOL, probe=[render(a, ph) for a in TOOL["probe"]], leases=str(tmp_path / "state" / "leases" / "demo"))
+    tool = dict(TOOL, probe=[render(a, ph) for a in TOOL["probe"]], leases=str(tmp_path / ".edr" / "leases" / "demo"))
     flow = "bash {root}/flow/flow.sh"
     defs = {
         "synth": {

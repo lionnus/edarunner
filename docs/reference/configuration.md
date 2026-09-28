@@ -292,8 +292,8 @@ the table replaces the site's keys for this project only.
 A `[tools.<name>]` table declares one tool of the site. A stage that needs a tool with a probe starts with a gate: the driver runs
 the probe on the host and reads the first line it prints, `free` or `free total`, and waits while
 `free`, less the seats other runs leased in the last `lease_s`, is below the seats the stage
-needs; then it leases its seats in `<state_dir>/leases/<tool>/`. A probe that fails or prints no number counts as
-unknown and lets the stage run. A hook that keeps a reserve for others subtracts it before it
+needs; then it leases its seats in `~/.edr/leases/<tool>/`, which the runs of every project of the
+user share. A probe that fails or prints no number counts as unknown and lets the stage run. A hook that keeps a reserve for others subtracts it before it
 prints. A tool without a probe has no gate; a host either has it or does not. A name that no `[tools]` table
 declares is an error where it appears. The core knows no licence manager;
 `examples/site/hooks/flexlm_free.sh` turns `lmutil lmstat` output into the `free total` line.
