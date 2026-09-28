@@ -734,30 +734,53 @@ share is refused; name one of them.
 `edr runtime <handle>` prints where the time of a run went: a row per
 stage attempt from `stage_runs`, a row per step under it, and one row per
 task group with the task count, the summed task time and the longest
-task. A step starts when the driver first sees its number, or at the time
-that the stage's `step_log` finds in a collected file:
+task. The source column names the table, or the file and line of each
+time.
+
+A step starts when the driver first sees its number. When the flow
+writes the start of each step into a log, the stage's `step_log` reads
+it from the collected files. With `{step}` in the file, each step has a
+log of its own, and its first matching line starts it; `*` matches any
+part of a name:
 
 ```toml
 [stages.pnr]
-step_log = { file = "log/pnr.log", regex = 'STARTING STAGE .*\((\d+) sec\)' }
+step_log = { file = "reports/{step}/*.log", regex = 'STARTING STAGE .*\((\d+) sec\)' }
 ```
 
-Group 1 is a unix time. Group 2, when present, is the step number;
-without it the lines count from the stage's first step, so a stage that
-resumed from a checkpoint needs group 2. The source column names the
-table, or the file and line of each time:
+Group 1 is a unix time. Group 2, when present, is the step number. One
+log of many steps, without `{step}`, counts its lines from the stage's
+first step, so a stage that resumed from a checkpoint needs group 2
+there. When the log and the driver both know a step, the log wins, since
+a progress command that counts report directories sees each step one
+step early.
+
+A step ends when the next step of its stage starts, else when its stage
+ends, else at the mtime of its own log file. A line of a later stage
+never ends a step: in one log of two stages, the last step of the first
+stage ends with its stage, or stays open when the run has no stage rows.
+A stage without an end counts up to now while the run lives, and up to
+its last heartbeat when its driver died, and so does its last step. A
+time that counts up to now, or that has no end at all, is open, and the
+total then reads as a lower bound that names it:
 
 ```
-$ edr runtime base@g8
-stage  step  what              started            wall  source
-pnr       7  synth-logic-opto  2026-09-08 22:58    51m  log/pnr.log:32269
-pnr       8  synth-init-opto   2026-09-08 23:50  2h10m  log/pnr.log:74936
-pnr      10  cts               2026-09-09 03:30  2h11m  log/pnr.log:272008
-pnr      11  route             2026-09-09 05:41  2h20m  log/pnr.log:400002
+$ edr runtime a@demo
+stage  step  what                         started            wall  source
+pnr       -  attempt 1, running, open     2026-01-12 09:00  6h40m  stage_runs
+pnr       4  cts                          2026-01-12 09:00  2h10m  reports/4/cts.log:4
+pnr       5  route, open                  2026-01-12 11:10  4h30m  step_runs
+total     -  at least, open: pnr 5 route  -                 6h40m  -
 ```
+
+Step 4 comes from its log, which the watcher collected once step 5
+began. Step 5 still runs, so its start comes from the driver. An imported
+run has no stage rows, so its total sums its steps, and its last step
+ends at the mtime of its own log.
 
 `edr runtime --batch <b>`, or several handles, prints one row per run
-with the wall time of each stage and the total.
+with the wall time of each stage and the total, and an `open` column
+when a run has an open time.
 
 ## Hosts and runs over time
 
@@ -771,6 +794,15 @@ The driver samples its own process groups at every heartbeat: the CPU
 since the last sample and the RSS, and the tree size at most once per ten
 minutes. The watcher keeps each heartbeat in `run_samples`, and
 `edr status <handle>` shows the four lines over the life of the run.
+
+`edr hosts --history --batch <b>` puts the two together for one batch.
+The window runs from the start of the batch's first run to the last
+heartbeat of its last run, or to now while one of its runs lives. Each
+host the batch ran on gets its line, and under it an indented line of
+the batch's own use: the CPU of its runs in cores, their RSS and the
+size of their trees, summed at each host sample and drawn on the scale
+of the host. The gap between the two lines is the work of everything
+else on the host.
 
 ## Compare runs
 

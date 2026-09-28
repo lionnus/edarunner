@@ -26,6 +26,22 @@ lists the keys.
 A channel whose secret file is missing, or readable by the group or by
 others, stays off, and `edr watch` logs the reason.
 
+### Alerts you ask for
+
+Every alert about a problem comes without asking. Two more come only
+when the user file lists them in `alerts`, one list for every channel:
+
+```toml
+alerts = ["done", "metrics"]
+```
+
+`done` tells you when a run ends `done`. `metrics` tells you when the
+watcher adds metric rows to a run, with the text of its `metrics` event,
+for example `6 new: area_um2, wns_ns at pnr 8, 9`. Telegram keeps one
+such message per run and edits it as more rows arrive; ntfy and mail
+send one per arrival. A watcher reads the list when it starts, so
+restart `edr serve` after you change it.
+
 ### Message kinds
 
 Every channel gets every kind with the same title and the same text.
@@ -40,6 +56,8 @@ other message is `<project>: <kind>`.
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
+| alert: `done`, when `alerts` lists it | the watcher, once when a run ends `done` | one message | one push | one mail |
+| alert: `metrics`, when `alerts` lists it | the watcher, when it adds metric rows to a run | one message per run, edited in place | one low push per arrival | one mail per arrival |
 | `digest` | the supervisor once a day at `digest_at` of the user file, for every project in one message, and `edr notify --digest` | one message | one low push | one mail |
 | `board` | the supervisor every minute, or a watcher without a supervisor every cycle | one pinned message, edited in place | none | none |
 | `board` on request | `edr notify --board` | one new message | one low push | one mail |
@@ -806,6 +824,30 @@ See every problem of the project files:
 edr check
 ```
 
+`done`, when `alerts` in the user file lists it: the run ended `done`.
+
+```
+⚪ demo: run done b_nodw@demo
+The run ended done after 5h.
+
+stage: pnr, step 5 route
+host: hostA
+
+See its numbers:
+edr metrics --run b_nodw@demo
+```
+
+`metrics`, when `alerts` in the user file lists it: the watcher added
+metric rows to the run. On Telegram a later arrival edits the message.
+
+```
+⚪ demo: new metrics of b_nodw@demo
+6 new: area_um2, wns_ns at pnr 4, 5.
+
+See them:
+edr metrics --run b_nodw@demo
+```
+
 ## ntfy
 
 ```toml
@@ -819,8 +861,9 @@ The table goes into `user.toml`. Subscribe to the topic in the ntfy
 app. Anyone who knows the name of a topic on a public server can read
 it, so use a long random name, or a protected topic with a token. A
 dead, failed or killed run, a full host and a stale watcher come with
-the urgent priority. The daily digest and the board come with a low
-one, and `edr notify --silent` with the lowest.
+the urgent priority, and a run that ended done with the default one.
+The daily digest, the board and new metrics come with a low one, and
+`edr notify --silent` with the lowest.
 
 ## Mail
 

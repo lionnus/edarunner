@@ -181,9 +181,12 @@ unit = "ns"
 canonical = "timing__setup__ws"
 ```
 
-`step = "*"` with `{step}` in the file reads one value per step. Besides
-`regex` and `json`, a metric can read a CSV row, a hierarchical area
-report, a CSV of per-instance numbers or call a Python hook;
+`step = "*"` with `{step}` in the file reads one value per step. A `*` in
+the file matches any part of a name, such as `reports/{step}/*.log` for a
+log named after its step; when several files match for one step, the
+first by name counts. Besides `regex` and `json`, a metric can read a CSV
+row, a hierarchical area report, a CSV of per-instance numbers or call a
+Python hook;
 [results.md](results.md) shows each of them and the canonical names.
 
 Only the files that a stage's `collect` list names reach the head node,
