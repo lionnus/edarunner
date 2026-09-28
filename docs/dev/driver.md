@@ -83,8 +83,11 @@ A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
 task with `id`, `cmd`, `dir`, `needs`, `budget` and, when its own
 `needs` names tools, `tools`. A `tools` entry is `{"name", "seats",
 "probe", "leases"}`: the seats needed, the probe argv, rendered, and the
-lease directory `<state_dir>/leases/<tool>/`, which the launch creates; a
-tool without a probe is not in the list.
+lease directory `~/.edr/leases/<tool>/`, which the launch creates; a
+tool without a probe is not in the list. The driver leases a seat as the
+file `<project>.<run_id>.<stage>.<n>`, or `<project>.<run_id>.<stage>.<task>.<n>`
+for a task, whose body holds the project, the run id, the stage, the
+pid, the host, the time and the budget.
 
 A change to the spec changes `launch._spec`, the driver and
 `tests/test_driver.py` in the same commit. `tests/helpers_driver.py`

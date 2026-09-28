@@ -15,7 +15,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import analysis, board, collect, config, launch, metrics
+from . import analysis, board, collect, config, home, launch, metrics
 from .backend import Backend, Live, make_backend, run_handle
 from .db import Database
 from .guards import Refuse
@@ -104,7 +104,7 @@ def _keep(project: Project, run: Row) -> dict:
 def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[tuple[str, dict]]:
     """Every heartbeat of every batch without RETIRED (or of `batches`), as (batch, heartbeat)."""
     out = []
-    for bdir in sorted(p for p in project.state_dir.glob("*") if p.is_dir() and p.name not in ("bin", "leases")):
+    for bdir in sorted(p for p in project.state_dir.glob("*") if p.is_dir() and p.name != "bin"):
         if (bdir / "RETIRED").exists() or (batches is not None and bdir.name not in batches):
             continue
         for f in sorted(bdir.glob("*.json")):
@@ -410,18 +410,19 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
 
 def sweep_leases(project: Project, db: Database, heartbeats: list[tuple[str, dict]], states: dict[str, str],
                  now: float, dry_run: bool = False) -> list[str]:
-    """Remove each stale seat lease with an event, and return their paths.
+    """Remove each stale seat lease of this project with an event, and return their paths.
 
-    A lease is stale when its run has no live heartbeat, is dead or retired, has left the lease's
+    The leases of every project of the user share one directory per tool under the user root. A
+    lease is stale when its run has no live heartbeat, is dead or retired, has left the lease's
     stage, or when the lease is older than the budget of its stage."""
     live = {hb["run_id"]: hb for _, hb in heartbeats}
     out = []
-    for f in sorted((project.state_dir / "leases").glob("*/*")):
+    for f in sorted((home.root() / "leases").glob("*/*")):
         if f.name.startswith("."):
             continue
         lease = config.load_json(f)
         run_id, age = lease.get("run_id"), now - float(lease.get("ts") or 0)
-        if age < _LEASE_YOUNG_S:
+        if age < _LEASE_YOUNG_S or lease.get("project") != project.project:
             continue
         hb, row = live.get(run_id), db.run(run_id) if run_id else None
         if hb is None:

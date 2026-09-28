@@ -106,8 +106,9 @@ its own `python3`. Every host in `[hosts]` needs:
 - `rsync`, to copy the source tree over and the results back, and `awk`.
 - `nvidia-smi` on `PATH` when the host has GPUs to report; without it
   the probe reports none.
-- The state directory of every project, mounted at the same path as on
-  the head node.
+- The state directory of every project and the user root `~/.edr`, or
+  the directory `EDR_HOME` names, mounted at the same path as on the
+  head node. The drivers write their seat leases into the user root.
 
 The head node reaches each host with `ssh` under `BatchMode=yes`, so the
 keys must work with no password prompt and no host key prompt.
