@@ -37,7 +37,9 @@ not collected unless you pass `--uncollected`.
 
 `--why` is required, and the text goes into the event log. The run keeps
 its rows in the database and its files under `data/results/`, with the
-state `retired`.
+state `retired`. `edr metrics`, `edr compare` and `edr export` still read
+the run, and compare.html shows it with the mark `retired`. The board and
+status.html leave out the runs of a retired batch.
 
 ## Prune part of a tree
 

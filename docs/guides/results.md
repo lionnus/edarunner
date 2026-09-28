@@ -1039,20 +1039,47 @@ Every watcher cycle writes `data/board/`:
 | File | Holds |
 |---|---|
 | `board.json` | the runs of the live batches, the last 50 events and the host probes, for a script |
-| `status.html` | a phone-width page: every run in board order, the last 50 events, the hosts, and a chart of the cores and RAM in use per host over the last day |
-| `compare.html` | the runs with their parameters as columns and a filter per column, a compare table of each metric at its step of record, else at its last step, with the stage and step of each value and the difference to the first ticked run, the area delta of two runs, and four plots |
+| `status.html` | a phone-width page: every run of the live batches in board order, the last 50 events, the hosts, and a chart of the cores and RAM in use per host over the last day |
+| `compare.html` | every run of the project with its parameters as columns and a filter per column, a compare table of the ticked runs, the area delta of two runs, and four plots |
 
 `compare.html` is one self-contained page over the database's runs,
 parameters, metrics and the area report of each run at its step of
-record, else at its last step, down to depth 3. A filter keeps the rows
-whose cell holds its text; `>n` and `<n` compare numbers. The tables need nothing else, but the plots need Plotly. They show
+record, else at its last step, down to depth 3. It holds every run, also
+the runs of a retired batch, which carry the mark `retired` next to
+their label. A filter keeps the rows whose cell holds its text; `>n` and
+`<n` compare numbers.
+
+The compare table has a column per ticked run, headed `label@source`.
+Its rows go by task, with the metrics without a task first under `flow`,
+and each row names the metric and its unit. A value shows at its step of
+record, else at its last step, with the stage and step next to it. Each
+run after the first ticked one shows its percent against that first run;
+across a sign change, or from 0, it shows the difference instead. A
+metric with the key `better` colours that change: green when the number
+moves the way `better` names, `lower` or `higher`, and red when it moves
+the other way. Give `better = "lower"` to an area or an energy and
+`better = "higher"` to a slack. A metric without the key gets no colour,
+since a rise is not always worse.
+
+The page opens on two done runs of the newest source, one per label, with
+the runs table open. Open it as
+`compare.html#runs=alpha@3f9a2c1,beta@3f9a2c1` to tick those runs, in
+that order, instead. A handle there is a run id or `label@source`, which
+names the run of [Which run a command takes](#which-run-a-command-takes).
+The runs table then folds away, so the compare table fills the first
+screen of a phone, and a handle that names no run is listed above it.
+`edr compare A B --html FILE` writes the page opened on the runs of the
+handles in the same way.
+
+The tables need nothing else, but the plots need Plotly. They show
 a metric over the steps with the step names, a scatter of any two columns,
 the power parts (the metrics whose canonical name is `power__*`, without
 `power__total`), and parallel
 coordinates over every shown run, with an axis per parameter that differs
-and one for the chosen metric. The page loads `data/board/plotly.min.js`
-when that file exists, else the CDN URL; the watcher downloads nothing, so
-put the file there yourself for a head node without internet.
+and one for the chosen metric. A page loads the `plotly.min.js` next to
+it when that file exists, `data/board/plotly.min.js` for the watcher's
+page, else the CDN URL; the watcher downloads nothing, so put the file
+there yourself for a head node without internet.
 
 The pages are files. Open them in a browser, or serve the directory:
 
@@ -1061,10 +1088,13 @@ cd data/board && python -m http.server --bind 127.0.0.1 8000
 ```
 
 On the phone, `/compare <handle>...` puts the metrics of several runs
-side by side as `edr compare` does, `/metric <name>` shows one metric
-per run, `/board` sends the two pages as files, and `/csv <source>`
-sends `metrics.csv`;
-[alerts.md](alerts.md#files) has the bot.
+side by side as `edr compare` does, the metrics without a task first, and
+each run after the first with its percent against the first. When the
+rows do not fit in one message, the reply keeps the first ones and ends
+with `… N more rows`. Then it sends compare.html opened on those runs.
+`/metric <name>` shows one metric per run, `/board` sends the two pages
+of the last watcher cycle as files, and `/csv <source>` sends
+`metrics.csv`; [alerts.md](alerts.md#files) has the bot.
 
 ## Snapshots
 
