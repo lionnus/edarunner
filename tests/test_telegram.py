@@ -16,6 +16,7 @@ from helpers_telegram import CHAT, USER, FakeActions, FakeApi, FakeDatabase, mak
 from edarunner import board
 from edarunner.model import BotCommand
 from edarunner.notify import alert_buttons, make_notifiers
+from edarunner.notify.alerts import Alert
 from edarunner.notify.telegram import TelegramBot
 from edarunner.notify.telegram import api as tgapi
 from edarunner.notify.telegram import bot as tgbot
@@ -32,6 +33,11 @@ def bot(tmp_path, monkeypatch) -> TelegramBot:
     assert len(bots) == 1 and isinstance(bots[0], TelegramBot)
     monkeypatch.setattr(bots[0], "api", FakeApi())
     return bots[0]
+
+
+def hung(key: str = "run1", about: str = "no progress <3 h", buttons: bool = True) -> Alert:
+    return Alert("hung", key, "no progress in", "a@demo", about, todo=[("Stop it:", "edr stop a@demo --why hung")],
+                 buttons=alert_buttons("a@demo") if buttons else [])
 
 
 def msg(text: str, chat: int = CHAT, user: int = USER) -> dict:
@@ -219,7 +225,7 @@ def test_a_project_without_poll_sends_alerts_only(tmp_path, monkeypatch):
     b.start()
     b.stop()
     assert b._thread is None and b.api.of("setMyCommands") == []
-    b.send("dead", "a@demo", "no heartbeat", alert_buttons("a@demo"))
+    b.send(hung())
     assert len(b.api.of("sendMessage")) == 1 and b.api.of("sendMessage")[0]["reply_markup"] is None
 
 
@@ -245,14 +251,15 @@ def test_user_id_gates_the_allowed_chat(tmp_path, monkeypatch, caplog):
 
 
 def test_alert_send_edits_a_repeat(bot):
-    mid = bot.send("hung", "run1", "hung a@demo\nno progress <3 h", alert_buttons("a@demo"), "edr stop a@demo --why hung")
+    mid = bot.send(hung())
     sent = bot.api.of("sendMessage")[-1]
     assert mid == "1" and sent["disable_notification"] is False
-    assert sent["text"] == "🔴 <b>demo: hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>"
+    assert sent["text"] == ("🔴 <b>demo: no progress in</b> <code>a@demo</code>\nno progress &lt;3 h\n\n"
+                            "Stop it:\n<code>edr stop a@demo --why hung</code>")
     assert [b["callback_data"] for b in sent["reply_markup"]["inline_keyboard"][0]] == ["keep12:a@demo", "ack:a@demo", "stop:a@demo"]
-    assert bot.send("hung", "run1", "no progress for 3 h") == "1"
+    assert bot.send(hung(about="no progress for 3 h", buttons=False)) == "1"
     assert bot.api.of("editMessageText")[-1]["message_id"] == 1
-    assert bot.send("hung", "run2", "x") == "2"
+    assert bot.send(hung("run2")) == "2"
 
 
 def test_board_is_created_once_then_edited(bot, tmp_path):
@@ -393,11 +400,6 @@ def test_a_long_reply_is_cut_at_a_line(bot):
     assert len(bot.api.of("sendMessage")[-1]["text"]) <= LIMIT + 2
 
 
-def test_an_alert_without_a_state_keeps_its_title(bot):
-    bot.send("watch", "", "watch stale\nno watch.json")
-    assert bot.api.of("sendMessage")[-1]["text"] == "<b>demo: watch stale</b>\nno watch.json"
-
-
 def in_topic(update: dict, thread: int) -> dict:
     """`update` with its message in forum thread `thread`."""
     m = update.get("message") or update["callback_query"]["message"]
@@ -413,7 +415,7 @@ def test_a_topic_routes_every_message_and_ignores_other_threads(bot, capsys):
     assert bot.api.calls == [] and bot.actions.calls == [] and bot.db.events == []
     bot.handle_update(in_topic(msg("/status"), 17))
     assert bot.api.of("sendMessage")[-1]["message_thread_id"] == 17
-    bot.send("dead", "run1", "dead a@demo\nno heartbeat", alert_buttons("a@demo"))
+    bot.send(hung())
     bot.board("board v1")
     assert [p["message_thread_id"] for p in bot.api.of("sendMessage")] == [17, 17, 17]
     assert bot.api.of("pinChatMessage")[0]["message_id"] == 3
@@ -437,7 +439,7 @@ def reply_to(text: str, msg_id: int) -> dict:
 
 
 def test_a_reply_to_an_alert_names_its_run(bot, monkeypatch):
-    mid = int(bot.send("hung", "run1", "hung a@demo\nno progress", alert_buttons("a@demo")))
+    mid = int(bot.send(hung()))
     for text, call in (("/keep 24", ("keep", ("run1", 24, "telegram"), {})),
                        ("/keep run1 6", ("keep", ("run1", 6, "telegram"), {})),
                        ("/ack", ("ack", ("run1", "telegram"), {})),

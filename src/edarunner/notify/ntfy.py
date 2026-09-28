@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from edarunner.model import Ntfy
-from edarunner.notify import Button, Notifier, button_cmds, plain, untag
+from edarunner.notify import Button, Notifier, alerts, button_cmds, untag
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class NtfyNotifier(Notifier):
         """POST one message as JSON to the server root; True on a 2xx answer.
 
         A server that refuses the actions with a 400 gets the message again without them."""
-        body = {"topic": self.cfg.topic, "title": f"{self.project.project}: {title}", "message": text,
+        body = {"topic": self.cfg.topic, "title": title, "message": text,
                 "priority": priority, **({"actions": actions} if actions else {})}
         req = urllib.request.Request(self.cfg.url.rstrip("/") + "/", data=json.dumps(body).encode(), method="POST",
                                      headers={"Content-Type": "application/json",
@@ -49,15 +49,14 @@ class NtfyNotifier(Notifier):
             log.warning("ntfy: %s", e)
             return False
 
-    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
-             cmd: str | None = None) -> str | None:
-        """Publish one alert: the first line of `text` is the title; a button becomes a command line and a copy action."""
-        title, _, rest = text.partition("\n")
-        self.publish(title, plain(rest or title, buttons, cmd), PRIORITY.get(kind, 4), copy_actions(buttons))
+    def send(self, alert: alerts.Alert) -> str | None:
+        """Publish one alert: the first line is the title; a button becomes a command line and a copy action."""
+        self.publish(alerts.subject(self.project.project, alert), alerts.text(alert),
+                     PRIORITY.get(alert.kind, 4), copy_actions(alert.buttons))
         return None
 
     def post(self, title: str, html: str, silent: bool = False) -> bool:
-        return self.publish(title, untag(html), 1 if silent else PRIORITY.get(title, 3))
+        return self.publish(f"{self.project.project}: {title}", untag(html), 1 if silent else PRIORITY.get(title, 3))
 
 
 def copy_actions(buttons: list[Button] | None) -> list[dict]:

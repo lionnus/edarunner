@@ -54,9 +54,10 @@ def test_cycle_classifies_events_and_alerts(env: Env) -> None:
                                                 ("over_budget", rid("o")), ("host_full", rid("f"))])
     assert len(env.notifier.boards) == 1
     assert env.notifier.boards[0].splitlines()[0] == "🔴 <code>d@demo</code> dead, synth 1/4, 3m"
-    text, cmd = env.notifier.texts[rid("l")]
-    assert text.splitlines()[0] == "looping l@demo" and cmd == "edr stop l@demo --why looping"
-    assert env.notifier.texts[rid("d")][1].startswith("edr continue d@demo --stage ")
+    looping = env.notifier.alerts[rid("l")]
+    assert (looping.title, looping.who, looping.todo[0][1]) == ("same failure again in", "l@demo",
+                                                                "edr stop l@demo --why looping")
+    assert env.notifier.alerts[rid("d")].todo[0][1].startswith("edr continue d@demo --stage ")
     bdir = env.project.data / "board"
     assert {p.name for p in bdir.iterdir()} == {"board.json", "status.html", "compare.html"}
     assert set(env.db.get_store("progress")) == set(states) and rid("d") in env.db.get_store("notified")

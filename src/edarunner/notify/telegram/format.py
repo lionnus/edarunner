@@ -11,9 +11,12 @@ import textwrap
 import time
 from collections import Counter
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from edarunner import board as runs
+
+if TYPE_CHECKING:
+    from edarunner.notify.alerts import Alert
 
 Row = dict[str, Any]
 
@@ -50,15 +53,12 @@ def head(project: str, title: str) -> str:
     return f"<b>{esc(project)}: {esc(title)}</b>"
 
 
-def alert(project: str, text: str, cmd: str | None = None) -> str:
-    """The first line of `text` as the title, the rest as prose, `cmd` in monospace.
+def alert(project: str, a: Alert) -> str:
+    """An alert: the mark and the bold title, then what was seen, the facts and each command in monospace."""
+    from edarunner.notify.alerts import blocks
 
-    A title `state handle` gets the mark of the state and the handle in monospace.
-    """
-    title, _, rest = text.partition("\n")
-    state, _, who = title.partition(" ")
-    top = f"{MARK[state]} {head(project, state)} <code>{esc(who)}</code>" if state in MARK and who else head(project, title)
-    return top + (f"\n{esc(rest)}" if rest else "") + (f"\n<code>{esc(cmd)}</code>" if cmd else "")
+    title = f"{MARK.get(a.kind, '🔴')} <b>{esc(project)}: {esc(a.title)}</b>" + (f" <code>{esc(a.who)}</code>" if a.who else "")
+    return fit(title + "\n" + blocks(a, lambda c: f"<code>{esc(c)}</code>", esc))
 
 
 def run_line(row: Row, now: float, totals: dict[str, int] | None = None) -> str:

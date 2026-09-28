@@ -19,12 +19,6 @@ def test_board_is_one_line_per_run_then_the_counts():
     assert "&lt;a&gt;@demo" in fmt.board(done, now=NOW) and fmt.board([], now=NOW) == "<i>no runs</i>"
 
 
-def test_alert_marks_the_state_and_escapes_the_reason():
-    assert fmt.alert("demo", "hung a@demo\nno progress <3 h", "edr stop a@demo --why hung") == (
-        "🔴 <b>demo: hung</b> <code>a@demo</code>\nno progress &lt;3 h\n<code>edr stop a@demo --why hung</code>")
-    assert fmt.alert("demo", "watch stale\nno watch.json") == "<b>demo: watch stale</b>\nno watch.json"
-
-
 def test_run_detail_of_a_dead_run():
     row = board_row("dead", "a", "stage:synth", "dead", age=5000)
     hb = {"step": 3, "step_name": "elaborate", "stage": "synth", "last_log": "step 3 <elaborate>\n\n"}

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from edarunner.model import Mail
-from edarunner.notify import Button, Notifier, plain, untag
+from edarunner.notify import Notifier, alerts, untag
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class MailNotifier(Notifier):
     def mail(self, subject: str, text: str) -> bool:
         """Send one plain-text mail; True when the server took it."""
         msg = EmailMessage()
-        msg["Subject"] = f"{self.project.project}: {subject}"
+        msg["Subject"] = subject
         msg["From"] = self.cfg.sender
         msg["To"] = ", ".join(self.cfg.to)
         msg.set_content(text)
@@ -42,12 +42,10 @@ class MailNotifier(Notifier):
             log.warning("mail: %s", e)
             return False
 
-    def send(self, kind: str, run_id: str, text: str, buttons: list[Button] | None = None,
-             cmd: str | None = None) -> str | None:
-        """Mail one alert: the first line of `text` is the subject; a button becomes a line with its command."""
-        title, _, rest = text.partition("\n")
-        self.mail(title, plain(rest or title, buttons, cmd))
+    def send(self, alert: alerts.Alert) -> str | None:
+        """Mail one alert: the first line is the subject, a command sits indented, a button is a command line."""
+        self.mail(alerts.subject(self.project.project, alert), alerts.text(alert, "    "))
         return None
 
     def post(self, title: str, html: str, silent: bool = False) -> bool:
-        return self.mail(title, untag(html))
+        return self.mail(f"{self.project.project}: {title}", untag(html))

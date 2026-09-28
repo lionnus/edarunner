@@ -21,7 +21,7 @@ from .db import Database
 from .guards import Refuse
 from .hosts import HostError, Ssh
 from .model import SCHEDULERS, Project, Task
-from .notify import Notifier, alert_buttons
+from .notify import Notifier, alerts
 from .notify.digest import Digest
 from .notify.telegram import format as tgfmt
 
@@ -244,12 +244,10 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     if state in _NOTIFY:
         msgs = rec.setdefault("msgs", {})
         if (msgs.get(state) or {}).get("text") != text:
-            handle = board.handle(run)
-            cmd = board.triage_cmd(run, state, _hb(project, run) if state == "dead" else {})
             # A repeat send edits the earlier message in place and keeps its buttons.
-            reason = text if reasons else run.get("phase") or state
-            ids = [n.send(state, run.get("key") or run_id, f"{state} {handle}\n{reason}",
-                          alert_buttons(handle) if run_id else None, cmd) for n in notifiers]
+            alert = (alerts.orphan_alert(project, run) if state == "orphan"
+                     else alerts.run_alert(project, run, state, reasons, _hb(project, run), now))
+            ids = [n.send(alert) for n in notifiers]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
@@ -592,6 +590,7 @@ def check(project: Project, notifiers: list[Notifier] = ()) -> int:
         return 0
     text = f"watch.json is {int(age)} s old (pid {w.get('pid')})" if w else "no watch.json"
     print(f"edr watch: {text}")
+    alert = alerts.watch_alert(project, age if w else None, w.get("pid"))
     for n in notifiers:
-        n.send("watch", "", f"watch stale\n{text}")
+        n.send(alert)
     return 1
