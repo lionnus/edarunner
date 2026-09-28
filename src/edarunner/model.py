@@ -350,6 +350,9 @@ class Metric:
                          "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
                          shown="one of the five")
     unit: str = doc("the unit, as text", "")
+    scale: float = doc("a factor that multiplies each value at extraction, so that the stored number is in `unit`: "
+                       "`scale = 1e-6` with `unit = \"ns\"` turns a window the file gives in fs into ns. Every view, "
+                       "the export, MLflow and `pass` see the product, and `area_hier` scales its instance rows too", 1.0)
     canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
                          "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
                          "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "

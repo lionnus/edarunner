@@ -111,7 +111,7 @@ def test_area_rows_filter_and_compare(demo: Path, capsys) -> None:
     lines = out.splitlines()
     assert code == 0 and lines[0] == "area um2 at depth 2"
     engine = next(ln for ln in lines if ln.startswith("i_top/i_engine"))
-    assert engine.split() == ["i_top/i_engine", "700.0", "630.0", "-70.0", "-10.0%"]
+    assert engine.split() == ["i_top/i_engine", "700", "630", "-70", "-10.0%"]
     assert next(ln for ln in lines if ln.startswith("<top>")).split()[-1] == "-7.0%"
     assert lines[1].split()[:7] == ["instance", "a", "(synth", "2)", "b", "(synth", "2)"]
     assert "a: reports/2/area_hier.rpt" in out
@@ -185,7 +185,7 @@ def test_each_run_at_its_step_of_record(demo: Path, capsys, tmp_path: Path) -> N
     code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--depth", "1")
     lines = out.splitlines()
     assert code == 0 and lines[1].split()[:7] == ["instance", "alpha", "(pnr", "12)", "beta", "(pnr", "11)"]
-    assert next(ln for ln in lines if ln.startswith("<top>")).split() == ["<top>", "1200.0", "3300.0", "2100.0", "+175.0%"]
+    assert next(ln for ln in lines if ln.startswith("<top>")).split() == ["<top>", "1200", "3300", "2100", "+175.0%"]
     code, out, _ = edr(capsys, "compare", alpha, beta, "--area", "--depth", "0")
     assert code == 0 and [ln.split()[0] for ln in out.splitlines()].count("<top>") == 1
     # The area is at the step of record of each run; wns_ns has no `record`, so both runs are at step 11, which both have.
@@ -287,8 +287,8 @@ def test_a_pass_rule_marks_a_failing_value(demo: Path, capsys) -> None:
             _metric(demo, run, "wns_ns", step, -0.1 if n else 0.1)
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--metric", "setup_violations")
     lines = [ln.split() for ln in out.splitlines()]
-    assert code == 0 and ["a", "abc1234", "synth", "2", "setup_violations", "3.0", "FAIL", "ns"] in lines
-    assert ["a", "abc1234", "synth", "3", "setup_violations", "0.0", "ns"] in lines
+    assert code == 0 and ["a", "abc1234", "synth", "2", "setup_violations", "3", "FAIL", "ns"] in lines
+    assert ["a", "abc1234", "synth", "3", "setup_violations", "0", "ns"] in lines
     code, out, _ = edr(capsys, "--json", "metrics", "--source", "abc1234", "--step", "2")
     assert {(m["label"], m["name"], m["verdict"]) for m in json.loads(out)["data"]} == {
         ("a", "setup_violations", "FAIL"), ("b", "setup_violations", "pass"), ("a", "wns_ns", None), ("b", "wns_ns", None)}

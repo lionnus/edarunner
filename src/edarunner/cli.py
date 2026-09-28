@@ -712,8 +712,8 @@ def _metrics_csv(rows: list[Row]) -> str:
 
 
 def _area_table(rows: list[Row]) -> Table | str:
-    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m["instance"], m["depth"], m["area"],
-             m.get("local_area"), m.get("cells")] for m in rows]
+    body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m["instance"], m["depth"], board.num(m["area"]),
+             board.num(m.get("local_area")), m.get("cells")] for m in rows]
     return board.table(["label", "source", "stage", "step", "instance", "depth", "area", "local", "cells"], body,
                        styles={"label": "bold", "source": "dim"},
                        right=("step", "depth", "area", "local", "cells")) if rows else "no area rows"

@@ -31,10 +31,6 @@ def names(runs: list[Row]) -> dict[str, str]:
     return {i: n if twins[n] == 1 else f"{n} {board.prefix(i, list(base))}" for i, n in base.items()}
 
 
-def _num(v: float | None, digits: int = 1) -> str | None:
-    return None if v is None else f"{v:.{digits}f}"
-
-
 def _pct(v: float | None, base: float | None) -> str | None:
     # A percent across a sign change, such as a slack from +1 ps to -1 ps, says nothing.
     return None if v is None or not base or v * base < 0 else f"{(v - base) / abs(base) * 100:+.1f}%"
@@ -198,10 +194,10 @@ def area_view(picked: list[Row], rows: list[Row], depth: int, missing: list[Row]
     # At depth 0 the rows are the top itself.
     for t in [*rows, *([{"instance": "<top>", "area": total}] if depth else [])]:
         a = t["area"]
-        line = [t["instance"], *[_num(a.get(i)) for i in ids]]
+        line = [t["instance"], *[board.num(a.get(i)) for i in ids]]
         for i in ids[1:]:
             d = None if a.get(i) is None or a.get(ids[0]) is None else a[i] - a[ids[0]]
-            line += [_num(d), _pct(a.get(i), a.get(ids[0]))]
+            line += [board.num(d), _pct(a.get(i), a.get(ids[0]))]
         body.append(line)
     right = tuple(h for h in head if h != "instance")
     src = Text("\n".join(f"{col[p['run_id']]}: {p['source_file']}" for p in picked), style="dim")
@@ -218,22 +214,18 @@ def step_name(project: Project | None, stage: str, step: int | None) -> str | No
     return steps[step] if step is not None and 0 <= step < len(steps) else None
 
 
-def _fmt(v: float | None) -> str | None:
-    return None if v is None else f"{v:.6g}"
-
-
 def verdict(project: Project | None, m: Row) -> str | None:
     """`FAIL` or `pass` for a metric row under the `pass` rule of its metric; None without a rule or a value."""
     metric = project.metrics.get(m["name"]) if project else None
     return metric.verdict(m.get("value")) if metric else None
 
 
-def mark(cell: object, verdict: str | None, source: str | None = None) -> object:
-    """A value cell, with FAIL next to a value that breaks its pass rule; `failed: <source>` for a row without a value,
-    whose source is the error."""
-    if cell is None and source is not None:
-        return f"failed: {source}"
-    return f"{cell} FAIL" if verdict == "FAIL" else cell
+def mark(value: float | None, verdict: str | None, source: str | None = None) -> str | None:
+    """A value as `board.num` prints it, with FAIL next to a value that breaks its pass rule; `failed: <source>` for a
+    row without a value, whose source is the error."""
+    if value is None:
+        return None if source is None else f"failed: {source}"
+    return board.num(value) + (" FAIL" if verdict == "FAIL" else "")
 
 
 def side_by_side(project: Project | None, runs: list[Row], rows: list[Row], stage: str | None = None,
@@ -267,7 +259,7 @@ def side_by_side(project: Project | None, runs: list[Row], rows: list[Row], stag
 def cell(row: Row, run_id: str) -> str | None:
     """The value of one run in a side-by-side row, with FAIL and its stage and step."""
     v = row["value"].get(run_id)
-    return None if v is None else f"{mark(_fmt(v), row['verdict'][run_id])}{_at(row['stage'][run_id], row['step'][run_id])}"
+    return None if v is None else f"{mark(v, row['verdict'][run_id])}{_at(row['stage'][run_id], row['step'][run_id])}"
 
 
 def side_by_side_view(runs: list[Row], rows: list[Row], missing: list[Row]) -> RenderableType:
@@ -284,7 +276,7 @@ def side_by_side_view(runs: list[Row], rows: list[Row], missing: list[Row]) -> R
     for r in rows:
         line = [r["metric"], r["task"], *[cell(r, i) for i in ids]]
         for i in ids[1:]:
-            line += [_fmt(r["delta"][i]), _pct(r["value"].get(i), r["value"].get(ids[0]))]
+            line += [board.num(r["delta"][i]), _pct(r["value"].get(i), r["value"].get(ids[0]))]
         body.append(line)
     return _with_missing(board.table(head, body, styles={"metric": "bold"}, right=tuple(head[2:])), missing)
 
@@ -312,7 +304,7 @@ def over_steps_view(rows: list[Row]) -> RenderableType:
     keys = sorted({k for r in rows for k in r["value"]})
     head = ["stage", "step", "name", *keys]
     body = [[r["stage"], r["step"], r["step_name"],
-             *[mark(_fmt(r["value"].get(k)), r["verdict"].get(k), r["source_file"].get(k)) for k in keys]] for r in rows]
+             *[mark(r["value"].get(k), r["verdict"].get(k), r["source_file"].get(k)) for k in keys]] for r in rows]
     if any(v for r in rows for v in r["verdict"].values()):
         head.append("verdict")
         for line, r in zip(body, rows):
@@ -323,7 +315,7 @@ def over_steps_view(rows: list[Row]) -> RenderableType:
         prev = None
         for line, r in zip(body, rows):
             v = r["value"].get(keys[0])
-            line += [None if v is None or prev is None else _fmt(v - prev), r["source_file"].get(keys[0])]
+            line += [None if v is None or prev is None else board.num(v - prev), r["source_file"].get(keys[0])]
             prev = v if v is not None else prev
     return board.table(head, body, styles={"source": "dim"}, right=("step", *keys, "Δ"))
 
