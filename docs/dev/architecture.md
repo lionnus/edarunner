@@ -29,13 +29,14 @@ report files and the numbers in them.
 | `home.py` | the user root `~/.edr` or `EDR_HOME`: the registry of the projects and the process locks |
 | `runid.py` | the git calls, the source tag, the run id template |
 | `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
-| `hosts.py` | the ssh wrapper with timeouts, the host probe, placement, the head-node check |
+| `hosts.py` | the ssh wrapper with timeouts, the host probe and the census call, placement with the disk floor, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
 | `launch.py` | spec rendering, `plan`, `launch`, `stop` |
 | `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`; `[scheduler] backend` picks one of these or a scheduler backend |
 | `schedulers.py` | the HTCondor, Slurm and LSF backends: the submit file, the state query, the stop |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
-| `watch.py` | the cycle: classify, act, collect, resume, launch queued, boards, `watch.json` |
+| `watch.py` | the cycle of one project: classify, act, collect, resume, launch queued, boards, `watch.json`; the watcher that holds `serve.lock` then calls `census.work` |
+| `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the work of the user: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the five parsers with the hierarchical area report, extraction |
 | `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |

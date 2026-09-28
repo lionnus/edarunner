@@ -31,7 +31,6 @@ stale_s = 600
 dead_s = 2700
 hung_s = 21600
 grace_s = 3600
-host_free_min_gb = 100
 streak = 3
 heartbeat_s = 60
 gate_max_s = 14400

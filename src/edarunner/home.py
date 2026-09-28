@@ -7,9 +7,11 @@ holds its pid.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import os
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 
 from .guards import Refuse
@@ -89,6 +91,18 @@ def lock(path: Path) -> int | None:
     os.ftruncate(fd, 0)
     os.write(fd, f"{os.getpid()}\n".encode())
     return fd
+
+
+@contextlib.contextmanager
+def held(path: Path) -> Iterator[None]:
+    """Hold the flock of `path` for the block, and wait for it when another process holds it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def holder(path: Path) -> str:

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .guards import Refuse
-from .hosts import HostError, HostProbe, Ssh
+from .hosts import HostError, HostProbe, Ssh, probe_all
 from .model import SCHEDULERS, Site
 
 
@@ -203,14 +203,8 @@ class SshBackend:
             self.ssh.kill_pgid(host, pgid, sig)
 
     def free(self, hosts: Iterable[str]) -> dict[str, HostProbe | str]:
-        """The probe of each host, or the error text of a host that did not answer."""
-        out: dict[str, HostProbe | str] = {}
-        for h in hosts:
-            try:
-                out[h] = self.ssh.probe(h)
-            except HostError as e:
-                out[h] = str(e)
-        return out
+        """The probe of each host, all at once, or the error text of a host that did not answer."""
+        return probe_all(self.ssh, hosts)
 
     def file_host(self, run: dict[str, Any]) -> str:
         """The run's host; `local` for a run of `edr track`, whose tree the head node reads in place."""

@@ -38,8 +38,8 @@ event, not even an empty database.
 text goes into the events table together with the actor.
 
 These commands never create data/edr.db: brief, check, compare, events,
-hosts, metrics, notify, plan, runtime, status, tools. Without the file they
-read an empty database in memory.
+hosts, metrics, notify, plan, projects, runtime, status, tools. Without the
+file they read an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
 queued, yellow when stale, red when dead, hung, over budget, an orphan or
@@ -75,7 +75,8 @@ A command below says where it refines a code.
 | [brief](#brief) | what a session reads first: the project, its flow, site and state |
 | [status](#status) | the board, or one run |
 | [events](#events) | the last events |
-| [hosts](#hosts) | probe every host |
+| [hosts](#hosts) | probe every host: its free room, and your runs on it |
+| [projects](#projects) | every registered project, its watcher and its live runs |
 | [tools](#tools) | every site tool: free seats and hosts |
 | [metrics](#metrics) | the metrics of one source or one run |
 | [extract](#extract) | extract the metrics of runs again from their collected files |
@@ -132,7 +133,7 @@ session with the briefing; docs/guides/agents.md shows the hook.
 ## status
 
 ```
-edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [handle]
+edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [--all] [handle]
 ```
 
 Without a handle, status prints the board: one line per run of every
@@ -152,6 +153,9 @@ names the stage that failed. The command exit column of the stage table
 is the code of the stage command itself. The tasks line with the done
 and failed counts appears only for a run with a task group.
 
+--all prints the board of every registered project in one table, with
+the project in the first column; it needs no project directory.
+
 | Flag | Meaning |
 |---|---|
 | `[handle]` | label@batch, a run id prefix, or #n from the last board |
@@ -162,6 +166,7 @@ and failed counts appears only for a run with a task group.
 | `--live` | ask each host whether the driver exists; a gone driver shows dead |
 | `--triage` | every run not running, with one proposed command |
 | `--digest` | the daily digest that the watcher sends, as plain text |
+| `--all` | the runs of every registered project, with a project column |
 
 | Exit | Meaning |
 |---|---|
@@ -193,31 +198,28 @@ watch or telegram), the run, the kind and the text.
 edr hosts [--json] [--history] [--since T] [--narrow]
 ```
 
-Probes every host of the site file and prints one row per host: the
-worst mark of the host; the name; cores in use of total, with a bar; the
-one-minute load average; RAM free of total; the largest writable scratch
-of the host's list, and its space free of total, with a bar of the used
-part; GPUs idle of total, where idle means under 5 % utilisation and
-under 5 % memory in use; GPU memory free of total, summed over the GPUs;
-processes that match tool_procs, split into yours and other users';
-and the live runs of this project on the host, from the database.
+Probes every host of the site file, all at once, and prints one row per
+host: whether a run can start there; the free cores, RAM and scratch
+of total, where the scratch is the largest writable one of the host's
+list; the idle GPUs of total, where idle means under 5 % utilisation
+and under 5 % memory in use; the processes that match tool_procs,
+yours and other users'; and your live runs on the host, by project over
+every registered project, with the cores, RAM and scratch they use,
+read from their heartbeats.
 
-A mark tells how full a resource is. It is 🟢 below the first threshold
-of the [marks] table, 🟡 from the first, 🟠 from the second and 🔴 from
-the third. A value exactly at a threshold takes the colour of that
-threshold. The used fraction is the load over the cores for cores, the
-used part of the total for ram GB and scratch GB, and the busy GPUs over
-all GPUs for gpu. A host without GPUs shows -, and a host that did not
-answer shows ⚫ and its error in the row. The rows go by the worst mark,
-⚫ first, then 🔴, 🟠, 🟡 and 🟢, and by host name within one mark.
+The mark says whether a run can start: 🟢 when the host passes every
+rule of [placement] of this project and keeps its scratch above the
+floor host_free_min_gb, 🔴 when it does not, and ⚫ when the host did
+not answer. The hosts where a run can start come first, the most free
+cores first. Under the table, a line per host says why no run can
+start there, and when your own runs fill the host: your trees push its
+scratch under the floor, or your runs use most of its busy cores or
+RAM. That is the case where your runs block other people's work.
 
-The GPU columns come from nvidia-smi; a host without it shows -. A bar is
-green below 70 % used, yellow below 90 % and red above; unlike the
-marks, the bar colour does not follow [marks]. --json gives the
-numbers: cores, load, free_cores, free_ram_gb, total_ram_gb, mount,
-free_gb, total_gb, gpus, gpus_idle, gpu_used_gb, gpu_total_gb,
-our_tool_procs, other_tool_procs and our_runs, and the marks of cores,
-ram, scratch and gpu in marks.
+Outside a project, hosts reads the default site file
+~/.config/edarunner/site.toml and the default [placement]. --json
+gives each row with the probe numbers, runs, our_cores, our_ram_gb,
+our_gb, floor_gb, start, why and note.
 
 --history probes nothing. It reads the host_samples table, where the
 watcher keeps one probe per host and cycle for 30 days, and prints one
@@ -230,12 +232,31 @@ use (the load, capped at the cores), RAM, scratch and busy GPUs over
 | `--json` | the same as edr --json hosts |
 | `--history` | no probe: the samples the watcher kept, one line per host over --since |
 | `--since T` | with --history: 30m, 2h, 1d or seconds; default 1d |
-| `--narrow` | only the mark (column ok), host, cores, RAM, scratch and GPUs, in 48 columns, with no space between a mark and its number |
+| `--narrow` | only the mark (column ok), host, free cores, free scratch and your runs, in 48 columns |
 
 | Exit | Meaning |
 |---|---|
 | 2 | with --history, no sample |
 | 3 | a host did not answer |
+
+## projects
+
+```
+edr projects [--json]
+```
+
+Prints one row per project of the registry ~/.edr/projects/: its
+directory, the pid of its watcher when watch.json is younger than
+three cycles, its live runs, and a note when its files do not load or
+the link names no project. It needs no project directory.
+
+| Flag | Meaning |
+|---|---|
+| `--json` | the same as edr --json projects |
+
+| Exit | Meaning |
+|---|---|
+| 2 | no project is registered |
 
 ## tools
 

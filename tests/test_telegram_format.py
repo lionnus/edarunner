@@ -57,14 +57,21 @@ def test_events_newest_first_with_handles():
 
 
 def test_hosts_and_tools():
-    probe = {"host": "hostA", "cores": 32, "load": 20.6, "free_ram_gb": 283.0, "total_ram_gb": 376.0,
-             "free_gb": 1343.0, "total_gb": 1538.0, "gpus": 1, "gpus_idle": 1}
-    probe["marks"] = {"cores": "🟡", "ram": "🟢", "scratch": "🟢", "gpu": "🟢"}
-    no_gpu = {**probe, "host": "hostC", "gpus": 0, "gpus_idle": 0}
-    assert fmt.hosts([{"host": "hostB", "error": "timeout"}, probe, no_gpu]).splitlines() == [
+    row = {"host": "hostA", "cores": 32, "free_cores": 11.4, "free_ram_gb": 283.0, "total_ram_gb": 376.0,
+           "free_gb": 1343.0, "total_gb": 1538.0, "gpus": 1, "gpus_idle": 1, "runs": {"p2": 1, "p1": 2},
+           "our_cores": 12.5, "our_gb": 40.0, "start": True, "why": "", "note": ""}
+    full = {**row, "host": "hostC", "gpus": 0, "gpus_idle": 0, "runs": {}, "start": False,
+            "why": "13 GB scratch free, under the floor of 100 GB", "note": "your runs use 12 of its 20 busy cores"}
+    assert fmt.hosts([row, full, {"host": "hostB", "error": "timeout", "start": None}]).splitlines() == [
+        "🟢 <b>hostA</b> free 11.4/32 cores, 283/376 GB RAM, 1343/1538 GB scratch, 1/1 GPUs; yours: p1 2, p2 1, 12.5 cores, "
+        "40 GB scratch",
+        "🔴 <b>hostC</b> free 11.4/32 cores, 283/376 GB RAM, 1343/1538 GB scratch; none of yours",
+        "    <i>13 GB scratch free, under the floor of 100 GB</i>",
+        "    <i>your runs use 12 of its 20 busy cores</i>",
         "⚫ <b>hostB</b> <i>no answer</i>",
-        "<b>hostA</b> 🟡 cores 21/32, 🟢 ram 93/376 GB, 🟢 scratch 195/1538 GB, 🟢 gpu 0/1",
-        "<b>hostC</b> 🟡 cores 21/32, 🟢 ram 93/376 GB, 🟢 scratch 195/1538 GB"]
+        "",
+        "<i>🟢 a run can start, 🔴 no run can start, ⚫ no answer</i>"]
+    assert fmt.hosts([]) == "<i>no hosts</i>"
     rows = [{"tool": "fc", "hosts": {"hostA": "", "hostB": "2024.09"}, "free": 5, "total": 8},
             {"tool": "vcs", "hosts": {"hostA": ""}, "free": 3}, {"tool": "gpu", "hosts": {}, "total": 2},
             {"tool": "x", "hosts": {}, "note": "unknown: <none>"}, {"tool": "sh", "hosts": {}}]

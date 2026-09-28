@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,12 @@ def add_metric(root: Path, run_id: str, name: str, value: float, step: int | Non
 
 def keep_file(root: Path, run_id: str) -> dict:
     return json.loads((bdir(root) / f"{run_id}.keep.json").read_text())
+
+
+def beat(root: Path, run_id: str, **fields) -> None:
+    """Set `fields` in the heartbeat of a seeded run."""
+    path = bdir(root) / f"{run_id}.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
 
 
 # init and check
@@ -162,7 +169,7 @@ def test_events_filters(demo: Path, capsys) -> None:
 def test_brief_on_an_empty_project_names_it_and_says_no_runs(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "brief")
     assert code == 0 and out.startswith("# demo\n") and f"`{demo}`" in out and "There are no runs yet" in out
-    assert "not been probed yet" in out and not (demo / "data" / "edr.db").exists()
+    assert "No census has probed the hosts yet" in out and not (demo / "data" / "edr.db").exists()
 
 
 def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
@@ -173,19 +180,22 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     (demo / "wt" / "def5678").mkdir(parents=True)
     with Database(demo / "data" / "edr.db") as db:
         db.add_event("user", a, "launch", "local /x")
-        db.add_host_samples(int(time.time()) - 600, {"local": {"cores": 4, "load": 3.8, "total_ram_gb": 8,
-                                                              "free_ram_gb": 6, "total_gb": 100, "free_gb": 90}})
+    probe = HostProbe("local", 0.2, 6.0, "/x", 90.0, cores=4, load=3.8, total_ram_gb=8.0, total_gb=100.0)
+    config.save_json(home.root() / "census.json", {"ts": time.time() - 600, "hosts": {"local": asdict(probe)}, "runs": [
+        {"project": "demo", "host": "local", "cpu_pct": 350.0, "rss_gb": 1.0, "tree_gb": 2.0}]})
     (demo / "AGENTS.md").write_text("notes\n")
     code, out, _ = edr(capsys, "brief")
     heads = [ln for ln in out.splitlines() if ln.startswith("## ")]
     assert code == 0 and heads == ["## The flow", "## The site", "## The state", "## Read more"]
     assert "- `synth` runs one command through 4 steps, collects `reports/` and needs the tool `demo`." in out
     assert "- `power` is a task group that runs 2 tasks at a time" in out
-    assert "`local` at the probe 10 minutes ago: cores 🔴, ram 🟢, scratch 🟢." in out
+    assert "The hosts at the census 10 minutes ago, the ones where a run of this project can start first" in out
+    assert ("- 🔴 `local`: 0.2 of 4 cores, 6 of 8 GB RAM and 90 of 100 GB scratch are free. No run can start there: "
+            "0.2 cores free, a run needs 1. Your runs there: demo 1, using 3.5 cores, 1 GB RAM and 2 GB scratch. "
+            "Your runs use 3.5 of its 3.8 busy cores.") in out
     assert "Batch `demo` on source `abc1234` has 3 runs: 1 failed, 1 running and 1 done." in out
     assert "2 sources are checked out under" in out
     assert "\n- `abc1234`, used by batch `demo`\n- `def5678`, used by no batch\n" in out
-    assert "🟢 has room, 🟡 is filling up, 🟠 is nearly full and 🔴 is full." in out
     assert "One run has not finished:" in out and "`c@demo` is running in stage `synth` at step 2 (elaborate) on `local`" in out
     assert "`b@demo` (failed): `edr retire b@demo --why FAILED:synth`" in out
     assert "user recorded `launch` on `a@demo`: local /x" in out and f"`{demo / 'AGENTS.md'}`" in out
@@ -193,7 +203,7 @@ def test_brief_has_its_sections_in_order(demo: Path, capsys) -> None:
     data = json.loads(out)["data"]
     assert code == 0 and {"project", "root", "repo", "sources", "backend", "stages", "hosts", "tools", "batches",
                           "live", "decisions", "events", "read", "docs"} <= data.keys()
-    assert data["hosts"][0]["marks"]["cores"] == "🔴" and [d["handle"] for d in data["decisions"]] == ["b@demo", "a@demo"]
+    assert data["hosts"]["hosts"][0]["start"] is False and [d["handle"] for d in data["decisions"]] == ["b@demo", "a@demo"]
 
 
 def test_brief_proposes_nothing_for_a_retired_run(demo: Path, capsys) -> None:
@@ -368,7 +378,7 @@ def test_actions_for_the_bot(demo: Path, capsys) -> None:
     cmp = acts.compare_text(["a@demo", "b_nodw@demo"]).splitlines()
     assert cmp[:3] == ["design__instance__area", "  a       1031.5", "  b_nodw   999.0"] and cmp[5].split() == ["b_nodw", "-"]
     assert len(acts.metric_text("design__instance__area", None).splitlines()) == 4 and acts.metric_text("design__instance__area", "zzz") == "no metrics"
-    assert acts.hosts_text().startswith("<b>local</b> ")
+    assert acts.hosts_text().startswith("🟢 <b>local</b> free ")
     assert acts.tools_text() == "<b>demo</b> 2/10 seats used, local"
     assert acts.metrics_csv("abc1234").decode().splitlines()[0].startswith("run_id,label,")
     assert len(acts.metrics_csv("abc1234").decode().splitlines()) == 5 and acts.metrics_csv("zzz").count(b"\n") == 1
@@ -453,7 +463,6 @@ def test_a_retired_live_run_stays_retired_and_the_watcher_does_not_resume_it(dem
     assert code == 0
     resumed, sent = [], []
     monkeypatch.setattr(watch, "_resume", lambda *a, **k: resumed.append(a))
-    monkeypatch.setattr(watch, "orphans", lambda *a: [])  # the sleeps of other tests on this machine
     notifier = Notifier()
     monkeypatch.setattr(notifier, "send", lambda *a, **k: sent.append(a))
     project = config.load_project(demo)
@@ -518,16 +527,14 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
 
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
     code, out, _ = edr(capsys, "hosts")
-    head, row = out.splitlines()[0], out.splitlines()[2]
-    assert code == 0 and head.split() == ["ok", "host", "cores", "load", "ram", "GB", "mount", "scratch", "GB", "gpu", "gpu", "GB", "tools", "runs"]
-    assert row.split()[1] == "local" and str(tmp_path / "scratch") in row and re.search(r" \d+/\d+ +[\u2588\u2591]{8} ", row)
+    row = out.splitlines()[2]
+    assert code == 0 and "free cores" in out.splitlines()[0] and row.split()[:2] == ["🟢", "local"]
     code, out, _ = edr(capsys, "--json", "hosts", "--narrow")
-    assert code == 0 and json.loads(out)["data"][0]["host"] == "local" and json.loads(out)["data"][0]["our_runs"] == 0
-    with Database(demo / "data" / "edr.db") as db:
-        for label, phase, state in (("a", "stage:synth", "running"), ("b", "done", None), ("c", None, "queued")):
-            db.upsert_run({"run_id": f"20260926_1200_{label}", "batch": "demo", "label": label, "host": "local",
-                           "phase": phase, "state": state})
-    assert json.loads(edr(capsys, "--json", "hosts")[1])["data"][0]["our_runs"] == 1
+    data = json.loads(out)["data"][0]
+    assert code == 0 and data["host"] == "local" and data["runs"] == {} and data["mount"] == str(tmp_path / "scratch")
+    beat(demo, seed(demo, "c", "stage:synth"), cpu_pct=250.0, tree_gb=3.5)
+    data = json.loads(edr(capsys, "--json", "hosts")[1])["data"][0]
+    assert (data["runs"], data["our_cores"], data["our_gb"]) == ({"demo": 1}, 2.5, 3.5)
     code, out, _ = edr(capsys, "tools")
     assert code == 0 and out.splitlines()[0].split() == ["tool", "free", "total", "hosts", "note"]
     assert out.splitlines()[2].split() == ["demo", "8", "10", "local", "1.0"]
@@ -549,12 +556,14 @@ def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None
 # run (reuse), watch, bad input
 
 
-def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
+def test_hosts_show_the_room_and_your_runs_where_a_run_can_start_first(demo: Path, capsys, monkeypatch,
+                                                                         tmp_path: Path) -> None:
     site = demo / "site.toml"
-    site.write_text(site.read_text() + "\n[hosts.hostA]\ncores = 64\nram_gb = 256\n\n[hosts.hostB]\ncores = 32\nram_gb = 128\n")
+    site.write_text(site.read_text().replace("host_free_min_gb = 1", "host_free_min_gb = 100")
+                    + "\n[hosts.hostA]\ncores = 64\nram_gb = 256\n\n[hosts.hostB]\ncores = 32\nram_gb = 128\n")
     probes = {
-        "local": HostProbe("local", 7.8, 35.0, "/tmp/x", 15.5, 3, 0, cores=8, load=0.2, total_ram_gb=62.3, total_gb=15.6),
-        "hostA": HostProbe("hostA", 12.5, 120.0, "/scratch", 800.0, 4, 2, cores=64, load=51.5, total_ram_gb=256.0,
+        "local": HostProbe("local", 7.8, 35.0, "/tmp/x", 150.5, 3, 0, cores=8, load=0.2, total_ram_gb=62.3, total_gb=200.0),
+        "hostA": HostProbe("hostA", 12.5, 120.0, "/scratch", 80.0, 4, 2, cores=64, load=51.5, total_ram_gb=256.0,
                            total_gb=2000.0, gpus=4, gpus_idle=1, gpu_used_gb=30.0, gpu_total_gb=320.0),
     }
 
@@ -564,48 +573,36 @@ def test_hosts_table_from_fake_probes(demo: Path, capsys, monkeypatch) -> None:
         raise HostError(f"{host}: rc 255: timeout")
 
     monkeypatch.setattr(Ssh, "probe", probe)
+    beat(demo, seed(demo, "a", "stage:synth"), host="hostA", tree_gb=1900.0, cpu_pct=100.0)
     code, out, _ = edr(capsys, "hosts")
     lines = out.splitlines()
-    assert code == 3 and len(lines) == 5 and "\x1b" not in out
-    assert [ln.split()[:2] for ln in lines[2:]] == [["⚫", "hostB"], ["🟠", "hostA"], ["🟢", "local"]]
-    a = next(ln for ln in lines if " hostA " in ln)
-    assert a.split() == ["🟠", "hostA", "🟠", "52/64", "\u2588" * 6 + "\u2591" * 2, "51.5", "🟢", "120/256", "/scratch", "🟢",
-                         "800/2000", "\u2588" * 5 + "\u2591" * 3, "🟡", "1/4", "290/320", "4/2", "0"]
-    local = next(ln for ln in lines if " local " in ln)
-    assert local.split() == ["🟢", "local", "🟢", "0/8", "\u2591" * 8, "0.2", "🟢", "35/62.3", "/tmp/x", "🟢", "15.5/15.6",
-                             "\u2591" * 8, "-", "-", "3/0", "0"]
-    assert next(ln for ln in lines if " hostB " in ln).split()[2:] == ["error:", "hostB:", "rc", "255:", "timeout"]
+    assert code == 3 and "\x1b" not in out
+    assert [ln.split()[:2] for ln in lines[2:5]] == [["🟢", "local"], ["🔴", "hostA"], ["⚫", "hostB"]]
+    assert next(ln for ln in lines if " hostA " in ln).split()[2:] == ["12.5/64", "120/256", "80/2000", "1/4", "4/2",
+                                                                     "demo", "1", "1", "0", "1900"]
+    assert lines[5:] == ["hostA: 80 GB scratch free, under the floor of 100 GB",
+                         "hostA: your trees hold 1900 GB and push its scratch under the floor of 100 GB",
+                         "hostB: hostB: rc 255: timeout"]
     code, out, _ = edr(capsys, "hosts", "--narrow")
     lines = out.splitlines()
     assert code == 3 and all(len(ln) <= 48 for ln in lines)
-    assert lines[0].split() == ["ok", "host", "cores", "ram", "GB", "scratch", "GB", "gpu"]
-    assert next(ln for ln in lines if " hostA " in ln).split() == ["🟠", "hostA", "🟠52/64", "🟢120/256", "🟢800/2000", "🟡1/4"]
-    code, out, _ = edr(capsys, "--json", "hosts")
-    data = json.loads(out)["data"]
-    assert [r["host"] for r in data] == ["hostB", "hostA", "local"]
-    data = {r["host"]: r for r in data}
-    assert code == 3 and data["hostA"]["gpus_idle"] == 1 and data["hostA"]["total_gb"] == 2000.0 and "error" in data["hostB"]
-    assert data["hostA"]["marks"] == {"cores": "🟠", "ram": "🟢", "scratch": "🟢", "gpu": "🟡"}
-    assert data["local"]["marks"]["gpu"] == "-" and set(data["hostB"]["marks"].values()) == {"⚫"}
-    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
-    text = acts.hosts_text().splitlines()
-    assert ("<b>hostA</b> 🟠 cores 52/64, 🟢 ram 136/256 GB, 🟢 scratch 1200/2000 GB, 🟡 gpu 3/4" in text
-            and "⚫ <b>hostB</b> <i>no answer</i>" in text and text[0].startswith("⚫"))
-
-
-def test_hosts_sort_red_first_by_marks(demo: Path, capsys, monkeypatch) -> None:
-    site = demo / "site.toml"
-    site.write_text(site.read_text() + "".join(f"\n[hosts.{h}]\ncores = 8\nram_gb = 8\n" for h in ("b", "a", "c")))
-    (demo / "edr.toml").write_text((demo / "edr.toml").read_text() + "\n[marks]\nram = [0.1, 0.2, 0.3]\n")
-    ram_used = {"local": 0.0, "a": 0.25, "b": 0.3, "c": 0.3}
-
-    def probe(self, host):
-        return HostProbe(host, 8, 10 - 10 * ram_used[host], "/s", 10, cores=8, total_ram_gb=10, total_gb=10)
-
-    monkeypatch.setattr(Ssh, "probe", probe)
-    code, out, _ = edr(capsys, "--json", "hosts")
-    data = json.loads(out)["data"]
-    assert code == 0 and [(r["host"], r["marks"]["ram"]) for r in data] == [("b", "🔴"), ("c", "🔴"), ("a", "🟠"), ("local", "🟢")]
+    assert next(ln for ln in lines if " hostA " in ln).split() == ["🔴", "hostA", "12.5/64", "80/2000", "1"]
+    data = json.loads(edr(capsys, "--json", "hosts")[1])["data"]
+    assert [(r["host"], r["start"]) for r in data] == [("local", True), ("hostA", False), ("hostB", None)]
+    assert data[1]["floor_gb"] == 100 and data[1]["runs"] == {"demo": 1} and "error" in data[2]
+    text = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False))).hosts_text().splitlines()
+    assert text[:4] == ["🟢 <b>local</b> free 7.8/8 cores, 35/62 GB RAM, 150/200 GB scratch; none of yours",
+                        "🔴 <b>hostA</b> free 12.5/64 cores, 120/256 GB RAM, 80/2000 GB scratch, 1/4 GPUs; yours: demo 1, "
+                        "1 cores, 1900 GB scratch",
+                        "    <i>80 GB scratch free, under the floor of 100 GB</i>",
+                        "    <i>your trees hold 1900 GB and push its scratch under the floor of 100 GB</i>"]
+    assert "⚫ <b>hostB</b> <i>no answer</i>" in text
+    monkeypatch.chdir(tmp_path)  # outside a project: the default site file
+    (tmp_path / ".config" / "edarunner").mkdir(parents=True)
+    shutil.copy(site, tmp_path / ".config" / "edarunner" / "site.toml")
+    data = json.loads(edr(capsys, "--json", "hosts")[1])["data"]
+    # The default [placement] wants 16 free cores, so no run can start, and the most free cores go first.
+    assert [(r["host"], r["start"], r["runs"]) for r in data] == [("hostA", False, {}), ("local", False, {}), ("hostB", None, {})]
 
 
 def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
@@ -698,6 +695,36 @@ def test_a_project_by_name_from_any_directory(demo: Path, capsys, tmp_path: Path
     code, _, err = edr(capsys, "status")
     assert code == 1 and f"inside the project {other}" in err
     assert edr(capsys, "-P", "demo", "status")[0] == 0
+
+
+def test_projects_and_the_board_of_every_project(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
+    beta = tmp_path / "edr" / "beta"
+    shutil.copytree(demo, beta, ignore=shutil.ignore_patterns("data"))
+    (beta / "edr.toml").write_text((beta / "edr.toml").read_text().replace('project = "demo"', 'project = "beta"'))
+    seed(demo, "a", "stage:synth")
+    seed(demo, "d", "done")
+    assert edr(capsys, "register")[0] == 0
+    monkeypatch.chdir(beta)
+    assert edr(capsys, "register")[0] == 0
+    (beta / "data").mkdir()
+    with Database(beta / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": f"{DATE}_q_demo_gabc1234", "batch": "demo", "label": "q", "state": "queued"})
+    monkeypatch.chdir(tmp_path)
+    config.save_json(config.load_project(demo).state_dir / "watch.json", {"ts": time.time(), "cycle": 1, "pid": 4711})
+    code, out, _ = edr(capsys, "--json", "projects")
+    rows = {r["project"]: r for r in json.loads(out)["data"]}
+    assert code == 0 and (rows["demo"]["watcher"], rows["demo"]["live"], rows["beta"]["watcher"], rows["beta"]["live"]) == (
+        4711, 1, None, 0)
+    assert rows["demo"]["root"] == str(demo.resolve()) and rows["beta"]["note"] == ""
+    (beta / "edr.toml").write_text((beta / "edr.toml").read_text() + "\nbogus = 1\n")
+    code, out, _ = edr(capsys, "projects")
+    assert code == 0 and "unknown key 'metrics.energy_nj.bogus'" in out and "pid 4711" in out
+    (beta / "edr.toml").write_text((beta / "edr.toml").read_text().replace("\nbogus = 1\n", ""))
+    code, out, _ = edr(capsys, "--json", "status", "--all")
+    runs = json.loads(out)["data"]["runs"]
+    assert code == 0 and sorted((r["project"], r["label"]) for r in runs) == [("beta", "q"), ("demo", "a"), ("demo", "d")]
+    code, out, _ = edr(capsys, "status", "--all")
+    assert out.splitlines()[0].split()[:2] == ["project", "label"] and not (beta / "data" / "board").exists()
 
 
 def _edr_bytes(demo: Path, *argv: str, **env: str) -> bytes:

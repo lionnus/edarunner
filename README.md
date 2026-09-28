@@ -104,14 +104,17 @@ from RTL to GDS, see
 #3  small  hostA  done     done         export      35m      0f/4d   0.0
 ```
 
-`edr hosts` shows the load and the free resources of each host. The
-fullest host comes first.
+`edr hosts` shows the free room of each host next to your live runs
+there, over all your projects. The hosts where a run can start come
+first, and a line under the table says when your own runs fill a host.
 
 ```text
-ok  host      cores            load      ram GB  mount       scratch GB               gpu   gpu GB  tools  runs
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-🟠  hostA  🟠 52/64  ██████░░  51.5  🟢 120/256  /scratch   🟢 800/2000  █████░░░  🟡 1/4  290/320    4/2     2
-🟠  hostB   🟢 3/32  █░░░░░░░   3.1   🟢 98/128  /scratch2  🟠 150/1000  ███████░       -        -    1/0     1
+ok  host   free cores  free RAM GB  free scratch GB  idle GPUs  tools  your runs  your cores  your RAM GB  your scratch GB
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+🟢  hostA     40.5/64      120/256         800/2000        1/4    4/2  myflow 1           16           30              120
+🔴  hostB     28.9/32       98/128          60/1000          -    1/0  power 1             1            2              900
+hostB: 60 GB scratch free, under the floor of 100 GB
+hostB: your trees hold 900 GB and push its scratch under the floor of 100 GB
 ```
 
 ## From your phone

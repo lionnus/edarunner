@@ -91,7 +91,6 @@ These are the timeouts and thresholds of the driver and the watcher;
 | `dead_s` | heartbeat age that marks a run `dead` | `2700` |
 | `hung_s` | time without progress that marks a run `hung` | `21600` |
 | `grace_s` | wait between an alert and the watcher's stop or kill | `3600` |
-| `host_free_min_gb` | free space below which the driver starts nothing new | `100.0` |
 | `streak` | equal failure signatures in a row that stop a task group | `3` |
 | `heartbeat_s` | period of the heartbeat and of the watcher cycle | `60` |
 | `gate_max_s` | longest wait at a tool gate | `14400` |
@@ -103,14 +102,14 @@ These are the timeouts and thresholds of the driver and the watcher;
 ### [placement]
 
 A job with `host = "auto"` goes to the first host, preferred ones first and then the one with
-the most free cores, that is not avoided, runs fewer than `max_per_host`, has the free cores, RAM
-and disk the job's first stage needs, and has every tool the job's stages need. No such host means
-the job is queued. When no host of the site has a tool the job needs, `plan` reports it as a
-problem.
+the most free cores, that is not avoided, runs fewer than `max_per_host` of your runs, has the free
+cores, RAM and disk the job's first stage needs with its scratch above the host's floor, and has
+every tool the job's stages need. No such host means the job is queued. When no host of the site
+has a tool the job needs, `plan` reports it as a problem.
 
 | Key | Meaning | Default |
 |---|---|---|
-| `max_per_host` | the most runs of this project on one host | `2` |
+| `max_per_host` | the most of your runs on one host, over every registered project: the live runs and the launches that wrote no heartbeat yet | `2` |
 | `min_free_cores` | free cores a host needs to take a run | `16` |
 | `min_free_ram_gb` | free RAM a host needs, in GB | `60` |
 | `avoid` | hosts `auto` never picks | `[]` |
@@ -119,10 +118,6 @@ problem.
 ### [telegram]
 
 In `edr.toml` the table takes `token_file`, `chat_id`, `user_id` and `topic_id` of the site's `[telegram]` table and replaces them for this project only. A key it leaves out keeps the site's value. Without a `[telegram]` table in `site.toml`, the table here needs `chat_id`. The custom commands stay in `site.toml`.
-
-### [marks]
-
-The table is optional. It takes the keys of the site's `[marks]` table and replaces them for this project only. A key it leaves out keeps the site's value.
 
 ### [stages.<name>]
 
@@ -243,6 +238,7 @@ shell of a host may be `csh` or `tcsh`.
 | `ssh.options` | the options of every ssh call | `["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]` |
 | `ssh.timeout_s` | seconds a remote command may take | `45` |
 | `tool_procs` | a regex over process names, for the orphan check and the host table | `""` |
+| `host_free_min_gb` | free scratch below which the driver starts nothing new on a host and placement sends no run there; one floor per disk, whatever project fills it | `100.0` |
 | `nfs_export` | a path the head node reads when ssh to a host fails at collect | `""` |
 
 ### [scheduler]
@@ -272,20 +268,7 @@ this table is a `check` problem. A tool in `tools` must be declared under `[tool
 | `ram_gb` | the RAM of the host, in GB | required |
 | `scratch` | the scratch roots of this host | the site `scratch` |
 | `tools` | the tools the host has: a list of names, or `{ name = version }`; the version is text the flow may use as `{tool.<name>.version}` | every tool of `[tools]` |
-
-### [marks]
-
-The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
-fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
-Below the first it is 🟢. Any other list stops the load with an error that names the key. In `edr.toml`
-the table replaces the site's keys for this project only.
-
-| Key | Meaning | Default |
-|---|---|---|
-| `cores` | the load average over the cores | `[0.6, 0.8, 0.9]` |
-| `ram` | the RAM in use over the total | `[0.6, 0.8, 0.9]` |
-| `scratch` | the used part of the scratch mount | `[0.7, 0.85, 0.95]` |
-| `gpu` | the busy GPUs over all GPUs | `[0.6, 0.8, 0.9]` |
+| `host_free_min_gb` | the free scratch this host keeps | the site `host_free_min_gb` |
 
 ### [tools.<name>]
 

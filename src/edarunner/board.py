@@ -15,19 +15,13 @@ import shlex
 import sys
 import time
 from collections import Counter
-from collections.abc import Iterable
 from string import Template
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rich import box
 from rich.console import Console, Group, RenderableType
 from rich.table import Table
 from rich.text import Text
-
-from .model import Marks
-
-if TYPE_CHECKING:
-    from .hosts import HostProbe
 
 Row = dict[str, Any]
 
@@ -46,10 +40,8 @@ STYLE = {"running": "green", "queued": "cyan", "stale": "yellow", "host_full": "
          "incomplete": "magenta", "done": "dim", "retired": "dim", "stopped": "dim", "killed": "dim",
          "imported": "dim", "abandoned": "dim", "resumed": "cyan", "pending": "cyan", "held": "magenta",
          "suspended": "yellow"}
-# Resource marks from green to red, then black for a host that did not answer.
-RESOURCE_MARKS = ("🟢", "🟡", "🟠", "🔴")
-NO_ANSWER = "⚫"
-SEVERITY = (NO_ANSWER, *reversed(RESOURCE_MARKS))
+# The mark of a host: a run can start there, none can, or the host did not answer.
+START = {True: "🟢", False: "🔴", None: "⚫"}
 # No markup: a task in a metric key looks like a tag, `power_w[k_small]`.
 _OPTS = {"markup": False, "highlight": False, "emoji": False}
 
@@ -83,28 +75,6 @@ def bar(used: float, total: float, width: int = 8) -> Text:
     return Text("\u2588" * n + "\u2591" * (width - n), style="green" if frac < 0.7 else "yellow" if frac < 0.9 else "red")
 
 
-def resource_mark(used_fraction: float, thresholds: list[float]) -> str:
-    """The mark of a resource: green, then yellow, orange and red from each threshold on."""
-    return RESOURCE_MARKS[sum(used_fraction >= t for t in thresholds)]
-
-
-def host_marks(probe: HostProbe | None, marks: Marks) -> dict[str, str]:
-    """One mark each for cores, ram, scratch and gpu; gpu is '-' without GPUs, all black for None (no answer)."""
-    if probe is None:
-        return dict.fromkeys(("cores", "ram", "scratch", "gpu"), NO_ANSWER)
-    p = probe
-
-    def frac(used: float, total: float) -> float:
-        return used / total if total else 0.0
-
-    return {
-        "cores": resource_mark(frac(p.load, p.cores), marks.cores),
-        "ram": resource_mark(frac(p.total_ram_gb - p.free_ram_gb, p.total_ram_gb), marks.ram),
-        "scratch": resource_mark(frac(p.total_gb - p.free_gb, p.total_gb), marks.scratch),
-        "gpu": resource_mark(frac(p.gpus - p.gpus_idle, p.gpus), marks.gpu) if p.gpus else "-",
-    }
-
-
 SPARK = "▁▂▃▄▅▆▇█"
 
 
@@ -122,22 +92,11 @@ def spark(points: list[tuple[int, float | None]], top: float | None = None, widt
     return "".join(" " if not b else SPARK[min(7, max(0, round(sum(b) / len(b) / top * 7)))] for b in bins)
 
 
-def worst_mark(marks: Iterable[str]) -> str:
-    """The most severe of `marks` by SEVERITY; '-' counts as green."""
-    return min((m for m in marks if m in SEVERITY), key=SEVERITY.index, default=RESOURCE_MARKS[0])
-
-
 # row helpers
 
 def is_live(row: Row) -> bool:
     """True while the phase is not terminal."""
     return not str(row.get("phase") or "").startswith(TERMINAL)
-
-
-def live_per_host(rows: list[Row]) -> Counter:
-    """The runs per host whose driver started and has not ended."""
-    return Counter(r.get("host") for r in rows if r.get("phase") and is_live(r)
-                   and r.get("state") not in ("queued", "retired", "abandoned"))
 
 
 def state_of(row: Row) -> str:
@@ -287,13 +246,17 @@ def triage_cmd(row: Row, state: str, hb: dict) -> str | None:
 
 
 def wide(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None) -> Table | str:
-    """One line per run, every state, in board order; `totals` holds the stages with steps."""
+    """One line per run, every state, in board order; `totals` holds the stages with steps.
+
+    Rows of several projects carry `project`, which then takes the place of the row number."""
     now = now or time.time()
-    body = [[f"#{n}", r.get("label"), r.get("host"), state_text(state_of(r)), r.get("phase"), _stage_step(r, totals),
-             hm(_age_s(r, now)), _fd(r), f"{cost(r, now):.1f}"] for n, r in enumerate(order(rows), 1)]
+    first = "project" if any("project" in r for r in rows) else "#"
+    body = [[r.get("project") if first == "project" else f"#{n}", r.get("label"), r.get("host"), state_text(state_of(r)),
+             r.get("phase"), _stage_step(r, totals), hm(_age_s(r, now)), _fd(r), f"{cost(r, now):.1f}"]
+            for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"
-    return table(["#", "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body,
+    return table([first, "label", "host", "state", "phase", "stage/step", "age", "fail/done", "cost"], body,
                  styles={"label": "bold", "age": "dim"}, right=("age", "fail/done", "cost"))
 
 

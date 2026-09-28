@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from edarunner import hosts
 from edarunner.guards import Refuse
-from edarunner.hosts import HostError, HostProbe, Proc, Ssh, missing_tools, place, tool_versions
+from edarunner.hosts import HostError, HostProbe, Proc, Ssh, missing_tools, place, probe_all, tool_versions, why_not
 from edarunner.model import Host, Job, Limits, Needs, Placement, Project, Safety, Site, Source, Stage, Sync, Tool
 from helpers_driver import DEMO
 
@@ -27,6 +28,7 @@ def demo_site(scratch: list[str]) -> Site:
         ssh_options=t["ssh"]["options"],
         ssh_timeout_s=t["ssh"]["timeout_s"],
         tool_procs=t["tool_procs"],
+        host_free_min_gb=t["host_free_min_gb"],
         hosts={n: Host(n, h["cores"], h["ram_gb"], h.get("scratch")) for n, h in t["hosts"].items()},
         tools={n: Tool(n, **x) for n, x in t["tools"].items()},
     )
@@ -125,7 +127,7 @@ def test_probe_picks_largest_writable_scratch(ssh: Ssh, tmp_path: Path) -> None:
 
 
 CANNED = [
-    "me", "8", "2.5", "65536000", "38750732", "@@",
+    "1800000000", "me", "8", "2.5", "65536000", "38750732", "@@",
     "/scratch 209715200 104857600", "/scratch2 1048576000 209715200", "@@",
     "me sleep", "other sleep", "me bash", "me sleep", "@@",
 ]
@@ -135,9 +137,10 @@ def test_probe_parses_canned_output_with_gpus(ssh: Ssh, monkeypatch) -> None:
     # One idle GPU, one busy by memory, one busy by utilisation, and a line nvidia-smi could not fill.
     out = "\n".join([*CANNED, "512, 81920, 0", "40960, 81920, 2", "1024, 81920, 87", "[N/A], 81920, 0", ""])
     fake_run(monkeypatch, {"nproc": (0, out, "")})
+    monkeypatch.setattr(hosts.time, "time", lambda: 1_800_000_090.0)
     assert ssh.probe("h") == HostProbe("h", 5.5, 37.0, "/scratch2", 200.0, 2, 1, cores=8, load=2.5,
                                        total_ram_gb=62.5, total_gb=1000.0, gpus=3, gpus_idle=1,
-                                       gpu_used_gb=41.5, gpu_total_gb=240.0)
+                                       gpu_used_gb=41.5, gpu_total_gb=240.0, skew_s=-90.0)
 
 
 def test_probe_parses_canned_output_without_gpus(ssh: Ssh, monkeypatch) -> None:
@@ -151,7 +154,7 @@ def test_probe_parses_canned_output_without_gpus(ssh: Ssh, monkeypatch) -> None:
 
 
 def test_probe_clamps_free_cores_at_zero(ssh: Ssh, monkeypatch) -> None:
-    fake_run(monkeypatch, {"nproc": (0, "\n".join([CANNED[0], CANNED[1], "12.5", *CANNED[3:], ""]), "")})
+    fake_run(monkeypatch, {"nproc": (0, "\n".join([*CANNED[:3], "12.5", *CANNED[4:], ""]), "")})
     p = ssh.probe("h")
     assert (p.free_cores, p.cores, p.load) == (0.0, 8, 12.5)
 
@@ -163,6 +166,17 @@ def test_probe_failure_raises(ssh: Ssh, monkeypatch) -> None:
     fake_run(monkeypatch, {"nproc": (0, "garbage\n", "")})
     with pytest.raises(HostError, match="unreadable"):
         ssh.probe("h")
+    fake_run(monkeypatch, {"nproc": (0, "\n".join(["Last login: yesterday", *CANNED[1:], ""]), "")})
+    with pytest.raises(HostError, match="unreadable"):
+        ssh.probe("h")
+
+
+def test_probe_all_asks_every_host_at_once(ssh: Ssh, monkeypatch) -> None:
+    fake_run(monkeypatch, {"nproc": (0, "\n".join([*CANNED, ""]), "")})
+    got = probe_all(ssh, ["h1", "h2"])
+    assert list(got) == ["h1", "h2"] and got["h2"].host == "h2" and got["h1"].free_cores == 5.5
+    fake_run(monkeypatch, {"nproc": (255, "", "ssh: connect timed out")})
+    assert probe_all(ssh, ["h1"]) == {"h1": "h1: rc 255: ssh: connect timed out"}
 
 
 def test_scratch_dirs_prefers_host_list(ssh: Ssh) -> None:
@@ -171,7 +185,7 @@ def test_scratch_dirs_prefers_host_list(ssh: Ssh) -> None:
     assert ssh.scratch_dirs("local") == ssh.site.scratch
 
 
-# pids_alive, kill_pgid, tool_processes
+# pids_alive, kill_pgid, census
 
 
 def test_pids_alive_local(ssh: Ssh) -> None:
@@ -204,28 +218,28 @@ def test_kill_pgid_refuses_bad_signal(ssh: Ssh) -> None:
         ssh.kill_pgid("local", 4242, "TERM; rm -rf /")
 
 
-def test_tool_processes_local(ssh: Ssh) -> None:
-    p = subprocess.Popen(["sleep", "31"])
+def test_census_local_lists_our_processes(ssh: Ssh) -> None:
+    p = subprocess.Popen(["sleep", "31"], env={**os.environ, "EDR_RUN_ID": "r7"}, cwd="/")
     try:
-        rows = ssh.tool_processes("local", ssh.site.tool_procs)
+        probe, procs = ssh.census("local")
     finally:
         p.kill(), p.wait()
-    mine = [r for r in rows if r[0] == p.pid]
-    assert mine and mine[0][3] == "sleep" and mine[0][4] == "sleep 31"
-    assert isinstance(mine[0][1], int) and isinstance(mine[0][2], float)
+    mine = [r for r in procs if r.pid == p.pid]
+    assert probe.host == "local" and probe.our_tool_procs >= 1 and probe.skew_s == 0
+    assert mine == [Proc(p.pid, mine[0].etimes, mine[0].pcpu, "sleep", "sleep 31", "/", "r7")]
+    assert os.getpid() in {r.pid for r in procs}
 
 
-def test_tool_processes_reads_the_run_id_and_the_cwd_in_one_call(ssh: Ssh, monkeypatch) -> None:
+def test_census_reads_the_probe_the_run_ids_and_the_cwds_in_one_call(ssh: Ssh, monkeypatch) -> None:
     listing = "501 60 99.0 fc_shell fc_shell -f main.tcl\n502 70 0.0 fc_shell fc_shell\n503 5 0.0 bash bash\n@@\n"
     cwds = "@@\n/proc/501 /scratch/x/edr/p/r1\n/proc/502 /home/me\n"
-    calls = fake_run(monkeypatch, {"EDR_RUN_ID": (0, listing + "/proc/501/environ:EDR_RUN_ID=r1\n/proc/503/environ:EDR_RUN_ID=r3\n"
-                                                  + cwds, "")})
-    assert ssh.tool_processes("hostA", "^fc_shell$") == [
-        Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/p/r1", "r1"),
-        Proc(502, 70, 0.0, "fc_shell", "fc_shell", "/home/me", "")]
-    assert len(calls) == 1
-    fake_run(monkeypatch, {"EDR_RUN_ID": (0, listing + cwds, "")})  # no process has EDR_RUN_ID
-    assert [p.cwd for p in ssh.tool_processes("hostA", "^fc_shell$")] == ["/scratch/x/edr/p/r1", "/home/me"]
+    probe = "\n".join([*CANNED, ""]) + "@@\n"
+    calls = fake_run(monkeypatch, {"EDR_RUN_ID": (0, probe + listing + "/proc/501/environ:EDR_RUN_ID=r1\n"
+                                                  "/proc/503/environ:EDR_RUN_ID=r3\n" + cwds, "")})
+    found, procs = ssh.census("hostA")
+    assert len(calls) == 1 and "nproc" in calls[0][1] and found.free_cores == 5.5
+    assert procs == [Proc(501, 60, 99.0, "fc_shell", "fc_shell -f main.tcl", "/scratch/x/edr/p/r1", "r1"),
+                     Proc(502, 70, 0.0, "fc_shell", "fc_shell", "/home/me", ""), Proc(503, 5, 0.0, "bash", "bash", "", "r3")]
 
 
 def test_check_local_finds_every_tool_here(ssh: Ssh) -> None:
@@ -265,6 +279,21 @@ def test_place_fits_nowhere(ssh: Ssh) -> None:
     assert place(proj, [job("j")], {}, {}) == {"j": None}
     low = {"a": probe("a", cores=0.5), "b": probe("b", ram=0.5), "c": probe("c", disk=0.1)}
     assert place(proj, [job("j")], low, {}) == {"j": None}
+
+
+def test_place_keeps_the_floor_of_each_host(ssh: Ssh) -> None:
+    proj = demo_project(ssh.site)
+    proj.site.host_free_min_gb = 50
+    proj.site.hosts.update({"a": Host("a", 64, 256, host_free_min_gb=200), "b": Host("b", 64, 256)})
+    probes = {"a": probe("a", cores=64, disk=150), "b": probe("b", cores=8, disk=60)}
+    assert place(proj, [job("j")], probes, {}) == {"j": "b"}
+    pl, needs = proj.placement, Needs(cores=1, disk_gb=0.1)
+    assert why_not(pl, probes["a"], 0, needs, 200) == "150 GB scratch free, under the floor of 200 GB"
+    assert why_not(pl, probes["b"], 4, needs, 50) == "4 of your runs, max_per_host is 4"
+    assert why_not(pl, probe("c", cores=0.5), 0, needs, 50) == "0.5 cores free, a run needs 1"
+    assert why_not(replace(pl, avoid=["b"]), probes["b"], 0, needs, 50) == "placement avoids it"
+    assert why_not(pl, probes["b"], 0, Needs(disk_gb=70), 50) == "60 GB scratch free, the stage needs 70"
+    assert why_not(pl, probes["b"], 0, needs, 50) == ""
 
 
 def test_place_skips_a_host_without_the_tool(ssh: Ssh) -> None:

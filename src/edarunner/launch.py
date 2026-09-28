@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import inspect
 import os
@@ -12,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, board, checkout, collect, config, home, hosts, sync
+from . import __version__, board, census, checkout, collect, config, home, hosts, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, NotFound
@@ -22,7 +23,7 @@ from .model import SCHEDULERS, Batch, Budget, Job, Project, Stage, Task
 DRIVER_SRC = Path(__file__).resolve().parent / "driver" / "edr_driver.py"
 DATE_FMT = "%Y%m%d_%H%M"
 _ID_RE = re.compile(r"^[A-Za-z_]\w*$")
-_SPEC_LIMITS = ("host_free_min_gb", "streak", "heartbeat_s", "gate_max_s", "lease_s")
+_SPEC_LIMITS = ("streak", "heartbeat_s", "gate_max_s", "lease_s")
 
 
 @dataclass
@@ -188,7 +189,8 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
         "label": job.label, "config": job.config, "vars": job.vars, "host": v["host"], "root": v["root"],
         "state_file": str(state_dir / f"{run_id}.json"), "queue_dir": str(state_dir / f"{run_id}.queue"),
         "shell": "/bin/bash", "env": _env(project, v),
-        "limits": {k: getattr(project.limits, k) for k in _SPEC_LIMITS},
+        "limits": {"host_free_min_gb": hosts.floor(project.site, str(v["host"] or "")),
+                   **{k: getattr(project.limits, k) for k in _SPEC_LIMITS}},
         "start_at": {"stage": stages[0].name, "checkpoint": None},
         "stages": [_stage_spec(project, s, tasks, v) for s in stages],
     }
@@ -314,10 +316,13 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
          only: list[str] | None = None, probes: dict[str, hosts.HostProbe] | None = None,
-         backend: Backend | None = None) -> list[RunPlan]:
+         backend: Backend | None = None, reserve: bool = False) -> list[RunPlan]:
     """Render every job of a batch into a RunPlan; a problem is reported in the plan, not raised.
 
     `probes` are the results of a caller who probed already; the hosts are then not probed again.
+    Placement counts your live runs of every registered project. With `reserve` it holds
+    `place.lock` from the count to the reservation of each run that will start, so two launches at
+    once never both take the last place of a host.
     """
     date = date or pin_date(project.state_dir, batch.batch, dry_run=True)
     jobs = [j for j in batch.jobs if not only or j.label in only]
@@ -336,8 +341,12 @@ def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str
     else:
         errors = {h: "no probe of the host" for h in names if h not in probes}
     auto = [j for j in jobs if j.host == "auto" and _fresh(j)]
-    placed = hosts.place(project, auto, probes, board.live_per_host(db.runs())) if auto else {}
-    return [_plan_job(project, batch, j, db, date, probes, errors, placed) for j in jobs]
+    with home.held(home.root() / "place.lock") if reserve else contextlib.nullcontext():
+        placed = hosts.place(project, auto, probes, census.running_per_host(project, time.time())) if auto else {}
+        plans = [_plan_job(project, batch, j, db, date, probes, errors, placed) for j in jobs]
+        if reserve:
+            census.reserve(project, plans)
+    return plans
 
 
 def _slots(project: Project, db: Database, plans: list[RunPlan]) -> list[RunPlan]:
@@ -428,7 +437,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
     backend = backend or make_backend(project.site, ssh)
     state = project.state_dir
     date = pin_date(state, batch.batch, dry_run)
-    plans = plan(project, batch, ssh, db, date=date, only=only, backend=backend)
+    plans = plan(project, batch, ssh, db, date=date, only=only, backend=backend, reserve=not dry_run)
     driver = sync.publish_driver(state, DRIVER_SRC, dry_run)
     if not dry_run:
         db.upsert_batch({"batch": batch.batch, "project": project.project, "source": batch.source, "run_date": date})
@@ -464,6 +473,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
                 ok = sync.run_after_hook(project.site, project, project.sync.after, p.values)
             if not ok:
                 p.problems.append("sync failed")
+                census.unreserve(project, p.run_id)
                 continue
         path = write_spec(state, batch.batch, p, driver, dry_run)
         print(f"{p.run_id}: {p.host or backend.name} {p.root}" + (" (dry)" if dry_run else ""))
@@ -476,6 +486,7 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         except hosts.HostError as e:
             # A run the backend refused never starts; a live phase would wait for a heartbeat for ever.
             p.problems.append(f"submit failed: {e}")
+            census.unreserve(project, p.run_id)
             db.upsert_run({"run_id": p.run_id, "phase": "FAILED:submit", "state": "failed"})
             db.add_event("user", p.run_id, "launch", f"submit failed: {e}")
             print(f"{p.run_id}: submit failed: {e}")

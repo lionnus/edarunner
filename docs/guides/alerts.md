@@ -31,7 +31,8 @@ other message is `<project>: <kind>`.
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
 | alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `held`, `incomplete`, `failed`, `killed` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; `hung`, `looping`, `over_budget`, `host_full` and `superseded` also get the keep, ack and stop buttons | one push per change, with the next command, and the button commands with three copy buttons | one mail per change, with the next command and the button commands |
-| alert: `orphan` | the watcher | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
+| alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
+| alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
 | `digest` | the watcher once a day at `digest_at`, and `edr notify --digest` | one message | one low push | one mail |
@@ -496,7 +497,7 @@ Stop it now if the rest of the stage is of no use:
 edr stop b_nodw@demo --why over-budget
 ```
 
-`host_full`: the free scratch of a host is below `host_free_min_gb`.
+`host_full`: the free scratch of a host is below its floor, `host_free_min_gb` of the site or of the host.
 
 ```
 🟡 demo: disk almost full on hostA
@@ -580,18 +581,20 @@ edr status b_nodw@demo
 ```
 
 `orphan`: a tool process of yours that no live run owns. The watcher
-reads `EDR_RUN_ID` from the environment of the process; the driver sets
-it for every stage command of every project.
+that holds `serve.lock` checks the processes once for every registered
+project. It reads `EDR_RUN_ID` from the environment of the process; the
+driver sets it for every stage command of every project.
 
-- A live run of this project owns the process.
-- A run of this project that is dead or has ended leaves it an orphan,
-  and the alert names that run.
-- A run id that the database does not know belongs to another project,
-  whose watcher judges it. The process is an orphan only when its
-  working directory or command line holds `/<project>/<run_id>` under
-  the safety marker.
+- A live run of a registered project owns the process.
+- A run that ended, or whose driver is gone after `dead_s`, leaves it an
+  orphan, and the alert names that run as `project/label@batch`.
+- A run id that no registered project knows is left alone, unless the
+  working directory or the command line of the process lies in the tree
+  `/<project>/<run_id>` of a registered project under its safety
+  marker.
 - A process without `EDR_RUN_ID` is owned when its working directory or
-  command line holds the safety marker.
+  command line holds the safety marker of a registered project. Such a
+  process belongs to no project, so edarunner never kills it.
 
 A tool process that no run owns:
 
@@ -608,14 +611,14 @@ Check it:
 ssh hostA ps -o pid,etime,args -p 5120
 If it is yours and stale, end it:
 ssh hostA kill 5120
-edarunner never kills it, since kill_orphan is off.
+edarunner never kills a process that belongs to no project.
 ```
 
 A tool that a dead run left behind:
 
 ```
 🔴 demo: tool process of an ended run on hostA
-Your process fc_shell runs on hostA for the run b_nodw@demo, whose driver is gone. It may hold a licence seat.
+Your process fc_shell runs on hostA for the run demo/b_nodw@demo, whose driver is gone. It may hold a licence seat.
 
 process: fc_shell, pid 5120
 running for: 2d
@@ -627,6 +630,17 @@ ssh hostA ps -o pid,etime,args -p 5120
 If it is yours and stale, end it:
 ssh hostA kill 5120
 edarunner never kills it, since kill_orphan is off.
+```
+
+`clock`: the clock of a host is more than 60 s off the head node.
+
+```
+🔴 demo: clock off on hostA
+The clock of hostA is 75 s ahead of the head node. A heartbeat and a seat lease carry the time of the host, so the stale, dead and lease windows move by as much.
+
+skew: +75 s
+
+Ask the admins to sync the host with NTP. edr hosts names every host whose clock is off.
 ```
 
 `watch`: `edr watch --check` found no watcher cycle for three heartbeats.

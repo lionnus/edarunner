@@ -163,27 +163,33 @@ def events(rows: Iterable[Row], names: dict[str, str]) -> str:
     return fit("\n".join(lines)) or "<i>no events</i>"
 
 
-def resources(probe: Row) -> list[tuple[str, str]]:
-    """The resources of one host probe as (name, `used/total`), in the order of the /hosts line."""
-    cores = probe["cores"]
-    out = [("cores", f"{max(0, min(cores, round(probe['load'])))}/{cores}"),
-           ("ram", f"{probe['total_ram_gb'] - probe['free_ram_gb']:.0f}/{probe['total_ram_gb']:.0f} GB"),
-           ("scratch", f"{probe['total_gb'] - probe['free_gb']:.0f}/{probe['total_gb']:.0f} GB")]
-    if probe["gpus"]:
-        out.append(("gpu", f"{probe['gpus'] - probe['gpus_idle']}/{probe['gpus']}"))
-    return out
+def room(r: Row) -> str:
+    """The free room of a host row of census.host_view, of total: cores, RAM, scratch and the idle GPUs."""
+    parts = [f"{r['free_cores']:g}/{r['cores']} cores", f"{r['free_ram_gb']:.0f}/{r['total_ram_gb']:.0f} GB RAM",
+             f"{r['free_gb']:.0f}/{r['total_gb']:.0f} GB scratch"]
+    return "free " + ", ".join(parts + ([f"{r['gpus_idle']}/{r['gpus']} GPUs"] if r["gpus"] else []))
+
+
+def yours(r: Row) -> str:
+    """Your runs of a host row by project, with the cores and the scratch they use."""
+    if not r["runs"]:
+        return "none of yours"
+    return "yours: " + ", ".join(f"{p} {n}" for p, n in sorted(r["runs"].items())) + (
+        f", {r['our_cores']:g} cores, {r['our_gb']:g} GB scratch")
 
 
 def hosts(rows: Iterable[Row]) -> str:
-    """`host mark cores used/total, mark ram used/total GB, …` per host; `marks` of a row holds the marks."""
+    """One line per host of census.host_view: whether a run can start, the free room and your runs; under it in
+    italics why no run can start there and what your runs fill."""
     lines = []
     for r in rows:
+        mark = runs.START[r["start"]]
         if "error" in r:
-            lines.append(f"{runs.NO_ANSWER} <b>{esc(r['host'])}</b> <i>no answer</i>")
+            lines.append(f"{mark} <b>{esc(r['host'])}</b> <i>no answer</i>")
             continue
-        lines.append(f"<b>{esc(r['host'])}</b> " + ", ".join(f"{r['marks'][name]} {name} {value}"
-                                                              for name, value in resources(r)))
-    return fit("\n".join(lines)) or "<i>no hosts</i>"
+        lines.append(f"{mark} <b>{esc(r['host'])}</b> {esc(room(r))}; {esc(yours(r))}")
+        lines += [f"    <i>{esc(t)}</i>" for t in (r["why"], r["note"]) if t]
+    return fit("\n".join(lines + ["", "<i>🟢 a run can start, 🔴 no run can start, ⚫ no answer</i>"])) if lines else "<i>no hosts</i>"
 
 
 def tools(rows: Iterable[Row]) -> str:

@@ -31,6 +31,7 @@ class Host:
     tools: dict[str, str] | None = doc("the tools the host has: a list of names, or `{ name = version }`; the "
                                        "version is text the flow may use as `{tool.<name>.version}`", None,
                                        shown="every tool of `[tools]`")
+    host_free_min_gb: float | None = doc("the free scratch this host keeps", None, shown="the site `host_free_min_gb`")
 
     def has(self, tool: str) -> bool:
         """True when the host has `tool`; a host without a `tools` key has every tool."""
@@ -126,19 +127,6 @@ class Mail:
     password_file: Path | None = doc("the password, mode 600; without it there is no login", None)
 
 
-@dataclass
-class Marks:
-    """The thresholds of the resource marks in `edr hosts`. Each key is a list of three ascending
-    fractions between 0 and 1. A resource turns 🟡 at the first, 🟠 at the second and 🔴 at the third.
-    Below the first it is 🟢. Any other list stops the load with an error that names the key. In `edr.toml`
-    the table replaces the site's keys for this project only."""
-
-    cores: list[float] = doc("the load average over the cores", factory=lambda: [0.6, 0.8, 0.9])
-    ram: list[float] = doc("the RAM in use over the total", factory=lambda: [0.6, 0.8, 0.9])
-    scratch: list[float] = doc("the used part of the scratch mount", factory=lambda: [0.7, 0.85, 0.95])
-    gpu: list[float] = doc("the busy GPUs over all GPUs", factory=lambda: [0.6, 0.8, 0.9])
-
-
 # The values of `[scheduler] backend`; the last three hand the run to a batch scheduler.
 SCHEDULERS = ("condor", "slurm", "lsf")
 BACKENDS = ("ssh", "local", *SCHEDULERS)
@@ -181,6 +169,8 @@ class Site:
                                  factory=lambda: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
     ssh_timeout_s: int = doc("seconds a remote command may take", 45, key="ssh.timeout_s")
     tool_procs: str = doc("a regex over process names, for the orphan check and the host table", "")
+    host_free_min_gb: float = doc("free scratch below which the driver starts nothing new on a host and placement "
+                                  "sends no run there; one floor per disk, whatever project fills it", 100.0)
     nfs_export: str = doc("a path the head node reads when ssh to a host fails at collect", "")
     scheduler: Scheduler = field(default_factory=Scheduler)
     hosts: dict[str, Host] = field(default_factory=dict)
@@ -188,7 +178,6 @@ class Site:
     telegram: Telegram | None = None
     ntfy: Ntfy | None = None
     mail: Mail | None = None
-    marks: Marks = field(default_factory=Marks)
 
 
 @dataclass
@@ -389,7 +378,6 @@ class Limits:
     dead_s: int = doc("heartbeat age that marks a run `dead`", 2700)
     hung_s: int = doc("time without progress that marks a run `hung`", 21600)
     grace_s: int = doc("wait between an alert and the watcher's stop or kill", 3600)
-    host_free_min_gb: float = doc("free space below which the driver starts nothing new", 100.0)
     streak: int = doc("equal failure signatures in a row that stop a task group", 3)
     heartbeat_s: int = doc("period of the heartbeat and of the watcher cycle", 60)
     gate_max_s: int = doc("longest wait at a tool gate", 14400)
@@ -402,12 +390,13 @@ class Limits:
 @dataclass
 class Placement:
     """A job with `host = "auto"` goes to the first host, preferred ones first and then the one with
-    the most free cores, that is not avoided, runs fewer than `max_per_host`, has the free cores, RAM
-    and disk the job's first stage needs, and has every tool the job's stages need. No such host means
-    the job is queued. When no host of the site has a tool the job needs, `plan` reports it as a
-    problem."""
+    the most free cores, that is not avoided, runs fewer than `max_per_host` of your runs, has the free
+    cores, RAM and disk the job's first stage needs with its scratch above the host's floor, and has
+    every tool the job's stages need. No such host means the job is queued. When no host of the site
+    has a tool the job needs, `plan` reports it as a problem."""
 
-    max_per_host: int = doc("the most runs of this project on one host", 2)
+    max_per_host: int = doc("the most of your runs on one host, over every registered project: the live "
+                            "runs and the launches that wrote no heartbeat yet", 2)
     min_free_cores: int = doc("free cores a host needs to take a run", 16)
     min_free_ram_gb: int = doc("free RAM a host needs, in GB", 60)
     avoid: list[str] = doc("hosts `auto` never picks", factory=list)

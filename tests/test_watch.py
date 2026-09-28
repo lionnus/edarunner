@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 from helpers_watch import NEW, NOW, Env, rid
 
-from edarunner import board, collect, config, launch, watch
+from edarunner import board, census, collect, config, launch, watch
 from edarunner.backend import Live
-from edarunner.hosts import Proc
+from edarunner.hosts import HostProbe
 from helpers_backend import FakeBackend
 
 
@@ -89,24 +90,6 @@ def test_hung_after_unchanged_progress_and_kill(env: Env) -> None:
     assert sorted(env.events()) == sorted([(rid("a"), "hung"), (rid("a"), "kill"), (rid("b"), "hung")])
     env.cycle(NOW + 2)
     assert len(env.ssh.killed) == 1 and env.notifier.sent == [("hung", rid("a")), ("hung", rid("b"))]
-
-
-def test_host_full_stops_the_newest_after_grace(env: Env, monkeypatch) -> None:
-    env.project.limits.grace_s = 5
-    env.heartbeat("a", host_full=True)
-    b = env.heartbeat("b", date=NEW)
-    stops: list[dict] = []
-    monkeypatch.setattr(launch, "stop", lambda ssh, db, run, hb, **kw: stops.append({**kw, "run_id": run["run_id"]}) or True)
-    keep = env.project.state_dir / "demo" / f"{b['run_id']}.keep.json"
-    assert env.cycle()[rid("a")] == "host_full" and stops == []
-    keep.write_text('{"hours": 1, "ack": true}')
-    env.cycle(NOW + 6)
-    assert stops == []
-    keep.write_text('{"hours": 1}')
-    env.cycle(NOW + 7)
-    assert len(stops) == 1 and stops[0]["run_id"] == rid("b", NEW) and stops[0]["now"] and stops[0]["actor"] == "watch"
-    env.cycle(NOW + 8)
-    assert len(stops) == 1
 
 
 def test_superseded_stops_after_task_unless_kept(env: Env) -> None:
@@ -200,44 +183,6 @@ def test_queued_runs_are_relaunched(env: Env, monkeypatch) -> None:
     assert calls == [("demo", {"only": ["a"], "stagger_s": 0, "allow_dirty": True})] * 2  # one job per cycle
 
 
-def test_orphans_are_reported_and_killed_only_when_asked(env: Env) -> None:
-    env.project.limits.grace_s = 0
-    hb = env.heartbeat("a")
-    env.ssh.procs = [Proc(99999, 120, 0.0, "sleep", "sleep 100"), Proc(99998, 5, 0.0, "sleep", f"sleep 1 {hb['root']}")]
-    states = env.cycle()
-    assert states["orphan:local:99999"] == "orphan" and "orphan:local:99998" not in states
-    assert env.events() == [("", "orphan")] and env.notifier.sent == [("orphan", "orphan:local:99999")]
-    env.ssh.procs = [Proc(99999, 121, 0.0, "sleep", "sleep 100")]
-    env.cycle(NOW + 1)
-    assert len(env.notifier.sent) == 1 and env.ssh.killed == []  # the age is not part of the alert text
-    env.project.limits.kill_orphan = True
-    env.ssh.procs = [Proc(99997, 130, 0.0, "sleep", "sleep 200")]
-    env.cycle(NOW + 1)
-    assert env.ssh.killed == [("cmd", "kill -TERM 99997")] and ("", "kill") in env.events()
-
-
-def test_the_run_id_in_the_environment_decides_who_owns_a_tool(env: Env) -> None:
-    live, dead, done = env.heartbeat("a")["run_id"], env.heartbeat("d", age=200)["run_id"], env.heartbeat(
-        "g", phase="done", exit=0)["run_id"]
-    env.ssh.procs = [Proc(501, 60, 99.0, "fc_shell", "fc_shell", "/home/me", live),
-                     Proc(502, 60, 99.0, "fc_shell", "fc_shell", "/home/me", dead),
-                     Proc(503, 60, 99.0, "fc_shell", "fc_shell", "/home/me", done),
-                     Proc(504, 60, 99.0, "fc_shell", "fc_shell", "/scratch/x/edr/other/r9/pnr", "r9"),
-                     Proc(505, 60, 99.0, "fc_shell", "fc_shell", "/scratch/x/edr/demo/r8/pnr", "r8"),
-                     Proc(506, 60, 99.0, "fc_shell", "fc_shell -f /scratch/x/edr/other/r1/main.tcl", "/home/me"),
-                     Proc(507, 60, 99.0, "fc_shell", "fc_shell", "/home/me")]
-    states = env.cycle()
-    assert sorted(k for k, s in states.items() if s == "orphan") == [f"orphan:local:{p}" for p in (502, 503, 505, 507)]
-    you = "Your process fc_shell runs on local"
-    assert {k.rsplit(":", 1)[1]: a.about.removesuffix(" It may hold a licence seat.")
-            for k, a in env.notifier.alerts.items() if a.kind == "orphan"} == {
-        "502": f"{you} for the run d@demo, whose driver is gone.",
-        "503": f"{you} for the run g@demo, which has ended (done).",
-        "505": f"{you} in the tree of the run r8, but this project has no record of that run.",
-        "507": f"{you}, and no edarunner run owns it."}
-    assert {e for e in env.events() if e[1] == "orphan"} == {(dead, "orphan"), (done, "orphan"), ("", "orphan")}
-
-
 def test_dry_run_writes_nothing(env: Env, capsys) -> None:
     env.heartbeat("a")
     env.heartbeat("d", age=200)
@@ -325,11 +270,14 @@ def test_run_forever_goes_on_with_the_last_good_config(env: Env, monkeypatch) ->
     monkeypatch.setattr(config, "load_project", load)
     monkeypatch.setattr(watch, "cycle", lambda *a, start=True, **k: calls.append(start))
     monkeypatch.setattr(watch.time, "sleep", sleep)
+    monkeypatch.setattr(census, "work", lambda notifiers, own=None: calls.append(own.project))
     env.notifier.project = None
     env.notifier.stop = lambda: None
     with pytest.raises(KeyboardInterrupt):
         watch.run_forever(env.project, env.ssh, env.db, [env.notifier])
-    assert calls == ["load", True, "load", False, "load", False, "load", True, "load", False]
+    # The first watcher takes serve.lock and does the work of the user after each cycle.
+    assert calls == ["load", True, "demo", "load", False, "demo", "load", False, "demo", "load", True, "demo", "load", False,
+                     "demo"]
     assert env.notifier.sent == [("config", "demo"), ("config", "demo")]
     alert = env.notifier.alerts["demo"]
     assert (alert.title, alert.code, alert.todo[0][1]) == ("config does not load", "edited again", "edr check")
@@ -360,44 +308,6 @@ def test_run_forever_once_returns_1_when_the_cycle_failed(env: Env, monkeypatch)
     assert watch.run_forever(env.project, env.ssh, env.db, [env.notifier], once=True) == 0
     monkeypatch.setattr(watch, "cycle", boom)
     assert watch.run_forever(env.project, env.ssh, env.db, [env.notifier], once=True) == 1
-
-
-def test_stale_leases_of_this_project_are_swept_with_an_event(env: Env, user_root: Path) -> None:
-    env.heartbeat("live")
-    env.heartbeat("gone", phase="KILLED:SIGKILL", exit=10)
-    env.heartbeat("d", age=200)
-    env.heartbeat("moved", stage="pnr")
-    d = user_root / "leases" / "demo"
-    d.mkdir(parents=True)
-
-    def lease(label: str, age: float, budget_s: float | None = None, run_id: str | None = None,
-              project: str = "demo") -> str:
-        run_id, name = run_id or rid(label), f"{project}.{run_id or rid(label)}.synth.0"
-        (d / name).write_text(json.dumps({"project": project, "run_id": run_id, "key": f"{project}.{run_id}.synth",
-                                          "stage": "synth", "pid": 4242, "host": "local", "ts": NOW - age,
-                                          "budget_s": budget_s}))
-        return name
-
-    keep = [lease("live", 300, 3600), lease("young", 10, run_id=rid("unknown")), lease("other", 300, project="beta")]
-    lease("gone", 300)
-    lease("d", 300)
-    lease("moved", 300)
-    lease("other", 300)
-    (d / f".demo.{rid('live')}.synth.1.tmp").write_text("{")
-    assert len(env.cycle(dry_run=True)) == 4 and len(list(d.iterdir())) == 8
-    env.cycle()
-    assert sorted(p.name for p in d.iterdir() if not p.name.startswith(".")) == sorted(keep)
-    texts = {e["run_id"]: e["text"] for e in env.db.events(n=500) if e["kind"] == "lease"}
-    assert texts == {
-        rid("gone"): f"stale lease demo/demo.{rid('gone')}.synth.0: the run ended KILLED:SIGKILL",
-        rid("d"): f"stale lease demo/demo.{rid('d')}.synth.0: the run is dead",
-        rid("moved"): f"stale lease demo/demo.{rid('moved')}.synth.0: the run left stage synth",
-        rid("other"): f"stale lease demo/demo.{rid('other')}.synth.0: no live heartbeat of the run"}
-    lease("live", 3601, 3600)
-    env.cycle(NOW + 1)
-    assert not (d / f"demo.{rid('live')}.synth.0").exists()
-    assert any(e["text"] == f"stale lease demo/demo.{rid('live')}.synth.0: older than the stage budget of 3600 s"
-               for e in env.db.events(n=50))
 
 
 @pytest.mark.parametrize("age, live, state, reason", [
@@ -454,3 +364,16 @@ def test_a_scheduler_job_before_its_first_heartbeat(env: Env) -> None:
     assert env.cycle(NOW + 2, backend=fake)[rid("p")] == "failed"
     assert env.db.run(rid("p"))["phase"] == "FAILED:scheduler" and rid("q") not in env.cycle(NOW + 3, backend=fake)
     assert fake.asked == [["1.0"]] * 3
+
+
+def test_a_fresh_census_saves_the_probe_of_the_boards(env: Env, user_root: Path, monkeypatch) -> None:
+    env.heartbeat("a")
+    probe = HostProbe("local", 3.0, 6.0, "/from-census", 42.0)
+    config.save_json(user_root / "census.json", {"ts": time.time(), "hosts": {"local": asdict(probe)}, "runs": []})
+    monkeypatch.setattr(env.ssh, "probe", lambda host: pytest.fail("the census had the probe"))
+    env.cycle()
+    assert json.loads((env.project.data / "board" / "board.json").read_text())["hosts"]["local"]["mount"] == "/from-census"
+    config.save_json(user_root / "census.json", {"ts": time.time() - 3 * env.project.limits.heartbeat_s, "hosts": {}})
+    monkeypatch.setattr(env.ssh, "probe", lambda host: HostProbe(host, 1.0, 1.0, "/probed", 1.0))
+    env.cycle(NOW + 1)
+    assert json.loads((env.project.data / "board" / "board.json").read_text())["hosts"]["local"]["mount"] == "/probed"

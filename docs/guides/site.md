@@ -54,6 +54,11 @@ regular expression over process names, which the orphan check and
 `edr hosts` use to find your tool processes. The host `local` is the
 head node itself, reached without ssh.
 
+`host_free_min_gb`, 100 GB by default, is the floor of every scratch
+disk: below it no driver starts anything new on the host, and placement
+sends no run there. A host table may set its own. The floor belongs to
+the disk, so it is the same for every project that fills it.
+
 `examples/site/` is a complete site file with placeholder names.
 [reference/configuration.md](../reference/configuration.md#sitetoml)
 lists every key, and the alert channels are in [alerts.md](alerts.md).
@@ -113,9 +118,8 @@ its own `python3`. Every host in `[hosts]` needs:
 The head node reaches each host with `ssh` under `BatchMode=yes`, so the
 keys must work with no password prompt and no host key prompt.
 `edr check` names every host that does not answer its probe; run it
-after you add or change a host. `edr hosts` then shows the load and the
-free cores, RAM, scratch and GPUs of each host, and `[marks]` sets the
-thresholds of its colour marks.
+after you add or change a host. `edr hosts` then shows the free cores,
+RAM, scratch and GPUs of each host, and whether a run can start there.
 
 ## A scheduler
 

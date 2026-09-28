@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from edarunner import board
+from edarunner import board, hosts
 from edarunner.model import Project
 from edarunner.notify import Button, alert_buttons, button_cmds
 from edarunner.notify.telegram.format import MARK
@@ -133,7 +133,7 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
     elif state == "host_full":
         a.title, a.who = "disk almost full on", host
         a.facts[1] = ("run", h)
-        a.about = (f"{host} has less than {lim.host_free_min_gb:g} GB of free scratch, so the driver starts nothing "
+        a.about = (f"{host} has less than {hosts.floor(project.site, host):g} GB of free scratch, so the driver starts nothing "
                    f"new there. edarunner stops the newest run on {host} {_after(project)} unless that run has an ack.")
         a.todo = [("Free scratch on the host. To keep this run from the stop, ack it:", f"edr keep {h} --ack")]
     elif state == "superseded":
@@ -170,15 +170,19 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
     return a
 
 
-def orphan_alert(project: Project, o: Row) -> Alert:
-    """The alert of a tool process that no live run owns; `owner` is the run of its `EDR_RUN_ID`, when it has one."""
+def orphan_alert(project: Project | None, o: Row) -> Alert:
+    """The alert of a tool process that no live run owns; `project` is the one it belongs to, None for none.
+
+    `owner` is the run id of its `EDR_RUN_ID`, and `owner_handle` that run as `project/label@batch`."""
     host, pid, owner, state = o["host"], int(o["pid"]), o.get("owner"), o.get("owner_state")
     ssh = "" if host == "local" else f"ssh {host} "
     you = f"Your process {o['label']} runs on {host}"
     if not owner:
         title, about = "tool process with no run on", f"{you}, and no edarunner run owns it."
     elif state == "unknown":
-        title, about = "tool process of an unknown run on", f"{you} in the tree of the run {owner}, but this project has no record of that run."
+        name = project.project if project else "a project"
+        title, about = "tool process of an unknown run on", (f"{you} in the tree of the run {owner} of {name}, but "
+                                                            "that project has no record of the run.")
     else:
         ended = {"dead": "whose driver is gone", "retired": "which was retired", "abandoned": "which was retired",
                  "stopped": "which was stopped"}.get(state, f"which has ended ({str(state).replace('_', ' ')})")
@@ -190,8 +194,19 @@ def orphan_alert(project: Project, o: Row) -> Alert:
         cut(o["phase"]),
         [("Check it:", f"{ssh}ps -o pid,etime,args -p {pid}"),
          ("If it is yours and stale, end it:", f"{ssh}kill {pid}"),
-         (f"edarunner sends it SIGTERM {_after(project)}, since kill_orphan is on." if project.limits.kill_orphan
-          else "edarunner never kills it, since kill_orphan is off.", None)])
+         (f"edarunner sends it SIGTERM {_after(project)}, since kill_orphan is on." if project and project.limits.kill_orphan
+          else "edarunner never kills it, since kill_orphan is off." if project
+          else "edarunner never kills a process that belongs to no project.", None)])
+
+
+def clock_alert(host: str, skew: float) -> Alert:
+    """The alert of a host whose clock is off from the head node's by `skew` seconds."""
+    return Alert(
+        "clock", host, "clock off on", host,
+        f"The clock of {host} is {abs(skew):.0f} s {'ahead of' if skew > 0 else 'behind'} the head node. A heartbeat and a "
+        "seat lease carry the time of the host, so the stale, dead and lease windows move by as much.",
+        [("skew", f"{skew:+.0f} s")],
+        todo=[("Ask the admins to sync the host with NTP. edr hosts names every host whose clock is off.", None)])
 
 
 def config_alert(project: Project, error: str) -> Alert:
