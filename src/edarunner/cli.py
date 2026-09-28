@@ -531,9 +531,10 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         hb, run_id = c.heartbeat(row), row["run_id"]
         stages = sorted(c.db.stage_runs(run_id), key=lambda r: (r["stage"] != "setup", r["stage"], r["task"], r["attempt"]))
         mets = c.db.metrics(run_ids=[run_id])
-        samples = c.db.run_samples(run_id)
-        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples),
-               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples})
+        samples, flags = c.db.run_samples(run_id), c.db.flags([run_id])
+        c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples,
+                                flags=flags),
+               {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples, "flags": flags})
         return Exit.DONE
     if a.all:
         rows = _all_rows(a)
@@ -781,7 +782,8 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
         for x in c.db.instances(run_ids=[run["run_id"]]):
             held.setdefault((x["stage"], x["step"], x["task"], x["name"]), set()).add(tuple(x[k] for k in inst))
         n = dict.fromkeys(("new", "changed", "unchanged", "failed", "removed", "kept"), 0)
-        rows = watch.extract_run(c.project, c.db, run, c.heartbeat(run), actor=None if a.dry_run else "user")
+        hb = c.heartbeat(run)
+        rows = watch.extract_run(c.project, c.db, run, hb, actor=None if a.dry_run else "user")
         write = []
         for r in rows:
             key = (r["stage"], r["step"], r["task"], r["name"])
@@ -804,17 +806,23 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
         failed = metrics.failures(rows)
         text = (f"{n['new']} new, {n['changed']} changed, {n['unchanged']} unchanged, {n['failed']} failed, "
                 f"{n['removed']} removed" + (f", {n['kept']} kept without a file" if n["kept"] else ""))
+        flags: list[Row] = []
         if not a.dry_run:
             with c.db.conn:  # one commit for the run
                 for r in write:
                     c.db.add_metric(r, replace=True)
                 c.db.remove_metrics(drop)
+                flags = watch.check_run(c.project, c.db, run, hb)
+                k = sum(p["origin"] == "extract" for p in c.db.parameters(run["run_id"]))
+                text += (f", {k} parameter{'s' * (k != 1)}" if k else "") + (
+                    f", {len(flags)} flag{'s' * (len(flags) != 1)}" if flags else "")
                 c.db.add_event("user", run["run_id"], "extract", text + (f"; {metrics.failure_text(failed)}" if failed else ""))
-        out.append({"run_id": run["run_id"], **n, "failures": failed,
+        out.append({"run_id": run["run_id"], **n, "failures": failed, "flags": flags,
                     "clashes": [x for x in clashes if any(run["run_id"] in s["runs"] for s in x["sets"])]})
         lines.append(f"{run['run_id']}: {text}" + (" (dry)" if a.dry_run else ""))
         if failed:
             lines.append("  " + metrics.failure_text(failed, "\n  "))
+        lines += [f"  flag {f['check']}{' ' + f['task'] if f['task'] else ''}: {f['text']}" for f in flags]
     names = board.handles(c.db.runs())
     lines += [f"warning: {analysis.clash_text(x, names)}" for x in clashes if any(x in o["clashes"] for o in out)]
     c.emit("\n".join(lines) or "no runs", out)
@@ -907,7 +915,8 @@ def cmd_check(c: Ctx, a: argparse.Namespace) -> int:
     except ConfigError as e:
         c.emit(f"problem: {e}", {"problems": [str(e)]})
         return Exit.REFUSED
-    hooks = [project.source.build_tag, project.task_resolver, *(m.python for m in project.metrics.values())]
+    hooks = [project.source.build_tag, project.task_resolver, project.checks.python,
+             *(m.python for m in (*project.metrics.values(), *project.parameters.values()))]
     for spec in filter(None, hooks):
         try:
             config.load_hook(project.root, spec)
@@ -1223,15 +1232,17 @@ def _import_spec(project: Project, row: Row, tasks: dict, params: dict[str, str]
 
 
 def _import_results(c: Ctx, row: Row, src: Path, spec: dict) -> list[Row]:
-    """Link `src` under data/results, extract every metric of the project from it as `edr extract` does, and return
-    the rows that went in."""
+    """Link `src` under data/results, extract every metric and parameter of the project from it and check the run, as
+    `edr extract` does, and return the metric rows that went in."""
     dest = c.project.data / "results" / row["run_id"]
     if not (dest.is_symlink() or dest.exists()):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.symlink_to(src)
     rows = watch.extract_run(c.project, c.db, row, {}, spec, actor=None)
     with c.db.conn:  # one commit for the rows of the run
-        return [r for r in rows if c.db.add_metric(r)]
+        new = [r for r in rows if c.db.add_metric(r)]
+        watch.check_run(c.project, c.db, row, {}, spec)
+        return new
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
@@ -1826,14 +1837,15 @@ def _parser() -> argparse.ArgumentParser:
         probe from the host_samples table and the tools with the seats their
         probe reports. The state follows: the runs per batch and state, the
         live runs, every run the triage proposes a command for with that
-        command, and the last ten events. Each batch names the source tags
+        command, the runs that the checks flag, and the last ten events. Each
+        batch names the source tags
         of its runs and how many commits each one lags behind [source] ref;
         a dirty tag counts from the commit it starts from. It ends with the
         project's CLAUDE.md and AGENTS.md, when they exist, and the
         documentation.
 
         With --run, it prints the history of one run instead: its identity,
-        its stage and step times from stage_runs and step_runs, its events with
+        its flags, its stage and step times from stage_runs and step_runs, its events with
         their reasons, the last 20 lines of its current stage log read from the host,
         the last value of each metric, and the command the triage proposes
         with the reason. --json gives either as an object.
@@ -1854,8 +1866,9 @@ def _parser() -> argparse.ArgumentParser:
         verdict (hung, host_full, ...). A finished run shows its phase class:
         done, incomplete, failed, over_budget, stopped or killed.
 
-        With a handle, it prints one run: its identity, state and disk, every
-        stage and task row, the CPU, RSS, tree size and free disk the driver sampled over the
+        With a handle, it prints one run: its identity, state and disk, the
+        flags of its checks, every stage and task row, the CPU, RSS, tree size
+        and free disk the driver sampled over the
         run, the metrics, and the log tail from the heartbeat. A finished run
         shows driver exit <n> (<phase>): the code of the driver, whose phase
         names the stage that failed. The command exit column of the stage table
@@ -2011,15 +2024,21 @@ def _parser() -> argparse.ArgumentParser:
         parse gives a failed row: an empty value, and the error in place of
         the source file.
 
+        It then reads the [parameters.<name>] tables from the files of the
+        stages of the run's spec, replaces the run's parameters of origin
+        extract with them, and runs the checks, which rewrite the flags of the
+        run and the same_parameters flags of every run at its source.
+
         Pass exactly one of a handle, --batch or --source. For each run,
         extract prints how many rows are new, changed, unchanged, failed and
         removed, and how many it kept without a file, then a line per failing
-        metric with its count and its first error. It writes the rows
-        of a run in one transaction, with an extract event of the same text.
-        --dry-run prints the counts and writes nothing. With --json, data
-        holds for each run run_id, the counts, and failures: the count and
-        the first error of each failing metric.
-
+        metric with its count and its first error, and a line per flag. The
+        count line also names how many parameters the files gave and how
+        many flags the run has. It writes the rows, parameters and flags of a
+        run in one transaction, with an extract event of the same text.
+        --dry-run prints the counts of the metric rows and writes nothing.
+        With --json, data holds for each run run_id, the counts, failures:
+        the count and the first error of each failing metric, and flags.
         A task id that ran with other fields in another run gets a warning:
         line with the fields that differ and up to five runs of each set.
         --json lists these under clashes of each run, with every run.
@@ -2321,7 +2340,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--why", default="", help="the reason; it goes into the events table")
     s = command("export", "a frozen snapshot of one or more sources", """
         Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-        metrics.csv, parameters.csv, task_fields.csv, instances.csv and the
+        metrics.csv, parameters.csv, task_fields.csv, instances.csv, flags.csv and the
         collected files of one run per label and source, the newest run by
         start time that ended done, else the newest run. --source matches the
         source tag exactly and may be given more than once. The manifest lists

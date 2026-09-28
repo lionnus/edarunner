@@ -91,7 +91,8 @@ def test_export_one_source(world, tmp_path):
     assert manifest["schema"] == 3 and manifest["producer"].startswith("edarunner ")
     assert manifest["incomplete"] == [{"run_id": RUN_B, "label": "b_nodw", "source": "aaa111", "phase": "stage:pnr"}]
     assert manifest["skipped"] == [{"run_id": RUN_A_OLD, "label": "a", "source": "aaa111", "phase": "done"}]
-    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0, "task_fields.csv": 2, "instances.csv": 2}
+    assert manifest["tables"] == {"runs.csv": 2, "metrics.csv": 2, "parameters.csv": 0, "task_fields.csv": 2, "instances.csv": 2,
+                                  "flags.csv": 0}
     assert manifest["dirty_sources"] == [] and manifest["ge_um2"] is None
     assert json.loads((out / "manifest.json").read_text()) == manifest
 
@@ -157,7 +158,8 @@ def test_dry_run_writes_nothing(world, tmp_path, capsys):
     manifest = export.export(project, db, ["aaa111"], out, dry_run=True)
     assert not (tmp_path / "paper").exists()
     paths = [f["path"] for f in manifest["files"]]
-    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv", "instances.csv", "a/reports/3/area.rpt",
+    assert paths == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv", "instances.csv", "flags.csv",
+                     "a/reports/3/area.rpt",
                      "a/sim/power/reports/power.csv", "b_nodw/reports/0/power.csv"]
     assert capsys.readouterr().out.splitlines() == paths
     real = export.export(project, db, ["aaa111"], out)
@@ -171,7 +173,7 @@ def test_with_logs_copies_the_logs(world, tmp_path):
     assert (out / "a" / "log" / "synth.log").read_text() == "a long log\n"
     assert (out / "a" / "reports" / "3" / "run.log").is_file()
     assert [f["path"] for f in manifest["files"]] == ["runs.csv", "metrics.csv", "parameters.csv", "task_fields.csv",
-                                                       "instances.csv", "a/log/synth.log", "a/reports/3/area.rpt", "a/reports/3/run.log",
+                                                       "instances.csv", "flags.csv", "a/log/synth.log", "a/reports/3/area.rpt", "a/reports/3/run.log",
                                                        "a/sim/power/reports/power.csv"]
 
 
@@ -230,3 +232,19 @@ def test_parameters_run_columns_commands_and_the_diff_of_a_dirty_source(world, t
                    "phase": "done"})
     lost = export.export(project, db, ["ddd444-dirty"], tmp_path / "lost")["dirty_sources"]
     assert lost == [{"source": "ddd444-dirty", "base": "ddd444", "nested": {}, "diff_sha256": None}]
+
+
+def test_the_flags_of_the_exported_runs(world, tmp_path):
+    project, db = world
+    db.set_flags(RUN_A, [("", "same_parameters", "the same extracted parameters as b_nodw@demo"),
+                         ("k_small", "same_results", "power_w equal those of k_big")])
+    db.set_flags(RUN_C, [("", "declared_vs_observed", "DW is 1 in the run's files and 0 by spec")])  # not exported
+    out = tmp_path / "out"
+    manifest = export.export(project, db, ["aaa111"], out)
+    flags = [{"run_id": RUN_A, "label": "a", "source": "aaa111", "task": "", "check": "same_parameters",
+              "text": "the same extracted parameters as b_nodw@demo"},
+             {"run_id": RUN_A, "label": "a", "source": "aaa111", "task": "k_small", "check": "same_results",
+              "text": "power_w equal those of k_big"}]
+    assert manifest["flags"] == flags and manifest["tables"]["flags.csv"] == 2 and _read_csv(out / "flags.csv") == flags
+    assert {r["run_id"]: r["flags"] for r in _read_csv(out / "runs.csv")} == {RUN_A: "same_parameters same_results",
+                                                                             RUN_B: ""}

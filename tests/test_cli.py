@@ -635,7 +635,7 @@ def test_two_runs_of_a_label_in_one_batch_are_named_apart(demo: Path, capsys, tm
     exp = tmp_path / "exp"
     code, out, _ = edr(capsys, "export", "--source", "abc1234", "--source", dirty_tag, "--labels", "a", "--out", str(exp))
     manifest = json.loads((exp / "manifest.json").read_text())
-    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 5 files\n"
+    assert code == 0 and out == f"{exp}: 2 runs (1 not done), 0 skipped, 6 files\n"
     assert [r["run_id"] for r in manifest["runs"]] == [clean, dirty] and manifest["sources"] == ["abc1234", dirty_tag]
 
 
@@ -653,7 +653,7 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
         assert [m["unit"] for m in db.metrics(run_ids=[a])] == ["u"] and db.events() == []
     code, out, _ = edr(capsys, "--json", "extract", "--source", "abc1234")
     assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 2, "changed": 1, "unchanged": 0, "failed": 0,
-                                                      "removed": 0, "kept": 0, "failures": {}, "clashes": []}]
+                                                      "removed": 0, "kept": 0, "failures": {}, "flags": [], "clashes": []}]
     with Database(demo / "data" / "edr.db") as db:
         assert {(m["name"], m["value"], m["unit"]) for m in db.metrics(run_ids=[a])} == {
             ("area_cell_um2", 1000.0, "um2"), ("wns_ns", -0.03, "ns"), ("setup_violations", 3.0, "paths")}
@@ -734,6 +734,89 @@ def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -
     assert out == f"{a}: 0 new, 0 changed, 8 unchanged, 2 failed, 2 removed, 1 kept without a file\n" + failures
     with Database(demo / "data" / "edr.db") as db:
         assert not db.metrics(name="setup_violations") and len(db.metrics()) == 13
+
+
+CHECKS = """
+[parameters.knobs]
+stage = "synth"
+file = "log/synth.log"
+regex = 'set (?P<key>\\w+) (?P<value>[^;]+);'
+head_bytes = 64
+
+[parameters.source]
+stage = "synth"
+file = "reports/build.rpt"
+regex = '^commit:\\s*(\\S+)'
+
+[checks]
+same_results = ["window_ns", "power_w"]
+python = "hooks/checks.py:check"
+"""
+
+
+def test_extract_reads_parameters_from_the_files_and_flags_runs_that_contradict_their_identity(demo: Path, capsys) -> None:
+    (demo / "edr.toml").write_text((demo / "edr.toml").read_text() + CHECKS)
+    (demo / "hooks" / "checks.py").write_text(
+        "def check(run, parameters, rows):\n"
+        "    return [(m['task'], 'capped_window', 'the window is the cap of 4096 ns') for m in rows\n"
+        "            if m['name'] == 'window_ns' and m['value'] == 4096]\n")
+    a, b, c = (seed(demo, label, "done") for label in ("a", "b", "c"))
+    d = seed(demo, "a.power", "done", tree_id=a)  # it continues a on the tree of a
+    beat(demo, c, tasks={"k_small": {"phase": "done"}, "k_big": {"phase": "done"}})
+    for run, lanes, design in ((a, 8, "abc1234"), (b, 8, "abc1234"), (c, 4, "abc1234-dirty"), (d, 8, "abc1234")):
+        results = demo / "data" / "results" / run
+        (results / "log").mkdir(parents=True)
+        # head_bytes stops the read in the dots, before the line that sets EXTRA.
+        (results / "log" / "synth.log").write_text(f"step 0 setup\nset ENABLE_X 1; set LANES {lanes};\n{'.' * 40}\nset EXTRA 1;\n")
+        (results / "reports").mkdir()
+        (results / "reports" / "build.rpt").write_text(f"built at 12:00\ncommit: {design}\n")
+    for test in ("GEMM_M64_N64", "SOFTMAX_R197"):  # k_small and k_big ran one test under two names
+        power = demo / "data" / "results" / c / "simulation" / "tests" / "demo" / test / "power"
+        (power / "reports").mkdir(parents=True)
+        (power / "reports" / "power.csv").write_text("phase,total_w\nWHOLE,0.25\n")
+        (power / "phases.json").write_text('{"window_ns": 4096}')
+    with Database(demo / "data" / "edr.db") as db:
+        for run in (a, b, c, d):
+            db.set_parameters(run, {"source": "abc1234"}, "checkout")
+        db.set_parameters(a, {"ENABLE_X": "0"}, "spec")  # the job override says 0
+        db.set_parameters(b, {"LANES": "8.0"}, "spec")  # the same number as the log's 8
+
+    code, out, _ = edr(capsys, "extract", "--batch", "demo")
+    assert code == 0 and out.split(f"{c}: ")[1] == (
+        "6 new, 0 changed, 0 unchanged, 0 failed, 0 removed, 3 parameters, 5 flags\n"
+        "  flag declared_vs_observed: source is abc1234-dirty in the run's files and abc1234 by checkout\n"
+        "  flag capped_window k_big: the window is the cap of 4096 ns\n"
+        "  flag same_results k_big: window_ns and power_w equal those of k_small\n"
+        "  flag capped_window k_small: the window is the cap of 4096 ns\n"
+        "  flag same_results k_small: window_ns and power_w equal those of k_big\n")
+    with Database(demo / "data" / "edr.db") as db:
+        flags = {(f["run_id"], f["task"], f["check"], f["text"]) for f in db.flags() if f["run_id"] != c}
+        extracted = {(p["run_id"], p["key"]): p["value"] for p in db.parameters() if p["origin"] == "extract"}
+    # d shares the tree of a, so only b pairs with each of them.
+    assert flags == {(a, "", "declared_vs_observed", "ENABLE_X is 1 in the run's files and 0 by spec"),
+                     (a, "", "same_parameters", "the same extracted parameters as b@demo"),
+                     (b, "", "same_parameters", "the same extracted parameters as a.power@demo and a@demo"),
+                     (d, "", "same_parameters", "the same extracted parameters as b@demo")}
+    assert extracted[(a, "LANES")] == "8" and extracted[(c, "source")] == "abc1234-dirty" and (a, "EXTRA") not in extracted
+
+    out = edr(capsys, "status", "a@demo")[1]
+    assert "flags" in out and "ENABLE_X is 1 in the run's files and 0 by spec" in out
+    out = edr(capsys, "brief")[1]
+    assert ("- `a@demo`: 1 `declared_vs_observed` and 1 `same_parameters`\n- `b@demo`: 1 `same_parameters`\n"
+            "- `c@demo`: 1 `declared_vs_observed`, 2 `capped_window` and 2 `same_results`\n") in out
+    out = edr(capsys, "brief", "--run", "c@demo")[1]
+    assert ("## Flags\n\nThe checks flag this run:\n\n- `declared_vs_observed`: source is abc1234-dirty in the run's "
+            "files and abc1234 by checkout\n- `capped_window` on task `k_big`: the window is the cap of 4096 ns\n") in out
+
+    # Each extraction rewrites the flags: a now runs as declared, and b keeps d as its only twin.
+    (demo / "data" / "results" / a / "log" / "synth.log").write_text("set ENABLE_X 0; set LANES 8;\n")
+    assert edr(capsys, "extract", "a@demo")[1] == f"{a}: 0 new, 0 changed, 0 unchanged, 0 failed, 0 removed, 3 parameters\n"
+    with Database(demo / "data" / "edr.db") as db:
+        assert [(f["run_id"], f["text"]) for f in db.flags([a, b, d])] == [
+            (d, "the same extracted parameters as b@demo"), (b, "the same extracted parameters as a.power@demo")]
+    # A hook that fails is a flag of the run.
+    (demo / "hooks" / "checks.py").write_text("def check(run, parameters, rows):\n    return 1 / 0\n")
+    assert "  flag checks.python: hooks/checks.py:check: division by zero\n" in edr(capsys, "extract", "c@demo")[1]
 
 
 def test_extract_writes_the_rows_of_a_run_in_one_commit(demo: Path, capsys, monkeypatch) -> None:
@@ -1305,7 +1388,13 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
     assert edr(capsys, *base, "--results", str(src), "--tasks", "nope")[0] == 1
     code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small", "--dry-run")
     assert code == 0 and "(dry)" in out and not (demo / "data").exists()
-    code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small")
+    # The spec of an import lists its task group only; its synth log is read all the same.
+    (src / "log").mkdir()
+    (src / "log" / "synth.log").write_text("set DW 0;\n")
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text() + "\n[parameters.knobs]\nstage = \"synth\"\nfile = \"log/synth.log\"\n"
+                    "regex = 'set (?P<key>\\w+) (?P<value>[^;]+);'\n")
+    code, out, _ = edr(capsys, *base, "--results", str(src), "--tasks", "k_small", "--param", "DW=1")
     link = demo / "data" / "results" / run_id
     assert code == 0 and "4 metrics" in out and link.is_symlink() and link.resolve() == src.resolve()
     code, out, _ = edr(capsys, "metrics", "--source", "abc1234", "--csv")
@@ -1315,6 +1404,8 @@ def test_import_results_links_and_extracts(demo: Path, capsys, tmp_path: Path) -
         row = db.run(run_id)
         assert row["root"] is None and row["host"] == "" and row["state"] == "imported"
         assert db.events()[-1]["text"].endswith("4 metrics")
+        assert [(f["check"], f["text"]) for f in db.flags([run_id])] == [
+            ("declared_vs_observed", "DW is 0 in the run's files and 1 by import")]
     other = tmp_path / "other"
     other.mkdir()
     assert edr(capsys, *base, "--results", str(other))[0] == 1  # never replaces a linked tree

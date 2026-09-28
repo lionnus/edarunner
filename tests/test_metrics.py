@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from helpers_results import POWER, POWER_NO_BLK, QOR, SUITE, TREE, area_hier, demo_qor, power_table
 
-from edarunner.metrics import extract
-from edarunner.model import Limits, Metric, Placement, Project, Safety, Site, Source, Stage, Sync, Task
+from edarunner.metrics import extract, extract_parameters
+from edarunner.model import Limits, Metric, Parameter, Placement, Project, Safety, Site, Source, Stage, Sync, Task
 from helpers_driver import DEMO
 
 RUN_ID = "20260926_1200_a_demo_gabc1234"
@@ -298,3 +298,39 @@ def test_a_table_stores_the_rows_of_where_down_to_its_depth_and_takes_its_value_
     (">= 0", -0.001, "FAIL"), ("< 1e3", 999.0, "pass"), ("> 5", 5.0, "FAIL"), ("== 0", None, None), ("", 1.0, None)])
 def test_a_pass_rule_gives_the_verdict(rule, value, verdict):
     assert Metric(name="m", pass_=rule).verdict(value) == verdict
+
+
+def test_parameters_from_the_head_of_a_log_a_report_a_json_object_and_a_hook(tmp_path):
+    run = tmp_path / "results" / RUN_ID
+    (run / "log").mkdir(parents=True)
+    # The knob line is at the head of the log; a line after the head carries other values.
+    (run / "log" / "synth.log").write_text("step 0 setup\nset ENABLE_X 1; set LANES 8;\n" + "." * 40 + "\nset LANES 2; set EXTRA 1;\n")
+    (run / "reports").mkdir()
+    (run / "reports" / "build.rpt").write_text("built at 12:00\ncommit: abc1234\n")
+    (run / "settings.json").write_text(json.dumps({"flow": {"clock_ns": 1.0, "corner": "ss"}}))
+    (tmp_path / "hooks").mkdir(exist_ok=True)
+    (tmp_path / "hooks" / "k.py").write_text("def read(path):\n    return {'LANES': 99, 'MODE': 'fast'}\n\n\ndef bad(path):\n    return [1]\n")
+    project = demo_project(tmp_path)
+    knobs = Parameter(name="knobs", stage="synth", file="log/synth.log", regex=r"set (?P<key>\w+) (?P<value>[^;]+);",
+                      head_bytes=48)
+    project.parameters = {"knobs": knobs,
+                          "source": Parameter(name="source", stage="synth", file="reports/build.rpt",
+                                              regex=r"^commit:\s*(\S+)"),
+                          "flow": Parameter(name="flow", stage="pnr", file="settings.json", json="flow"),
+                          "hook": Parameter(name="hook", stage="synth", file="settings.json", python="hooks/k.py:read"),
+                          "gone": Parameter(name="gone", stage="synth", file="reports/{label}.json", json="")}
+    got, failed = extract_parameters(project, RUN, tmp_path / "results")
+    # A key that two tables give keeps the first value, so the hook's LANES loses.
+    assert got == {"ENABLE_X": "1", "LANES": "8", "source": "abc1234", "clock_ns": "1.0", "corner": "ss", "MODE": "fast"}
+    assert failed == []
+    knobs.head_bytes = 0  # the whole log: EXTRA comes in, and the first LANES still wins
+    assert {k: v for k, v in extract_parameters(project, RUN, tmp_path / "results")[0].items() if k in ("LANES", "EXTRA")} == {
+        "LANES": "8", "EXTRA": "1"}
+    knobs.head_bytes = 20
+    project.parameters["hook"].python = "hooks/k.py:bad"
+    project.parameters["deep"] = Parameter(name="deep", stage="synth", file="settings.json", json="flow.corner.x")
+    got, failed = extract_parameters(project, RUN, tmp_path / "results", stages=["synth"])
+    assert got == {"source": "abc1234"} and failed == [
+        ("", "parameters.knobs", "log/synth.log: no match for 'set (?P<key>\\\\w+) (?P<value>[^;]+);' in the first 20 bytes"),
+        ("", "parameters.hook", "settings.json: a list, not an object of keys and values"),
+        ("", "parameters.deep", "settings.json: no key flow.corner.x")]

@@ -40,6 +40,7 @@ from .model import (
     Batch,
     BotCommand,
     Budget,
+    Checks,
     Host,
     Job,
     Limits,
@@ -47,6 +48,7 @@ from .model import (
     Metric,
     Needs,
     Ntfy,
+    Parameter,
     Placement,
     Project,
     Retry,
@@ -73,7 +75,7 @@ DEFAULT_USER = "~/.config/edarunner/user.toml"
 _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "ge_um2",
-    "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "env",
+    "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "parameters", "checks", "env",
 }
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "host_free_min_gb", "hosts", "tools", "nfs_export",
               "telegram", "scheduler"}
@@ -420,6 +422,12 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         _check_stage(stage, stages, site, file)
     metrics = {n: _metric(n, t, stages, file)
                for n, t in _table(raw.get("metrics", {}), None, file, "metrics").items()}
+    parameters = {n: _parameter(n, t, stages, file)
+                  for n, t in _table(raw.get("parameters", {}), None, file, "parameters").items()}
+    checks = _build(Checks, raw.get("checks", {}), file, "checks")
+    for m in checks.same_results:
+        if m not in metrics:
+            raise ConfigError(f"{file}: checks.same_results names unknown metric '{m}'")
     tasks, resolver = load_tasks(root / "tasks.toml", site) if (root / "tasks.toml").exists() else (
         {}, _default(Project, "task_resolver"))
     ge_um2 = raw.get("ge_um2", _default(Project, "ge_um2"))
@@ -441,6 +449,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         placement=_build(Placement, raw.get("placement", {}), file, "placement"),
         stages=stages,
         metrics=metrics,
+        parameters=parameters,
+        checks=checks,
         env={str(k): str(val) for k, val in _table(raw.get("env", {}), None, file, "env").items()},
         tasks=tasks,
         task_resolver=resolver,
@@ -529,6 +539,29 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
             raise ConfigError(f'{file}: {at}.record is {{ stage = "<a stage of the metric with steps>", '
                               'from = <step number> }, and the metric needs step')
     return _build(Metric, raw, file, at, name=name, pass_=rule)
+
+
+def _parameter(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Parameter:
+    at = f"parameters.{name}"
+    p = _build(Parameter, raw, file, at, name=name)
+    if not (p.stage and p.file):
+        raise ConfigError(f"{file}: {at} needs stage and file")
+    if p.stage not in stages:
+        raise ConfigError(f"{file}: {at}.stage names unknown stage '{p.stage}'")
+    parsers = [k for k in ("regex", "json", "python") if k in raw]  # type: ignore[operator]
+    if len(parsers) != 1 or parsers == ["python"] and not p.python:
+        raise ConfigError(f"{file}: {at} needs exactly one of regex, json, python")
+    if parsers == ["regex"]:
+        try:
+            rx = re.compile(p.regex)
+        except re.error as e:
+            raise ConfigError(f"{file}: {at}.regex: {e}") from None
+        named = {"key", "value"} & set(rx.groupindex)
+        if not (named == {"key", "value"} or not named and rx.groups):
+            raise ConfigError(f"{file}: {at}.regex needs group 1, or the named groups key and value")
+    if p.head_bytes < 0 or p.head_bytes and not p.regex:
+        raise ConfigError(f"{file}: {at}.head_bytes is a count of bytes from 0, and needs regex")
+    return p
 
 
 def load_tasks(file: Path, site: Site) -> tuple[dict[str, Task], str]:

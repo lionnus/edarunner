@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import config
 from .config import ConfigError, load_hook
-from .model import Metric, Project, Stage, Task
+from .model import Metric, Parameter, Project, Stage, Task
 
 TOP = "<top>"
 _NUM = re.compile(r"-?\d+(\.\d*)?([eE][-+]?\d+)?$")
@@ -269,6 +269,54 @@ def _extract_one(
             row["instances"] = instances
         rows.append(row)
     return rows
+
+
+def parse_parameters(param: Parameter, path: Path, project_root: Path) -> dict[str, str]:
+    """The keys and values that one parameter table reads from `path`, each value as text."""
+    if param.python:
+        fn, _ = load_hook(project_root, param.python)
+        got = fn(path) or {}
+    elif param.regex:
+        with path.open("rb") as fh:
+            text = fh.read(param.head_bytes or -1).decode(errors="replace")
+        rx = re.compile(param.regex, re.MULTILINE)
+        named, got = "key" in rx.groupindex, {}
+        for m in rx.finditer(text):
+            got.setdefault(m["key"] if named else param.name, m["value"] if named else m.group(1))
+        if not got:
+            raise ValueError(f"no match for {param.regex!r}" + (f" in the first {param.head_bytes} bytes" if param.head_bytes else ""))
+    else:
+        got = json.loads(path.read_text())
+        try:
+            for key in filter(None, param.json.split(".")):
+                got = got[key]
+        except (KeyError, TypeError):
+            raise ValueError(f"no key {param.json}") from None
+    if not isinstance(got, dict):
+        raise ValueError(f"a {type(got).__name__}, not an object of keys and values")
+    return {str(k): v if isinstance(v, str) else json.dumps(v) for k, v in got.items()}
+
+
+def extract_parameters(project: Project, run: dict, results_dir: Path,
+                       stages: list[str] | None = None) -> tuple[dict[str, str], list[tuple[str, str, str]]]:
+    """The parameters that the collected files of `run` give, and a flag `parameters.<name>` (task, check, text) for
+    each table whose file did not parse. `stages` limits the tables to the stages of the run's spec."""
+    run_dir = Path(results_dir) / run["run_id"]
+    values = {k: v for k, v in run.items() if isinstance(v, (str, int, float))}
+    got: dict[str, str] = {}
+    failed = []
+    for p in project.parameters.values():
+        if stages is not None and p.stage not in stages:
+            continue
+        rel = p.file
+        try:
+            rel = config.render(p.file, values)
+            if (run_dir / rel).is_file():
+                for k, v in parse_parameters(p, run_dir / rel, project.root).items():
+                    got.setdefault(k, v)
+        except Exception as e:  # a parse error is a flag, never a crash
+            failed.append(("", f"parameters.{p.name}", f"{rel}: {e}"))
+    return got, failed
 
 
 def step_totals(project: Project) -> dict[str, int]:

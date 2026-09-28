@@ -123,6 +123,9 @@ def project_data(c: Any, tools: list[Row]) -> Row:
     names = board.handles(everyone)
     events = [{**e, "run": names.get(e["run_id"], e["run_id"] or "")} for e in c.db.events(n=EVENTS)]
     read = [str(project.root / f) for f in ("CLAUDE.md", "AGENTS.md") if (project.root / f).is_file()]
+    flagged: dict[str, Counter] = {}
+    for f in c.db.flags([r["run_id"] for r in rows]):
+        flagged.setdefault(f["run_id"], Counter())[f["check"]] += 1
     return {
         "project": project.project, "root": str(project.root), "repo": str(project.source.repo),
         "ref": project.source.ref, "worktrees": str(project.source.worktrees), "sources": _sources(project, everyone),
@@ -132,6 +135,7 @@ def project_data(c: Any, tools: list[Row]) -> Row:
                     for b, n in per_batch.items()],
         "live": [r for r in runs if board.is_live({"phase": r["phase"]}) and r["state"] != "queued"],
         "decisions": [r for r in runs if r["command"]],
+        "flags": [{"handle": names[i], "run_id": i, "checks": dict(n)} for i, n in flagged.items()],
         "events": events, "read": read, "docs": DOCS_URL,
     }
 
@@ -158,7 +162,7 @@ def run_data(c: Any, row: Row, file_host: str) -> Row:
         "state": state["state"], "phase": row.get("phase"), "stage": row.get("stage"), "step": row.get("step"),
         "step_name": hb.get("step_name"), "age_s": state["age_s"], "started": row.get("started"),
         "exit": row.get("exit"), "runtime": analysis.runtime(c.project, c.db, row), "events": events,
-        "log": log, "log_tail": tail, "log_note": note, "metrics": list(last.values()),
+        "log": log, "log_tail": tail, "log_note": note, "metrics": list(last.values()), "flags": c.db.flags([row["run_id"]]),
         "command": state["command"], "reason": st.test if st else "",
     }
 
@@ -281,6 +285,10 @@ def project_text(d: Row, now: float | None = None) -> str:
                 who = board.join([f"`{r['handle']}` ({r['state']})" for r in rs])
                 out.append(f"- {who}: `{cmd}`")
             out += ["", "`docs/reference/states.md` says what to check before you run a proposed command.", ""]
+        if d["flags"]:
+            out += ["The checks flag these runs; `edr brief --run <handle>` lists each flag:", "",
+                    *(f"- `{f['handle']}`: " + board.join([f"{n} `{k}`" for k, n in f["checks"].items()]) for f in d["flags"]),
+                    ""]
     if d["events"]:
         out += ["The last event:" if len(d["events"]) == 1 else f"The last {len(d['events'])} events, oldest first:", "",
                 *(_event_line(e) for e in d["events"]), ""]
@@ -304,6 +312,10 @@ def run_text(d: Row) -> str:
         ident += f" It ended with the phase `{d['phase']}`" + (f" and exit {d['exit']}" if d.get("exit") is not None
                                                                  else "") + f", so its state is {d['state']}."
     out += [ident, ""]
+    if d["flags"]:
+        out += ["## Flags", "", "The checks flag this run:", "",
+                *(f"- `{f['check']}`" + (f" on task `{f['task']}`" if f["task"] else "") + f": {f['text']}"
+                  for f in d["flags"]), ""]
     rt = d["runtime"]
     if rt["stages"] or rt["steps"]:
         out += ["## Phases", ""]

@@ -1,4 +1,4 @@
-"""A frozen snapshot of one or more sources for a paper: manifest, five tables, the diff of each dirty source and the
+"""A frozen snapshot of one or more sources for a paper: manifest, six tables, the diff of each dirty source and the
 collected files."""
 
 from __future__ import annotations
@@ -22,9 +22,10 @@ from .model import Project
 Row = dict[str, Any]
 
 RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "phase", "started", "ended", "batch", "dirty",
-               "tree_id", "retired"]
+               "tree_id", "retired", "flags"]
 PARAMETER_COLUMNS = ["run_id", "label", "source", "key", "value", "origin"]
 TASK_FIELD_COLUMNS = ["run_id", "label", "source", "task", "key", "value", "origin"]
+FLAG_COLUMNS = ["run_id", "label", "source", "task", "check", "text"]
 METRIC_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "stage", "step", "task", "metric", "canonical", "value",
                   "unit", "source_file", "record"]
 INSTANCE_COLUMNS = ["run_id", "label", "source", "stage", "step", "task", "metric", "part", "instance", "depth", "value", "local",
@@ -40,8 +41,8 @@ def export(
     dry_run: bool = False,
     with_logs: bool = False,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, task_fields.csv, instances.csv and the collected
-    files of the runs of `sources` to `out`.
+    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, task_fields.csv, instances.csv, flags.csv and the
+    collected files of the runs of `sources` to `out`.
 
     The export holds the `pick` of each label and source. The manifest lists every exported run whose phase is
     not done under `incomplete`, and the other runs of each label and source under `skipped`. The files of a run
@@ -67,13 +68,17 @@ def export(
               for r in runs for f in db.task_fields([r["run_id"]])]
     dirty = [_dirty_source(project, s) for s in sources if "-dirty" in s]
     instances = [[i["name" if k == "metric" else k] for k in INSTANCE_COLUMNS] for i in db.instances(run_ids=ids)]
+    by_id = {r["run_id"]: r for r in runs}
+    flags = [{"run_id": f["run_id"], "label": by_id[f["run_id"]]["label"], "source": by_id[f["run_id"]]["source"],
+              **{k: f[k] for k in ("task", "check", "text")}} for f in db.flags(ids)]
 
     plan: list[tuple[str, Path | bytes]] = [
-        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired) for r in runs])),
+        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired, flags) for r in runs])),
         ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics])),
         ("parameters.csv", to_csv(PARAMETER_COLUMNS, params)),
         ("task_fields.csv", to_csv(TASK_FIELD_COLUMNS, fields)),
         ("instances.csv", to_csv(INSTANCE_COLUMNS, instances)),
+        ("flags.csv", to_csv(FLAG_COLUMNS, [list(f.values()) for f in flags])),
     ]
     plan += [(f"sources/{d['source']}/source.diff", project.data / "sources" / d["source"] / "source.diff")
              for d in dirty if d["diff_sha256"]]
@@ -94,9 +99,10 @@ def export(
         "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "source", "host", "phase")},
                   "record": _record(project, db, r)} for r in runs],
         "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics), "parameters.csv": len(params),
-                   "task_fields.csv": len(fields), "instances.csv": len(instances)},
+                   "task_fields.csv": len(fields), "instances.csv": len(instances), "flags.csv": len(flags)},
         "ge_um2": project.ge_um2 or None,
         "dirty_sources": dirty,
+        "flags": flags,
         "files": [],
         "incomplete": [_ident(r) for r in runs if r.get("phase") != "done"],
         "skipped": [_ident(r) for r in skipped],
@@ -161,11 +167,13 @@ def _ident(r: Row) -> Row:
     return {k: r.get(k) for k in ("run_id", "label", "source", "phase")}
 
 
-def _run_row(r: Row, retired: set[str]) -> list[Any]:
+def _run_row(r: Row, retired: set[str], flags: list[Row]) -> list[Any]:
+    """One runs.csv row; `flags` names the checks that flag the run, separated by spaces."""
     ended = "" if is_live(r) else r.get("updated")
     return [r["run_id"], r.get("label"), r.get("config"), r.get("build_tag"), r.get("source"), r.get("host"), r.get("phase"),
             r.get("started"), ended, r.get("batch"), r.get("dirty"), r.get("tree_id"),
-            int(r.get("state") == "retired" or r.get("batch") in retired)]
+            int(r.get("state") == "retired" or r.get("batch") in retired),
+            " ".join(sorted({f["check"] for f in flags if f["run_id"] == r["run_id"]}))]
 
 
 def metric_row(m: Row) -> list[Any]:

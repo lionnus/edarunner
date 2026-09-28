@@ -393,6 +393,60 @@ class Metric:
 
 
 @dataclass
+class Parameter:
+    """A parameter table reads parameters of a run from one of the run's own files: the knob line a stage writes at
+    the head of its log, a JSON file of settings, or a report that names the commit the flow built. Each key goes
+    into the `parameters` table with the origin `extract`, next to the values the run was declared with. A table holds
+    exactly one of three parsers: `regex`, `json` or `python`.
+
+    ```toml
+    [parameters.knobs]
+    stage = "pnr"
+    file = "log/pnr.log"
+    regex = 'set (?P<key>\\w+) (?P<value>[^;]+);'
+    head_bytes = 65536
+    ```
+
+    An extraction reads the file of every stage of the run's spec, or of every stage for a run without a heartbeat
+    such as an import, whenever the file is there, also for a stage that failed or still runs, and replaces the
+    values it wrote before. A file that does not parse gives the flag `parameters.<name>` with the error; a missing
+    file gives nothing. When two tables give one key, the first wins.
+    """
+
+    name: str
+    stage: str = doc("the stage whose files hold the values", "", shown="required")
+    file: str = doc("the file under the collected results", "", shown="required")
+    regex: str = doc("a regex over the file with `re.MULTILINE`: group 1 of the first match is the value of the key "
+                     "`<name>`; with the named groups `key` and `value`, every match gives a key and its value, and "
+                     "the first match of a key wins", "", shown="one of the three")
+    json: str = doc("a dotted path to a flat object in a JSON file, `\"\"` for the whole file; every key of the object "
+                    "is a key of the run", "", shown="one of the three")
+    python: str = doc("a hook that gets the file path and returns a dict of keys and values", "", shown="one of the three")
+    head_bytes: int = doc("how many bytes from the start of the file `regex` reads, for the head of a large log; 0 "
+                          "reads the whole file", 0)
+
+
+@dataclass
+class Checks:
+    """`[checks]` sets the checks that flag a run whose files or results contradict its identity. Every extraction of
+    a run rewrites its flags. Three checks are built in:
+
+    - `declared_vs_observed`: a key read from the run's files has another value under another origin, such as a job
+      override or the source tag. Two numbers are equal when their values are, so `1` equals `1.0`.
+    - `same_parameters`: two runs with different labels at one source have equal extracted parameters and do not share
+      a tree, so one of them is not the build its label names.
+    - `same_results`: two tasks of one run have equal values in every metric that `same_results` lists, so the flow ran
+      one test under two names.
+
+    `edr status <handle>`, `edr brief`, `edr extract` and `edr export` show the flags.
+    """
+
+    same_results: list[str] = doc("the metrics whose values, all equal, flag two tasks of one run", factory=list)
+    python: str = doc("a hook for the project's own rules: it gets the run's row, its parameter rows and its metric "
+                      "rows, and returns a (task, check, text) for each flag, with the task `\"\"` for the run", "")
+
+
+@dataclass
 class Task:
     """`tasks.toml` is optional. A task is a table `[tasks.<id>]`, and every key of a task is a
     placeholder `{task.<key>}` in the strings of a task group.
@@ -512,6 +566,8 @@ class Project:
     placement: Placement = field(default_factory=Placement)
     stages: dict[str, Stage] = field(default_factory=dict)  # in file order
     metrics: dict[str, Metric] = field(default_factory=dict)
+    parameters: dict[str, Parameter] = field(default_factory=dict)
+    checks: Checks = field(default_factory=Checks)
     state_dir: Path = doc("the state directory, on a filesystem every host mounts", Path("~/.edr/{project}"))
     data: Path = doc("the head-node data directory: `edr.db`, `results/`, `board/`", Path("data"))
     run_prefix: str = doc("the run tree prefix under the host scratch", "{user}/edr/{project}")

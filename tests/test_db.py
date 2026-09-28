@@ -74,9 +74,11 @@ def test_upsert_then_update(tmp_path):
         db.set_parameters(RUN_A, {"DW": 0, "name": "x"}, "spec")
         db.set_parameters(RUN_A, {"DW": 1}, "import")
         db.set_parameters(RUN_A, {"DW": 2}, "import")
-        # One row per key and origin; a second write under the same origin replaces the value.
+        db.set_parameters(RUN_A, {"DW": 3}, "extract")
+        # One row per key and origin; a second write under the same origin replaces the value. The value read from the
+        # run's files comes last, so a reader that keeps one value per key keeps it.
         assert [(r["key"], r["value"], r["origin"]) for r in db.parameters(RUN_A)] == [
-            ("DW", "2", "import"), ("DW", "0", "spec"), ("name", "x", "spec")]
+            ("DW", "2", "import"), ("DW", "0", "spec"), ("DW", "3", "extract"), ("name", "x", "spec")]
 
         db.set_task_fields(RUN_A, [("k_old", "args", "M=4", "resolver")])
         db.set_task_fields(RUN_B, [("k_small", "args", "M=8", "spec")])

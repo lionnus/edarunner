@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS stage_runs(run_id TEXT, stage TEXT, task TEXT, attemp
   status TEXT, exit INTEGER, signature TEXT, log TEXT, PRIMARY KEY(run_id, stage, task, attempt));
 CREATE TABLE IF NOT EXISTS parameters(run_id TEXT, key TEXT, value TEXT, origin TEXT, PRIMARY KEY(run_id, key, origin));
 CREATE TABLE IF NOT EXISTS task_fields(run_id TEXT, task TEXT, key TEXT, value TEXT, origin TEXT, PRIMARY KEY(run_id, task, key));
+CREATE TABLE IF NOT EXISTS flags(run_id TEXT, task TEXT, "check" TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS metrics(run_id TEXT, stage TEXT, step INTEGER, task TEXT, name TEXT, canonical TEXT, value REAL, unit TEXT,
   source_file TEXT, extracted_at INTEGER, PRIMARY KEY(run_id, stage, step, task, name));
 CREATE TABLE IF NOT EXISTS artifacts(run_id TEXT, path TEXT, bytes INTEGER, collected_at INTEGER, class TEXT, PRIMARY KEY(run_id, path));
@@ -185,14 +186,23 @@ class Database:
         """Insert a stage or task row, or update it. `task` defaults to '' and `attempt` to 1."""
         self._upsert("stage_runs", {"task": "", "attempt": 1, **row})
 
-    def set_parameters(self, run_id: str, parameters: dict[str, Any], origin: str) -> None:
-        """Write parameters of a run as text under one origin, such as `spec`, `checkout` or `import`. A key already
-        present under that origin is replaced."""
+    def set_parameters(self, run_id: str, parameters: dict[str, Any], origin: str, replace: bool = False) -> None:
+        """Write parameters of a run as text under one origin, such as `spec`, `checkout`, `import` or `extract`; the
+        caller commits. A key already present under that origin is replaced, and with `replace` every earlier row of
+        that origin goes."""
+        if replace:
+            self.conn.execute("DELETE FROM parameters WHERE run_id=? AND origin=?", (run_id, origin))
         self.conn.executemany(
             "INSERT OR REPLACE INTO parameters(run_id, key, value, origin) VALUES(?, ?, ?, ?)",
             [(run_id, k, v if isinstance(v, str) else json.dumps(v), origin) for k, v in parameters.items()],
         )
-        self.conn.commit()
+
+    def set_flags(self, run_id: str, flags: list[tuple[str, str, str]], check: str | None = None) -> None:
+        """Replace the flags of a run, or only those of one check, with `flags` of (task, check, text); the caller
+        commits."""
+        self.conn.execute('DELETE FROM flags WHERE run_id=?' + (' AND "check"=?' if check else ""),
+                          (run_id, check) if check else (run_id,))
+        self.conn.executemany("INSERT INTO flags VALUES(?, ?, ?, ?)", [(run_id, *f) for f in dict.fromkeys(flags)])
 
     def set_task_fields(self, run_id: str, rows: list[tuple[str, str, str, str]]) -> None:
         """Replace the task fields of a run with `rows` of (task, key, value, origin); the origin is `spec`, `resolver`
@@ -315,9 +325,17 @@ class Database:
         return self._rows("SELECT stage, step, started FROM step_runs WHERE run_id=? ORDER BY stage, step", (run_id,))
 
     def parameters(self, run_id: str | None = None) -> list[Row]:
-        """The parameter rows of one run, or of every run, by run, key and origin."""
+        """The parameter rows of one run, or of every run, by run, key and origin, with the `extract` row of a key last:
+        a reader that keeps one value per key keeps the value read from the run's files."""
         where, args = (" WHERE run_id=?", (run_id,)) if run_id else ("", ())
-        return self._rows("SELECT run_id, key, value, origin FROM parameters" + where + " ORDER BY run_id, key, origin", args)
+        return self._rows("SELECT run_id, key, value, origin FROM parameters" + where
+                          + " ORDER BY run_id, key, origin = 'extract', origin", args)
+
+    def flags(self, run_ids: list[str] | None = None) -> list[Row]:
+        """The flags of the runs, or of every run, by run, task and check."""
+        where, args = ["1"], []
+        _within(where, args, ("run_id", run_ids))
+        return self._rows(f"SELECT * FROM flags WHERE {' AND '.join(where)} ORDER BY run_id, task, \"check\", text", args)
 
     def task_fields(self, run_ids: list[str] | None = None) -> list[Row]:
         """The task field rows of the runs, or of every run, by run, task and key."""

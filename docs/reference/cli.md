@@ -121,14 +121,15 @@ and the tools it needs, then the hosts with the marks of their last
 probe from the host_samples table and the tools with the seats their
 probe reports. The state follows: the runs per batch and state, the
 live runs, every run the triage proposes a command for with that
-command, and the last ten events. Each batch names the source tags
+command, the runs that the checks flag, and the last ten events. Each
+batch names the source tags
 of its runs and how many commits each one lags behind [source] ref;
 a dirty tag counts from the commit it starts from. It ends with the
 project's CLAUDE.md and AGENTS.md, when they exist, and the
 documentation.
 
 With --run, it prints the history of one run instead: its identity,
-its stage and step times from stage_runs and step_runs, its events with
+its flags, its stage and step times from stage_runs and step_runs, its events with
 their reasons, the last 20 lines of its current stage log read from the host,
 the last value of each metric, and the command the triage proposes
 with the reason. --json gives either as an object.
@@ -158,8 +159,9 @@ follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.
 
-With a handle, it prints one run: its identity, state and disk, every
-stage and task row, the CPU, RSS, tree size and free disk the driver sampled over the
+With a handle, it prints one run: its identity, state and disk, the
+flags of its checks, every stage and task row, the CPU, RSS, tree size
+and free disk the driver sampled over the
 run, the metrics, and the log tail from the heartbeat. A finished run
 shows driver exit &lt;n&gt; (&lt;phase&gt;): the code of the driver, whose phase
 names the stage that failed. The command exit column of the stage table
@@ -388,15 +390,21 @@ tasks.toml no longer resolves, stays as it is. A file that does not
 parse gives a failed row: an empty value, and the error in place of
 the source file.
 
+It then reads the [parameters.&lt;name&gt;] tables from the files of the
+stages of the run's spec, replaces the run's parameters of origin
+extract with them, and runs the checks, which rewrite the flags of the
+run and the same_parameters flags of every run at its source.
+
 Pass exactly one of a handle, --batch or --source. For each run,
 extract prints how many rows are new, changed, unchanged, failed and
 removed, and how many it kept without a file, then a line per failing
-metric with its count and its first error. It writes the rows
-of a run in one transaction, with an extract event of the same text.
---dry-run prints the counts and writes nothing. With --json, data
-holds for each run run_id, the counts, and failures: the count and
-the first error of each failing metric.
-
+metric with its count and its first error, and a line per flag. The
+count line also names how many parameters the files gave and how
+many flags the run has. It writes the rows, parameters and flags of a
+run in one transaction, with an extract event of the same text.
+--dry-run prints the counts of the metric rows and writes nothing.
+With --json, data holds for each run run_id, the counts, failures:
+the count and the first error of each failing metric, and flags.
 A task id that ran with other fields in another run gets a warning:
 line with the fields that differ and up to five runs of each set.
 --json lists these under clashes of each run, with every run.
@@ -877,7 +885,7 @@ edr export [--dry-run] [--json] [--source SOURCE] [--out DIR] [--mlflow DIR] [--
 ```
 
 Writes a snapshot of the sources to DIR: manifest.json, runs.csv,
-metrics.csv, parameters.csv, task_fields.csv, instances.csv and the
+metrics.csv, parameters.csv, task_fields.csv, instances.csv, flags.csv and the
 collected files of one run per label and source, the newest run by
 start time that ended done, else the newest run. --source matches the
 source tag exactly and may be given more than once. The manifest lists
