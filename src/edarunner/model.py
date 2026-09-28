@@ -394,7 +394,8 @@ class Source:
 
     repo: Path = doc("the git repository of the flow")
     worktrees: Path = doc("where `edr checkout` puts a local clone per commit")
-    ref: str = doc("the ref `edr checkout` takes without an argument", "HEAD")
+    ref: str = doc("the ref `edr checkout` takes without an argument, and the one `edr brief` counts the lag of each "
+                   "source against", "HEAD")
     nested: list[str] = doc("nested repositories inside the tree, cloned at the HEAD the repository copy has; a run "
                             "records the commit of each as the parameter `nested.<name>`, and their changes count in "
                             "a dirty tag", factory=list)

@@ -275,19 +275,21 @@ def triage_cmd(row: Row, state: str, hb: dict, runs: list[Row] | None = None) ->
     return f"edr retire {h} --why {shlex.quote(str(row.get('phase') or '<why>'))}"
 
 
-def wide(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None) -> Table | str:
-    """One line per run, every state, in board order; `totals` holds the stages with steps.
+def wide(rows: list[Row], now: float | None = None, totals: dict[str, int] | None = None,
+         extra: dict[str, dict[str, Any]] | None = None) -> Table | str:
+    """One line per run, every state, in board order; `totals` holds the stages with steps, and `extra` one more
+    column per key with the cell of each run by run id.
 
     Rows of several projects carry `project`, which then takes the place of the row number."""
-    now = now or time.time()
+    now, extra = now or time.time(), extra or {}
     first = "project" if any("project" in r for r in rows) else "#"
     body = [[r.get("project") if first == "project" else f"#{n}", r.get("label"), r.get("source"), r.get("host"),
              state_text(state_of(r)), _s(r.get("phase"))[:40] or None, _stage_step(r, totals), hm(_age_s(r, now)), _fd(r),
-             f"{cost(r, now):.1f}"] for n, r in enumerate(order(rows), 1)]
+             f"{cost(r, now):.1f}", *[col.get(r["run_id"]) for col in extra.values()]] for n, r in enumerate(order(rows), 1)]
     if not body:
         return "no runs"
-    return table([first, "label", "source", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h"], body,
-                 styles={"label": "bold", "source": "dim", "age": "dim"}, right=("age", "fail/done", "core-h"))
+    return table([first, "label", "source", "host", "state", "phase", "stage/step", "age", "fail/done", "core-h", *extra],
+                 body, styles={"label": "bold", "source": "dim", "age": "dim"}, right=("age", "fail/done", "core-h", *extra))
 
 
 def samples_table(samples: list[Row]) -> Table | None:

@@ -305,6 +305,50 @@ def test_a_pass_rule_marks_a_failing_value(demo: Path, capsys) -> None:
     assert code == 0 and "verdict" not in out
 
 
+def test_status_shows_each_run_at_the_step_of_record_with_its_verdict(demo: Path, capsys) -> None:
+    # The demo's area records the deepest pnr step from 5 on; setup_violations has pass = "== 0" and no `record`.
+    alpha, beta = seed(demo, "alpha", "done"), seed(demo, "beta", "FAILED:pnr")
+    gamma = seed(demo, "gamma", "done", source="def5678", batch="other")
+    for run, area, fails in ((alpha, {3: 900, 4: 1000, 5: 1100}, {4: 2, 5: 0}), (beta, {3: 950, 4: 1050}, {4: 3}),
+                             (gamma, {5: 1200}, {5: 1})):
+        for step, v in area.items():
+            _metric(demo, run, "area_cell_um2", step, v, stage="synth" if step < 4 else "pnr")
+        for step, v in fails.items():
+            _metric(demo, run, "setup_violations", step, v, stage="pnr")
+    with Database(demo / "data" / "edr.db") as db:
+        db.conn.execute("UPDATE metrics SET canonical='design__instance__area' WHERE name='area_cell_um2'")
+        db.add_metric({"run_id": alpha, "stage": "power", "task": "k1", "name": "power_w", "value": 0.5})
+
+    code, out, _ = edr(capsys, "status", "--source", "abc1234", "--metric", "area_cell_um2", "--metric", "setup_violations",
+                       "--metric", "power_w")
+    lines = out.splitlines()
+    assert code == 0 and lines[0].split()[-3:] == ["area_cell_um2", "setup_violations", "power_w"]
+    assert lines[2].split()[:2] == ["#1", "beta"] and lines[2].split()[-6:] == ["missing", "3", "FAIL", "(pnr", "4)", "-"]
+    assert lines[3].split()[:2] == ["#2", "alpha"] and lines[3].split()[-7:] == ["1100", "(pnr", "5)", "0", "(pnr", "5)", "-"]
+    assert lines[4:] == ["missing: beta@demo has pnr step 4"]
+    code, out, _ = edr(capsys, "--json", "status", "--source", "abc1234", "--source", "def5678", "--metric",
+                       "design__instance__area")
+    data = json.loads(out)["data"]
+    assert code == 0 and {r["run_id"] for r in data["runs"]} == {alpha, beta, gamma}
+    assert data["metrics"][0]["metric"] == "area_cell_um2" and data["metrics"][0]["value"] == {alpha: 1100.0, gamma: 1200.0}
+    assert data["missing"] == [{"run_id": beta, "label": "beta@demo", "metric": "area_cell_um2", "task": "", "stage": "pnr",
+                                "steps": [4]}]
+    code, out, err = edr(capsys, "status", "--metric", "setup_violations", "--metric", "area_cell_um2", "--csv")
+    rows = list(csv.DictReader(out.splitlines()))
+    assert err == "missing: beta@demo has pnr step 4\n" and rows[0]["area_cell_um2"] == ""
+    assert code == 0 and [(r["label"], r["setup_violations"], r["setup_violations_stage"], r["setup_violations_step"],
+                           r["setup_violations_verdict"]) for r in rows] == [
+        ("beta", "3.0", "pnr", "4", "FAIL"), ("alpha", "0.0", "pnr", "5", "pass"), ("gamma", "1.0", "pnr", "5", "FAIL")]
+    assert list(rows[0])[:7] == ["run_id", "label", "batch", "source", "host", "state", "phase"]
+    code, _, err = edr(capsys, "status", "--narrow", "--metric", "area_cell_um2")
+    assert code == 1 and "--narrow" in err
+    with Database(demo / "data" / "edr.db") as db:
+        db.add_metric({"run_id": alpha, "stage": "pnr", "step": 5, "name": "area_again", "canonical": "design__instance__area",
+                       "value": 1100.0})
+    code, _, err = edr(capsys, "status", "--metric", "design__instance__area")
+    assert code == 1 and "area_again and area_cell_um2" in err
+
+
 def test_runtime_of_one_run_and_of_a_batch(demo: Path, capsys) -> None:
     a, b = seed(demo, "a", "done"), seed(demo, "b", "done")
     t0 = 1_790_000_000
