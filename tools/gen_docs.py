@@ -38,7 +38,7 @@ Part = type | tuple[type, list[str]]
 # The sections of configuration.md: the heading, the dataclasses (or some of their fields) it lists, and the
 # prose above the table; "" takes the docstring of the first dataclass.
 CONFIG: list[tuple[str, list[Part], str]] = [
-    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "env"])], ""),
+    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "ge_um2", "env"])], ""),
     ("### [source]", [model.Source], ""),
     ("### [sync]", [model.Sync], ""),
     ("### [runtime]", [model.Runtime], ""),

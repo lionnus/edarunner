@@ -313,3 +313,21 @@ def test_metric_record(tmp_path):
             config.load_project(root)
     toml.write_text(text.replace(rec, 'record = { stage = "pnr" }'))
     assert config.load_project(root).metrics["area_cell_um2"].record == {"stage": "pnr"}
+
+
+def test_metric_table_and_ge_um2(tmp_path):
+    root = demo_copy(tmp_path)
+    toml = root / "edr.toml"
+    table = 'table = { instance = "full", value = "total_w", top = { phase = "WHOLE" }, where = { phase = ["WHOLE", "T*"] }, max_depth = 3 }'
+    text = toml.read_text().replace("csv = { where = { phase = \"WHOLE\" }, column = \"total_w\" }", table)
+    toml.write_text(text.replace("run_prefix =", "ge_um2 = 0.2\nrun_prefix ="))
+    p = config.load_project(root)
+    assert p.metrics["power_w"].table["top"] == {"phase": "WHOLE"} and p.ge_um2 == 0.2
+    for old, new, match in ((table, 'table = { instance = "full", value = "total_w" }', "power_w.table needs instance, value and top"),
+                            (table, table.replace("max_depth = 3", "max_depth = -1"), "max_depth is the deepest depth"),
+                            (table, table.replace("where = {", "keep = {"), "unknown key 'metrics.power_w.table.keep'"),
+                            (table, 'table = "full"', "'metrics.power_w.table' must be a table"),
+                            ("run_prefix =", "ge_um2 = 0\nrun_prefix =", "ge_um2 is the area of one gate equivalent")):
+        toml.write_text(text.replace(old, new))
+        with pytest.raises(ConfigError, match=match):
+            config.load_project(root)

@@ -19,12 +19,34 @@ def demo_qor(step: int) -> str:
                       ("func_slow", "reg2reg", {"Critical Path Slack": f"-0.0{step}", "No. of Violating Paths": step}))
 
 
+def area_report(top: float, rows: list[tuple[str, float]]) -> str:
+    """A Synopsys `report_area -hierarchy` of `top` um2 with one line per (path from the top, area)."""
+    body = "".join(f"{name:<34}{area:>12.3f}{area / top * 100:>9.1f}{0:>13.3f}{0:>13.3f}{0:>14.3f}  {name.split('/')[-1]}\n"
+                   for name, area in [("top_wrap", top), *rows])
+    return f"Report : area\nTotal cell area:{top:>32.3f}\n\nHierarchical cell{'Absolute':>29}{'Percent':>9}\n{RULE}\n{body}{RULE}\n"
+
+
 def area_hier(top: float) -> str:
     """A Synopsys `report_area -hierarchy` of `top` um2: i_top with 99 % of it, blk_a with 60 % and blk_b with 30 %."""
-    rows = [("top_wrap", 1.0), ("i_top", 0.99), ("i_top/blk_a", 0.6), ("i_top/blk_b", 0.3)]
-    body = "".join(f"{name:<34}{top * share:>12.3f}{share * 100:>9.1f}{0:>13.3f}{0:>13.3f}{0:>14.3f}  {name.split('/')[-1]}\n"
-                   for name, share in rows)
-    return f"Report : area\nTotal cell area:{top:>32.3f}\n\nHierarchical cell{'Absolute':>29}{'Percent':>9}\n{RULE}\n{body}{RULE}\n"
+    return area_report(top, [("i_top", top * 0.99), ("i_top/blk_a", top * 0.6), ("i_top/blk_b", top * 0.3)])
+
+
+# A design of 1024 um2 as (path from the top, area): the adder u_add sits at depth 3, four lanes at depth 5.
+TREE = [("i_top", 960.0), ("i_top/u_core", 512.0), ("i_top/u_sum", 256.0), ("i_top/u_sum/u_add", 64.0),
+        ("i_top/u_vec", 128.0), ("i_top/u_vec/u_bank", 128.0), ("i_top/u_vec/u_bank/u_lanes", 128.0),
+        *((f"i_top/u_vec/u_bank/u_lanes/u_lane_{k}", 32.0) for k in range(4))]
+
+
+def power_table(rows: list[tuple[str, float]], parts: dict[str, float]) -> str:
+    """A tidy per-instance power CSV of the design `rows` of 1024 um2: per part, such as the whole window or a trace
+    slice, the top `chip` and each instance draw the part's watts times their share of the area. `full` is the path
+    from the top, `instance` the leaf name."""
+    lines = ["phase,instance,full,depth,total_w"]
+    for part, watts in parts.items():
+        for path, area in [("", 1024.0), *rows]:
+            full = f"chip/{path}".rstrip("/")
+            lines.append(f"{part},{full.split('/')[-1]},{full},{full.count('/')},{watts * area / 1024:.6e}")
+    return "\n".join(lines) + "\n"
 
 
 # The hold scenario first, and its reg2reg block has no setup slack; the setup slacks are on lines 11, 18 and 25.

@@ -1,4 +1,4 @@
-"""A frozen snapshot of one or more sources for a paper: manifest, three tables, the diff of each dirty source and the
+"""A frozen snapshot of one or more sources for a paper: manifest, four tables, the diff of each dirty source and the
 collected files."""
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ RUN_COLUMNS = ["run_id", "label", "config", "build_tag", "source", "host", "phas
 PARAMETER_COLUMNS = ["run_id", "label", "source", "key", "value", "origin"]
 METRIC_COLUMNS = ["run_id", "label", "config", "source", "stage", "step", "task", "metric", "canonical", "value", "unit", "source_file",
                   "record"]
+INSTANCE_COLUMNS = ["run_id", "label", "source", "stage", "step", "task", "metric", "part", "instance", "depth", "value", "local",
+                    "cells", "unit"]
 
 
 def export(
@@ -37,8 +39,8 @@ def export(
     dry_run: bool = False,
     with_logs: bool = False,
 ) -> dict[str, Any]:
-    """Write manifest.json, runs.csv, metrics.csv, parameters.csv and the collected files of the runs of `sources` to
-    `out`.
+    """Write manifest.json, runs.csv, metrics.csv, parameters.csv, instances.csv and the collected files of the runs of
+    `sources` to `out`.
 
     The export holds the `pick` of each label and source. The manifest lists every exported run whose phase is
     not done under `incomplete`, and the other runs of each label and source under `skipped`. The files of a run
@@ -61,11 +63,13 @@ def export(
     params = [[r["run_id"], r["label"], r["source"], p["key"], p["value"], p["origin"]]
               for r in runs for p in db.parameters(r["run_id"])]
     dirty = [_dirty_source(project, s) for s in sources if "-dirty" in s]
+    instances = [[i["name" if k == "metric" else k] for k in INSTANCE_COLUMNS] for i in db.instances(run_ids=ids)]
 
     plan: list[tuple[str, Path | bytes]] = [
         ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired) for r in runs])),
         ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics])),
         ("parameters.csv", to_csv(PARAMETER_COLUMNS, params)),
+        ("instances.csv", to_csv(INSTANCE_COLUMNS, instances)),
     ]
     plan += [(f"sources/{d['source']}/source.diff", project.data / "sources" / d["source"] / "source.diff")
              for d in dirty if d["diff_sha256"]]
@@ -85,7 +89,9 @@ def export(
         "sources": sources,
         "runs": [{**{k: r.get(k) for k in ("run_id", "label", "config", "build_tag", "source", "host", "phase")},
                   "record": _record(project, db, r)} for r in runs],
-        "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics), "parameters.csv": len(params)},
+        "tables": {"runs.csv": len(runs), "metrics.csv": len(metrics), "parameters.csv": len(params),
+                   "instances.csv": len(instances)},
+        "ge_um2": project.ge_um2 or None,
         "dirty_sources": dirty,
         "files": [],
         "incomplete": [_ident(r) for r in runs if r.get("phase") != "done"],

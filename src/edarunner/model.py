@@ -311,8 +311,8 @@ def pass_rule(rule: str) -> tuple[Callable[[float, float], bool], float]:
 
 @dataclass
 class Metric:
-    """A metric holds exactly one of the five parsers: `regex`, `csv`, `json`, `python` or `area_hier`. A number
-    the flow does not print, such as an energy from a power and a window, comes from a `python`
+    """A metric holds exactly one of the six parsers: `regex`, `csv`, `json`, `python`, `area_hier` or `table`. A
+    number the flow does not print, such as an energy from a power and a window, comes from a `python`
     hook that reads the input files itself.
 
     A regex runs with `re.MULTILINE` over the whole file, group 1 of each match is a value, and
@@ -336,23 +336,31 @@ class Metric:
     step: str | None = doc("`\"*\"` for one row per step, a number, or absent", None)
     file: str = doc("the file under the collected results; `{step}` and `{task_dir}` allowed", "",
                     shown="required")
-    regex: str = doc("a regex; group 1 of each match is a value", "", shown="one of the five")
+    regex: str = doc("a regex; group 1 of each match is a value", "", shown="one of the six")
     reduce: str = doc("how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum "
                       "names the line of its first value", "first")
     csv: dict[str, object] | None = doc("`{ where = { column = value }, column }`; the first row that matches "
                                         "`where`, whose values take the placeholders of `file`", None,
-                                        shown="one of the five")
-    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the five")
+                                        shown="one of the six")
+    json: str = doc("a dotted path into a JSON file; a number indexes a list", "", shown="one of the six")
     python: str = doc("a hook that gets the file path and returns a number, or None where the number does not "
-                      "apply", "", shown="one of the five")
+                      "apply", "", shown="one of the six")
     area_hier: int = doc("the deepest instance depth to keep from a hierarchical area report, of Synopsys "
                          "`report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is "
-                         "the top area, and each instance down to this depth becomes a row of the `area` table", 0,
-                         shown="one of the five")
+                         "the top area, and each instance down to this depth becomes a row of the `instances` table",
+                         0, shown="one of the six")
+    table: dict[str, object] | None = doc(
+        "`{ instance, value, top, depth, part, local, where, max_depth }`: a CSV with one row per instance and part, "
+        "such as a phase or a trace slice of a power run. `instance`, `value`, `depth`, `part` and `local` name its "
+        "columns. The value of the metric comes from the first row that `top` matches, such as the design total of "
+        "the whole window, and the rows that `where` matches, down to depth `max_depth`, go into the `instances` "
+        "table. `instance`, `value` and `top` are required; without `depth`, the depth is the count of `/` in the "
+        "path. A value of `where` or `top` is a glob or a list of globs", None, shown="one of the six")
     unit: str = doc("the unit, as text", "")
     scale: float = doc("a factor that multiplies each value at extraction, so that the stored number is in `unit`: "
                        "`scale = 1e-6` with `unit = \"ns\"` turns a window the file gives in fs into ns. Every view, "
-                       "the export, MLflow and `pass` see the product, and `area_hier` scales its instance rows too", 1.0)
+                       "the export, MLflow and `pass` see the product, and `area_hier` and `table` scale their instance rows "
+                       "too", 1.0)
     canonical: str = doc("the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: "
                          "`design__instance__area`, `design__instance__count`, `design__instance__utilization`, "
                          "`timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; "
@@ -499,6 +507,9 @@ class Project:
     state_dir: Path = doc("the state directory, on a filesystem every host mounts", Path("~/.edr/{project}"))
     data: Path = doc("the head-node data directory: `edr.db`, `results/`, `board/`", Path("data"))
     run_prefix: str = doc("the run tree prefix under the host scratch", "{user}/edr/{project}")
+    ge_um2: float = doc("the area of one gate equivalent in um2, such as a NAND2 of the library; `--unit kGE` or "
+                        "`MGE` of `edr compare` and `edr metrics` divides an area in um2 by it, and an export records it",
+                        0.0, shown="unset")
     env: dict[str, str] = doc("the variables every command of every stage needs, on top of the site `env`; "
                               "a value takes the run placeholders. A `$NAME` or `${NAME}` that the site sets takes "
                               "the site value, so `PATH = \"{root}/.venv/bin:$PATH\"` keeps the site path; a value "
