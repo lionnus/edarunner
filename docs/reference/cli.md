@@ -301,7 +301,8 @@ included, and may be given more than once; --run takes one run
 instead. --csv writes the columns of metrics.csv
 (docs/guides/results.md) to stdout. A value that breaks the pass
 rule of its metric shows FAIL next to it, and --json gives each row
-a verdict: pass, FAIL or null.
+a verdict: pass, FAIL or null. A row whose file did not parse shows
+failed: and the error in place of the value.
 
 --run with --over steps prints the metrics along the steps of that run:
 one row per step with its name, one column per metric, and a verdict
@@ -338,20 +339,32 @@ edr extract [--dry-run] [--json] [--batch B] [--source SOURCE] [handle]
 ```
 
 Extracts every metric in edr.toml again from the files collected for
-each run under data/results. It uses the same function as the watcher,
-so it reads the tasks that ended done, the stages that exited 0, and
-in any other stage the steps that the run has passed: step_runs holds
-the step and a later one. A run without a heartbeat, such as an
-imported one, is read for every stage. New rows are added. A row is
-replaced when its value, canonical name or unit has changed, or when
-its area_hier metric has no area rows yet. Rows that the new
-extraction does not find are kept.
+each run under data/results, and makes the rows of the run match the
+definitions. It uses the same function as the watcher, so it reads
+the tasks that ended done, the stages that exited 0, and in any other
+stage the steps that the run has passed: step_runs holds the step and
+a later one. A run without a heartbeat, such as an imported one, is
+read for every stage and for the tasks its rows name.
+
+New rows are added. A row is replaced when its value, canonical name,
+unit or source file has changed, or when its area rows differ. A row
+that the extraction no longer gives is removed with its area rows when
+it is a failed row, when no metric defines it at its stage and step,
+or when the extraction read its stage and task. A value whose file is gone is
+kept and counted. A value of a stage or task that the extraction did
+not read, such as a stage outside the run's spec or a task that
+tasks.toml no longer resolves, stays as it is. A file that does not
+parse gives a failed row: an empty value, and the error in place of
+the source file.
 
 Pass exactly one of a handle, --batch or --source. For each run,
-extract prints how many rows are new, changed, unchanged and failed,
-where a failed row is a file that did not parse, and it writes an
-extract event with the same counts. With --json, data holds run_id,
-new, changed, unchanged and failed for each run.
+extract prints how many rows are new, changed, unchanged, failed and
+removed, and how many it kept without a file, then a line per failing
+metric with its count and its first error. It writes the rows
+of a run in one transaction, with an extract event of the same text.
+--dry-run prints the counts and writes nothing. With --json, data
+holds for each run run_id, the counts, and failures: the count and
+the first error of each failing metric.
 
 | Flag | Meaning |
 |---|---|

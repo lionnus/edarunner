@@ -15,7 +15,7 @@ batch, every number and every action.
 | `runs` | run | identity (label, config, build tag, source tag, dirty flag), host and root, phase, state, stage and step, exit, times, disk figures, task counts, `tree_id`, the cores the run reserved |
 | `stage_runs` | stage or task attempt of a run | status, start and end, exit, failure signature, log path |
 | `parameters` | key and origin of a run | the parameters of the run as text, each with its origin; [Run identity](#run-identity) lists them |
-| `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file, when it was extracted |
+| `metrics` | number | run, stage, step, task, name, canonical name, value, unit, the source file or the error of a failed row, when it was extracted |
 | `artifacts` | collected file | path under `data/results/<run_id>/`, size, when, class (`always` or the `collect_on_request` name) |
 | `events` | action | time, actor (`user`, `watch`, `telegram`), run, kind, text with the `--why` |
 | `store` | key | one JSON value per key, a small key-value store: the watcher's `progress` and `notified`, the `last_board` row order for `#n`, and under `telegram` the message ids and the forum topic of the project |
@@ -30,6 +30,10 @@ run tree, so a metric's `source_file` is a path under it.
 Read the tables with `sqlite3 data/edr.db` when a command does not answer
 the question. Only the head node opens the file, and a read command
 without the file reads an empty database in memory and creates nothing.
+`edr metrics`, `edr compare`, `edr runtime`, `edr events` and
+`edr coverage` open the database read-only. They write nothing next to it, not even the `-wal`
+and `-shm` files of SQLite, so they also read a copy in a directory you
+cannot write to.
 [how-it-works.md](../how-it-works.md#where-the-results-end-up) says how
 the database works on a network filesystem.
 
@@ -147,8 +151,8 @@ shows FAIL next to it; see
 The watcher extracts metrics as the files arrive, using the definitions
 in `edr.toml` at that moment. If you add or change a metric later, runs
 that have already finished keep the rows from the old definitions.
-`edr extract` runs the watcher's extraction again over the files that
-were collected for those runs:
+`edr extract` rebuilds the rows of those runs from their collected files
+and the current definitions:
 
 ```sh
 edr extract base@g8 --dry-run   # counts only, writes nothing
@@ -156,12 +160,35 @@ edr extract --batch g8
 edr extract --source 3f9a2c1
 ```
 
-For each run it prints how many rows are new, changed, unchanged and
-failed. A row counts as changed when its value, canonical name or unit
-differs, or when it is missing its area rows, and `extract` replaces it.
-A failed row is a file that did not parse. Rows that the new extraction
-no longer finds are left in place. Every run gets an `extract` event with
-the counts.
+For each run it prints how many rows are new, changed, unchanged, failed
+and removed, and a line for each metric that failed, with the count and
+the first error:
+
+```
+$ edr extract base@g8
+20260902_0221_base_demo_g3f9a2c1: 0 new, 2 changed, 30 unchanged, 1 failed, 4 removed
+  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: power.csv has no WHOLE row
+```
+
+A row counts as changed when its value, canonical name, unit or source
+file differs, or when its area rows differ, and `extract` replaces it.
+A row written by an earlier parser therefore gets the source file of the
+current one.
+
+A row that the extraction no longer gives is removed with its area rows
+when it is a failed row, when no metric defines it any more, or when the
+extraction read its stage and task. That covers the rows of a metric you
+deleted from `edr.toml`, the instances below a smaller `area_hier` depth,
+and a step that another stage owns now. Two kinds of values stay. A value
+whose source file is gone from `data/results/` cannot be read again, so
+`extract` keeps it and counts it as kept without a file. A value of a
+stage or a task that the extraction did not read stays as it is: a stage
+outside the stages of the run's spec, or a task that `tasks.toml` no
+longer resolves.
+
+Each run gets an `extract` event with the same text, and its rows are
+written in one transaction. `--dry-run` prints the counts and writes
+nothing; run it first.
 
 ## Reports with several blocks
 
@@ -354,8 +381,57 @@ def energy_nj(path):
     return float(row["total_w"]) * window_ns
 ```
 
-An exception in the hook gives a row with an empty value and the error
-in `source_file`. `examples/local-demo/hooks/energy.py` is this hook.
+An exception in the hook gives a failed row, and a hook that returns
+None gives no row; see [Numbers that did not parse](#numbers-that-did-not-parse).
+`examples/local-demo/hooks/energy.py` is this hook.
+
+The values of a csv `where` take the placeholders of `file`, so each
+task of a task group can read its own row of one shared file, such as
+the cycle counts of a bench suite:
+
+```toml
+[metrics.cycles]
+stage = "power"
+file = "bench/suite.csv"
+csv = { where = { name = "{task.test}" }, column = "cycles" }
+unit = "cycles"
+```
+
+## Numbers that did not parse
+
+A file that is there but does not parse gives a failed row: its value
+is empty, and `source_file` holds the file and the error. The
+watcher, `edr import` and `edr extract` all store failed rows, and the
+views print `failed:` and the error in place of the value:
+
+```
+$ edr metrics --source 3f9a2c1 --stage power --metric power_w
+label  source   stage  step  task     metric                                                                                                   value  unit
+base   3f9a2c1  power     -  k_big    power_w  failed: simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE'}  W
+base   3f9a2c1  power     -  k_small  power_w                                                                                                   0.25  W
+```
+
+A missing file gives no row. When the watcher reads the file again and
+it parses, the value fills the failed row; `edr extract` rewrites it at
+once.
+
+Some numbers exist in some runs only, such as the power of a block that
+one build does not have. Mark such a metric `optional`. A file without a
+match of its `regex`, without a row that matches its csv `where`, or
+without its `json` key then gives no row instead of a failed one:
+
+```toml
+[metrics.blk_b_w]
+stage = "power"
+file = "{task_dir}/power/reports/power.csv"
+csv = { where = { phase = "WHOLE", instance = "u_blk_b" }, column = "total_w" }
+optional = true
+unit = "W"
+```
+
+A `python` hook decides for itself. It returns None when the number does
+not apply to the file, such as a trace number of a task without a trace,
+and it raises an exception when the file is wrong.
 
 ## Hierarchical area
 

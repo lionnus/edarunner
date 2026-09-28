@@ -133,10 +133,10 @@ def test_extract_fills_the_area_rows_of_an_old_run(demo: Path, capsys) -> None:
         db.conn.execute("DELETE FROM area")
         db.conn.commit()
     code, out, _ = edr(capsys, "extract", "a@demo")
-    assert code == 0 and out == f"{a}: 0 new, 1 changed, 0 unchanged, 0 failed\n"
+    assert code == 0 and out == f"{a}: 0 new, 1 changed, 0 unchanged, 0 failed, 0 removed\n"
     with Database(demo / "data" / "edr.db") as db:
         assert {r["depth"] for r in db.area()} == {0, 1, 2}
-    assert edr(capsys, "extract", "a@demo")[1] == f"{a}: 0 new, 0 changed, 1 unchanged, 0 failed\n"
+    assert edr(capsys, "extract", "a@demo")[1] == f"{a}: 0 new, 0 changed, 1 unchanged, 0 failed, 0 removed\n"
 
 
 def test_area_hier_takes_a_depth_from_one(demo: Path) -> None:

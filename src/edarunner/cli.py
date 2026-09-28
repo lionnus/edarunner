@@ -67,6 +67,8 @@ _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
                             "notify", "plan", "coverage"})
+# These commands open the database read-only, so they write nothing, not even the -wal and -shm files of SQLite.
+_READ_ONLY = frozenset({"events", "metrics", "compare", "runtime", "coverage"})
 
 
 class Ctx:
@@ -114,8 +116,9 @@ class Ctx:
         if self._db is None:
             path = self.project.data / "edr.db"
             # A read command or a dry run creates nothing, not even an empty database.
-            memory = not path.exists() and (self.a.dry_run or self.a.command in _READ_COMMANDS)
-            self._db = Database(":memory:") if memory else Database(path)
+            command = getattr(self.a, "command", None)
+            memory = not path.exists() and (self.a.dry_run or command in _READ_COMMANDS)
+            self._db = Database(":memory:") if memory else Database(path, readonly=command in _READ_ONLY)
         return self._db
 
     @functools.cached_property
@@ -331,7 +334,7 @@ def _tools_table(rows: list[Row]) -> Table | str:
 
 def _metrics_table(rows: list[Row]) -> Table | str:
     body = [[m.get("label"), m.get("source"), m["stage"], m.get("step"), m.get("task") or "", m["name"],
-             analysis.mark(m["value"], m.get("verdict")), m.get("unit")] for m in rows]
+             analysis.mark(m["value"], m.get("verdict"), m.get("source_file")), m.get("unit")] for m in rows]
     return board.table(["label", "source", "stage", "step", "task", "metric", "value", "unit"], body,
                        styles={"label": "bold", "source": "dim"}, right=("step", "value")) if rows else "no metrics"
 
@@ -460,7 +463,8 @@ class Actions:
         """`label source step value` per metric row."""
         rows = self.c.db.metrics(sources=[source] if source else None, name=name)
         body = [[str(m.get("label")) + (f"[{m['task']}]" if m.get("task") else ""), m.get("source"), m.get("step"),
-                 f"{m['value']}{' ' + m['unit'] if m.get('unit') else ''}"] for m in rows]
+                 f"{analysis.mark(m['value'], None, m.get('source_file'))}"
+                 f"{' ' + m['unit'] if m.get('unit') and m['value'] is not None else ''}"] for m in rows]
         return board.cols(["label", "source", "step", "value"], body) if body else "no metrics"
 
 
@@ -657,7 +661,7 @@ def cmd_metrics(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
-    """Extract every configured metric again from the collected files of runs, as the watcher does."""
+    """Extract every configured metric again from the collected files of runs, and make the rows of each run match."""
     if sum(map(bool, (a.handle, a.batch, a.source))) != 1:
         raise Refuse("extract needs one of a handle, --batch or --source")
     if a.handle:
@@ -671,22 +675,40 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
         for x in c.db.area(run_ids=[run["run_id"]]):
             areas.setdefault((x["stage"], x["step"], x["name"]), set()).add(
                 (x["instance"], x["depth"], x["area"], x["local_area"], x["cells"]))
-        n = {"run_id": run["run_id"], "new": 0, "changed": 0, "unchanged": 0, "failed": 0}
+        n = dict.fromkeys(("new", "changed", "unchanged", "failed", "removed", "kept"), 0)
         rows = watch.extract_run(c.project, c.db, run, c.heartbeat(run), actor=None if a.dry_run else "user")
+        write = []
         for r in rows:
-            m = old.get((r["stage"], r["step"], r["task"], r["name"]))
+            m = old.pop((r["stage"], r["step"], r["task"], r["name"]), None)
             area = {(i["instance"], i["depth"], i["area"], i["local_area"], i["cells"]) for i in r.get("instances") or []}
-            same = (m is not None and (m["value"], m["canonical"], m["unit"]) == (r["value"], r["canonical"], r["unit"])
-                    and area <= areas.get((r["stage"], r["step"], r["name"]), set()))
-            kind = "failed" if r["value"] is None else "new" if m is None else "unchanged" if same else "changed"
-            n[kind] += 1
-            if not a.dry_run and kind in ("new", "changed"):
-                c.db.add_metric(r, replace=True)
-        text = f"{n['new']} new, {n['changed']} changed, {n['unchanged']} unchanged, {n['failed']} failed"
+            same = (m is not None and all(m[k] == r[k] for k in ("value", "canonical", "unit", "source_file"))
+                    and area == areas.get((r["stage"], r["step"], r["name"]), set()))
+            n["failed" if r["value"] is None else "new" if m is None else "unchanged" if same else "changed"] += 1
+            if not same:
+                write.append(r)
+        # A row the extraction no longer gives goes when it failed, when no metric defines it, or when the extraction
+        # read its stage and task. A value stays when its file is gone, and when the extraction did not read it: a
+        # stage outside the run's spec, or a task that tasks.toml no longer resolves.
+        results, read, drop = c.project.data / "results" / run["run_id"], {(r["stage"], r["task"]) for r in rows}, []
+        for m in old.values():
+            if m["value"] is not None and not (results / metrics.source_path(m["source_file"])).is_file():
+                n["kept"] += 1
+            elif m["value"] is None or (m["stage"], m["task"]) in read or not metrics.defines(c.project, m):
+                drop.append(m)
+        n["removed"] = len(drop)
+        failed = metrics.failures(rows)
+        text = (f"{n['new']} new, {n['changed']} changed, {n['unchanged']} unchanged, {n['failed']} failed, "
+                f"{n['removed']} removed" + (f", {n['kept']} kept without a file" if n["kept"] else ""))
         if not a.dry_run:
-            c.db.add_event("user", run["run_id"], "extract", text)
-        out.append(n)
+            with c.db.conn:  # one commit for the run
+                for r in write:
+                    c.db.add_metric(r, replace=True)
+                c.db.remove_metrics(drop)
+                c.db.add_event("user", run["run_id"], "extract", text + (f"; {metrics.failure_text(failed)}" if failed else ""))
+        out.append({"run_id": run["run_id"], **n, "failures": failed})
         lines.append(f"{run['run_id']}: {text}" + (" (dry)" if a.dry_run else ""))
+        if failed:
+            lines.append("  " + metrics.failure_text(failed, "\n  "))
     c.emit("\n".join(lines) or "no runs", out)
     return Exit.DONE if runs else Exit.NOTHING
 
@@ -1005,7 +1027,10 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
         c.db.upsert_run(row)
         c.db.set_parameters(a.run_id, {k: row[k] for k in ("config", "build_tag", "source") if row[k]}, "import")
         if results:
-            text += f", {_import_results(c, row, results, tasks)} metrics"
+            rows = _import_results(c, row, results, tasks)
+            failed = metrics.failures(rows)
+            text += f", {sum(r['value'] is not None for r in rows)} metrics" + (
+                f"; {metrics.failure_text(failed)}" if failed else "")
         c.db.add_event("user", a.run_id, "import", text)
     c.emit(f"imported {text}" + (" (dry)" if a.dry_run else ""), row)
     return Exit.DONE
@@ -1022,14 +1047,15 @@ def _results_dir(c: Ctx, run_id: str, text: str) -> Path:
     return src
 
 
-def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> int:
-    """Link `src` under data/results and extract every metric of the project from it."""
+def _import_results(c: Ctx, row: Row, src: Path, tasks: dict) -> list[Row]:
+    """Link `src` under data/results, extract every metric of the project from it, and return the rows that went in."""
     dest = c.project.data / "results" / row["run_id"]
     if not (dest.is_symlink() or dest.exists()):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.symlink_to(src)
     rows = metrics.extract(c.project, row, c.project.data / "results", tasks)
-    return sum(c.db.add_metric(r) for r in rows if r["value"] is not None)
+    with c.db.conn:  # one commit for the rows of the run
+        return [r for r in rows if c.db.add_metric(r)]
 
 
 def cmd_export(c: Ctx, a: argparse.Namespace) -> int:
@@ -1732,7 +1758,8 @@ def _parser() -> argparse.ArgumentParser:
         instead. --csv writes the columns of metrics.csv
         (docs/guides/results.md) to stdout. A value that breaks the pass
         rule of its metric shows FAIL next to it, and --json gives each row
-        a verdict: pass, FAIL or null.
+        a verdict: pass, FAIL or null. A row whose file did not parse shows
+        failed: and the error in place of the value.
 
         --run with --over steps prints the metrics along the steps of that run:
         one row per step with its name, one column per metric, and a verdict
@@ -1757,20 +1784,32 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--depth", type=int, metavar="N", help="the area rows at this depth; the top is 0")
     s = command("extract", "extract the metrics of runs again from their collected files", """
         Extracts every metric in edr.toml again from the files collected for
-        each run under data/results. It uses the same function as the watcher,
-        so it reads the tasks that ended done, the stages that exited 0, and
-        in any other stage the steps that the run has passed: step_runs holds
-        the step and a later one. A run without a heartbeat, such as an
-        imported one, is read for every stage. New rows are added. A row is
-        replaced when its value, canonical name or unit has changed, or when
-        its area_hier metric has no area rows yet. Rows that the new
-        extraction does not find are kept.
+        each run under data/results, and makes the rows of the run match the
+        definitions. It uses the same function as the watcher, so it reads
+        the tasks that ended done, the stages that exited 0, and in any other
+        stage the steps that the run has passed: step_runs holds the step and
+        a later one. A run without a heartbeat, such as an imported one, is
+        read for every stage and for the tasks its rows name.
+
+        New rows are added. A row is replaced when its value, canonical name,
+        unit or source file has changed, or when its area rows differ. A row
+        that the extraction no longer gives is removed with its area rows when
+        it is a failed row, when no metric defines it at its stage and step,
+        or when the extraction read its stage and task. A value whose file is gone is
+        kept and counted. A value of a stage or task that the extraction did
+        not read, such as a stage outside the run's spec or a task that
+        tasks.toml no longer resolves, stays as it is. A file that does not
+        parse gives a failed row: an empty value, and the error in place of
+        the source file.
 
         Pass exactly one of a handle, --batch or --source. For each run,
-        extract prints how many rows are new, changed, unchanged and failed,
-        where a failed row is a file that did not parse, and it writes an
-        extract event with the same counts. With --json, data holds run_id,
-        new, changed, unchanged and failed for each run.
+        extract prints how many rows are new, changed, unchanged, failed and
+        removed, and how many it kept without a file, then a line per failing
+        metric with its count and its first error. It writes the rows
+        of a run in one transaction, with an extract event of the same text.
+        --dry-run prints the counts and writes nothing. With --json, data
+        holds for each run run_id, the counts, and failures: the count and
+        the first error of each failing metric.
         """, write=True, exits={Exit.NOTHING: "no run matches"})
     s.add_argument("handle", nargs="?", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="every run of the batch")

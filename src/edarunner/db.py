@@ -102,21 +102,35 @@ class Database:
 
     The journal is WAL on a local filesystem. On a network filesystem it is DELETE with
     `synchronous=FULL`, because WAL needs shared memory that such a filesystem does not give.
+    A writer waits up to 30 s for the lock of another.
     """
 
-    def __init__(self, path: str | os.PathLike, threads: bool = False) -> None:
-        """`threads=True` lets another thread use the connection; the caller serialises the calls."""
+    def __init__(self, path: str | os.PathLike, threads: bool = False, readonly: bool = False) -> None:
+        """`threads=True` lets another thread use the connection; the caller serialises the calls. `readonly` opens an
+        existing database for reading only, without the journal mode and the schema script, and creates no file."""
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path, check_same_thread=not threads)
+        self.network_fs, self.journal_mode = None, ""
+        if readonly:
+            self.conn = sqlite3.connect(self._read_uri(), uri=True, timeout=30, check_same_thread=not threads)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(self.path, timeout=30, check_same_thread=not threads)
+            self.network_fs = None if str(path) == ":memory:" else network_fs(self.path.parent)
+            mode = "DELETE" if self.network_fs else "WAL"
+            self.journal_mode = self.conn.execute(f"PRAGMA journal_mode={mode}").fetchone()[0]
+            if self.network_fs:
+                self.conn.execute("PRAGMA synchronous=FULL")
+            self.init_schema()
         self.conn.row_factory = sqlite3.Row
-        self.network_fs = None if str(path) == ":memory:" else network_fs(self.path.parent)
-        mode = "DELETE" if self.network_fs else "WAL"
-        self.journal_mode: str = self.conn.execute(f"PRAGMA journal_mode={mode}").fetchone()[0]
-        if self.network_fs:
-            self.conn.execute("PRAGMA synchronous=FULL")
-        self.init_schema()
         self._columns = {t: self._table_columns(t) for t in ("batches", "runs", "stage_runs", "artifacts")}
+
+    def _read_uri(self) -> str:
+        with self.path.open("rb") as fh:
+            wal = fh.read(20)[18:19] == b"\x02"  # the header's write version: 2 is WAL
+        # mode=ro makes the -wal and -shm files of a WAL database. Without a -wal file no connection has the
+        # database open, so the file is whole, and immutable=1 reads it without making any file.
+        flag = "immutable=1" if wal and not Path(f"{self.path}-wal").exists() else "mode=ro"
+        return f"{self.path.absolute().as_uri()}?{flag}"
 
     def __enter__(self) -> Database:
         return self
@@ -179,19 +193,25 @@ class Database:
         self.conn.commit()
 
     def add_metric(self, row: Row, replace: bool = False) -> bool:
-        """Insert one metric, and its `instances` into the area table. Returns False when the metric was present.
+        """Insert one metric, and its `instances` into the area table; the caller commits. Returns True when the row
+        went in or took the new value.
 
-        The instance rows go in even when the metric was present, so a new area metric fills an old run.
-        `replace` overwrites a present metric and its instance rows with the new values.
+        A present row keeps its value, but a failed row, whose value is empty, takes a new value. The instance rows go
+        in even when the metric was present, so a new area metric fills an old run. `replace` overwrites a present
+        metric and replaces its instance rows.
         """
         r = {"task": "", "step": None, "canonical": "", "unit": "", "source_file": "", "extracted_at": _now(), **row}
         key = (r["run_id"], r["stage"], r["step"], r["task"], r["name"])
         # An `IS` match sees a NULL step; the primary key does not.
-        if replace:
-            self.conn.execute(
+        filled = 0
+        if replace or r["value"] is not None:
+            filled = self.conn.execute(
                 "UPDATE metrics SET canonical=?, value=?, unit=?, source_file=?, extracted_at=? "
-                "WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?",
-                (r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key))
+                "WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?" + ("" if replace else " AND value IS NULL"),
+                (r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key)).rowcount
+        if replace:
+            self.conn.execute("DELETE FROM area WHERE run_id=? AND stage=? AND step IS ? AND name=?",
+                              (r["run_id"], r["stage"], r["step"], r["name"]))
         cur = self.conn.execute(
             "INSERT INTO metrics(run_id, stage, step, task, name, canonical, value, unit, source_file, extracted_at) "
             "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS "
@@ -199,12 +219,18 @@ class Database:
             (*key, r["canonical"], r["value"], r["unit"], r["source_file"], r["extracted_at"], *key),
         )
         self.conn.executemany(
-            f"INSERT OR {'REPLACE' if replace else 'IGNORE'} INTO area(run_id, stage, step, name, instance, depth, area, "
-            "local_area, cells) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO area(run_id, stage, step, name, instance, depth, area, local_area, cells) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(r["run_id"], r["stage"], r["step"], r["name"], i["instance"], i["depth"], i["area"], i["local_area"],
               i["cells"]) for i in r.get("instances") or []])
-        self.conn.commit()
-        return cur.rowcount == 1
+        return cur.rowcount == 1 or filled == 1
+
+    def remove_metrics(self, rows: list[Row]) -> None:
+        """Delete metric rows and the area rows of their metric; the caller commits."""
+        keys = [(r["run_id"], r["stage"], r["step"], r["task"], r["name"]) for r in rows]
+        self.conn.executemany("DELETE FROM metrics WHERE run_id=? AND stage=? AND step IS ? AND task=? AND name=?", keys)
+        self.conn.executemany("DELETE FROM area WHERE run_id=? AND stage=? AND step IS ? AND name=?",
+                              [(k[0], k[1], k[2], k[4]) for k in keys])
 
     def set_step_times(self, run_id: str, times: dict[str, dict[str, int]]) -> None:
         """Write the start time of each step, {stage: {step: unix time}}; a resumed step replaces its time."""

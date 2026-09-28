@@ -223,7 +223,9 @@ budget without a kill). Any other stage gives the rows of the numbered steps tha
 passed: `step_runs` holds the step and a later step of the run. There, a report of a step that
 the run never recorded, as in a copied tree, gives no row. A `step = "*"` metric gives one row
 per step directory found, under the stage that owns that step number. A file that does not
-parse gives a row with an empty value and the error in `source_file`; the extraction goes on.
+parse gives a failed row: an empty value and the error in `source_file`; the extraction goes
+on. A missing file gives no row, and so does a `python` hook that returns None, for a file where
+the number does not apply.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -232,14 +234,15 @@ parse gives a row with an empty value and the error in `source_file`; the extrac
 | `file` | the file under the collected results; `{step}` and `{task_dir}` allowed | required |
 | `regex` | a regex; group 1 of each match is a value | one of the five |
 | `reduce` | how the values of `regex` become one: `first`, `last`, `min`, `max` or `sum`; a sum names the line of its first value | `"first"` |
-| `csv` | `{ where = { column = value }, column }`; the first row that matches `where` | one of the five |
+| `csv` | `{ where = { column = value }, column }`; the first row that matches `where`, whose values take the placeholders of `file` | one of the five |
 | `json` | a dotted path into a JSON file; a number indexes a list | one of the five |
-| `python` | a hook that gets the file path and returns a number | one of the five |
+| `python` | a hook that gets the file path and returns a number, or None where the number does not apply | one of the five |
 | `area_hier` | the deepest instance depth to keep from a hierarchical area report, of Synopsys `report_area -hierarchy` or of OpenROAD `report_design_area` by hierarchy: the value is the top area, and each instance down to this depth becomes a row of the `area` table | one of the five |
 | `unit` | the unit, as text | `""` |
 | `canonical` | the METRICS2.1 name of the number, as OpenROAD writes it without the stage prefix: `design__instance__area`, `design__instance__count`, `design__instance__utilization`, `timing__setup__ws`, `timing__setup__tns`, `power__total`, `runtime__total`; empty when the schema has no name | `""` |
 | `pass` | a rule the value must meet: `==`, `!=`, `<`, `<=`, `>` or `>=` and a number, such as `"== 0"`; `edr metrics`, `edr compare` and `--over steps` print FAIL next to a value that breaks it | unset |
 | `record` | `{ stage, from }`: the step of record of a run is its deepest step of `stage` with a value, at or after step `from`. `edr compare`, compare.html, the MLflow export and the `record` column of metrics.csv take that step, and a run without one is named missing. The stage needs `steps`, and the metric needs `step` | unset |
+| `optional` | a file without the number gives no row instead of a failed one: no match of `regex`, no row of `csv` that matches `where`, no key of `json` | `false` |
 
 ## site.toml
 

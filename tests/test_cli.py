@@ -10,6 +10,7 @@ import re
 import shlex
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -590,17 +591,18 @@ def test_extract_replaces_changed_rows(demo: Path, capsys) -> None:
     (reports / "qor.rpt").write_text(demo_qor(3))
     assert edr(capsys, "extract")[0] == 1 and edr(capsys, "extract", "a@demo", "--batch", "demo")[0] == 1
     code, out, _ = edr(capsys, "extract", "a@demo", "--dry-run")
-    assert code == 0 and out == f"{a}: 2 new, 1 changed, 0 unchanged, 0 failed (dry)\n"
+    assert code == 0 and out == f"{a}: 2 new, 1 changed, 0 unchanged, 0 failed, 0 removed (dry)\n"
     with Database(demo / "data" / "edr.db") as db:
         assert [m["unit"] for m in db.metrics(run_ids=[a])] == ["u"] and db.events() == []
     code, out, _ = edr(capsys, "--json", "extract", "--source", "abc1234")
-    assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 2, "changed": 1, "unchanged": 0, "failed": 0}]
+    assert code == 0 and json.loads(out)["data"] == [{"run_id": a, "new": 2, "changed": 1, "unchanged": 0, "failed": 0,
+                                                      "removed": 0, "kept": 0, "failures": {}}]
     with Database(demo / "data" / "edr.db") as db:
         assert {(m["name"], m["value"], m["unit"]) for m in db.metrics(run_ids=[a])} == {
             ("area_cell_um2", 1000.0, "um2"), ("wns_ns", -0.03, "ns"), ("setup_violations", 3.0, "paths")}
-        assert [(e["kind"], e["text"]) for e in db.events()] == [("extract", "2 new, 1 changed, 0 unchanged, 0 failed")]
+        assert [(e["kind"], e["text"]) for e in db.events()] == [("extract", "2 new, 1 changed, 0 unchanged, 0 failed, 0 removed")]
     code, out, _ = edr(capsys, "extract", "--batch", "demo")
-    assert code == 0 and out == f"{a}: 0 new, 0 changed, 3 unchanged, 0 failed\n"
+    assert code == 0 and out == f"{a}: 0 new, 0 changed, 3 unchanged, 0 failed, 0 removed\n"
     assert edr(capsys, "extract", "--source", "0000000")[0] == 2
 
 
@@ -619,10 +621,104 @@ def test_extract_takes_every_step_of_a_stage_over_budget_with_exit_0(demo: Path,
         (reports / "area.rpt").write_text(f"i_top {1000 + n}\n")
         (reports / "qor.rpt").write_text(demo_qor(n))
     code, out, _ = edr(capsys, "extract", "a@demo")
-    assert code == 0 and out == f"{a}: 18 new, 0 changed, 0 unchanged, 0 failed\n"
+    assert code == 0 and out == f"{a}: 18 new, 0 changed, 0 unchanged, 0 failed, 0 removed\n"
     with Database(demo / "data" / "edr.db") as db:
         steps = {(m["stage"], m["step"]) for m in db.metrics(run_ids=[a])}
     assert steps == {("synth", n) for n in range(4)} | {("pnr", 4), ("pnr", 5)}
+
+
+def test_extract_rebuilds_the_rows_of_a_run_from_its_files(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    beat(demo, a, tasks={"k_small": {"phase": "done"}, "k_big": {"phase": "done"}})
+    results = demo / "data" / "results" / a
+    for n in (2, 3, 4):
+        (results / "reports" / str(n)).mkdir(parents=True)
+        (results / "reports" / str(n) / "area.rpt").write_text(f"i_top {1000 + n}\n")
+        (results / "reports" / str(n) / "qor.rpt").write_text(demo_qor(n))
+    for test, whole in (("GEMM_M64_N64", "WHOLE,0.250\n"), ("SOFTMAX_R197", "")):
+        power = results / "simulation" / "tests" / "demo" / test / "power"
+        (power / "reports").mkdir(parents=True)
+        (power / "reports" / "power.csv").write_text("phase,total_w\n" + whole)
+        (power / "phases.json").write_text('{"window_ns": 3400}')
+    with Database(demo / "data" / "edr.db") as db:
+        for stage, step, task, name, value, unit, canonical, source in (
+                ("power", None, "k_small", "energy_nj", 850.0, "nJ", "energy", "power_w * window_ns"),  # an old parser
+                ("pnr", 3, "", "area_cell_um2", 1003.0, "um2", "design__instance__area", "reports/3/area.rpt:1"),
+                ("synth", 1, "", "area_cell_um2", 1001.0, "um2", "design__instance__area", "reports/1/area.rpt:1"),
+                ("pnr", 4, "", "area_cell_um2", 1004.0, "um2", "design__instance__area", "reports/4/area.rpt:1"),
+                ("pnr", 5, "", "wns_ns", None, "ns", "timing__setup__ws", "reports/5/qor.rpt: no match"),
+                ("power", None, "k_gone", "window_ns", 3400.0, "ns", "", "simulation/tests/demo/GEMM_M64_N64/power/phases.json")):
+            db.add_metric({"run_id": a, "stage": stage, "step": step, "task": task, "name": name, "value": value,
+                           "unit": unit, "canonical": canonical, "source_file": source})
+    failures = ("  power_w: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches "
+                "{'phase': 'WHOLE'}\n  energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: "
+                "power.csv has no WHOLE row\n")
+    # pnr owns steps 4 and 5, so its row at step 3 goes; the file of step 1 is gone, so its row stays. The run has
+    # passed no pnr step and k_gone is no task, so the extraction reads neither: their values stay, a failure goes.
+    code, out, _ = edr(capsys, "extract", "a@demo", "--dry-run")
+    assert code == 0 and out == f"{a}: 9 new, 1 changed, 0 unchanged, 2 failed, 2 removed, 1 kept without a file (dry)\n" + failures
+    code, out, _ = edr(capsys, "--json", "extract", "a@demo")
+    assert json.loads(out)["data"][0]["failures"]["power_w"] == {
+        "count": 1, "first": "simulation/tests/demo/SOFTMAX_R197/power/reports/power.csv: no row matches {'phase': 'WHOLE'}"}
+    with Database(demo / "data" / "edr.db") as db:
+        rows = {(m["stage"], m["step"], m["task"], m["name"]): (m["value"], m["source_file"]) for m in db.metrics()}
+        assert db.events()[-1]["text"] == ("9 new, 1 changed, 0 unchanged, 2 failed, 2 removed, 1 kept without a file; "
+                                           + failures.strip().replace("\n  ", "; "))
+    assert rows[("power", None, "k_small", "energy_nj")] == (850.0, "simulation/tests/demo/GEMM_M64_N64/power/phases.json")
+    assert rows[("power", None, "k_big", "power_w")][0] is None and ("pnr", 3, "", "area_cell_um2") not in rows
+    assert rows[("synth", 1, "", "area_cell_um2")] == (1001.0, "reports/1/area.rpt:1") and len(rows) == 15
+    assert rows[("pnr", 4, "", "area_cell_um2")][0] == 1004.0 and rows[("power", None, "k_gone", "window_ns")][0] == 3400.0
+    out = edr(capsys, "metrics", "--source", "abc1234")[1]
+    assert "failed: simulation/tests/demo/SOFTMAX_R197/power/phases.json: power.csv has no WHOLE row" in out
+    toml = demo / "edr.toml"
+    text = toml.read_text()
+    toml.write_text(text[:text.index("# A slack can print")] + text[text.index("[metrics.power_w]"):])
+    code, out, _ = edr(capsys, "extract", "a@demo")
+    assert out == f"{a}: 0 new, 0 changed, 8 unchanged, 2 failed, 2 removed, 1 kept without a file\n" + failures
+    with Database(demo / "data" / "edr.db") as db:
+        assert not db.metrics(name="setup_violations") and len(db.metrics()) == 13
+
+
+def test_extract_writes_the_rows_of_a_run_in_one_commit(demo: Path, capsys, monkeypatch) -> None:
+    a = seed(demo, "a", "done")
+    (demo / "data" / "results" / a).mkdir(parents=True)
+    (demo / "data" / "results" / a / "n.txt").write_text("n 7\n")
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text() + "".join(f"\n[metrics.n{i}]\nstage = \"synth\"\nfile = \"n.txt\"\nregex = 'n (\\d+)'\n"
+                                               for i in range(1000)))
+    commits, connect = [], sqlite3.connect
+
+    def traced(*args, **kwargs) -> sqlite3.Connection:
+        conn = connect(*args, **kwargs)
+        conn.set_trace_callback(lambda sql: commits.append(sql) if sql == "COMMIT" else None)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", traced)
+    code, out, _ = edr(capsys, "extract", "a@demo")
+    assert code == 0 and out == f"{a}: 1000 new, 0 changed, 0 unchanged, 0 failed, 0 removed\n" and commits == ["COMMIT"]
+
+
+def test_a_read_command_opens_the_database_read_only_and_creates_no_file(demo: Path, capsys, tmp_path: Path) -> None:
+    a = seed(demo, "a", "done")
+    add_metric(demo, a, "area_cell_um2", 1000.0)
+    data, demand = demo / "data", tmp_path / "demand.csv"
+    demand.write_text("label,stage,task\na,synth,\n")
+    reads = (("metrics", "--source", "abc1234"), ("compare", a), ("runtime", a), ("events",), ("coverage", str(demand)))
+    for argv in reads:
+        assert edr(capsys, *argv)[0] in (0, 2)
+    assert sorted(p.name for p in data.iterdir()) == ["edr.db"]
+    data.chmod(0o555)
+    try:
+        for argv in reads:
+            assert edr(capsys, *argv)[0] in (0, 2)
+        code, out, _ = edr(capsys, "metrics", "--source", "abc1234")
+        assert code == 0 and "1000" in out and sorted(p.name for p in data.iterdir()) == ["edr.db"]
+    finally:
+        data.chmod(0o755)
+    with Database(data / "edr.db") as db:  # a writer with the database open keeps its rows in the -wal file
+        add_metric(demo, a, "wns_ns", -0.25)
+        assert (data / "edr.db-wal").is_file() and "-0.25" in edr(capsys, "metrics", "--source", "abc1234")[1]
+        assert db.metrics(name="wns_ns")
 
 
 def test_hosts_and_tools_probe_local(demo: Path, capsys, tmp_path: Path) -> None:
