@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import time
+from collections.abc import Iterable
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,15 @@ def pick(runs: list[Row]) -> Row | None:
     done, else the newest run; the run id breaks a tie. Every command that takes one run of a label uses it."""
     done = [r for r in runs if r.get("phase") == "done"]
     return max(done or runs, key=lambda r: (r.get("started") or 0, r["run_id"]), default=None)
+
+
+def has_label(run: Row, label: str, stages: Iterable[str]) -> bool:
+    """True when `label` names the run: as its label, as its config, or as the label L of a run that `edr continue`
+    made from a run of L, whose label is L.<stage>, such as `base.power` or `base.pnr-power.2`."""
+    own = str(run.get("label") or "")
+    rest = own[len(label) + 1:] if own.startswith(label + ".") else None
+    return own == label or run.get("config") == label or (
+        rest is not None and any(rest == s or rest.startswith((s + ".", s + "-")) for s in stages))
 
 
 class Database:
@@ -401,15 +411,13 @@ class Database:
             raise NotFound(f"{handle}: ambiguous, matches {', '.join(sorted(ids))}")
         return ids[0]
 
-    def events(self, since_s: int | None = None, run_id: str | None = None, n: int = 50) -> list[Row]:
-        """The last `n` events in time order. `since_s` is a unix timestamp."""
+    def events(self, since_s: int | None = None, run_id: str | None = None, n: int = 50, kind: str | None = None) -> list[Row]:
+        """The last `n` events in time order, every event for a negative `n`. `since_s` is a unix timestamp."""
         where, args = ["1"], []
-        if since_s is not None:
-            where.append("ts>=?")
-            args.append(since_s)
-        if run_id is not None:
-            where.append("run_id=?")
-            args.append(run_id)
+        for cond, val in (("ts>=?", since_s), ("run_id=?", run_id), ("kind=?", kind)):
+            if val is not None:
+                where.append(cond)
+                args.append(val)
         sql = f"SELECT * FROM (SELECT * FROM events WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?) ORDER BY id"
         return self._rows(sql, args + [n])
 
@@ -420,10 +428,11 @@ class Database:
         step: int | None = None,
         name: str | None = None,
         run_ids: list[str] | None = None,
+        task: str | None = None,
     ) -> list[Row]:
         """Metric rows joined with the run's label, config, build tag, source and host. `name` matches name or canonical."""
         where, args = ["1"], []
-        for cond, val in (("m.stage=?", stage), ("m.step=?", step)):
+        for cond, val in (("m.stage=?", stage), ("m.step=?", step), ("m.task=?", task)):
             if val is not None:
                 where.append(cond)
                 args.append(val)

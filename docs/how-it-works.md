@@ -496,8 +496,12 @@ database read-only and create no file next to it (`cli._READ_ONLY`).
 `edr metrics --source` and `edr export` match each source tag exactly,
 and read several tags only when each has its own `--source`, so two
 versions of the design end up in one table only on purpose
-(`cli.cmd_metrics`, `export._select`). `edr export` writes a snapshot, a
-frozen directory with a manifest, and an analysis reads that snapshot
-instead of the live database. `edr compare` names the sources when the
-runs it compares come from more than one.
+(`cli.cmd_metrics`, `export._select`). `edr metrics --label` and
+`--task` read every source on purpose, to find a number, and name the
+source on each row. `edr export` writes a snapshot, a frozen directory
+with a manifest, and an analysis reads that snapshot instead of the live
+database. The export event names the directory, so `edr metrics` lists
+the snapshots whose manifest holds each run (`analysis.snapshots`).
+`edr compare` names the sources when the runs it compares come from more
+than one.
 [guides/results.md](guides/results.md) shows the commands.

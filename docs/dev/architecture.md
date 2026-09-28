@@ -42,7 +42,7 @@ report files and the numbers in them.
 | `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the work of the user: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the six parsers with the hierarchical area report and the per-instance table, extraction, and the parameter tables |
-| `analysis.py` | the views over the database: area deltas, metrics per step, runtimes, host and run samples |
+| `analysis.py` | the views over the database: instances side by side, metrics per step, pivots, runtimes, host and run samples |
 | `mlflow_export.py` | `edr export --mlflow`: the project database as a local MLflow tracking store; imports `mlflow` only when called |
 | `db.py` | the project database: the SQLite schema, upserts, queries, `board.json` |
 | `export.py` | the snapshot |

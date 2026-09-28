@@ -7,7 +7,7 @@ import pytest
 
 from edarunner import board
 from edarunner import db as db_mod
-from edarunner.db import Database, pick
+from edarunner.db import Database, has_label, pick
 
 RUN_A = "20261002_1130_a_demo_gaaa111"
 RUN_B = "20261002_1130_b_nodw_demo_gaaa111"
@@ -127,6 +127,13 @@ def test_pick_takes_the_newest_done_run_by_start_time():
     assert pick([failed, {**later_id, "phase": "STOPPED"}]) is failed  # nothing ended done: the newest run
     assert pick([]) is None
 
+
+
+def test_a_label_names_its_runs_its_config_and_the_runs_that_continue_it():
+    stages = ["synth", "pnr", "power"]
+    assert has_label({"label": "base"}, "base", stages) and has_label({"label": "b8", "config": "base"}, "base", stages)
+    assert all(has_label({"label": f"base.{s}"}, "base", stages) for s in ("pnr", "pnr-power", "power.2", "pnr.power"))
+    assert not any(has_label({"label": x}, "base", stages) for x in ("base_l8", "base.v2", "base.", "basepnr", "b.pnr"))
 
 def test_label_at_batch_names_one_run_and_label_at_source_the_pick(tmp_path):
     with Database(tmp_path / "edr.db") as db:
