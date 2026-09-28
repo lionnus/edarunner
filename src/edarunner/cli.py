@@ -252,13 +252,13 @@ class Ctx:
         """The heartbeat of a run, or {} when the driver wrote none."""
         return config.load_json(self.project.state_dir / str(row["batch"]) / f"{row['run_id']}.json")
 
-    def left(self, row: Row, state: str) -> list[str]:
-        """The stages that `edr continue` runs on the tree of a run that ended over its budget, for the triage; none
-        for another run, or when continue refuses."""
-        if state != "over_budget" or board.is_live(row):
+    def left(self, row: Row, state: str) -> list[str] | None:
+        """The stages that `edr continue` runs on the tree of a run that ended over its budget or stopped, for the
+        triage; an empty list for another run, and None when continue refuses."""
+        if state not in ("over_budget", "stopped") or board.is_live(row):
             return []
         left, _, why = launch.stages_left(self.project, self.db, row)
-        return [] if why else left
+        return None if why else left
 
     def save_board(self, rows: list[Row]) -> None:
         """Keep the board order in the database, so #n resolves next time."""

@@ -47,10 +47,13 @@ class State:
     for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
     the stop of `superseded` for N hours; the full-host stop never waits for a keep.
     The triage proposes no retire for a run without a tree, such as one imported with `--results`,
-    since a retire would only mark its row. For a run that ended `OVER_BUDGET` it proposes
-    `edr continue` while the tree has stages or held tasks that `edr continue` runs without
-    `--stage`, and nothing when it has none. When another run has the same label and batch, the
-    command names the run by the shortest unique prefix of its run id instead of `<label>@<batch>`.
+    since a retire would only mark its row. For a run that ended `OVER_BUDGET` or `STOPPED` it
+    proposes `edr continue` while the tree has stages or held tasks that `edr continue` runs without
+    `--stage`. When the tree has none, it proposes nothing for `OVER_BUDGET` and a retire for
+    `STOPPED`. While `edr continue` refuses, such as for a stage that did not end with exit 0, it
+    proposes neither, since a retire would take the tree that such a stage needs. When another run
+    has the same label and batch, the command names the run by the shortest unique prefix of its run
+    id instead of `<label>@<batch>`.
     """
 
     test: str

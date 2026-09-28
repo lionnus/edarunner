@@ -180,6 +180,31 @@ def test_the_triage_stops_a_live_run_over_its_budget_and_continues_one_that_ende
     assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo") and "<code>edr " not in acts.status_text("z@demo")
 
 
+def test_the_triage_continues_a_stopped_run_with_work_left_and_retires_one_without(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "STOPPED")
+    ran(demo, a, "STOPPED", {"synth": ("done", 0), "pnr": ("done", 0)})  # export and power are left
+    h = seed(demo, "h", "STOPPED")
+    ran(demo, h, "STOPPED", {n: ("done", 0) for n in DEMO_STAGES})
+    beat(demo, h, tasks={"power": {"k_small": {"phase": "done", "started": 110, "ended": 120, "exit": 0},
+                                   "k_big": {"phase": "held"}}})
+    k = seed(demo, "k", "STOPPED")
+    ran(demo, k, "STOPPED", {"synth": ("done", 0), "pnr": ("stopped", None)})  # a stop --now in pnr: continue refuses
+    z = seed(demo, "z", "STOPPED")
+    ran(demo, z, "STOPPED", {n: ("done", 0) for n in DEMO_STAGES})
+    code, out, _ = edr(capsys, "status", "--triage")
+    assert code == 0 and "    edr continue a@demo\n" in out and "    edr continue h@demo\n" in out
+    assert "    edr retire z@demo --why STOPPED\n" in out and "k@demo" not in out
+    decisions = json.loads(edr(capsys, "--json", "brief")[1])["data"]["decisions"]
+    assert [(d["handle"], d["command"]) for d in decisions] == [
+        ("a@demo", "edr continue a@demo"), ("h@demo", "edr continue h@demo"), ("z@demo", "edr retire z@demo --why STOPPED")]
+    assert "The triage proposes `edr continue h@demo`." in edr(capsys, "brief", "--run", "h@demo")[1]
+    assert "The triage proposes nothing for it." in edr(capsys, "brief", "--run", "k@demo")[1]
+    acts = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False)))
+    assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo")
+    assert "<code>edr retire z@demo --why STOPPED</code>" in acts.status_text("z@demo")
+    assert "<code>edr " not in acts.status_text("k@demo")
+
+
 def test_events_filters(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "events")
     assert code == 2 and out == "no events\n"

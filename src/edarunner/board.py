@@ -276,10 +276,12 @@ STOP_FLAGS = {"hung": "--why hung", "looping": "--why looping", "over_budget": "
 
 
 def triage_cmd(row: Row, state: str, hb: dict, runs: list[Row] | None = None, left: list[str] | None = None) -> str | None:
-    """The one command a person runs next for a run in `state`; None for a running run, an orphan, a run that
-    ended over its budget with no stage left, and a run without a tree whose next command would be a retire, which
-    would only mark its row. `left` holds the stages that `edr continue` runs on the tree of a run that ended. With
-    `runs`, the runs of the project, the handle in the command names this run alone."""
+    """The one command a person runs next for a run in `state`; None for a running run, an orphan, and a run without
+    a tree whose next command would be a retire, which would only mark its row. A run that ended over its budget or
+    stopped gets `edr continue` while `left`, the stages that continue runs on its tree, has some. Without them, a
+    stopped run gets a retire and a run over its budget nothing. `left` is None when continue refuses or nobody
+    asked, and then such a run gets nothing, since a retire would take the tree its stages need. With `runs`, the
+    runs of the project, the handle in the command names this run alone."""
     h = handle(row, runs)
     if state in ("running", "orphan", "retired", "abandoned"):
         return None
@@ -290,8 +292,11 @@ def triage_cmd(row: Row, state: str, hb: dict, runs: list[Row] | None = None, le
     if state == "dead":
         return f"edr continue {h} --stage {hb.get('stage') or row.get('stage')}" + (
             f" --from {hb['step_name']}" if hb.get("step_name") else "")
-    if state == "over_budget" and not is_live(row):
-        return f"edr continue {h}" if left else None
+    if state in ("over_budget", "stopped") and not is_live(row):
+        if left:
+            return f"edr continue {h}"
+        if left is None or state == "over_budget":
+            return None
     if state in STOP_FLAGS:
         return f"edr stop {h} {STOP_FLAGS[state]}"
     if state == "done":

@@ -225,14 +225,15 @@ def states_page() -> str:
     hb = {"stage": "<stage>", "step_name": "<step>"}
 
     def proposed(s: str) -> str:
-        """The command the triage proposes; `over_budget` names a live run and one that ended, with and without stages
-        left."""
+        """The command the triage proposes; `over_budget` and `stopped` name a run that ended with and without stages
+        left, and `over_budget` also a live run."""
         live = code(board.triage_cmd(row, s, hb))
-        if s != "over_budget":
+        if s not in ("over_budget", "stopped"):
             return live
-        ended = {**row, "phase": "OVER_BUDGET:<stage>"}
-        return (f"{live} while the run lives; once it ended, {code(board.triage_cmd(ended, s, hb, left=['<next>']))} "
-                f"with stages left, and {code(board.triage_cmd(ended, s, hb, left=[])) or 'none'} without")
+        ended = {**row, "phase": "STOPPED" if s == "stopped" else "OVER_BUDGET:<stage>"}
+        some, none = (code(board.triage_cmd(ended, s, hb, left=x)) or "none" for x in (["<next>"], []))
+        text = f"{some} with stages or held tasks left, and {none} without"
+        return f"{live} while the run lives; once it ended, {text}" if s == "over_budget" else text
 
     rows = [[code(s), tgfmt.MARK.get(s, ""), st.test, "yes" if st.alert else "", st.action, proposed(s)]
             for s, st in watch.STATES.items()]
