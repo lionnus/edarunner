@@ -129,7 +129,7 @@ def project_data(c: Any, tools: list[Row]) -> Row:
 
 
 def run_data(c: Any, row: Row, file_host: str) -> Row:
-    """Everything the story of one run says, as one dict; `row` carries the state the board gives it."""
+    """Everything the history of one run says, as one dict; `row` carries the state the board gives it."""
     now, hb = time.time(), c.heartbeat(row)
     state = _state_row(row, hb, now)
     names = {r["run_id"]: board.handle(r) for r in c.db.runs()}
@@ -265,13 +265,13 @@ def project_text(d: Row, now: float | None = None) -> str:
     out += ["## Read more", ""]
     local = [f"`{p}`" for p in d["read"]]
     out.append((f"This project keeps its own notes in {_join(local)}. " if local else "")
-               + f"The edarunner documentation is at {d['docs']}, and `edr brief --run <handle>` tells the story "
-                 "of one run.")
+               + f"The edarunner documentation is at {d['docs']}, and `edr brief --run <handle>` prints the "
+                 "history of one run.")
     return "\n".join(out).rstrip() + "\n"
 
 
 def run_text(d: Row) -> str:
-    """The story of one run as Markdown."""
+    """The history of one run as Markdown."""
     out = [f"# {d['handle']}", ""]
     ident = f"`{d['handle']}` is the run `{d['run_id']}` of batch `{d['batch']}`. It builds the configuration " \
             f"`{d['config'] or '-'}` from source `{d['src'] or '-'}`"

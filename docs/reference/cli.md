@@ -6,7 +6,7 @@
 edr [--json] [--version] command ...
 ```
 
-Run flows on hosts, keep a project database, watch, export.
+Run your flow on the hosts, watch the runs, keep them in one project database and export snapshots.
 
 | Flag | Meaning |
 |---|---|
@@ -28,7 +28,7 @@ nothing: no date pin, no spec, no file on a host, no database row, no
 event, not even an empty database.
 
 --why &lt;text&gt; is required on stop and retire, and optional on import. The
-text lands in the events table with the actor.
+text goes into the events table together with the actor.
 
 These commands never create data/edr.db: brief, check, compare, events,
 hosts, metrics, notify, plan, runtime, status, tools. Without the file they
@@ -106,9 +106,9 @@ live runs, every run the triage proposes a command for with that
 command, and the last ten events. It ends with the project's CLAUDE.md
 and AGENTS.md, when they exist, and the documentation.
 
---run tells the story of one run instead: its identity, its stage and
-step times from stage_runs and step_runs, its events with their
-reasons, the last 20 lines of its current stage log read from the host,
+With --run, it prints the history of one run instead: its identity,
+its stage and step times from stage_runs and step_runs, its events with
+their reasons, the last 20 lines of its current stage log read from the host,
 the last value of each metric, and the command the triage proposes
 with the reason. --json gives either as an object.
 
@@ -118,7 +118,7 @@ session with the briefing; docs/guides/agents.md shows the hook.
 | Flag | Meaning |
 |---|---|
 | `--json` | the same as edr --json brief |
-| `--run HANDLE` | the story of one run: label@batch, a run id prefix, or #n from the last board |
+| `--run HANDLE` | the history of one run: label@batch, a run id prefix, or #n from the last board |
 
 ## status
 
@@ -126,16 +126,16 @@ session with the briefing; docs/guides/agents.md shows the hook.
 edr status [--json] [--batch B] [--narrow] [--watch] [--live] [--triage] [--digest] [handle]
 ```
 
-Without a handle, the board: one line per run of every batch that is not
-retired, live runs first and dead ones on top. The columns are the row
+Without a handle, status prints the board: one line per run of every
+batch that is not retired, live runs first and dead ones on top. The columns are the row
 number, label, host, state, phase, stage/step, heartbeat age, failed and
 done task counts, and the core hours so far. The state of a live run
 follows the heartbeat age (running, stale, dead) or the watcher's last
 verdict (hung, host_full, ...). A finished run shows its phase class:
 done, incomplete, failed, over_budget, stopped or killed.
 
-With a handle, one run: identity, state, disk, every stage and task
-row, the CPU, RSS, tree size and free disk the driver sampled over the
+With a handle, it prints one run: its identity, state and disk, every
+stage and task row, the CPU, RSS, tree size and free disk the driver sampled over the
 run, the metrics, and the log tail from the heartbeat. A finished run
 shows driver exit &lt;n&gt; (&lt;phase&gt;): the code of the driver, whose phase
 names the stage that failed. The command exit column of the stage table
@@ -163,8 +163,8 @@ and failed counts appears only for a run with a task group.
 edr events [--json] [--since T] [--run HANDLE] [-n N]
 ```
 
-The last N events, oldest first: time, actor (user, watch or telegram),
-run, kind and text.
+Prints the last N events, oldest first, with the time, the actor (user,
+watch or telegram), the run, the kind and the text.
 
 | Flag | Meaning |
 |---|---|
@@ -233,7 +233,7 @@ use (the load, capped at the cores), RAM, scratch and busy GPUs over
 edr tools [--json]
 ```
 
-One row per tool of the site file. free and total are the seats the
+Prints one row per tool of the site file. free and total are the seats the
 probe reports; the probe runs on the head node with the project
 directory as {root}. hosts lists the hosts that have the tool, with
 their versions. A tool without a probe shows - for the seats. --json
@@ -253,15 +253,16 @@ gives tool, free, total, hosts (host to version) and note.
 edr metrics [--json] [--design SRC] [--run HANDLE] [--metric NAME] [--over {steps}] [--stage S] [--step N] [--csv] [--instance PATH] [--depth N]
 ```
 
-Every metric of one design: label, design, stage, step, task, name,
-value and unit. --design or --run is required. --design is the source
+Prints every metric of one design with its label, design, stage, step,
+task, name, value and unit. --design or --run is required. --design is the source
 tag exactly as edr checkout printed it, -dirty-... included; --run takes
 one run instead. --csv writes the columns of
 metrics.csv (docs/guides/results.md) to stdout.
 
 --run with --over steps prints the metrics along the steps of that run:
 one row per step with its name, one column per metric. With --metric,
-the one metric, its change from the step before, and its source file.
+it prints that one metric, its change from the step before and its
+source file.
 
 --instance or --depth prints the area rows of an area_hier metric
 instead: label, design, stage, step, instance, depth, area with the
@@ -323,13 +324,12 @@ new, changed, unchanged and failed for each run.
 edr compare [--json] [--area] [--metric NAME] [--depth N] [--instance PATH] [--stage S] [--step N] HANDLE [HANDLE ...]
 ```
 
-Puts two or more runs side by side. Without --area, one row per stage,
-step, task and metric: the step name, the value of each run, and the
+Puts two or more runs side by side. Without --area, it prints one row
+per stage, step, task and metric: the step name, the value of each run, and the
 percent of each run to the first. --metric (repeatable), --stage and
 --step narrow the rows; --json keeps the source file of every value.
 
---area compares the hierarchical
-area: one row per instance at --depth (default 1; the top is 0), one
+--area compares the hierarchical area: one row per instance at --depth (default 1; the top is 0), one
 column per run, and the delta and the percent of each run to the
 first. Each run is compared at its last step with an area report, or
 at --stage and --step. The source file of each run is printed under
@@ -356,7 +356,8 @@ the table.
 edr runtime [--json] [--batch B] [HANDLE ...]
 ```
 
-With one handle, the times of one run: a row per stage attempt from
+With one handle, runtime prints the times of one run: a row per stage
+attempt from
 the stage_runs table, a row per step under it, and one row per task
 group with the task count, the summed task time and the longest task.
 A step starts when the driver first sees its number, or at the time
@@ -364,8 +365,8 @@ the stage's step_log finds in a collected file; it ends when the next
 step starts or the stage ends. The source column names the table or
 the file and line of each time. The total sums the stage attempts.
 
-With several handles or --batch, one row per run: the wall time of
-each stage, attempts summed, and the total.
+With several handles or --batch, it prints one row per run: the wall
+time of each stage, with the attempts summed, and the total.
 
 | Flag | Meaning |
 |---|---|
@@ -384,9 +385,9 @@ edr init [--dry-run] [--json] --site DIR
 ```
 
 Writes edr.toml and edr-watch.service into the current directory, the
-project directory where you run edr. --site is the directory or the
-file of the site file; init does not write that file. Refuses when
-edr.toml exists.
+project directory where you run edr. --site names the site directory
+or the site file itself; init does not write that file. It refuses
+when edr.toml already exists.
 
 | Flag | Meaning |
 |---|---|
@@ -402,8 +403,8 @@ edr check [--json]
 
 Loads the project, the site and every batch under jobs/, imports every
 hook, checks the driver file, probes every host once, names every tool
-the head node lacks, and plans every batch with those probes. Prints one
-problem: line per fault, or an ok: line with the counts.
+the head node lacks, and plans every batch with those probes. It prints
+one problem: line per fault, or an ok: line with the counts.
 
 | Flag | Meaning |
 |---|---|
@@ -419,14 +420,14 @@ problem: line per fault, or an ok: line with the counts.
 edr checkout [--dry-run] [--json] [--dirty DIR] [ref]
 ```
 
-Fetches, then makes a detached local clone of ref (default source.ref) at
+Fetches the repository, then makes a detached local clone of ref (default source.ref) at
 &lt;worktrees&gt;/&lt;short hash&gt;, and clones each source.nested repository into
 it at the HEAD the repository copy has. A local clone shares the git
-objects of the repository by hard links. Prints &lt;src&gt; &lt;path&gt;.
+objects of the repository by hard links. It prints &lt;src&gt; &lt;path&gt;.
 
 --dirty DIR clones the HEAD of a working tree and copies its files over
 the clone, with the diff in source.diff; the tag is &lt;hash&gt;-dirty-&lt;8 hex&gt;
-and prints with (dirty). A clean tree under --dirty is checked out as a
+and is printed with (dirty). A clean tree under --dirty is checked out as a
 clone.
 
 | Flag | Meaning |
@@ -505,8 +506,8 @@ exists is already launched; a batch name is used once.
 edr continue [--dry-run] [--json] [--stage S] [--tasks ID [ID ...]] [--from CHECKPOINT] [--on HOST] [--parallel N] [--collect NAME] handle
 ```
 
-More work on the tree of an existing run: one stage, on the same tree,
-as a new run in the batch of that run with the label &lt;label&gt;.&lt;stage&gt;.
+Runs one more stage on the tree of an existing run, as a new run in the
+batch of that run with the label &lt;label&gt;.&lt;stage&gt;.
 --tasks names the tasks of a task group, --parallel its width, --on the
 host (default: the tree's host). --from fills {checkpoint} in the
 stage's resume command, and is refused when the stage has none.
@@ -613,10 +614,9 @@ edr import [--dry-run] [--json] --run-id RUN_ID --label LABEL [--config CONFIG] 
 
 Records a run that edr did not start, such as one you ran by hand. With
 --host and --root, it records the tree on that host, so reuse and edr
-continue can build on it. With --results DIR,
-a directory of collected files of a run whose tree is gone: it is linked
-as data/results/&lt;run id&gt; and the project's metrics are extracted from
-it; --tasks names the tasks whose files it holds. The run id must start
+continue can build on it. --results DIR names a directory of collected
+files from a run whose tree is gone; it is linked as
+data/results/&lt;run id&gt;, and the project's metrics are extracted from it; --tasks names the tasks whose files it holds. The run id must start
 with YYYYMMDD_HHMM_.
 
 | Flag | Meaning |
@@ -645,8 +645,8 @@ edr export [--dry-run] [--json] [--design SRC] [--out DIR] [--mlflow DIR] [--lab
 Writes a snapshot of one design to DIR: manifest.json, runs.csv,
 metrics.csv and the collected files of the newest run per label.
 --design matches the source tag exactly. log/ and *.log stay out unless
---with-logs. Refuses a DIR that exists and is not empty. docs/guides/results.md
-explains the layout.
+you pass --with-logs. It refuses a DIR that exists and is not empty.
+docs/guides/results.md explains the layout.
 
 --mlflow DIR writes the project database into a local MLflow tracking store
 in DIR instead (mlflow.db and artifacts/), for mlflow ui: one MLflow run
@@ -672,8 +672,8 @@ edr stop [--dry-run] --why WHY [--json] [--after-task] [--now] handle
 ```
 
 Stops one run through the pids the driver recorded, never through a
-session name or a process pattern. Without a flag: SIGTERM to the driver
-and every process group of the run, then a wait of up to 60 s.
+session name or a process pattern. Without a flag, it sends SIGTERM to
+the driver and every process group of the run and waits up to 60 s.
 --after-task writes the stop file: a task group finishes its running
 tasks and claims no more, and a one-command stage runs to its end. --now
 sends SIGTERM, then SIGKILL after 30 s.
@@ -709,7 +709,7 @@ skips it. A live run gets the phase ABANDONED:&lt;why&gt;.
 The logs and results survive a retire. The watcher has already copied
 log/ and the collect paths of every finished stage to
 data/results/&lt;run id&gt;/ on the head node, and retire refuses a tree
-without that copy unless --uncollected. edr watch --once makes the copy
+without that copy unless you pass --uncollected. edr watch --once makes the copy
 now.
 
 --collect NAME,... first copies the named collect_on_request lists of
@@ -720,7 +720,7 @@ retire refuses a run whose driver is alive, a live run that has no
 heartbeat yet and started less than dead_s ago, a tree that another
 live run uses, a tree shared with a run whose results are not collected
 (retire them together with --batch), and a tree whose own results are
-not collected unless --uncollected.
+not collected unless you pass --uncollected.
 
 | Flag | Meaning |
 |---|---|
@@ -769,8 +769,8 @@ line can mail either.
 edr watch [--dry-run] [--json] [--once] [--check]
 ```
 
-The watcher loop: one cycle every heartbeat_s seconds, with the Telegram
-bot as a thread when the site file configures it. --once runs one cycle.
+Runs the watcher loop: one cycle every heartbeat_s seconds, with the
+Telegram bot as a thread when the site file configures it. --once runs one cycle.
 --check reads the watcher's own heartbeat; a cron line runs it. --dry-run
 reads and classifies every run, prints the states and writes nothing.
 docs/how-it-works.md explains the cycle.

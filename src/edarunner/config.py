@@ -5,7 +5,7 @@ to them, and `site.toml`, wherever `site` points, with the hosts, the tools and 
 hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
-  key path, so `cores = "16"` stops at load.
+  key path, so `cores = "16"` stops the load.
 - A key without a default is required.
 - A path is absolute or relative to the file that names it, and `~` expands.
 - A string may hold `{placeholders}`; the last section lists them. `${VAR}` belongs to the shell
