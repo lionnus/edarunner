@@ -125,7 +125,7 @@ def test_missing_file_is_skipped_and_bad_file_is_a_none_row(tmp_path):
 def test_scale_multiplies_each_value_at_extraction(tmp_path):
     run = results_tree(tmp_path / "results")
     for test in ("GEMM_M64_N64", "SOFTMAX_R197"):
-        (run / "simulation/tests/demo" / test / "power/phases.json").write_text(json.dumps({"window_dur": 10716000000}))
+        (run / "simulation/tests/demo" / test / "power/phases.json").write_text(json.dumps({"window_dur": 48213000000}))
     (run / "reports" / "3" / "area_hier.rpt").write_text(area_hier(1234.5))
     project = demo_project(tmp_path)
     project.metrics = {
@@ -135,7 +135,7 @@ def test_scale_multiplies_each_value_at_extraction(tmp_path):
                            unit="mm2", scale=1e-6),
     }
     rows = extract(project, RUN, tmp_path / "results", demo_tasks())
-    assert {r["task"]: r["value"] for r in by_name(rows, "window_ns")} == {"k_small": 10716.0, "k_big": 10716.0}
+    assert {r["task"]: r["value"] for r in by_name(rows, "window_ns")} == {"k_small": 48213.0, "k_big": 48213.0}
     (area,) = by_name(rows, "area_mm2")
     assert area["value"] == pytest.approx(1234.5e-6)
     assert [(i["instance"], round(i["area"] * 1e6, 3)) for i in area["instances"]] == [("<top>", 1234.5), ("i_top", 1222.155)]
