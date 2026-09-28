@@ -505,3 +505,9 @@ the snapshots whose manifest holds each run (`analysis.snapshots`).
 `edr compare` names the sources when the runs it compares come from more
 than one.
 [guides/results.md](guides/results.md) shows the commands.
+
+A snapshot holds tables: the runs, metrics, parameters, task fields,
+instances and flags of the exported runs, with the diff of each dirty
+source. The collected files come only on request, `--files` for those
+that the exported rows cite and `--with` for others, each under its run
+id with the run, stage, step and task in the manifest (`export.export`).
