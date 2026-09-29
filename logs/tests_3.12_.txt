@@ -1,0 +1,415 @@
+﻿2026-09-29T01:27:05.0876741Z Current runner version: '2.337.0'
+2026-09-29T01:27:05.0893002Z ##[group]Runner Image Provisioner
+2026-09-29T01:27:05.0893619Z Hosted Compute Agent
+2026-09-29T01:27:05.0894243Z Version: 20260828.587
+2026-09-29T01:27:05.0894691Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-29T01:27:05.0895187Z Build Date: 2026-08-28T16:44:25Z
+2026-09-29T01:27:05.0895670Z Worker ID: {3af2dab5-ddac-4f7d-b20b-10a350f1cef6}
+2026-09-29T01:27:05.0896147Z Azure Region: centralus
+2026-09-29T01:27:05.0896551Z ##[endgroup]
+2026-09-29T01:27:05.0897590Z ##[group]Operating System
+2026-09-29T01:27:05.0898004Z Ubuntu
+2026-09-29T01:27:05.0898369Z 24.04.5
+2026-09-29T01:27:05.0898739Z LTS
+2026-09-29T01:27:05.0899100Z ##[endgroup]
+2026-09-29T01:27:05.0899481Z ##[group]Runner Image
+2026-09-29T01:27:05.0899878Z Image: ubuntu-24.04
+2026-09-29T01:27:05.0900270Z Version: 20260920.314.1
+2026-09-29T01:27:05.0901137Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-29T01:27:05.0902207Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+2026-09-29T01:27:05.0902936Z ##[endgroup]
+2026-09-29T01:27:05.0903704Z ##[group]GITHUB_TOKEN Permissions
+2026-09-29T01:27:05.0905542Z Contents: read
+2026-09-29T01:27:05.0905957Z Metadata: read
+2026-09-29T01:27:05.0906338Z ##[endgroup]
+2026-09-29T01:27:05.0907990Z Secret source: Actions
+2026-09-29T01:27:05.0908665Z Cache mode: write
+2026-09-29T01:27:05.0909154Z Prepare workflow directory
+2026-09-29T01:27:05.1167242Z Prepare all required actions
+2026-09-29T01:27:05.1201953Z Getting action download info
+2026-09-29T01:27:05.3579706Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-09-29T01:27:05.6686934Z Download action repository 'astral-sh/setup-uv@v6' (SHA:d0cc045d04ccac9d8b7881df0226f9e82c39688e)
+2026-09-29T01:27:06.2089059Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-09-29T01:27:06.4877060Z Complete job name: tests (3.12)
+2026-09-29T01:27:06.5445165Z ##[group]Run actions/checkout@v4
+2026-09-29T01:27:06.5446186Z with:
+2026-09-29T01:27:06.5446923Z   repository: lionnus/edarunner
+2026-09-29T01:27:06.5452576Z   token: ***
+2026-09-29T01:27:06.5453279Z   ssh-strict: true
+2026-09-29T01:27:06.5454084Z   ssh-user: git
+2026-09-29T01:27:06.5454756Z   persist-credentials: true
+2026-09-29T01:27:06.5455506Z   clean: true
+2026-09-29T01:27:06.5456190Z   sparse-checkout-cone-mode: true
+2026-09-29T01:27:06.5456999Z   fetch-depth: 1
+2026-09-29T01:27:06.5457655Z   fetch-tags: false
+2026-09-29T01:27:06.5458336Z   show-progress: true
+2026-09-29T01:27:06.5459038Z   lfs: false
+2026-09-29T01:27:06.5459777Z   submodules: false
+2026-09-29T01:27:06.5460531Z   set-safe-directory: true
+2026-09-29T01:27:06.5461310Z   allow-unsafe-pr-checkout: false
+2026-09-29T01:27:06.5462248Z ##[endgroup]
+2026-09-29T01:27:06.6223767Z Syncing repository: lionnus/edarunner
+2026-09-29T01:27:06.6226326Z ##[group]Getting Git version info
+2026-09-29T01:27:06.6227484Z Working directory is '/home/runner/work/edarunner/edarunner'
+2026-09-29T01:27:06.6229019Z [command]/usr/bin/git version
+2026-09-29T01:27:06.7812081Z git version 2.55.0
+2026-09-29T01:27:06.7828738Z ##[endgroup]
+2026-09-29T01:27:06.7842389Z Temporarily overriding HOME='/home/runner/work/_temp/d9077987-ffe9-4ceb-aece-a90466d86295' before making global git config changes
+2026-09-29T01:27:06.7845265Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-29T01:27:06.7847370Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-09-29T01:27:06.8550297Z Deleting the contents of '/home/runner/work/edarunner/edarunner'
+2026-09-29T01:27:06.8554317Z ##[group]Initializing the repository
+2026-09-29T01:27:06.8557861Z [command]/usr/bin/git init /home/runner/work/edarunner/edarunner
+2026-09-29T01:27:07.0185731Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-29T01:27:07.0187210Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-29T01:27:07.0188156Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-29T01:27:07.0189363Z hint: call:
+2026-09-29T01:27:07.0189781Z hint:
+2026-09-29T01:27:07.0190142Z hint: 	git config --global init.defaultBranch <name>
+2026-09-29T01:27:07.0190457Z hint:
+2026-09-29T01:27:07.0190804Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-29T01:27:07.0191254Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-29T01:27:07.0191608Z hint:
+2026-09-29T01:27:07.0191887Z hint: 	git branch -m <name>
+2026-09-29T01:27:07.0192148Z hint:
+2026-09-29T01:27:07.0192501Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-29T01:27:07.0198385Z Initialized empty Git repository in /home/runner/work/edarunner/edarunner/.git/
+2026-09-29T01:27:07.0212468Z [command]/usr/bin/git remote add origin https://github.com/lionnus/edarunner
+2026-09-29T01:27:07.0305021Z ##[endgroup]
+2026-09-29T01:27:07.0305695Z ##[group]Disabling automatic garbage collection
+2026-09-29T01:27:07.0309056Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-29T01:27:07.0629476Z ##[endgroup]
+2026-09-29T01:27:07.0630532Z ##[group]Setting up auth
+2026-09-29T01:27:07.0634110Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-29T01:27:07.0657994Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-29T01:27:07.2027183Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-29T01:27:07.2050774Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-29T01:27:07.2203067Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-29T01:27:07.2225657Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-29T01:27:07.2376000Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-29T01:27:07.2408561Z ##[endgroup]
+2026-09-29T01:27:07.2409351Z ##[group]Fetching the repository
+2026-09-29T01:27:07.2414970Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +0880b60be9eb0a94372d70cbd091091d3422b5f3:refs/remotes/origin/main
+2026-09-29T01:27:08.7862591Z From https://github.com/lionnus/edarunner
+2026-09-29T01:27:08.7863158Z  * [new ref]         0880b60be9eb0a94372d70cbd091091d3422b5f3 -> origin/main
+2026-09-29T01:27:08.7865658Z ##[endgroup]
+2026-09-29T01:27:08.7866233Z ##[group]Determining the checkout info
+2026-09-29T01:27:08.7867794Z ##[endgroup]
+2026-09-29T01:27:08.7874255Z [command]/usr/bin/git sparse-checkout disable
+2026-09-29T01:27:08.7942215Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-29T01:27:08.8033715Z ##[group]Checking out the ref
+2026-09-29T01:27:08.8038496Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-09-29T01:27:08.9665089Z Switched to a new branch 'main'
+2026-09-29T01:27:08.9671445Z branch 'main' set up to track 'origin/main'.
+2026-09-29T01:27:08.9673425Z ##[endgroup]
+2026-09-29T01:27:08.9716430Z [command]/usr/bin/git log -1 --format=%H
+2026-09-29T01:27:08.9735947Z 0880b60be9eb0a94372d70cbd091091d3422b5f3
+2026-09-29T01:27:09.0052627Z ##[group]Run astral-sh/setup-uv@v6
+2026-09-29T01:27:09.0052864Z with:
+2026-09-29T01:27:09.0053016Z   python-version: 3.12
+2026-09-29T01:27:09.0053190Z   activate-environment: false
+2026-09-29T01:27:09.0053414Z   working-directory: /home/runner/work/edarunner/edarunner
+2026-09-29T01:27:09.0053674Z   server-url: https://github.com
+2026-09-29T01:27:09.0055750Z   github-token: ***
+2026-09-29T01:27:09.0055914Z   enable-cache: auto
+2026-09-29T01:27:09.0056298Z   cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+2026-09-29T01:27:09.0056709Z   restore-cache: true
+2026-09-29T01:27:09.0056905Z   save-cache: true
+2026-09-29T01:27:09.0057073Z   prune-cache: true
+2026-09-29T01:27:09.0057233Z   ignore-nothing-to-cache: false
+2026-09-29T01:27:09.0057415Z   ignore-empty-workdir: false
+2026-09-29T01:27:09.0057617Z   add-problem-matchers: true
+2026-09-29T01:27:09.0057802Z ##[endgroup]
+2026-09-29T01:27:09.1339844Z (node:2036) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-29T01:27:09.1340351Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-29T01:27:09.1421322Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/uv.toml
+2026-09-29T01:27:09.1422141Z Could not find file: /home/runner/work/edarunner/edarunner/uv.toml
+2026-09-29T01:27:09.1422839Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-09-29T01:27:09.1433173Z Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+2026-09-29T01:27:09.1434505Z Getting latest version from GitHub API...
+2026-09-29T01:27:09.4617894Z manifest-file not provided, reading from local file.
+2026-09-29T01:27:09.4650293Z manifest-file does not contain version 0.12.20, arch x86_64, platform unknown-linux-gnu. Falling back to GitHub releases.
+2026-09-29T01:27:09.4651697Z Downloading uv from "https://github.com/astral-sh/uv/releases/download/0.12.20/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-09-29T01:27:09.8166163Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/78465b3e-b6e1-4952-a86f-2bc05f8f2466 -f /home/runner/work/_temp/f498a9ac-6113-437e-bed1-4b50719bad0e
+2026-09-29T01:27:10.5106448Z Added /home/runner/.local/bin to the path
+2026-09-29T01:27:10.5107906Z Added /opt/hostedtoolcache/uv/0.12.20/x86_64 to the path
+2026-09-29T01:27:10.5109037Z Set UV_PYTHON to 3.12
+2026-09-29T01:27:10.5135221Z Set UV_CACHE_DIR to /home/runner/work/_temp/setup-uv-cache
+2026-09-29T01:27:10.5135597Z Successfully installed uv version 0.12.20
+2026-09-29T01:27:10.5137071Z Searching files using cache dependency glob: /home/runner/work/edarunner/edarunner/**/*requirements*.txt,/home/runner/work/edarunner/edarunner/**/*requirements*.in,/home/runner/work/edarunner/edarunner/**/*constraints*.txt,/home/runner/work/edarunner/edarunner/**/*constraints*.in,/home/runner/work/edarunner/edarunner/**/pyproject.toml,/home/runner/work/edarunner/edarunner/**/uv.lock,/home/runner/work/edarunner/edarunner/**/*.py.lock
+2026-09-29T01:27:10.5291600Z /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-09-29T01:27:10.5407192Z Found 1 files to hash.
+2026-09-29T01:27:10.5457631Z Trying to restore uv cache from GitHub Actions cache with key: setup-uv-1-x86_64-unknown-linux-gnu-3.12-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-09-29T01:27:10.7507229Z Cache hit for: setup-uv-1-x86_64-unknown-linux-gnu-3.12-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-09-29T01:27:10.7587221Z (node:2036) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-09-29T01:27:11.4054388Z Received 12155616 of 12155616 (100.0%), 22.5 MBs/sec
+2026-09-29T01:27:11.4054981Z Cache Size: ~12 MB (12155616 B)
+2026-09-29T01:27:11.4077841Z [command]/usr/bin/tar -xf /home/runner/work/_temp/c10a23b1-6eb6-4ce5-b0bf-bd39d75dced1/cache.tzst -P -C /home/runner/work/edarunner/edarunner --use-compress-program unzstd
+2026-09-29T01:27:11.5194590Z Cache restored successfully
+2026-09-29T01:27:11.5203710Z uv cache restored from GitHub Actions cache with key: setup-uv-1-x86_64-unknown-linux-gnu-3.12-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-09-29T01:27:11.5847473Z ##[group]Run uv sync --extra dev --extra mlflow
+2026-09-29T01:27:11.5847807Z [36;1muv sync --extra dev --extra mlflow[0m
+2026-09-29T01:27:11.8006770Z shell: /usr/bin/bash -e {0}
+2026-09-29T01:27:11.8007059Z env:
+2026-09-29T01:27:11.8007252Z   UV_PYTHON: 3.12
+2026-09-29T01:27:11.8007478Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-09-29T01:27:11.8007733Z ##[endgroup]
+2026-09-29T01:27:11.8288598Z Using CPython 3.12.3 interpreter at: /usr/bin/python3.12
+2026-09-29T01:27:11.8288994Z Creating virtual environment at: .venv
+2026-09-29T01:27:12.5020858Z Resolved 127 packages in 672ms
+2026-09-29T01:27:12.5268120Z    Building edarunner @ file:///home/runner/work/edarunner/edarunner
+2026-09-29T01:27:12.5514144Z Downloading pyarrow (47.8MiB)
+2026-09-29T01:27:12.5514858Z Downloading numpy (15.9MiB)
+2026-09-29T01:27:12.5515133Z Downloading mlflow (11.1MiB)
+2026-09-29T01:27:12.5515883Z Downloading scipy (33.7MiB)
+2026-09-29T01:27:12.5516520Z Downloading ruff (9.9MiB)
+2026-09-29T01:27:12.5517603Z Downloading matplotlib (9.4MiB)
+2026-09-29T01:27:12.5518139Z Downloading scikit-learn (8.7MiB)
+2026-09-29T01:27:12.5518881Z Downloading pillow (6.6MiB)
+2026-09-29T01:27:12.5519603Z Downloading fonttools (5.1MiB)
+2026-09-29T01:27:12.5520491Z Downloading mlflow-skinny (3.6MiB)
+2026-09-29T01:27:12.5521198Z Downloading mlflow-tracing (1.7MiB)
+2026-09-29T01:27:12.5521760Z Downloading pydantic-core (2.0MiB)
+2026-09-29T01:27:12.5522450Z Downloading databricks-sdk (1.0MiB)
+2026-09-29T01:27:12.5524098Z Downloading setuptools (1.0MiB)
+2026-09-29T01:27:12.5686466Z Downloading pygments (1.2MiB)
+2026-09-29T01:27:12.5687688Z Downloading aiohttp (1.7MiB)
+2026-09-29T01:27:12.5688433Z Downloading kiwisolver (1.4MiB)
+2026-09-29T01:27:12.5690848Z Downloading cryptography (4.5MiB)
+2026-09-29T01:27:12.5691480Z Downloading pandas (10.3MiB)
+2026-09-29T01:27:12.5694856Z Downloading sqlalchemy (4.5MiB)
+2026-09-29T01:27:12.8731474Z  Downloaded databricks-sdk
+2026-09-29T01:27:12.9681788Z  Downloaded setuptools
+2026-09-29T01:27:12.9867943Z  Downloaded pygments
+2026-09-29T01:27:13.0096135Z  Downloaded kiwisolver
+2026-09-29T01:27:13.0262490Z  Downloaded mlflow-tracing
+2026-09-29T01:27:13.0281026Z  Downloaded aiohttp
+2026-09-29T01:27:13.0384872Z  Downloaded pydantic-core
+2026-09-29T01:27:13.3545863Z  Downloaded mlflow-skinny
+2026-09-29T01:27:13.3667868Z  Downloaded sqlalchemy
+2026-09-29T01:27:13.3678764Z  Downloaded cryptography
+2026-09-29T01:27:13.3997394Z  Downloaded fonttools
+2026-09-29T01:27:13.4245725Z  Downloaded pillow
+2026-09-29T01:27:13.4789308Z  Downloaded scikit-learn
+2026-09-29T01:27:13.4942931Z  Downloaded matplotlib
+2026-09-29T01:27:13.5105016Z  Downloaded ruff
+2026-09-29T01:27:13.5345041Z  Downloaded mlflow
+2026-09-29T01:27:13.5394540Z  Downloaded pandas
+2026-09-29T01:27:13.5951047Z  Downloaded numpy
+2026-09-29T01:27:13.7117288Z  Downloaded scipy
+2026-09-29T01:27:13.7951300Z  Downloaded pyarrow
+2026-09-29T01:27:13.8525612Z       Built edarunner @ file:///home/runner/work/edarunner/edarunner
+2026-09-29T01:27:13.9116664Z Prepared 100 packages in 1.40s
+2026-09-29T01:27:15.0266123Z Installed 100 packages in 1.11s
+2026-09-29T01:27:15.0267074Z  + aiohappyeyeballs==2.7.1
+2026-09-29T01:27:15.0267362Z  + aiohttp==3.14.3
+2026-09-29T01:27:15.0267564Z  + aiosignal==1.4.0
+2026-09-29T01:27:15.0267777Z  + alembic==1.20.0
+2026-09-29T01:27:15.0267976Z  + annotated-doc==0.0.5
+2026-09-29T01:27:15.0268224Z  + annotated-types==0.8.0
+2026-09-29T01:27:15.0268415Z  + anyio==4.15.1
+2026-09-29T01:27:15.0268581Z  + attrs==26.1.0
+2026-09-29T01:27:15.0268748Z  + blinker==1.9.0
+2026-09-29T01:27:15.0268920Z  + cachetools==7.2.0
+2026-09-29T01:27:15.0269108Z  + certifi==2026.7.22
+2026-09-29T01:27:15.0269301Z  + cffi==2.1.1
+2026-09-29T01:27:15.0269516Z  + charset-normalizer==3.5.1
+2026-09-29T01:27:15.0269766Z  + click==8.5.0
+2026-09-29T01:27:15.0269976Z  + cloudpickle==3.1.2
+2026-09-29T01:27:15.0270230Z  + contourpy==1.4.0
+2026-09-29T01:27:15.0270779Z  + coverage==7.16.2
+2026-09-29T01:27:15.0270994Z  + coverage-badge==1.1.2
+2026-09-29T01:27:15.0271407Z  + cryptography==50.0.1
+2026-09-29T01:27:15.0271601Z  + cycler==0.12.1
+2026-09-29T01:27:15.0271795Z  + databricks-sdk==0.143.0
+2026-09-29T01:27:15.0271993Z  + docker==7.2.0
+2026-09-29T01:27:15.0272270Z  + edarunner==0.1.0 (from file:///home/runner/work/edarunner/edarunner)
+2026-09-29T01:27:15.0272586Z  + fastapi==0.141.1
+2026-09-29T01:27:15.0272755Z  + flask==3.1.3
+2026-09-29T01:27:15.0272956Z  + flask-cors==6.0.5
+2026-09-29T01:27:15.0273140Z  + fonttools==4.66.0
+2026-09-29T01:27:15.0273325Z  + frozenlist==1.8.0
+2026-09-29T01:27:15.0273507Z  + gitdb==4.0.12
+2026-09-29T01:27:15.0273682Z  + gitpython==3.1.62
+2026-09-29T01:27:15.0273863Z  + google-auth==2.59.0
+2026-09-29T01:27:15.0274186Z  + graphene==3.4.3
+2026-09-29T01:27:15.0274545Z  + graphql-core==3.2.13
+2026-09-29T01:27:15.0274911Z  + graphql-relay==3.2.0
+2026-09-29T01:27:15.0275125Z  + gunicorn==26.2.0
+2026-09-29T01:27:15.0275320Z  + h11==0.16.0
+2026-09-29T01:27:15.0275505Z  + huey==3.4.0
+2026-09-29T01:27:15.0275682Z  + idna==3.20
+2026-09-29T01:27:15.0275882Z  + importlib-metadata==9.0.1
+2026-09-29T01:27:15.0276107Z  + iniconfig==2.3.0
+2026-09-29T01:27:15.0276301Z  + itsdangerous==2.2.0
+2026-09-29T01:27:15.0276492Z  + jinja2==3.1.6
+2026-09-29T01:27:15.0276667Z  + joblib==1.6.0
+2026-09-29T01:27:15.0276859Z  + kiwisolver==1.5.1
+2026-09-29T01:27:15.0277042Z  + mako==1.4.3
+2026-09-29T01:27:15.0277228Z  + markdown-it-py==4.2.0
+2026-09-29T01:27:15.0277434Z  + markupsafe==3.0.3
+2026-09-29T01:27:15.0277632Z  + matplotlib==3.11.2
+2026-09-29T01:27:15.0277830Z  + mdurl==0.1.2
+2026-09-29T01:27:15.0278006Z  + mlflow==3.16.1
+2026-09-29T01:27:15.0278206Z  + mlflow-skinny==3.16.1
+2026-09-29T01:27:15.0278404Z  + mlflow-tracing==3.16.1
+2026-09-29T01:27:15.0278606Z  + multidict==6.9.1
+2026-09-29T01:27:15.0278781Z  + narwhals==2.26.0
+2026-09-29T01:27:15.0278954Z  + numpy==2.5.3
+2026-09-29T01:27:15.0279135Z  + opentelemetry-api==1.45.0
+2026-09-29T01:27:15.0279377Z  + opentelemetry-proto==1.45.0
+2026-09-29T01:27:15.0279604Z  + opentelemetry-sdk==1.45.0
+2026-09-29T01:27:15.0279896Z  + opentelemetry-semantic-conventions==0.66b0
+2026-09-29T01:27:15.0280157Z  + packaging==26.3
+2026-09-29T01:27:15.0280357Z  + pandas==3.0.6
+2026-09-29T01:27:15.0280535Z  + pillow==12.3.0
+2026-09-29T01:27:15.0280711Z  + pluggy==1.6.0
+2026-09-29T01:27:15.0280900Z  + prettytable==3.18.0
+2026-09-29T01:27:15.0281100Z  + propcache==0.5.4
+2026-09-29T01:27:15.0281287Z  + protobuf==6.33.6
+2026-09-29T01:27:15.0281477Z  + pyarrow==25.0.1
+2026-09-29T01:27:15.0281666Z  + pyasn1==0.6.4
+2026-09-29T01:27:15.0281859Z  + pyasn1-modules==0.4.2
+2026-09-29T01:27:15.0282079Z  + pycparser==3.0
+2026-09-29T01:27:15.0282265Z  + pydantic==2.13.5
+2026-09-29T01:27:15.0282569Z  + pydantic-core==2.46.5
+2026-09-29T01:27:15.0282819Z  + pygments==2.21.0
+2026-09-29T01:27:15.0283016Z  + pyparsing==3.3.3
+2026-09-29T01:27:15.0283162Z  + pytest==9.1.1
+2026-09-29T01:27:15.0283337Z  + pytest-cov==7.1.0
+2026-09-29T01:27:15.0283505Z  + python-dateutil==2.9.0.post0
+2026-09-29T01:27:15.0283692Z  + python-dotenv==1.2.3
+2026-09-29T01:27:15.0283851Z  + pyyaml==6.0.3
+2026-09-29T01:27:15.0284149Z  + requests==2.34.2
+2026-09-29T01:27:15.0284304Z  + rich==15.0.0
+2026-09-29T01:27:15.0284611Z  + ruff==0.16.9
+2026-09-29T01:27:15.0284770Z  + scikit-learn==1.9.1
+2026-09-29T01:27:15.0284923Z  + scipy==1.18.1
+2026-09-29T01:27:15.0285069Z  + setuptools==80.10.2
+2026-09-29T01:27:15.0285220Z  + six==1.17.0
+2026-09-29T01:27:15.0285363Z  + skops==0.16.0
+2026-09-29T01:27:15.0285501Z  + smmap==5.0.3
+2026-09-29T01:27:15.0285642Z  + sqlalchemy==2.1.1
+2026-09-29T01:27:15.0285787Z  + sqlparse==0.6.0
+2026-09-29T01:27:15.0285926Z  + starlette==1.7.0
+2026-09-29T01:27:15.0286132Z  + threadpoolctl==3.7.0
+2026-09-29T01:27:15.0286303Z  + typing-extensions==4.16.0
+2026-09-29T01:27:15.0286482Z  + typing-inspection==0.4.4
+2026-09-29T01:27:15.0286644Z  + urllib3==2.8.0
+2026-09-29T01:27:15.0286788Z  + uvicorn==0.54.0
+2026-09-29T01:27:15.0286949Z  + wcwidth==0.9.1
+2026-09-29T01:27:15.0287238Z  + werkzeug==3.1.9
+2026-09-29T01:27:15.0287393Z  + yarl==1.25.1
+2026-09-29T01:27:15.0287619Z  + zipp==4.1.0
+2026-09-29T01:27:15.0428940Z ##[group]Run uv run ruff check src tests tools
+2026-09-29T01:27:15.0429216Z [36;1muv run ruff check src tests tools[0m
+2026-09-29T01:27:15.0462471Z shell: /usr/bin/bash -e {0}
+2026-09-29T01:27:15.0462692Z env:
+2026-09-29T01:27:15.0462847Z   UV_PYTHON: 3.12
+2026-09-29T01:27:15.0463039Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-09-29T01:27:15.0463271Z ##[endgroup]
+2026-09-29T01:27:15.0828398Z All checks passed!
+2026-09-29T01:27:15.0865610Z ##[group]Run uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
+2026-09-29T01:27:15.0866088Z [36;1muv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88[0m
+2026-09-29T01:27:15.0892231Z shell: /usr/bin/bash -e {0}
+2026-09-29T01:27:15.0892442Z env:
+2026-09-29T01:27:15.0892594Z   UV_PYTHON: 3.12
+2026-09-29T01:27:15.0892793Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-09-29T01:27:15.0893028Z ##[endgroup]
+2026-09-29T01:27:45.8956807Z ........................................................................ [ 14%]
+2026-09-29T01:28:18.6356865Z ........................................................................ [ 28%]
+2026-09-29T01:29:29.6171567Z ........................................................s............... [ 42%]
+2026-09-29T01:31:24.3345086Z ........................................................................ [ 57%]
+2026-09-29T01:31:47.0466093Z ........................................................................ [ 71%]
+2026-09-29T01:31:53.0473576Z ........................................................................ [ 85%]
+2026-09-29T01:32:10.9573873Z ........................................................................ [ 99%]
+2026-09-29T01:32:13.8131086Z .                                                                        [100%]
+2026-09-29T01:32:13.8131578Z =============================== warnings summary ===============================
+2026-09-29T01:32:13.8132018Z tests/test_analysis.py::test_mlflow_export_writes_one_run_per_run
+2026-09-29T01:32:13.8133305Z   /home/runner/work/edarunner/edarunner/.venv/lib/python3.12/site-packages/mlflow/store/tracking/utils/sql_trace_metrics_utils.py:155: SADeprecationWarning: The ``noload`` loader strategy is deprecated and will be removed in a future release.  This option produces incorrect results by returning ``None`` for related items. (deprecated since: 2.1) (This warning originated from the `configure_mappers()` process, which was invoked automatically in response to a user-initiated operation.)
+2026-09-29T01:32:13.8135326Z     _SESSION_TRACE_METADATA = aliased(SqlTraceMetadata)
+2026-09-29T01:32:13.8135519Z 
+2026-09-29T01:32:13.8135711Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2026-09-29T01:32:13.8136108Z ================================ tests coverage ================================
+2026-09-29T01:32:13.8136412Z _______________ coverage: platform linux, python 3.12.3-final-0 ________________
+2026-09-29T01:32:13.8136610Z 
+2026-09-29T01:32:13.8136716Z Name                                        Stmts   Miss  Cover
+2026-09-29T01:32:13.8136960Z ---------------------------------------------------------------
+2026-09-29T01:32:13.8137228Z src/edarunner/__init__.py                       1      0   100%
+2026-09-29T01:32:13.8137510Z src/edarunner/analysis.py                     491     11    98%
+2026-09-29T01:32:13.8137763Z src/edarunner/backend.py                      162      8    95%
+2026-09-29T01:32:13.8138035Z src/edarunner/board.py                        262      7    97%
+2026-09-29T01:32:13.8138294Z src/edarunner/brief.py                        237     15    94%
+2026-09-29T01:32:13.8138551Z src/edarunner/census.py                       247     16    94%
+2026-09-29T01:32:13.8138852Z src/edarunner/checkout.py                     115      8    93%
+2026-09-29T01:32:13.8139110Z src/edarunner/cli.py                         1508     90    94%
+2026-09-29T01:32:13.8139672Z src/edarunner/collect.py                      194     21    89%
+2026-09-29T01:32:13.8139932Z src/edarunner/config.py                       392     17    96%
+2026-09-29T01:32:13.8140182Z src/edarunner/db.py                           266      3    99%
+2026-09-29T01:32:13.8140439Z src/edarunner/export.py                       120      0   100%
+2026-09-29T01:32:13.8140689Z src/edarunner/guards.py                        28      4    86%
+2026-09-29T01:32:13.8140939Z src/edarunner/home.py                          94      3    97%
+2026-09-29T01:32:13.8141359Z src/edarunner/hosts.py                        215      8    96%
+2026-09-29T01:32:13.8141624Z src/edarunner/launch.py                       411     10    98%
+2026-09-29T01:32:13.8141875Z src/edarunner/metrics.py                      252      1    99%
+2026-09-29T01:32:13.8142129Z src/edarunner/mlflow_export.py                 79      7    91%
+2026-09-29T01:32:13.8142375Z src/edarunner/model.py                        261      0   100%
+2026-09-29T01:32:13.8142632Z src/edarunner/notify/__init__.py               50      2    96%
+2026-09-29T01:32:13.8142885Z src/edarunner/notify/alerts.py                176      4    98%
+2026-09-29T01:32:13.8143134Z src/edarunner/notify/digest.py                 34      0   100%
+2026-09-29T01:32:13.8143387Z src/edarunner/notify/mail.py                   37      0   100%
+2026-09-29T01:32:13.8143646Z src/edarunner/notify/ntfy.py                   38      0   100%
+2026-09-29T01:32:13.8143907Z src/edarunner/notify/telegram/__init__.py       2      0   100%
+2026-09-29T01:32:13.8144365Z src/edarunner/notify/telegram/api.py           78      0   100%
+2026-09-29T01:32:13.8144660Z src/edarunner/notify/telegram/bot.py          212     13    94%
+2026-09-29T01:32:13.8144918Z src/edarunner/notify/telegram/buttons.py       62      2    97%
+2026-09-29T01:32:13.8145180Z src/edarunner/notify/telegram/commands.py     183      3    98%
+2026-09-29T01:32:13.8145447Z src/edarunner/notify/telegram/custom.py        60      5    92%
+2026-09-29T01:32:13.8145707Z src/edarunner/notify/telegram/format.py       170      2    99%
+2026-09-29T01:32:13.8145964Z src/edarunner/runid.py                         35      0   100%
+2026-09-29T01:32:13.8146212Z src/edarunner/schedulers.py                   174      5    97%
+2026-09-29T01:32:13.8146473Z src/edarunner/serve.py                        202     42    79%
+2026-09-29T01:32:13.8146716Z src/edarunner/sync.py                          54     12    78%
+2026-09-29T01:32:13.8146961Z src/edarunner/watch.py                        428     15    96%
+2026-09-29T01:32:13.8147199Z ---------------------------------------------------------------
+2026-09-29T01:32:13.8147431Z TOTAL                                        7330    334    95%
+2026-09-29T01:32:13.8147640Z Coverage XML written to file coverage.xml
+2026-09-29T01:32:13.8147877Z Required test coverage of 88% reached. Total coverage: 95.44%
+2026-09-29T01:32:13.8148128Z 504 passed, 1 skipped, 1 warning in 297.54s (0:04:57)
+2026-09-29T01:32:14.2589366Z ##[group]Run uv run coverage-badge -o coverage.svg
+2026-09-29T01:32:14.2589725Z [36;1muv run coverage-badge -o coverage.svg[0m
+2026-09-29T01:32:14.2627105Z shell: /usr/bin/bash -e {0}
+2026-09-29T01:32:14.2627361Z env:
+2026-09-29T01:32:14.2627538Z   UV_PYTHON: 3.12
+2026-09-29T01:32:14.2627765Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-09-29T01:32:14.2628021Z ##[endgroup]
+2026-09-29T01:32:14.3993508Z /home/runner/work/edarunner/edarunner/.venv/lib/python3.12/site-packages/coverage_badge/__main__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+2026-09-29T01:32:14.3994825Z   import pkg_resources
+2026-09-29T01:32:14.9240329Z Saved badge to /home/runner/work/edarunner/edarunner/coverage.svg
+2026-09-29T01:32:14.9572481Z Post job cleanup.
+2026-09-29T01:32:15.0535772Z Cache hit occurred on key setup-uv-1-x86_64-unknown-linux-gnu-3.12-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c, not saving cache.
+2026-09-29T01:32:15.0537311Z (node:6489) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-29T01:32:15.0537921Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-29T01:32:15.0653796Z Post job cleanup.
+2026-09-29T01:32:15.1287636Z [command]/usr/bin/git version
+2026-09-29T01:32:15.1323642Z git version 2.55.0
+2026-09-29T01:32:15.1355522Z Temporarily overriding HOME='/home/runner/work/_temp/a7aa88fd-be07-4006-9a6e-2669fb5f9a60' before making global git config changes
+2026-09-29T01:32:15.1356485Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-29T01:32:15.1360565Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-09-29T01:32:15.1400166Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-29T01:32:15.1431346Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-29T01:32:15.1595078Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-29T01:32:15.1613739Z http.https://github.com/.extraheader
+2026-09-29T01:32:15.1620930Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-09-29T01:32:15.1653093Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-29T01:32:15.1820265Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-29T01:32:15.1843169Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-29T01:32:15.2127719Z Cleaning up orphan processes
+2026-09-29T01:32:15.2312368Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, astral-sh/setup-uv@v6. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

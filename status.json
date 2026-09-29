@@ -1,0 +1,125 @@
+{
+ "sha": "0880b60be9eb0a94372d70cbd091091d3422b5f3",
+ "ref": "main",
+ "run_id": 36507951321,
+ "run_url": "https://github.com/lionnus/edarunner/actions/runs/36507951321",
+ "timestamp": "2026-09-29T01:32:27+00:00",
+ "jobs": {
+  "docs": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:04Z",
+   "completed_at": "2026-09-29T01:27:12Z",
+   "steps": {
+    "Set up job": "success",
+    "Run actions/checkout@v4": "success",
+    "Run astral-sh/setup-uv@v6": "success",
+    "Run uv sync": "success",
+    "Run uv run tools/gen_docs.py --check": "success",
+    "Post Run astral-sh/setup-uv@v6": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Complete job": "success"
+   }
+  },
+  "openroad": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:04Z",
+   "completed_at": "2026-09-29T01:28:34Z",
+   "steps": {
+    "Set up job": "success",
+    "Initialize containers": "success",
+    "Run actions/checkout@v4": "success",
+    "Run apt-get update -qq && apt-get install -y -qq rsync": "success",
+    "Run curl -LsSf https://astral.sh/uv/install.sh | sh && echo \"$HOME/.local/bin\" >> \"$GITHUB_PATH\"": "success",
+    "Run uv venv -q --python 3.11 .venv && uv pip install -q --python .venv/bin/python -e .": "success",
+    "run": "success",
+    "Run actions/upload-artifact@v4": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Stop containers": "success",
+    "Complete job": "success"
+   }
+  },
+  "driver": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:05Z",
+   "completed_at": "2026-09-29T01:29:29Z",
+   "steps": {
+    "Set up job": "success",
+    "Initialize containers": "success",
+    "Run actions/checkout@v4": "success",
+    "Run astral-sh/setup-uv@v6": "success",
+    "pytest": "success",
+    "Post Run astral-sh/setup-uv@v6": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Stop containers": "success",
+    "Complete job": "success"
+   }
+  },
+  "slurm": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:04Z",
+   "completed_at": "2026-09-29T01:28:23Z",
+   "steps": {
+    "Set up job": "success",
+    "Run actions/checkout@v4": "success",
+    "Run astral-sh/setup-uv@v6": "success",
+    "Run uv venv -q .venv && uv pip install -q --python .venv/bin/python -e .": "success",
+    "Run WORK=$RUNNER_TEMP/harness/work EDR=$PWD/.venv/bin/edr bash tools/harness/slurm.sh": "success",
+    "Post Run astral-sh/setup-uv@v6": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Complete job": "success"
+   }
+  },
+  "condor": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:04Z",
+   "completed_at": "2026-09-29T01:28:03Z",
+   "steps": {
+    "Set up job": "success",
+    "Run actions/checkout@v4": "success",
+    "Run astral-sh/setup-uv@v6": "success",
+    "Run uv venv -q .venv && uv pip install -q --python .venv/bin/python -e .": "success",
+    "Run RUNTIME=docker IMAGE=htcondor/mini:latest WORK=$RUNNER_TEMP/harness/work EDR=$PWD/.venv/bin/edr bash tools/harness/condor.sh": "success",
+    "Post Run astral-sh/setup-uv@v6": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Complete job": "success"
+   }
+  },
+  "tests (3.12)": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:04Z",
+   "completed_at": "2026-09-29T01:32:17Z",
+   "steps": {
+    "Set up job": "success",
+    "Run actions/checkout@v4": "success",
+    "Run astral-sh/setup-uv@v6": "success",
+    "Run uv sync --extra dev --extra mlflow": "success",
+    "Run uv run ruff check src tests tools": "success",
+    "pytest": "success",
+    "Run uv run coverage-badge -o coverage.svg": "success",
+    "Run actions/upload-artifact@v4": "skipped",
+    "Post Run astral-sh/setup-uv@v6": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Complete job": "success"
+   }
+  },
+  "tests (3.11)": {
+   "conclusion": "success",
+   "started_at": "2026-09-29T01:27:06Z",
+   "completed_at": "2026-09-29T01:31:30Z",
+   "steps": {
+    "Set up job": "success",
+    "Run actions/checkout@v4": "success",
+    "Run astral-sh/setup-uv@v6": "success",
+    "Run uv sync --extra dev ": "success",
+    "Run uv run ruff check src tests tools": "success",
+    "pytest": "success",
+    "Run uv run coverage-badge -o coverage.svg": "success",
+    "Run actions/upload-artifact@v4": "success",
+    "Post Run astral-sh/setup-uv@v6": "success",
+    "Post Run actions/checkout@v4": "success",
+    "Complete job": "success"
+   }
+  }
+ },
+ "conclusion": "success"
+}
