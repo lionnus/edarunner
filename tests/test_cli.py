@@ -1055,7 +1055,7 @@ def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "pnr", "--on", "local", "--from", "cts", "--dry-run")
     data = json.loads(out)["data"]
     assert code == 0 and data["batch"] == "demo" and data["host"] == "local"
-    assert re.fullmatch(r"\d{8}_\d{4}_a\.pnr_demo_gabc1234", data["run_id"])
+    assert re.fullmatch(r"\d{8}_\d{4}_demo_a\.pnr_demo_gabc1234", data["run_id"])
     spec = data["spec"]
     assert spec["start_at"] == {"stage": "pnr", "checkpoint": "cts"} and [s["name"] for s in spec["stages"]] == ["pnr"]
     assert spec["root"] == spec["stages"][0]["cwd"] and f"pnr {data['run_id']} demo" in spec["stages"][0]["cmd"]
@@ -1083,7 +1083,7 @@ def test_continue_without_stage_runs_what_the_tree_has_left(demo: Path, capsys) 
     edr(capsys, "status")
     code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--dry-run")
     run_id, stages = stages_of(out)
-    assert code == 0 and stages == ["export", "power"] and re.fullmatch(r"\d{8}_\d{4}_a\.export-power_demo_gabc1234", run_id)
+    assert code == 0 and stages == ["export", "power"] and re.fullmatch(r"\d{8}_\d{4}_demo_a\.export-power_demo_gabc1234", run_id)
     assert json.loads(out)["data"]["spec"]["start_at"] == {"stage": "export", "checkpoint": None}
     code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
     assert code == 0 and stages_of(out)[1] == ["pnr"] and "_b_nodw.pnr_demo_DW0_g" in stages_of(out)[0]
@@ -1404,6 +1404,21 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
     other.mkdir()
     assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--source", "abc1234", "--host", "local",
                "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
+
+
+def test_track_and_import_refuse_a_run_id_that_another_run_holds(demo: Path, capsys, tmp_path: Path) -> None:
+    toml = demo / "edr.toml"
+    # A template without {date} stands for a track in the same minute as the import.
+    toml.write_text(re.sub(r'(?m)^run_id = .*$', 'run_id = "20260904_0411_{label}_g{source}"', toml.read_text()))
+    root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_t_gabc1234"
+    root.mkdir(parents=True)
+    argv = ["import", "--run-id", root.name, "--label", "t", "--source", "abc1234", "--host", "local", "--root", str(root)]
+    assert edr(capsys, *argv, "--batch", "b1")[0] == 0
+    assert edr(capsys, *argv, "--batch", "b1")[0] == 0  # the same run again updates it
+    code, _, err = edr(capsys, *argv, "--batch", "b2")
+    assert code == 1 and "run id 20260904_0411_t_gabc1234 belongs to t@b1; give another --run-id" in err
+    code, _, err = edr(capsys, "track", "--label", "t", "--stage", "synth", "--source", "abc1234", "--dry-run", "--", "true")
+    assert code == 1 and "run id 20260904_0411_t_gabc1234 belongs to t@b1; track a minute later or rename the label" in err
 
 
 def test_an_incomplete_phase_carries_the_held_tasks() -> None:

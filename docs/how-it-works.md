@@ -95,10 +95,12 @@ alone, and the repository is never the target of a delete
 `edr plan sweep1` works out what a launch would do and writes nothing
 (`launch.plan`). It reads the batch, computes the build tag of each job
 from its configuration name and overrides, and names each run
-`<date>_<label>_<build_tag>_g<source>` by default. The first launch pins
-the date in `<state_dir>/sweep1/RUN_DATE`, so runs of the batch that
-start later, after the stagger or from the queue, keep the same date; a
-plan before that first launch shows the current time. A job with
+`<date>_<batch>_<label>_<build_tag>_g<source>` by default. A run id that
+a run of another batch or label holds in the database is a problem of the
+plan (`launch.taken`), because the tree root and the spec derive from it.
+The first launch pins the date in `<state_dir>/sweep1/RUN_DATE`, so runs
+of the batch that start later, after the stagger or from the queue, keep
+the same date; a plan before that first launch shows the current time. A job with
 `host = "auto"` goes to a host with enough free cores, RAM and disk, with
 its scratch above the floor of the host, with fewer than `max_per_host`
 of your runs, and with every tool the job needs (`hosts.place`); when no
@@ -137,7 +139,10 @@ new file, and a driver that is running never sees its own file change
 
 For each run, `launch` first looks for the run's spec. When the spec
 exists, the job counts as launched and is skipped, so a batch is never
-launched twice; a new sweep needs a new batch name.
+launched twice; a new sweep needs a new batch name. After the stagger it
+checks the run id once more and writes the row of the run, which claims
+the id before the sync, so a launch that started in the same minute
+cannot sync over a tree that this one is about to fill.
 
 Then it copies the checked-out tree to the run tree on the host with
 `rsync -a --delete`, `.git` included, so the host gets a normal git

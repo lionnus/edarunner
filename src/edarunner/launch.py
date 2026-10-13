@@ -63,6 +63,15 @@ def pin_date(state: Path, batch: str, dry_run: bool = False) -> str:
     return date
 
 
+def taken(db: Database, run_id: str, batch: str, label: str, hint: str = "launch a minute later or rename the label") -> str:
+    """Why a new run of `label` in `batch` cannot take `run_id`, or "": a run of another batch or label holds it, and
+    its tree and spec are that run's."""
+    old = db.run(run_id)
+    if old is None or (old.get("batch"), old.get("label")) == (batch, label):
+        return ""
+    return f"run id {run_id} belongs to {old.get('label')}@{old.get('batch')}; {hint}"
+
+
 def build_tag(project: Project, job: Job, source: str = "") -> str:
     """The build tag of a job: the source hook, else config plus one token per override.
 
@@ -312,6 +321,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
                             build_tag=tag, source=source, overrides=job.overrides, vars=job.vars)
     run_id = render_run_id(project.source.run_id, v)
+    if why := taken(db, run_id, batch.batch, job.label):
+        problems.append(why)
     if _fresh(job) and sched:
         # The scheduler picks the host, and the tree lies where every node reads it.
         host = None if job.host == "auto" else job.host
@@ -516,6 +527,14 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         if started and stagger > 0:
             print(f"waiting {stagger} s (stagger) before {p.label}")
             time.sleep(stagger)
+        # Another launch may have taken the run id since the plan; the row claims it before the sync.
+        if why := taken(db, p.run_id, batch.batch, p.label):
+            p.problems.append(why)
+            census.unreserve(project, p.run_id)
+            print(f"{p.run_id}: {why}")
+            continue
+        if not dry_run:
+            db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         if not p.reuse or p.restore:
             ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.source, src_dir, dry_run), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
@@ -531,13 +550,15 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
             if not ok:
                 p.problems.append("sync failed")
                 census.unreserve(project, p.run_id)
+                if not dry_run:
+                    db.upsert_run({"run_id": p.run_id, "phase": "FAILED:sync", "state": "failed"})
+                    db.add_event("user", p.run_id, "launch", "sync failed")
                 continue
         path = write_spec(state, batch.batch, p, driver, dry_run)
         where = f"{p.run_id}: {p.host or backend.name} {p.root}"
         if dry_run:
             print(f"{where} (dry)")
             continue
-        db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
         try:
             handle = start(backend, db, project, p.run_id, p.host, path, driver)

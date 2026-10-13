@@ -35,12 +35,15 @@ entries. The `vars` table holds any other value the flow
 needs, and each key becomes a placeholder `{vars.<name>}` for the stage
 strings, `[env]` and `collect`.
 
-The run id is `<date>_<label>_<build_tag>_g<source>`. The build tag is the
-configuration name followed by `_KEYVALUE` for each override, such as
-`base_DW0`; a job without either has an empty build tag, and the run id
-drops that part with its `_`. A batch name is used once. A second
+The run id is `<date>_<batch>_<label>_<build_tag>_g<source>`. The build
+tag is the configuration name followed by `_KEYVALUE` for each override,
+such as `base_DW0`; a job without either has an empty build tag, and the
+run id drops that part with its `_`. A batch name is used once. A second
 launch of the same batch finds the specs and starts nothing, so a new
-sweep needs a new name.
+sweep needs a new name. The batch in the run id keeps apart two batches
+with the same labels that launch in the same minute. A project whose
+`run_id` template leaves out `{batch}` gets a plan problem instead, since
+a run id that another run holds names that run's tree.
 
 ## Check out and launch
 

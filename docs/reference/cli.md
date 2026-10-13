@@ -720,9 +720,11 @@ and starts one driver per run, stagger_s apart, with a waiting line
 before each wait. Prints &lt;n&gt; started, &lt;n&gt; queued, &lt;n&gt; with problems.
 --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec
-exists is already launched; a batch name is used once. A run whose
-submit fails ends FAILED:submit with the error in an event, and launch
-exits 1.
+exists is already launched; a batch name is used once. A job whose run
+id a run of another batch or label holds has a problem, and the row of
+a run claims its id before the sync. A run whose sync fails ends
+FAILED:sync. A run whose submit fails ends FAILED:submit with the error
+in an event, and launch exits 1.
 
 | Flag | Meaning |
 |---|---|

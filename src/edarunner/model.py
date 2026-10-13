@@ -487,8 +487,10 @@ class Source:
                             "the parameter `nested.<name>`, and their changes count in a dirty tag. A "
                             "git repository in the tree that this list does not name and git does not ignore stops "
                             "`edr checkout --dirty`", factory=list)
-    run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows",
-                      "{date}_{label}_{build_tag}_g{source}")
+    run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows, and "
+                      "`{batch}` keeps apart two batches with the same labels that launch in the same minute. A "
+                      "launch refuses a run id that a run of another batch or label holds",
+                      "{date}_{batch}_{label}_{build_tag}_g{source}")
     build_tag: str = doc("a hook that returns the build tag from `(config, overrides, worktree)` or from "
                          "`(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each "
                          "override, such as `base_FREQ500`", "")

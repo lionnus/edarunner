@@ -1176,6 +1176,8 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
                             source=source, overrides={})
     run_id = config.render(project.source.run_id, v)
     assert_run_id(run_id)
+    if why := launch.taken(c.db, run_id, a.batch, a.label, "track a minute later or rename the label"):
+        raise Refuse(why)
     v.update(run_id=run_id, tree_id=run_id, host=None, mount="", root=str(root))
     # The command runs as given; only the stage's steps, progress, budget, retry and tools come from edr.toml.
     spec = launch._spec(project, batch, job, [], [], v, stages=[replace(stage, cmd="", resume="")])
@@ -1248,6 +1250,8 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     spec = _import_spec(c.project, row, tasks, params)
     if (old := c.db.run(a.run_id)) and old.get("state") != "imported":
         raise Refuse(f"{a.run_id} exists in state {old.get('state')}; import records a new run or updates an imported one")
+    if why := launch.taken(c.db, a.run_id, a.batch, a.label, "give another --run-id"):
+        raise Refuse(why)
     batch = next((b for b in c.db.batches() if b["batch"] == a.batch), None)
     if batch and batch.get("source") and batch["source"] != a.source:
         raise Refuse(f"batch {a.batch} holds the source {batch['source']}; give {a.source} a batch of its own with --batch")
@@ -2319,9 +2323,11 @@ def _parser() -> argparse.ArgumentParser:
         before each wait. Prints <n> started, <n> queued, <n> with problems.
         --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
         queued; the watcher starts it when a host frees up. A job whose spec
-        exists is already launched; a batch name is used once. A run whose
-        submit fails ends FAILED:submit with the error in an event, and launch
-        exits 1.
+        exists is already launched; a batch name is used once. A job whose run
+        id a run of another batch or label holds has a problem, and the row of
+        a run claims its id before the sync. A run whose sync fails ends
+        FAILED:sync. A run whose submit fails ends FAILED:submit with the error
+        in an event, and launch exits 1.
         """, write=True, exits={Exit.DONE: "a run started or was queued", Exit.REFUSED: "a job has a problem, or a submit failed",
                                 Exit.NOTHING: "every job was already launched"})
     s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
