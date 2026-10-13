@@ -499,6 +499,8 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
     except (HostError, OSError) as e:
         db.add_event("watch", run_id, "resume", f"failed: {e}")
         return
+    # Its new driver lives, so until the first heartbeat the run is stale, not dead, and no continue starts on its tree.
+    db.upsert_run({"run_id": run_id, "state": "stale"})
     db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {handle}")
 
 

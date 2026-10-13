@@ -385,7 +385,8 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate", "attempt": 2}
     starts = [(r.host, str(r.driver), r.spec) for r in fake.requests]
     assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
-    assert env.db.run(hb["run_id"])["handle"] == "fake:1"
+    assert env.db.run(hb["run_id"])["handle"] == "fake:1" and env.db.run(hb["run_id"])["state"] == "stale"
+    assert watch.launch.live_on_tree(env.db, env.db.run(hb["run_id"])) == "c@demo on the same tree has not ended"
     rows = [tuple(r) for r in env.db.conn.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
     assert rows == [("synth", 1, "running")]  # the resumed driver writes attempt 2
     assert env.events().count((hb["run_id"], "resume")) == 2
