@@ -278,11 +278,12 @@ def _parameters(run: Row, spec: dict) -> dict[str, dict[str, Any]]:
 
 
 def _collect_key(project: Project, hb: dict, spec: dict) -> list | None:
-    """What a collect of the run copies, or None when there is nothing to copy; the watcher collects again when it
-    changes. Lists, not tuples: the key goes through JSON between cycles."""
+    """What a collect of the run copies, or None while the run lives and has nothing to copy; the watcher collects
+    again when it changes. A run that ended always has `log/`. Lists, not tuples: the key goes through JSON between
+    cycles."""
     finished, running = collect.stage_state(project, hb, collect.spec_stages(spec))
     tasks = sorted([s, t] for (s, t), phase in collect.task_phases(hb).items() if phase in ("done", "failed"))
-    if not (finished or tasks or running):
+    if board.is_live(hb) and not (finished or tasks or running):
         return None
     return [finished, tasks, hb.get("step") if running else None, board.is_live(hb)]
 

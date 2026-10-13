@@ -75,7 +75,7 @@ and project tables combine.
 ### The run ends `FAILED:runtime`
 
 `[runtime] setup` failed before the first stage, and `log/setup.log`
-says why. The usual cause is a tool that the head node has and the host
+says why; the watcher copies it to `data/results/<run_id>/log/`. The usual cause is a tool that the head node has and the host
 lacks, such as `uv` or `git` missing from the host's `PATH`; `edr check`
 does not look for them on the hosts. Add the tool's directory to the
 site `[env]`.

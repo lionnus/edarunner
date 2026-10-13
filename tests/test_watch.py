@@ -269,6 +269,17 @@ def test_a_failed_collect_runs_again_and_the_run_counts_as_collected_only_after_
     assert (env.project.data / "results" / run_id / "log" / "synth.log").is_file()
 
 
+def test_a_run_that_ended_before_its_first_stage_collects_its_log(env: Env) -> None:
+    hb = env.heartbeat("a", phase="FAILED:runtime", exit=5, stage=None,
+                       stages={"setup": {"status": "failed", "attempt": 1, "started": 1, "ended": 2, "exit": 1}})
+    (Path(hb["root"]) / "log" / "setup.log").write_text("uv: command not found\n")
+    live = env.heartbeat("b", phase="setup", stage=None)
+    env.cycle()
+    assert (env.project.data / "results" / hb["run_id"] / "log" / "setup.log").is_file()
+    assert watch.collected(env.project, env.db, env.db.run(hb["run_id"]), hb)
+    assert not (env.project.data / "results" / live["run_id"]).exists()
+
+
 def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
     root = Path(hb["root"])
