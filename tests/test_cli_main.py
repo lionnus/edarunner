@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import socket
+import sqlite3
+import sys
 from pathlib import Path
 
 from helpers_cli import edr
 
-from edarunner import checkout, cli, launch
+from edarunner import checkout, cli, home, launch
 from edarunner.hosts import HostProbe, Ssh
 
 
@@ -75,3 +79,57 @@ def test_check_probes_each_host_once_and_resolves_the_source(demo: Path, capsys,
     (tree / "source.json").write_text('{"source": "deadbee"}')
     monkeypatch.setattr(checkout, "find", lambda project, source: tree)
     assert edr(capsys, "check")[0] == 0 and planned[2:] == [("deadbee", ["local"])] * 2
+
+
+def _head(demo: Path, tmp_path: Path, monkeypatch, ssh_exit: str = 'eval "$last"') -> Path:
+    """A site with head = "head", this host host1, and an ssh on PATH that logs its arguments and runs the remote
+    command here with an edr that prints where it runs; returns the log."""
+    site = demo / "site.toml"
+    site.write_text('head = "head"\n' + site.read_text())
+    bin_, log = tmp_path / "bin", tmp_path / "ssh.log"
+    bin_.mkdir()
+    (bin_ / "ssh").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {log}\nfor a; do last=$a; done\n{ssh_exit}\n')
+    (bin_ / "edr").write_text('#!/bin/sh\necho "pwd=$(pwd) argv=$* fwd=$EDR_FORWARDED batch=$EDR_BATCH"\nexit 3\n')
+    for f in ("ssh", "edr"):
+        (bin_ / f).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+    monkeypatch.setattr(sys, "argv", [str(bin_ / "edr")])
+    monkeypatch.setattr(socket, "gethostname", lambda: "host1.example.org")
+    return log
+
+
+def test_a_host_other_than_the_head_runs_the_command_on_the_head_in_the_project_directory(demo: Path, capfd,
+                                                                                         monkeypatch, tmp_path: Path) -> None:
+    log = _head(demo, tmp_path, monkeypatch)
+    monkeypatch.chdir(demo / "jobs")
+    monkeypatch.setenv("EDR_BATCH", "b 1")
+    assert cli.main(["--json", "status"]) == 3
+    out = capfd.readouterr().out
+    assert out == f"pwd={demo / 'jobs'} argv=--json status fwd=1 batch=b 1\n"
+    assert "head" in log.read_text().splitlines() and "BatchMode=yes" in log.read_text()
+    home.register("demo", demo)
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["-P", "demo", "export", "--source", "abc1234", "--out", "exports/x"]) == 3
+    assert capfd.readouterr().out.startswith(f"pwd={os.path.realpath(demo)} argv=-P demo export --source abc1234 --out exports/x ")
+
+
+def test_the_head_and_init_run_here_and_a_failed_ssh_names_the_head(demo: Path, capsys, monkeypatch, tmp_path: Path) -> None:
+    log = _head(demo, tmp_path, monkeypatch, ssh_exit="exit 255")
+    code, _, err = edr(capsys, "status")
+    assert code == 255 and "ssh head failed; edr runs this command on the head node head" in err
+    monkeypatch.setattr(socket, "gethostname", lambda: "head")
+    log.unlink()
+    assert edr(capsys, "status")[0] == 0 and not log.exists()
+    monkeypatch.setattr(socket, "gethostname", lambda: "host1")
+    assert edr(capsys, "init", "--site", str(demo), "--dry-run")[0] in (0, 1) and not log.exists()
+
+
+def test_a_locked_database_on_a_network_filesystem_names_the_head(demo: Path, capsys, monkeypatch) -> None:
+    def locked(c, a):
+        c.project.site.head = "head"
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(cli, "cmd_status", locked)
+    monkeypatch.setattr(cli, "network_fs", lambda path: "nfs")
+    code, _, err = edr(capsys, "status")
+    assert code == 1 and "edr.db is locked on a network filesystem; only the head node opens it, so run edr on head" in err

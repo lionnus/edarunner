@@ -64,6 +64,31 @@ disk: below it no driver starts anything new on the host, and placement
 sends no run there. A host table may set its own. The floor belongs to
 the disk, so it is the same for every project that fills it.
 
+## Call edr from another host
+
+Only the head node opens the database. Set `head` to the name that
+`hostname` prints on the head node:
+
+```toml
+head = "head"
+```
+
+`edr` on any other host then runs each command on the head node over
+`ssh`, with the options of `[ssh]`. It runs there in the same directory,
+or in the project directory when `-P` names a project you are not in, so
+a relative path such as `--out exports/b1` lands in the project.
+`EDR_PROJECT` and `EDR_BATCH` go along. Input, output and the exit code
+pass through. When ssh fails, edr exits 255 and names the head node.
+Outside a project, edr reads `head` from `~/.config/edarunner/site.toml`.
+
+`edr init` and `edr track` run where you call them. The head node must
+find `edr` and the project directory at the same paths, which a home
+directory and a project on a shared filesystem give.
+
+Without `head`, a command on another host opens the database itself. On
+a network filesystem SQLite then finds the database locked, and edr
+refuses and tells you to run it on the head node.
+
 `examples/site/` is a complete site file with placeholder names.
 [reference/configuration.md](../reference/configuration.md#sitetoml)
 lists every key, and the alert channels are in [alerts.md](alerts.md).

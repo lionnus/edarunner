@@ -78,11 +78,13 @@ watcher has run for three cycles. `--timeout HOURS` ends the wait with
 exit 4. The output gives the proposed command for each run that is not
 done.
 
-An agent on another host calls it through ssh and starts it again when
-ssh drops, which exits 255:
+An agent on another host calls it the same way when the site sets
+`head` ([site.md](site.md#call-edr-from-another-host)), since edr then
+runs the command on the head node over ssh. It starts the call again
+when ssh drops, which exits 255:
 
 ```sh
-until ssh head ~/.local/bin/edr -P myflow wait --batch b1; [ $? -ne 255 ]; do sleep 60; done
+until edr -P myflow wait --batch b1; [ $? -ne 255 ]; do sleep 60; done
 ```
 
 ## Report to the phone

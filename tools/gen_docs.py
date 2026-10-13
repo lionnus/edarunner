@@ -53,7 +53,7 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [parameters.<name>]", [model.Parameter], ""),
     ("### [checks]", [model.Checks], ""),
     ("## site.toml", [(model.Site, ["scratch", "env", "ssh_options", "ssh_timeout_s", "tool_procs", "orphan_min_age_s",
-                                    "host_free_min_gb", "nfs_export"])], ""),
+                                    "host_free_min_gb", "nfs_export", "head"])], ""),
     ("### [scheduler]", [model.Scheduler], ""),
     ("### [hosts.<name>]", [model.Host], ""),
     ("### [tools.<name>]", [model.Tool], ""),

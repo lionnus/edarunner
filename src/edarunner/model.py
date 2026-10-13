@@ -199,6 +199,8 @@ class Site:
     host_free_min_gb: float = doc("free scratch below which the driver starts nothing new on a host and placement "
                                   "sends no run there; one floor per disk, whatever project fills it", 100.0)
     nfs_export: str = doc("a path the head node reads when ssh to a host fails at collect", "")
+    head: str = doc("the host name of the head node; `edr` on any other host runs the command there over ssh, "
+                    "in the same project directory", "")
     scheduler: Scheduler = field(default_factory=Scheduler)
     hosts: dict[str, Host] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
