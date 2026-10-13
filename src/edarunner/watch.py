@@ -526,7 +526,7 @@ def _pulse(project: Project) -> None:
 
 
 def _boards(project: Project, backend: Backend, db: Database, notifiers: list[Notifier], now: float,
-            pin: bool = True) -> None:
+            pin: bool = True, compare: bool = True) -> None:
     # The census of the last two cycles saves an ssh call per host.
     probes = census.probes(project, 2 * project.limits.heartbeat_s)
     if probes is None:
@@ -537,7 +537,8 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     rows = db.runs(live_batches=True)
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
                                                            db.host_samples(int(now) - 86400)))
-    config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))
+    if compare:
+        config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
     for n in notifiers if pin else []:
         n.board(text)
@@ -572,11 +573,13 @@ def _unstarted(project: Project, db: Database, run: Row, live: Live, why: str, s
 
 
 def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
-          dry_run: bool = False, backend: Backend | None = None, start: bool = True, served: bool = False) -> dict[str, str]:
+          dry_run: bool = False, backend: Backend | None = None, start: bool = True, served: bool = False,
+          compare: bool = True) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing.
 
     The backend answers once per cycle for the drivers of every live run. Without `start` the cycle
-    resumes and launches nothing. A `served` cycle leaves the pinned board to the supervisor."""
+    resumes and launches nothing. A `served` cycle leaves the pinned board to the supervisor. The cycle
+    rewrites compare.html with `compare` or after a `metrics` event."""
     now = time.time() if now is None else now
     backend = backend or make_backend(project.site, ssh)
     progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
@@ -613,6 +616,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
                     db.upsert_run({"run_id": hb["run_id"], "state": state})
                     actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
                     added = _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
+                    compare = compare or bool(added)
                     if added and (want := wanted(notifiers, "metrics")):
                         alert = alerts.metrics_alert(run, added, db.runs())
                         for n in want:
@@ -633,7 +637,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         return states
     if start:
         _launch_queued(project, ssh, db)
-    _boards(project, backend, db, notifiers, now, pin=not served)
+    _boards(project, backend, db, notifiers, now, pin=not served, compare=compare)
     db.set_store("progress", progress)
     db.set_store("notified", notes)
     n = int(config.load_json(project.state_dir / "watch.json").get("cycle") or 0) + 1
@@ -648,8 +652,9 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
     A config that stops loading gets one alert per error text, and the cycles go on with the last one
     that loaded and start nothing until the file loads again. Unless the supervisor started it
     (`served`), the first watcher that takes `serve.lock` keeps it, starts to take the commands of
-    the bot, and runs the checks across all projects after each cycle."""
-    failed, broken, serve = False, "", None
+    the bot, and runs the checks across all projects after each cycle. The first cycle that ends
+    writes compare.html, and a later one only after a `metrics` event."""
+    failed, broken, serve, first = False, "", None, True
     try:
         while True:
             t0 = time.time()
@@ -668,7 +673,9 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
                 for n in notifiers:
                     if hasattr(n, "project"):
                         n.project = project
-                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken, served=served)
+                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken, served=served,
+                      compare=first)
+                first = False
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
                 failed = True

@@ -1053,7 +1053,10 @@ else on the host.
 
 ## Compare runs
 
-Every watcher cycle writes `data/board/`:
+Every watcher cycle writes `board.json` and `status.html` in
+`data/board/`. It writes `compare.html` in its first cycle and then in
+each cycle that adds metrics, so a retire or an import shows there after
+the next new metric or a restart of the watcher:
 
 | File | Holds |
 |---|---|

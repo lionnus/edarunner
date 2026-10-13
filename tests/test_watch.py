@@ -294,6 +294,20 @@ def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) 
     assert text == f"1 new: area_cell_um2 at synth 0; area_cell_um2: 1 failed: {rows[1][1]}"
 
 
+def test_a_cycle_without_compare_writes_compare_html_only_after_a_metrics_event(env: Env) -> None:
+    page = env.project.data / "board" / "compare.html"
+    env.cycle(compare=False)
+    assert not page.exists()
+    hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
+    (Path(hb["root"]) / "reports" / "0").mkdir(parents=True)
+    (Path(hb["root"]) / "reports" / "0" / "area.rpt").write_text("i_top 1000.0\n")
+    env.cycle(NOW + 1, compare=False)
+    assert "b_nodw" in page.read_text()
+    page.unlink()
+    env.cycle(NOW + 2, compare=False)
+    assert not page.exists() and (page.parent / "status.html").exists()
+
+
 def test_done_and_metrics_alerts_go_only_to_a_user_who_asks_for_them(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth", elapsed_s=5400)
     (Path(hb["root"]) / "reports" / "0").mkdir(parents=True)
