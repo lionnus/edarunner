@@ -261,7 +261,9 @@ A task that failed was started, so it is not held; name it with
 
 `continue` refuses to guess in two cases. While a run on the tree has
 not ended, such as a continue that is still running, a second call
-starts nothing. And when the first stage left started but did not end
+starts nothing, with `--stage` or without. The one exception is the run
+you name when the watcher found it `dead`: its triage proposes
+`--stage` with `--from` on its own tree. And when the first stage left started but did not end
 with exit 0, because it failed, was killed or was stopped halfway, a new
 run would start that stage from its first step. A flow that sets up its
 library in that first step deletes the checkpoints that a resume needs,

@@ -249,6 +249,20 @@ def _fresh(job: Job) -> bool:
     return not job.reuse or bool(job.reuse.get("restore"))
 
 
+def _tree(runs: list[dict[str, Any]], run: dict[str, Any]) -> list[dict[str, Any]]:
+    """The runs of `runs` on the tree of `run`: `run` and every run with its root."""
+    return [r for r in runs if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
+
+
+def live_on_tree(db: Database, run: dict[str, Any]) -> str:
+    """Why no new run may start on the tree of `run`, or "": a run on it has not ended. `run` itself does not count
+    while the watcher has found it dead, since its triage proposes `edr continue --stage` for its own tree."""
+    everyone = db.runs()
+    live = [r for r in _tree(everyone, run) if board.is_live(r)
+            and not (r["run_id"] == run["run_id"] and r.get("state") == "dead")]
+    return f"{board.handle(live[0], everyone)} on the same tree has not ended" if live else ""
+
+
 def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[list[str], list[str], str]:
     """The stages the tree of `run` has left, the held tasks of the first of them, and why `edr continue` without
     `--stage` does not run them, or "".
@@ -258,8 +272,7 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
     run on the tree held it back or skipped it, and no run on the tree started it. The stages left follow the last
     stage that ended with exit 0 and holds no task. A run without a spec, such as an imported one, adds no stage.
     """
-    everyone = db.runs()
-    runs = [r for r in everyone if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
+    runs = _tree(db.runs(), run)
     names = {n for r in runs for n in collect.spec_stages(collect.load_spec(project, r)) or []}
     rows = [s for r in runs for s in db.stage_runs(r["run_id"])]
     last = {s["stage"]: s for s in sorted((s for s in rows if not s["task"]), key=lambda s: (s["started"] or 0, s["ended"] or 0))}
@@ -270,8 +283,8 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
     ok = [i for i, n in enumerate(order) if n in last and last[n]["exit"] == 0 and not held.get(n)]
     left = order[ok[-1] + 1:] if ok else order
     tasks = held.get(left[0], []) if left else []
-    if live := [board.handle(r, everyone) for r in runs if board.is_live(r)]:
-        return left, tasks, f"{live[0]} on the same tree has not ended"
+    if why := live_on_tree(db, run):
+        return left, tasks, why
     # A first stage that ended with exit 0 is left for its held tasks alone.
     if not left or left[0] not in last or last[left[0]]["exit"] == 0:
         return left, tasks, ""

@@ -1095,6 +1095,8 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
             c.db.add_event("user", run_id, "collect", f"{a.collect}: {res.files} files, {len(res.failures)} failed")
         c.emit("\n".join([f"{run_id}: {res.files} files" + (" (dry)" if a.dry_run else ""), *res.failures]), asdict(res))
         return Exit.HOSTS if res.failures else Exit.DONE
+    if why := launch.live_on_tree(c.db, row):
+        raise Refuse(f"{h}: {why}")
     stages, held = a.stage, []
     if not stages:
         stages, held, why = launch.stages_left(project, c.db, row)
@@ -2340,11 +2342,13 @@ def _parser() -> argparse.ArgumentParser:
         run on the tree was launched with a list of stages, and the stages left
         are those after the last one that ended with exit 0, so a run that
         ended OVER_BUDGET or STOPPED at the end of a stage goes on with the next
-        one. It refuses while a run on the tree has not ended. It also refuses
-        when the first stage left started but did not end with exit 0; name the
-        stages with --stage then, and a checkpoint with --from when the stage
-        has a resume command, because a stage that runs from its start can
-        delete the checkpoints it needs.
+        one. It refuses when the first stage left started but did not end with
+        exit 0; name the stages with --stage then, and a checkpoint with --from
+        when the stage has a resume command, because a stage that runs from its
+        start can delete the checkpoints it needs.
+
+        With or without --stage, continue refuses while a run on the tree has
+        not ended, except the run itself when the watcher found it dead.
 
         --stage names the stages to run, in the order given. The new run gets
         the label <label>.<stage> for one stage and <label>.<first>-<last> for

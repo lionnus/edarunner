@@ -1210,6 +1210,22 @@ def test_two_continues_of_one_stage_in_one_minute_get_runs_of_their_own(demo: Pa
     assert ids[0] != ids[1] and "_a.export.2_" in ids[1]
 
 
+def test_continue_with_stage_refuses_a_live_tree_except_a_dead_run_itself(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "stage:pnr")
+    argv = ("continue", "a@demo", "--stage", "pnr", "--from", "cts", "--dry-run")
+    code, _, err = edr(capsys, *argv)
+    assert code == 1 and "a@demo: a@demo on the same tree has not ended" in err
+    with Database(demo / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": a, "state": "dead"})  # the triage proposes continue --stage --from for it
+    code, out, _ = edr(capsys, "--json", *argv)
+    assert code == 0 and json.loads(out)["data"]["spec"]["start_at"] == {"stage": "pnr", "checkpoint": "cts"}
+    with Database(demo / "data" / "edr.db") as db:  # another run on the tree has not ended
+        db.upsert_run({"run_id": "20260926_1300_a.pnr_demo_gabc1234", "batch": "demo", "label": "a.pnr",
+                       "root": db.run(a)["root"], "phase": "stage:pnr", "state": "running"})
+    code, _, err = edr(capsys, *argv)
+    assert code == 1 and "a@demo: a.pnr@demo on the same tree has not ended" in err
+
+
 def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monkeypatch) -> None:
     a = seed(demo, "a", "OVER_BUDGET:pnr")
     ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
