@@ -2763,9 +2763,10 @@ def _forward(c: Ctx, argv: list[str]) -> int | None:
     if site is None or not site.head or site.head.split(".")[0] == socket.gethostname().split(".")[0]:
         return None
     cwd = Path(os.getcwd())
-    wd = cwd if root is None or root in (cwd, *cwd.parents) else root
+    # A project unknown here may sit on a disk of the head only; the head then enters its directory itself.
+    wd = "" if root is None else f"cd {shlex.quote(str(cwd if root in (cwd, *cwd.parents) else root))} && "
     env = [f"{k}={shlex.quote(os.environ[k])}" for k in ("EDR_PROJECT", "EDR_BATCH") if os.environ.get(k)]
-    text = f"cd {shlex.quote(str(wd))} && EDR_FORWARDED=1 {' '.join(env)} exec {shlex.join([os.path.abspath(sys.argv[0]), *argv])}"
+    text = f"{wd}EDR_FORWARDED=1 {' '.join(env)} exec {shlex.join([os.path.abspath(sys.argv[0]), *argv])}"
     code = subprocess.run(["ssh", *site.ssh_options, site.head, "sh -c " + shlex.quote(text)]).returncode
     if code == 255:
         print(f"edr: ssh {site.head} failed; edr runs this command on the head node {site.head}, which opens the "
@@ -2786,6 +2787,10 @@ def main(argv: list[str] | None = None) -> int:
         forwarded = _forward(c, argv)
         if forwarded is not None:
             return forwarded
+        if os.environ.get("EDR_FORWARDED") and a.command not in _HERE:
+            root, cwd = c.project_dir(), Path(os.getcwd())
+            if root is not None and root not in (cwd, *cwd.parents):
+                os.chdir(root)
         with contextlib.redirect_stdout(buf) if a.json else contextlib.nullcontext():
             if a.command in _REGISTERS and not a.dry_run:
                 home.register(c.project.project, c.project.root)
