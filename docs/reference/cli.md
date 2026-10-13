@@ -168,7 +168,9 @@ run, the metrics, and the log tail from the heartbeat. A finished run
 shows driver exit &lt;n&gt; (&lt;phase&gt;): the code of the driver, whose phase
 names the stage that failed. The command exit column of the stage table
 is the code of the stage command itself. The tasks line with the done
-and failed counts appears only for a run with a task group.
+and failed counts appears only for a run with a task group. With
+--live, a live run also shows what its host or scheduler says of the
+driver, such as running, pending, suspended or gone.
 
 --all prints the board of every registered project in one table, with
 the project in the first column; it needs no project directory.
@@ -775,7 +777,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 | `--stage S ...` | the stages to run on the tree, in this order; default the stages the tree has left |
 | `--tasks ID ...` | the tasks of a task group; default the job's |
 | `--from CHECKPOINT` | resume the first stage from this checkpoint |
-| `--on HOST` | the host; default auto |
+| `--on HOST` | the host; only the host of the tree passes, and it is the default |
 | `--parallel N` | tasks at once; default the stage's parallel |
 | `--collect NAME` | fetch a collect_on_request list instead |
 

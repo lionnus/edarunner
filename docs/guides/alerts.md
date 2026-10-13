@@ -682,11 +682,13 @@ See which tasks failed and the log tail:
 edr status b_nodw@demo
 ```
 
-`failed`: the run ended `FAILED`.
+`failed`: the run ended `FAILED`. The exit code is the driver's, not
+the tool's: 5 for a stage command that failed, 4 for a tool gate that
+gave up, 3 for too little free disk.
 
 ```
 🔴 demo: failed run b_nodw@demo
-The run ended in stage synth with exit code 1.
+The run ended in stage synth with exit code 5.
 
 stage: synth, step 3 elaborate
 host: hostA

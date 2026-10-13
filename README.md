@@ -154,8 +154,8 @@ copies a one-file driver to the host and starts it. The driver runs the
 stages and writes a heartbeat file every minute. `edr serve` on the head
 node keeps one watcher per project, which reads the heartbeats, collects
 the reports, extracts the metrics and sends the alerts. The watcher never
-deletes a run tree; the only files it removes are expired licence-seat
-leases and launch reservations under `~/.edr/`.
+deletes a run tree; the only files it removes are
+stale licence-seat leases and spent launch reservations under `~/.edr/`.
 [docs/how-it-works.md](docs/how-it-works.md) follows one run through
 every step, and [docs/guides/projects.md](docs/guides/projects.md)
 shows several projects on the same machines.

@@ -114,7 +114,8 @@ with an error that names it.
 When the batch's source is not checked out yet, `plan` and `launch`
 check out a clean ref for you.
 
-A plan is one of the read commands, which never create a file. Every
+Apart from that checkout, a plan writes nothing: no date pin, no spec
+and no reservation. `edr plan --dry-run` skips the checkout too. Every
 command that writes takes `--dry-run`, which prints every path and every
 command with `(dry)` or `dry:` and writes nothing at all: no date pin,
 no spec, no driver copy, no stop or keep file, no database row or event,
@@ -275,8 +276,8 @@ text, and the watcher goes on with the last config that loaded: it
 still reads the heartbeats, alerts and collects, but it resumes and
 launches nothing until the file loads again (`watch.run_forever`). edr
 never deletes a file of yours on its own: the only files a watcher
-removes are expired seat leases and reservations in `~/.edr/`. One cycle
-does this, in order:
+removes are stale licence-seat leases and spent launch reservations
+under `~/.edr/`. One cycle does this, in order:
 
 1. It reads the heartbeat of every run in every batch without a
    `RETIRED` file, and writes the runs, their stages and steps and a

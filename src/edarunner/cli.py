@@ -1955,7 +1955,9 @@ def _parser() -> argparse.ArgumentParser:
         shows driver exit <n> (<phase>): the code of the driver, whose phase
         names the stage that failed. The command exit column of the stage table
         is the code of the stage command itself. The tasks line with the done
-        and failed counts appears only for a run with a task group.
+        and failed counts appears only for a run with a task group. With
+        --live, a live run also shows what its host or scheduler says of the
+        driver, such as running, pending, suspended or gone.
 
         --all prints the board of every registered project in one table, with
         the project in the first column; it needs no project directory.
@@ -2360,7 +2362,7 @@ def _parser() -> argparse.ArgumentParser:
                                                            "stages the tree has left")
     s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
     s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the first stage from this checkpoint")
-    s.add_argument("--on", metavar="HOST", help="the host; default auto")
+    s.add_argument("--on", metavar="HOST", help="the host; only the host of the tree passes, and it is the default")
     s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
     s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
     s = command("track", "run a command under the driver here, as a run of the project", """

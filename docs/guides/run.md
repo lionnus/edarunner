@@ -123,6 +123,12 @@ metrics, `--source` and `--csv`.
 | `STOPPED` | 10 | a stop file ended the run |
 | `KILLED:<signal>` | 10 | a signal ended the run |
 
+A task group holds the tasks it has not started when a stop file, a
+budget or a `looping` verdict stops it. After `looping` the run goes on
+with the next stage and ends `INCOMPLETE` with the held tasks in `k`.
+After a stop file or a budget it ends `STOPPED` or `OVER_BUDGET`, and
+`edr continue <handle>` runs the held tasks.
+
 Exit 2 also means bad usage, a spec that does not load, or a run tree
 that is not a directory; then no heartbeat is written and the reason is
 in the driver log. A terminal phase sets `exit`, and from then on the
@@ -273,8 +279,9 @@ stage, such as `base.power`, and `<label>.<first>-<last>` for several,
 such as `base.export-power`; when the batch has that label already, the
 next one is `base.export-power.2`. The new run takes the job of the run
 it continues, with its tasks, vars and overrides, also when `continue`
-made that run. `--tasks` names the tasks, `--parallel` the width, and
-`--on` another host when the tree is reachable there.
+made that run. `--tasks` names the tasks and `--parallel` the width. The
+new run goes to the host of the tree; `--on` with any other host is
+refused, also when that host can reach the tree.
 
 On the phone, the alert of a run that ended `OVER_BUDGET` or `STOPPED`
 with stages or held tasks left has a Continue button that does the same,

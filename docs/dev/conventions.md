@@ -16,7 +16,8 @@ request.
   for the whole flow.
 - A read command creates nothing.
 - The watcher never deletes a run tree. A budget stops or kills a run,
-  and the only files the watcher removes are expired seat leases.
+  and the only files the watcher removes are
+  stale licence-seat leases and spent launch reservations under `~/.edr/`.
 - A stop signals the pids the driver recorded, never a session name or
   a process pattern.
 - A loop that continues after a failure counts what it skipped and
