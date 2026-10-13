@@ -2629,7 +2629,9 @@ def _parser() -> argparse.ArgumentParser:
         the file is missing or older than three cycles, it alerts and exits
         1, so a cron line can run it.
 
-        --unit prints the systemd user unit. When this edr runs from a
+        --unit prints the systemd user unit, with ConditionHost set to this
+        host, so a home shared over NFS starts the supervisor on this host
+        only. When this edr runs from a
         checkout, an editable install, it first installs a copy of the
         checkout's HEAD commit with uv tool install, and the unit runs that
         copy, so a later edit or git pull in the checkout never changes the

@@ -278,15 +278,18 @@ def pinned() -> tuple[list[str], str, str]:
 
 
 def unit(exe: str, what: str) -> str:
-    """The systemd user unit that runs `edr serve` from `exe`."""
+    """The systemd user unit that runs `edr serve` from `exe`, on this host only."""
+    # A home on NFS shares the unit with every host; ConditionHost compares with gethostname(), as systemd does.
     return f"""# edr serve for every project of the user: {what}.
 # Install it:
 #   edr serve --unit > ~/.config/systemd/user/edr-serve.service
 #   systemctl --user daemon-reload && systemctl --user enable --now edr-serve
 # The unit survives a logout only after: loginctl enable-linger $USER
+# It starts on {socket.gethostname()} only; render it again on the host that should run the supervisor.
 [Unit]
 Description=edr serve for every project of %u
 After=network-online.target
+ConditionHost={socket.gethostname()}
 
 [Service]
 Type=notify
