@@ -1068,6 +1068,8 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     problems = [r["problems"] for r in rows if r["problems"]]
     c.emit(Text.assemble((f"{started} started", "green" if started else ""), ", ", (f"{queued} queued", "cyan" if queued else ""),
                          ", ", (f"{len(problems)} with problems", "red" if problems else ""), " (dry)" if a.dry_run else ""), rows)
+    if any(p.startswith("submit failed") for ps in problems for p in ps):
+        return Exit.REFUSED
     if started or queued or (a.dry_run and not problems):
         return Exit.DONE
     # A second launch of the same batch names every old job "already launched"; that is nothing to do.
@@ -1133,13 +1135,12 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
         p.spec["start_at"]["checkpoint"] = a.from_
     driver = sync.publish_driver(state, launch.DRIVER_SRC, a.dry_run)
     spec_path = launch.write_spec(state, batch.batch, p, driver, a.dry_run)
+    if not a.dry_run:
+        c.db.upsert_run({**launch.run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
+        c.db.add_event(actor, p.run_id, "continue", f"{board.left_text(stages, held)} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
+        launch.start(c.backend, c.db, project, p.run_id, p.host, spec_path, driver, actor)
     c.emit(f"{p.run_id}: {board.left_text(stages, held)} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
            {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
-    if a.dry_run:
-        return Exit.DONE
-    c.db.upsert_run({**launch.run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
-    c.db.add_event(actor, p.run_id, "continue", f"{board.left_text(stages, held)} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
-    launch.submit(c.backend, c.db, project, p.run_id, p.host, spec_path, driver)
     return Exit.DONE
 
 
@@ -2308,8 +2309,10 @@ def _parser() -> argparse.ArgumentParser:
         before each wait. Prints <n> started, <n> queued, <n> with problems.
         --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
         queued; the watcher starts it when a host frees up. A job whose spec
-        exists is already launched; a batch name is used once.
-        """, write=True, exits={Exit.DONE: "a run started or was queued", Exit.REFUSED: "a job has a problem",
+        exists is already launched; a batch name is used once. A run whose
+        submit fails ends FAILED:submit with the error in an event, and launch
+        exits 1.
+        """, write=True, exits={Exit.DONE: "a run started or was queued", Exit.REFUSED: "a job has a problem, or a submit failed",
                                 Exit.NOTHING: "every job was already launched"})
     s.add_argument("batch", nargs="?", help="the batch name; default EDR_BATCH, else the newest")
     s.add_argument("--only", metavar="L", help="labels, comma separated")
@@ -2334,10 +2337,13 @@ def _parser() -> argparse.ArgumentParser:
         host (default: the tree's host). --from fills {checkpoint} in the resume
         command of the first stage, and is refused when that stage has none.
 
+        A new run whose submit fails ends FAILED:submit with the error in an
+        event, so it does not block the tree.
+
         --collect NAME instead copies the collect_on_request list NAME of every
         stage from the tree into data/results/<run id>/.
-        """, write=True, exits={Exit.REFUSED: "the plan has a problem, --from names a stage without resume, or "
-                                              "without --stage the tree cannot go on by itself",
+        """, write=True, exits={Exit.REFUSED: "the plan has a problem, --from names a stage without resume, "
+                                              "without --stage the tree cannot go on by itself, or the submit failed",
                                 Exit.NOTHING: "without --stage, no stage is left on the tree",
                                 Exit.HOSTS: "with --collect, a copy failed"})
     s.add_argument("handle", help=HANDLE)

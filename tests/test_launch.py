@@ -359,6 +359,25 @@ def test_submit_records_the_cores_the_run_reserves(env, tmp_path: Path) -> None:
     assert db.run("r1")["cores"] == 16 and board.cost(db.run("r1"), now=1000 + 7200) == 32.0
 
 
+class BrokenBackend(FakeBackend):
+    def submit(self, req: Request) -> Handle:
+        raise KeyError("runs: unknown columns ['cores']")
+
+
+def test_a_submit_that_raises_ends_the_run_and_prints_no_start(env, tmp_path: Path, monkeypatch, capsys) -> None:
+    project, batch, ssh, db = env
+    synth_only(batch)
+    monkeypatch.setattr(launch.sync, "sync_tree", lambda *a, **k: True)
+    backend = BrokenBackend()
+    backend.probes = {"local": ssh.probe("local")}
+    (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path), backend=backend)
+    run = db.run(row["run_id"])
+    assert not row["started"] and (run["phase"], run["state"]) == ("FAILED:submit", "failed")
+    assert row["problems"] == ["submit failed: \"runs: unknown columns ['cores']\""]
+    assert [e["text"] for e in db.events()][1:] == ["submit failed: \"runs: unknown columns ['cores']\""]
+    assert capsys.readouterr().out == f"{row['run_id']}: submit failed: \"runs: unknown columns ['cores']\"\n"
+
+
 def test_launch_says_when_it_waits_for_the_stagger(env, tmp_path: Path, monkeypatch, capsys) -> None:
     project, batch, ssh, db = env
     waits: list[float] = []

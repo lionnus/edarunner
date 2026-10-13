@@ -431,7 +431,8 @@ def test_launch_exit_codes(demo: Path, capsys, monkeypatch) -> None:
     old, sync_failed = row(False, False, "already launched: x exists"), row(False, False, "sync failed")
     monkeypatch.setattr(cli.Ctx, "batch", lambda self, name, dry_run=False: name)
     cases = [([row(True), old], 0), ([row(False, True), old], 0), ([row(True), sync_failed], 0),
-             ([old, old], 2), ([], 2), ([sync_failed, old], 1), ([sync_failed], 1)]
+             ([old, old], 2), ([], 2), ([sync_failed, old], 1), ([sync_failed], 1),
+             ([row(True), row(False, False, "submit failed: rc 1")], 1)]
     for rows, code in cases:
         monkeypatch.setattr(launch, "launch", lambda *a, **k: rows)
         assert edr(capsys, "launch", "demo")[0] == code, rows
@@ -1142,6 +1143,24 @@ def test_continue_without_stage_refuses_a_stage_that_did_not_end_with_exit_0(dem
     assert code == 2 and out == "e@demo: no stage left on its tree\n"
     with Database(demo / "data" / "edr.db") as db:
         assert db.events() == []
+
+
+def test_a_continue_whose_submit_fails_ends_its_run_and_does_not_block_the_tree(demo: Path, capsys, monkeypatch) -> None:
+    a = seed(demo, "a", "OVER_BUDGET:pnr")
+    ran(demo, a, "OVER_BUDGET:pnr", {"synth": ("done", 0), "pnr": ("over_budget", 0)})
+    edr(capsys, "status")
+
+    def refuse(*args):
+        raise sqlite3.OperationalError("table runs has no column named cores")
+
+    monkeypatch.setattr(launch, "submit", refuse)
+    for _ in range(2):  # the failed run has ended, so a second continue is not refused for the tree
+        code, out, err = edr(capsys, "continue", "a@demo")
+        assert code == 1 and out == "" and "submit failed: table runs has no column named cores" in err
+    with Database(demo / "data" / "edr.db") as db:
+        failed = [r for r in db.runs() if r["run_id"] != a]
+        assert [(r["phase"], r["state"]) for r in failed] == [("FAILED:submit", "failed")] * 2
+        assert [e["kind"] for e in db.events(run_id=failed[0]["run_id"])] == ["continue", "launch"]
 
 
 def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monkeypatch) -> None:

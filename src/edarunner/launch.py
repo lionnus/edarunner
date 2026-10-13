@@ -460,6 +460,20 @@ def submit(backend: Backend, db: Database, project: Project, run_id: str, host: 
     return handle
 
 
+def start(backend: Backend, db: Database, project: Project, run_id: str, host: str | None, spec_path: Path,
+          driver: Path, actor: str = "user") -> Handle:
+    """Submit a new run. A run whose submit fails ends FAILED:submit with the error in an event, and the error is
+    raised as Refuse: its driver never started, so a live phase would wait for a heartbeat for ever and block the
+    next run on its tree."""
+    try:
+        return submit(backend, db, project, run_id, host, spec_path, driver)
+    except Exception as e:
+        census.unreserve(project, run_id)
+        db.upsert_run({"run_id": run_id, "phase": "FAILED:submit", "state": "failed"})
+        db.add_event(actor, run_id, "launch", f"submit failed: {e}")
+        raise Refuse(f"{run_id}: submit failed: {e}") from e
+
+
 def _src_dir(project: Project, source: str, src_dir: Path | None, dry_run: bool = False) -> Path:
     if src_dir is not None:
         return Path(src_dir)
@@ -520,21 +534,19 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
                 census.unreserve(project, p.run_id)
                 continue
         path = write_spec(state, batch.batch, p, driver, dry_run)
-        print(f"{p.run_id}: {p.host or backend.name} {p.root}" + (" (dry)" if dry_run else ""))
+        where = f"{p.run_id}: {p.host or backend.name} {p.root}"
         if dry_run:
+            print(f"{where} (dry)")
             continue
         db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
         try:
-            handle = submit(backend, db, project, p.run_id, p.host, path, driver)
-        except hosts.HostError as e:
-            # A run the backend refused never starts; a live phase would wait for a heartbeat for ever.
-            p.problems.append(f"submit failed: {e}")
-            census.unreserve(project, p.run_id)
-            db.upsert_run({"run_id": p.run_id, "phase": "FAILED:submit", "state": "failed"})
-            db.add_event("user", p.run_id, "launch", f"submit failed: {e}")
-            print(f"{p.run_id}: submit failed: {e}")
+            handle = start(backend, db, project, p.run_id, p.host, path, driver)
+        except Refuse as e:
+            p.problems.append(f"submit failed: {e.__cause__}")
+            print(e)
             continue
+        print(where)
         row["pid"], row["handle"] = handle.pid, str(handle)
         row["started"] = True
         started += 1
