@@ -13,7 +13,7 @@ from helpers_results import demo_qor
 from helpers_watch import NEW, NOW, Env, Rec, rid
 
 from edarunner import board, census, collect, config, launch, watch
-from edarunner.backend import Live
+from edarunner.backend import Live, LocalBackend
 from edarunner.hosts import HostProbe
 from edarunner.model import Parameter
 from helpers_backend import FakeBackend
@@ -249,6 +249,37 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 12
 
 
+def test_a_failed_collect_runs_again_and_the_run_counts_as_collected_only_after_it(env: Env, monkeypatch) -> None:
+    hb = env.heartbeat("a", phase="done", exit=0)
+    run_id, real, calls = hb["run_id"], collect.collect_run, []
+
+    def flaky(*a, **k):
+        calls.append(run_id)
+        return collect.CollectResult(failures=["log/: rsync rc 255: no answer"]) if len(calls) < 3 else real(*a, **k)
+
+    monkeypatch.setattr(collect, "collect_run", flaky)
+    env.cycle()
+    env.cycle(NOW + 1)
+    assert len(calls) == 2 and not watch.collected(env.project, env.db, env.db.run(run_id), hb)
+    env.cycle(NOW + 2)  # the tree has no reports/: a missing source is not retried
+    env.cycle(NOW + 3)
+    assert len(calls) == 3 and watch.collected(env.project, env.db, env.db.run(run_id), hb)
+    texts = [e["text"] for e in env.db.events(run_id=run_id) if e["kind"] == "collect"]
+    assert len(texts) == 2 and texts[0].endswith("no answer") and "rsync rc 23" in texts[1]
+    assert (env.project.data / "results" / run_id / "log" / "synth.log").is_file()
+
+
+def test_a_run_that_ended_before_its_first_stage_collects_its_log(env: Env) -> None:
+    hb = env.heartbeat("a", phase="FAILED:runtime", exit=5, stage=None,
+                       stages={"setup": {"status": "failed", "attempt": 1, "started": 1, "ended": 2, "exit": 1}})
+    (Path(hb["root"]) / "log" / "setup.log").write_text("uv: command not found\n")
+    live = env.heartbeat("b", phase="setup", stage=None, stages={})
+    env.cycle()
+    assert (env.project.data / "results" / hb["run_id"] / "log" / "setup.log").is_file()
+    assert watch.collected(env.project, env.db, env.db.run(hb["run_id"]), hb)
+    assert not (env.project.data / "results" / live["run_id"]).exists()
+
+
 def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
     root = Path(hb["root"])
@@ -314,7 +345,8 @@ def test_a_stage_that_did_not_exit_0_keeps_the_steps_it_finished(env: Env, phase
 
 
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
-    hb = env.heartbeat("c", age=200, step=2, step_name="elaborate")
+    synth = {"status": "running", "attempt": 1, "started": NOW - 3000, "ended": None, "exit": None}
+    hb = env.heartbeat("c", age=200, step=2, step_name="elaborate", stages={"synth": synth})
     spec_path = env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json"
     spec_path.write_text(json.dumps({"run_id": hb["run_id"], "start_at": {"stage": "synth", "checkpoint": None},
                                      "driver": "/x/bin/edr_driver-0badc0de.py",
@@ -325,12 +357,12 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     assert [e for e in env.events() if e[1] == "resume"] == [(hb["run_id"], "resume")]
     env.ssh.alive[4300] = False
     assert env.cycle(backend=fake)[hb["run_id"]] == "dead"
-    assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate"}
+    assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate", "attempt": 2}
     starts = [(r.host, str(r.driver), r.spec) for r in fake.requests]
     assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
     assert env.db.run(hb["run_id"])["handle"] == "fake:1"
     rows = [tuple(r) for r in env.db.conn.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
-    assert rows == [("synth", 1, "running"), ("synth", 2, "resumed")]
+    assert rows == [("synth", 1, "running")]  # the resumed driver writes attempt 2
     assert env.events().count((hb["run_id"], "resume")) == 2
     env.cycle(NOW + 1, backend=fake)
     assert len(fake.requests) == 1
@@ -394,6 +426,16 @@ def test_stage_rows_follow_the_stages_map(env) -> None:
                                        (hb2["run_id"],)).fetchone()) == ("failed", 5)
     assert env.db.conn.execute("SELECT status FROM stage_runs WHERE run_id=? AND stage='synth'",
                                  (hb3["run_id"],)).fetchone()[0] == "killed"
+
+
+def test_a_heartbeat_at_a_gate_adds_no_row_for_the_stage_that_waits(env: Env) -> None:
+    first = env.heartbeat("g1", phase="gate:synth", stages={})
+    done = {"synth": {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}}
+    later = env.heartbeat("g2", phase="gate:pnr", stage="pnr", stages=done)
+    assert env.cycle() == {first["run_id"]: "running", later["run_id"]: "running"}
+    rows = [tuple(r) for r in env.db.conn.execute("SELECT run_id, stage, status FROM stage_runs ORDER BY run_id")]
+    assert rows == [(later["run_id"], "synth", "done")]
+    assert (env.db.run(first["run_id"])["phase"], env.db.run(later["run_id"])["stage"]) == ("gate:synth", "pnr")
 
 
 def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:
@@ -545,6 +587,24 @@ def test_a_scheduler_job_before_its_first_heartbeat(env: Env) -> None:
     assert env.cycle(NOW + 2, backend=fake)[rid("p")] == "failed"
     assert env.db.run(rid("p"))["phase"] == "FAILED:scheduler" and rid("q") not in env.cycle(NOW + 3, backend=fake)
     assert fake.asked == [["1.0"]] * 3
+
+
+def test_a_driver_that_ends_before_its_first_heartbeat_fails_the_run(env: Env) -> None:
+    driver = env.tmp / "stub_driver.py"
+    driver.write_text("import sys\nsys.stderr.write('stub: cannot start\\n')\nsys.exit(1)\n")
+    run_id = rid("s")
+    env.db.upsert_run({"run_id": run_id, "batch": "demo", "label": "s", "phase": "setup", "host": "local"})
+    spec = env.project.state_dir / "demo" / f"{run_id}.spec.json"
+    config.save_json(spec, {"run_id": run_id})
+    backend = LocalBackend(env.ssh)
+    h = launch.submit(backend, env.db, env.project, run_id, "local", spec, driver)
+    deadline = time.time() + 10
+    while backend.alive([h])[h][0] is not Live.GONE and time.time() < deadline:
+        time.sleep(0.05)
+    assert env.cycle(backend=backend)[run_id] == "failed"
+    assert env.db.run(run_id)["phase"] == "FAILED:setup"
+    assert env.notifier.sent == [("failed", run_id)] and env.notifier.alerts[run_id].log == ["stub: cannot start"]
+    assert run_id not in env.cycle(NOW + 1, backend=backend)
 
 
 def test_a_fresh_census_saves_the_probe_of_the_boards(env: Env, user_root: Path, monkeypatch) -> None:

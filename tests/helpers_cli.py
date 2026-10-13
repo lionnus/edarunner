@@ -8,8 +8,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from edarunner import board, cli, config
+from edarunner import board, cli, config, watch
 from edarunner.db import Database
+from edarunner.hosts import Ssh
 
 DATE = "20260926_1200"
 
@@ -47,11 +48,19 @@ def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batc
         (run_root / "log").mkdir()
         row["root"] = str(run_root)
         terminal = str(phase).startswith(board.TERMINAL)
+        synth = {"status": "running", "attempt": 1, "started": now - 100, "ended": None, "exit": None}
         hb = {**row, "driver_pid": pid, "pgids": [], "stage": "synth", "step": 2, "step_name": "elaborate",
-              "tasks": {}, "exit": 0 if terminal else None, "last_log": "step 2 elaborate"}
+              "stages": {"synth": synth}, "tasks": {}, "exit": 0 if terminal else None, "last_log": "step 2 elaborate"}
         (project.state_dir / batch).mkdir(parents=True, exist_ok=True)
         (project.state_dir / batch / f"{run_id}.json").write_text(json.dumps(hb))
     with Database(project.data / "edr.db") as db:
         db.upsert_batch({"batch": batch, "project": "demo", "source": source})
         db.upsert_run(row)
     return run_id
+
+
+def watch_once(root: Path) -> None:
+    """One watcher cycle that starts nothing: it collects every run it can."""
+    project = config.load_project(root)
+    with Database(project.data / "edr.db") as db:
+        watch.cycle(project, Ssh(project.site), db, [], start=False)

@@ -1539,8 +1539,7 @@ def _refuse_shared_root(c: Ctx, row: Row, host: str, root: str, retiring: set[st
                      "stop it first")
     if prune:
         return
-    results = c.project.data / "results"
-    uncollected = [r["run_id"] for r in others if not (results / r["run_id"] / "log").is_dir()]
+    uncollected = [r["run_id"] for r in others if not watch.collected(c.project, c.db, r, c.heartbeat(r))]
     if uncollected:
         raise Refuse(f"{row['run_id']}: root {root} is shared with a run whose results are not collected "
                      f"({', '.join(uncollected[:3])}); run edr watch --once, or retire them together with --batch")
@@ -1557,7 +1556,7 @@ def _retire_targets(c: Ctx, row: Row, hb: dict, root: str, a: argparse.Namespace
         targets = [posixpath.join(root, config.render(p, values))
                    for n in names for st in project.stages.values() for p in st.prune.get(n, [])]
     else:
-        if not (project.data / "results" / row["run_id"] / "log").is_dir() and not a.uncollected:
+        if not watch.collected(project, c.db, row, hb) and not a.uncollected:
             raise Refuse(f"{row['run_id']}: results not collected; run edr watch --once, or pass --uncollected")
         targets = [root]
     return [str(assert_safe_target(t, project.safety.marker, project.safety.min_depth)) for t in targets]

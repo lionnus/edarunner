@@ -336,7 +336,8 @@ def test_per_task_budget_kills_that_task_only(tmp_path: Path) -> None:
 
 
 def test_checkpoint_resumes_the_first_stage_only(tmp_path: Path) -> None:
-    spec = render_spec(tmp_path, stages=("synth", "pnr"), start_at={"stage": "synth", "checkpoint": "elaborate"})
+    spec = render_spec(tmp_path, stages=("synth", "pnr"), start_at={"stage": "synth", "checkpoint": "elaborate",
+                                                                     "attempt": 3})
     rc, hb = finish(start(spec), spec)
     assert (rc, hb["phase"], hb["exit"]) == (0, "done", 0)
     root = Path(spec["root"])
@@ -345,6 +346,7 @@ def test_checkpoint_resumes_the_first_stage_only(tmp_path: Path) -> None:
     assert "FIRST_STAGE=elaborate" in synth.splitlines()[0] and "step 0 setup" not in synth
     assert "FIRST_STAGE" not in pnr and "step 4 cts" in pnr
     assert hb["stages"]["synth"]["status"] == hb["stages"]["pnr"]["status"] == "done"
+    assert (hb["stages"]["synth"]["attempt"], hb["stages"]["pnr"]["attempt"]) == (3, 1)
 
 
 def test_two_shards_claim_from_one_queue(tmp_path: Path) -> None:

@@ -297,7 +297,9 @@ under `~/.edr/`. One cycle does this, in order:
    `collect` paths from the run tree into `data/results/<run_id>/` on
    the head node. Of a running stage with steps, it copies each numbered
    directory under the `collect` paths below the step that runs now, as
-   soon as the step number moves on (`collect.py`).
+   soon as the step number moves on (`collect.py`). A collect that
+   fails, for example on a host that does not answer, runs again in the
+   next cycle; a path that is not in the run tree is not retried.
 5. It reads each metric from the collected files of the tasks that
    ended `done` and the stages that exited 0. From any other stage, it
    reads the steps that the run has passed: `step_runs` holds the step
@@ -308,7 +310,8 @@ under `~/.edr/`. One cycle does this, in order:
    `metrics.py`).
 6. A `dead` run is resumed once, from the last step in its heartbeat,
    when its stage has a `resume` command and no process group of the run
-   is still alive on the host (`watch._resume`).
+   is still alive on the host (`watch._resume`). The new driver records
+   the stage as the next attempt.
 7. A queued job starts when a host now fits it, one per batch per cycle.
 8. It writes `data/board/`, edits the pinned Telegram board, and writes
    `<state_dir>/watch.json`, the watcher's own heartbeat that the
@@ -467,7 +470,10 @@ A run tree stays on its host until you retire it. `edr retire <handle>
 --why <text>` removes the tree with `rm -rf` after the guard above
 (`cli.cmd_retire`, `cli._retire_targets`). It refuses a run whose driver
 is alive, a live run that has not written a heartbeat yet, and a tree
-whose results are not collected unless you pass `--uncollected`. It
+whose results are not collected unless you pass `--uncollected`. The
+results of a run are collected when the last collect copied every path
+that exists and, for a run that ended, ran after the end
+(`watch.collected`). It
 also refuses a root that another live run uses, and a root shared with
 a run whose results are not collected yet (`cli._refuse_shared_root`).
 

@@ -125,10 +125,8 @@ def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[t
 
 def _stages(hb: dict) -> dict[str, dict]:
     """The stage entries of a heartbeat; a stage still running in a finished run ended with the run."""
-    stage = hb.get("stage") or ""
-    stages = hb.get("stages") or ({stage: {"log": hb.get("log")}} if stage else {})
     out = {}
-    for name, s in stages.items():
+    for name, s in (hb.get("stages") or {}).items():
         status = s.get("status") or "running"
         if status == "running" and not board.is_live(hb):
             status = board.state_of(hb)  # killed, stopped or failed
@@ -251,7 +249,7 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
             left, held, why = launch.stages_left(project, db, run) if ended else ([], [], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            hb = {} if state == "unreadable" else _hb(project, run)
+            hb = {} if state == "unreadable" else _hb(project, run) or {"last_log": _driver_tail(project, run)}
             alert = alerts.run_alert(project, run, state, reasons, hb, now, [] if why else left, db.runs(), held=held)
             ids = [n.send(alert) for n in wanted(notifiers, state)]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
@@ -262,6 +260,17 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     except (HostError, Refuse, OSError, ValueError) as e:
         db.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
         rec["acted"] = True
+
+
+def _driver_tail(project: Project, run: Row) -> str:
+    """The end of the driver log of a run, where a driver that wrote no heartbeat says why."""
+    try:
+        with open(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.driver.log", "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 4096))
+            return f.read().decode(errors="replace")
+    except OSError:
+        return ""
 
 
 # collect, extract, resume, queue
@@ -277,27 +286,48 @@ def _parameters(run: Row, spec: dict) -> dict[str, dict[str, Any]]:
                          **{f"nested.{k}": v for k, v in nested.items()}}}
 
 
+def _collect_key(project: Project, hb: dict, spec: dict) -> list | None:
+    """What a collect of the run copies, or None while the run lives and has nothing to copy; the watcher collects
+    again when it changes. A run that ended always has `log/`. Lists, not tuples: the key goes through JSON between
+    cycles."""
+    finished, running = collect.stage_state(project, hb, collect.spec_stages(spec))
+    tasks = sorted([s, t] for (s, t), phase in collect.task_phases(hb).items() if phase in ("done", "failed"))
+    if board.is_live(hb) and not (finished or tasks or running):
+        return None
+    return [finished, tasks, hb.get("step") if running else None, board.is_live(hb)]
+
+
+def collected(project: Project, db: Database, run: Row, hb: dict) -> bool:
+    """Whether the last collect of `run` copied all there was and saw the run as its heartbeat shows it now, so a
+    finished run counts only after the collect that followed its end. A run without a heartbeat, such as an imported
+    one, counts when its results hold `log/`."""
+    if not hb:
+        return (project.data / "results" / run["run_id"] / "log").is_dir()
+    key = _collect_key(project, hb, collect.load_spec(project, run))
+    return key is not None and (db.get_store("progress", {}).get(run["run_id"]) or {}).get("collected") == key
+
+
 def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> str:
     """Collect and extract one run; the text of the `metrics` event when rows arrived, else ""."""
     spec = collect.load_spec(project, run)
     if spec.get("collect") is False:  # edr track without --collect
         return ""
-    only = collect.spec_stages(spec)
-    finished, running = collect.stage_state(project, hb, only)
-    tasks = {k: phase for k, phase in collect.task_phases(hb).items() if phase in ("done", "failed")}
-    # Lists, not tuples: the key goes through JSON between cycles.
-    key = [finished, sorted(map(list, tasks)), hb.get("step") if running else None, board.is_live(hb)]
-    rec = progress.setdefault(run["run_id"], {})
-    if rec.get("collected") == key or not (finished or tasks or running):
+    key, rec = _collect_key(project, hb, spec), progress.setdefault(run["run_id"], {})
+    if key is None or rec.get("collected") == key:
         return ""
-    rec["collected"] = key
     _pulse(project)
     res = collect.collect_run(project, ssh, db, run, hb, host=host)
-    if res.failures:
-        db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
+    # A source that is not on the host stays missing; any other failure, such as a host that did not answer, or an
+    # rsync timeout, makes the next cycle collect again.
+    if len(res.failures) == res.missing:
+        rec["collected"] = key
+    failed = f"{len(res.failures)} failed: {res.failures[0]}" if res.failures else ""
+    if failed and failed != rec.get("collect_failed"):
+        db.add_event("watch", run["run_id"], "collect", failed)
+    rec["collect_failed"] = failed
     # No new file does not mean no new metric: a file can arrive before its step or stage counts as
     # finished. Extraction is idempotent, so run it.
-    rows = extract_run(project, db, run, hb, spec, tasks)
+    rows = extract_run(project, db, run, hb, spec)
     with db.conn:  # one commit for the rows, parameters and flags of the run
         new = [r for r in rows if db.add_metric(r)]
         for origin, params in (_parameters(run, spec) if not rec.get("params") else {}).items():
@@ -437,8 +467,7 @@ def _same_parameters(db: Database, run: Row) -> None:
                      if twins else [], "same_parameters")
 
 
-def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict,
-            now: float) -> None:
+def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
     spec_path = project.state_dir / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
@@ -459,15 +488,14 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
         return
     rec["resumed"] = True
     checkpoint = hb.get("step_name") if hb.get("step") else None
-    spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint}
+    attempt = ((hb.get("stages") or {}).get(stage["name"]) or {}).get("attempt") or 1
+    spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint, "attempt": attempt + 1}
     config.save_json(spec_path, spec)
     try:
         handle = launch.submit(backend, db, project, run_id, host, spec_path, driver)
     except (HostError, OSError) as e:
         db.add_event("watch", run_id, "resume", f"failed: {e}")
         return
-    db.upsert_stage_run({"run_id": run_id, "stage": stage["name"], "attempt": 2, "started": int(now),
-                             "status": "resumed", "log": str(spec_path.with_name(f"{run_id}.driver.log"))})
     db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {handle}")
 
 
@@ -514,9 +542,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
 
 
 def _waiting(name: str, db: Database, seen: set[str]) -> dict[str, Any]:
-    """The live runs in a scheduler that wrote no heartbeat yet, with their handles."""
-    if name not in SCHEDULERS:
-        return {}
+    """The live runs that wrote no heartbeat yet, with their handles."""
     out = {}
     for r in db.runs():
         if r["run_id"] not in seen and board.is_live(r) and r.get("state") not in ("queued", "retired", "abandoned"):
@@ -525,12 +551,18 @@ def _waiting(name: str, db: Database, seen: set[str]) -> dict[str, Any]:
     return out
 
 
-def _unstarted(db: Database, run_id: str, live: Live, why: str, dry_run: bool) -> tuple[str, list[str]]:
-    """The state of a scheduler job before its first heartbeat; a job that left the queue failed."""
+def _unstarted(project: Project, db: Database, run: Row, live: Live, why: str, sched: bool,
+               dry_run: bool) -> tuple[str, list[str]]:
+    """The state of a run before its first heartbeat. A scheduler job that left the queue ends `FAILED:scheduler`, and
+    a driver that is gone ends `FAILED:setup`, unless it wrote its heartbeat after the cycle read them."""
+    run_id = run["run_id"]
     if live is Live.GONE:
+        if (project.state_dir / str(run.get("batch")) / f"{run_id}.json").exists():
+            return "running", []  # the next cycle reads it
         if not dry_run:
-            db.upsert_run({"run_id": run_id, "phase": "FAILED:scheduler", "exit": None})
-        return "failed", [f"the job left the scheduler before the driver started: {why}"]
+            db.upsert_run({"run_id": run_id, "phase": "FAILED:scheduler" if sched else "FAILED:setup", "exit": None})
+        return "failed", [f"the job left the scheduler before the driver started: {why}" if sched
+                          else f"the driver ended before its first heartbeat: {why}"]
     state = {Live.PENDING: "pending", Live.HELD: "held", Live.SUSPENDED: "suspended", Live.RUNNING: "running"}.get(live, "stale")
     if not dry_run:
         db.upsert_run({"run_id": run_id, "state": state})
@@ -557,12 +589,13 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     alive = backend.alive(list(handles.values())) if handles else {}
     states: dict[str, str] = {}
     for run_id, h in waiting.items():
-        state, reasons = _unstarted(db, run_id, *alive[h], dry_run)
+        run = db.run(run_id) or {"run_id": run_id}
+        state, reasons = _unstarted(project, db, run, *alive[h], backend.name in SCHEDULERS, dry_run)
         states[run_id] = state
         if dry_run:
             print(f"{run_id}: {state} {'; '.join(reasons)}".rstrip())
         else:
-            actions(project, ssh, db, notifiers, db.run(run_id) or {"run_id": run_id}, state, reasons, now, notes)
+            actions(project, ssh, db, notifiers, db.run(run_id) or run, state, reasons, now, notes)
     for batch, hb in heartbeats:
         run = db.run(hb["run_id"]) or {**hb, "batch": batch}
         h = handles.get(hb["run_id"])
@@ -583,7 +616,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
                         for n in want:
                             n.send(alert)
                     if state == "dead" and start:
-                        _resume(project, ssh, backend, db, run, hb, progress, now)
+                        _resume(project, ssh, backend, db, run, hb, progress)
             except _UNREADABLE as e:  # a run whose files a reader cannot use leaves every other run watched
                 error = f"{type(e).__name__}: {e}"
         if error is not None:
