@@ -705,11 +705,12 @@ def cmd_wait(c: Ctx, a: argparse.Namespace) -> int:
     lim, lock = c.project.limits, c.project.state_dir / "watch.lock"
     deadline = time.time() + a.timeout * 3600 if a.timeout is not None else None
     seen: dict[str, tuple[str, float]] = {}  # run id -> the state that needs a decision and when wait first saw it
-    first = True
+    first, missed = True, 0
     while True:
         watcher = home.holder(lock)
         if first and not watcher:
             raise Refuse(f"no watcher holds {lock}, so nothing collects; start edr watch or edr serve")
+        missed = 0 if watcher else missed + 1  # edr serve restarts a watcher that exited after 60 s
         rows = [r for r in c.rows(batch) if (not ids or r["run_id"] in ids) and (not a.source or r.get("source") in a.source)]
         if first and not rows:
             raise Refuse("no run matches")
@@ -725,7 +726,7 @@ def cmd_wait(c: Ctx, a: argparse.Namespace) -> int:
                 seen[r["run_id"]] = (state, now)
             since = min(seen[r["run_id"]][1], rec["since"] if rec.get("state") == state else now)
             late = late or now - since > lim.grace_s + lim.heartbeat_s  # the watcher acts in the cycle after grace_s
-        reason = ("ended" if all(done.values()) else "needs_decision" if late else "no_watcher" if not watcher
+        reason = ("ended" if all(done.values()) else "needs_decision" if late else "no_watcher" if missed > 3
                   else "timeout" if deadline is not None and now >= deadline else "")
         if reason:
             break
@@ -2051,9 +2052,10 @@ def _parser() -> argparse.ArgumentParser:
         the watcher left it. It returns when every run has ended and the
         watcher has collected its results. It returns early when a run is
         dead, hung, looping, held or unreadable for longer than grace_s plus
-        one cycle, since the watcher acts first, or when no watcher holds
-        <state_dir>/watch.lock any more. Without a watcher at the start it
-        refuses, since nothing would collect.
+        one cycle, since the watcher acts first, or when no watcher has held
+        <state_dir>/watch.lock for three cycles, which outlasts a restart by
+        edr serve. Without a watcher at the start it refuses, since nothing
+        would collect.
 
         It prints the board of the runs and, for each run that is not done,
         the command the triage proposes. --json gives {"runs": [...],
@@ -2063,8 +2065,8 @@ def _parser() -> argparse.ArgumentParser:
 
         docs/guides/agents.md shows how an agent on another host calls it
         through ssh.
-        """, exits={Exit.REFUSED: "a run ended other than done, a run needs a decision, no watcher runs, or the "
-                                  "input is bad",
+        """, exits={Exit.REFUSED: "a run ended other than done, a run needs a decision, no watcher ran for three "
+                                  "cycles, or the input is bad",
                     Exit.TIMEOUT: "--timeout ran out"})
     s.add_argument("handle", nargs="*", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH")

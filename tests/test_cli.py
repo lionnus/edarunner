@@ -1593,9 +1593,19 @@ def test_wait_returns_1_when_the_watcher_goes_and_4_at_the_timeout(demo: Path, c
     start = now[0]
     code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo", "--timeout", "0.01")
     assert code == 4 and json.loads(out)["data"]["reason"] == "timeout" and 36 <= now[0] - start < 41
-    monkeypatch.setattr(time, "sleep", lambda s: os.close(fd))
+    sleeps: list[float] = []
+
+    def sleep(s: float) -> None:
+        sleeps.append(s)
+        if len(sleeps) in (1, 4):  # the watcher exits, the second time for good
+            os.close(fds[-1])
+        elif len(sleeps) == 3:  # edr serve starts it again
+            fds.append(_watcher(demo))
+
+    fds = [fd]
+    monkeypatch.setattr(time, "sleep", sleep)
     code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo")
-    assert code == 1 and json.loads(out)["data"]["reason"] == "no_watcher"
+    assert code == 1 and json.loads(out)["data"]["reason"] == "no_watcher" and len(sleeps) == 7
 
 
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
