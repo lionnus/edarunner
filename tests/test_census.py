@@ -114,8 +114,9 @@ def orphan_procs(alpha, beta) -> list[Proc]:
             Proc(504, 60, 99.0, "sleep", "sleep 4", "/scratch/x/edr/other/r9/pnr", "r9"),
             Proc(505, 60, 99.0, "sleep", "sleep 5", "/scratch/x/edr/beta/r8/pnr", "r8"),
             Proc(506, 60, 99.0, "sleep", "sleep -f /scratch/x/edr/other/r1/main.tcl", "/home/me"),
-            Proc(507, 60, 99.0, "sleep", "sleep 7", "/home/me"),
-            Proc(508, 60, 0.0, "bash", "bash", "/home/me")]
+            Proc(507, 600, 99.0, "sleep", "sleep 7", "/home/me"),
+            Proc(508, 60, 0.0, "bash", "bash", "/home/me"),
+            Proc(509, 60, 99.0, "sleep", "sleep 9", "/home/me")]
 
 
 def test_one_alert_per_orphan_over_every_project(two, fake) -> None:
@@ -133,6 +134,23 @@ def test_one_alert_per_orphan_over_every_project(two, fake) -> None:
     assert len(rec.sent) == 4 and fake.killed == []
     with Database(two["beta"].data / "edr.db") as db:
         assert sorted(e["kind"] for e in db.events()) == ["orphan", "orphan", "orphan"]
+
+
+def test_a_process_of_no_run_alerts_once_it_is_old_enough(two, fake) -> None:
+    fake.procs, rec = [Proc(601, 240, 99.0, "sleep", "sleep 1", "/home/me")], Rec()
+    census.work([rec], NOW)
+    assert rec.sent == []  # younger than orphan_min_age_s
+    fake.procs = [Proc(601, 300, 99.0, "sleep", "sleep 1", "/home/me")]
+    census.work([rec], NOW + 60)
+    census.work([rec], NOW + 120)
+    assert rec.sent == [("orphan", "orphan:local:601")]
+
+
+def test_a_restart_does_not_reset_the_age_of_a_process(two, fake) -> None:
+    fake.procs = [Proc(602, 7200, 99.0, "sleep", "sleep 2", "/home/me")]
+    rec = Rec()
+    census.work([rec], NOW)  # a fresh watcher sees it for the first time
+    assert rec.sent == [("orphan", "orphan:local:602")]
 
 
 def test_an_orphan_is_killed_only_with_kill_orphan_of_its_project(two, fake, monkeypatch) -> None:

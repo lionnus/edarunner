@@ -744,6 +744,11 @@ driver sets it for every stage command of every project.
 - A process without `EDR_RUN_ID` is owned when its working directory or
   command line holds the safety marker of a registered project. Such a
   process belongs to no project, so edarunner never kills it.
+- A process without `EDR_RUN_ID` raises no alert until it has run for
+  `orphan_min_age_s` of the site, 5 min by default, so a short `vsim` by
+  hand stays quiet. The age counts from the start of the process, so a
+  restart of the watcher does not reset it. A process that a run of
+  edarunner left behind alerts at once.
 
 A tool process that no run owns:
 

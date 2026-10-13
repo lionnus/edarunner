@@ -170,7 +170,8 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
     that no project knows belongs to an unregistered project and is left alone, unless the cwd or
     the command line of the process lies in the tree `/<project>/<run_id>` of a registered project
     under its safety marker. A process without `EDR_RUN_ID` is owned when its cwd or command line
-    holds the safety marker of a registered project."""
+    holds the safety marker of a registered project, and it counts only from `orphan_min_age_s` after its start,
+    so that a short tool call by hand raises no alert."""
     runs: dict[str, list[tuple[Project, dict]]] = {}
     for p in projects.values():
         for batch, hb in watch.read_heartbeats(p):
@@ -198,7 +199,8 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
                 if owner is None:
                     continue
                 ended = "unknown"
-            elif any(p.safety.marker in t for p in projects.values() for t in texts):
+            elif any(p.safety.marker in t for p in projects.values() for t in texts) \
+                    or proc.etimes < site.orphan_min_age_s:
                 continue
             out.append({"key": f"orphan:{host}:{proc.pid}", "host": host, "pid": proc.pid, "label": proc.comm,
                         "phase": proc.args, "etimes": proc.etimes, "cwd": proc.cwd, "owner": proc.run_id,

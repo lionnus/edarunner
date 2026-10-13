@@ -350,7 +350,9 @@ and does the work after each of its cycles:
    `/<project>/<run_id>` of a registered project under its safety
    marker. A process without `EDR_RUN_ID` is owned when its working
    directory or command line holds the safety marker of a registered
-   project. With `kill_orphan` of the project the process belongs to, it
+   project, and it becomes an orphan only once it has run for
+   `orphan_min_age_s` of the site, 5 min by default. The age comes from
+   `ps`, so a restart of the watcher does not reset it. With `kill_orphan` of the project the process belongs to, it
    sends `SIGTERM` after `grace_s`; a process of no project is never
    killed.
 3. While a live run on a host reports `host_full`, it stops the newest
