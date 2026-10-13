@@ -39,7 +39,7 @@ Two switches make failures:
 | `hooks/energy.py` | the metric hook of `energy_nj`: the power times the window of one task |
 | `tasks.toml` | `k_small`, `k_big` (budget 2 h), `k_bad` |
 | `jobs/demo.toml` | job `a`: every stage, tasks `k_small` and `k_big`, and `vars = { netlist_stage = 11 }` for `export`; job `b_nodw`: `synth` and `pnr` with `DW=0` |
-| `setup.sh` | creates `repo/`, a git repository that holds `flow/`; the batch checks out its source from it |
+| `setup.sh` | creates `repo/`, a git repository that holds `flow/`, from which the batch checks out its source; creates the scratch `/tmp/edr-demo` |
 
 The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 
@@ -47,7 +47,7 @@ The run makes `repo/`, `wt/` and `data/`, and git ignores them.
 
 ```sh
 cd examples/local-demo
-bash setup.sh                 # repo/ with one commit
+bash setup.sh                 # repo/ with one commit, and the scratch /tmp/edr-demo
 edr checkout HEAD             # <source> and the path of the pinned clone
 edr check                     # load the config, probe the host, check the hooks
 edr plan demo                 # one run id, host and root per job; writes nothing
@@ -82,10 +82,13 @@ The run puts its files in these places:
 
 ## Try a failure
 
-A batch name is used once, so each try gets a new job file:
+A batch name is used once, so each try gets a new job file. A run id
+holds the label and the minute of the launch but not the batch, so each
+copy also gets its own labels; two batches that launch the same labels in
+the same minute would name the same runs.
 
 ```sh
-sed 's/^batch = .*/batch = "gate"/' jobs/demo.toml > jobs/gate.toml
+sed -e 's/^batch = .*/batch = "gate"/' -e 's/^label = "/label = "gate_/' jobs/demo.toml > jobs/gate.toml
 DEMO_SEATS_USED=10 edr launch gate   # no free seat: the gate blocks
 edr status --triage                  # after 30 s: failed, FAILED:synth, exit 4
 ```
@@ -93,12 +96,13 @@ edr status --triage                  # after 30 s: failed, FAILED:synth, exit 4
 To make a task fail, add `k_bad` to the tasks of job `a` in another copy:
 
 ```sh
-sed -e 's/^batch = .*/batch = "bad"/' -e 's/"k_big"]/"k_big", "k_bad"]/' jobs/demo.toml > jobs/bad.toml
+sed -e 's/^batch = .*/batch = "bad"/' -e 's/^label = "/label = "bad_/' \
+    -e 's/"k_big"]/"k_big", "k_bad"]/' jobs/demo.toml > jobs/bad.toml
 edr launch bad
 ```
 
-The run `a@bad` ends `INCOMPLETE:1f0s0h` with exit 8, and `edr status a@bad`
-shows the signature `boom: kernel bad failed`.
+The run `bad_a@bad` ends `INCOMPLETE:1f0s0h` with exit 8, and
+`edr status bad_a@bad` shows the signature `boom: kernel bad failed`.
 
 ## Clean up
 
@@ -114,9 +118,15 @@ edr retire --batch bad --why "demo done"
 ```
 
 The state, the database, the source, the clones and the extra job
-files stay. Remove them by hand:
+files stay. edr deletes only a path that contains the marker `/edr/`,
+and the clone `wt/<source>` usually does not, so the last retire prints
+`worktree kept: ... does not contain the marker '/edr/'; remove it with rm -rf`.
+Remove them by hand:
 
 ```sh
 rm -rf ~/.edr/demo data repo wt
 rm -f jobs/gate.toml jobs/bad.toml
 ```
+
+`/tmp/edr-demo` stays for the next run; other users of the host can
+have run trees in it.

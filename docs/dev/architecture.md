@@ -15,8 +15,8 @@ one run through the code from `plan` to `export`.
   protocol.
 - `edr serve` is the supervisor, one long-lived process per user on the
   head node. It keeps one `edr watch --served` process per registered
-  project, the controller that watches that project, and does the work
-  that belongs to the user once for all projects.
+  project, the controller that watches that project, and runs the checks
+  across all projects once.
 
 No module knows an EDA tool. The project config names the commands, the
 report files and the numbers in them.
@@ -29,17 +29,17 @@ report files and the numbers in them.
 | `config.py` | loading and validation of the five TOML files, the type check against the model, placeholders, hooks |
 | `guards.py` | `assert_safe_target`, `assert_run_id` and `Refuse` |
 | `home.py` | the user root `~/.edr` or `EDR_HOME`: the registry of the projects, the process locks and `store.json` |
-| `runid.py` | the git calls, the source tag, the run id template |
+| `runid.py` | the git calls and the source tag |
 | `checkout.py` | `edr checkout`: local clones, nested repositories, the dirty snapshot |
 | `hosts.py` | the ssh wrapper with timeouts, the host probe and the census call, placement with the disk floor, the head-node check |
 | `sync.py` | the rsync of the tree behind the guard, the driver copy by rename, the sync hook |
-| `launch.py` | spec rendering, `plan`, `launch`, `stop`, and the stages a tree has left, which `continue`, the Continue button and the prune of a host read |
+| `launch.py` | the run id template (`render_run_id`), spec rendering, `plan`, `launch`, `stop`, and the stages a tree has left, which `continue`, the Continue button and the prune of a host read |
 | `backend.py` | the `Backend` protocol: `submit`, `alive`, `stop`, `free`, `file_host`; `SshBackend` and `LocalBackend`; `[scheduler] backend` picks one of these or a scheduler backend |
 | `schedulers.py` | the HTCondor, Slurm and LSF backends: the submit file, the state query, the stop |
 | `driver/edr_driver.py` | one run on one host: stages, task groups, gates, budgets, retries, the heartbeat, the stop and keep files |
 | `watch.py` | the cycle of one project: classify, act, collect, resume, launch queued, boards, `watch.json`; the watcher that holds `serve.lock` then calls `census.work`; the checks that rewrite the flags of a run after each extraction |
 | `serve.py` | `edr serve`: the watcher process of each project with its restarts and the kill of a stuck one, the global board, `serve.json`, `--check`, the systemd notify and watchdog, the unit with its pinned install |
-| `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the work of the user: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
+| `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the checks across all projects: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the six parsers with the hierarchical area report and the per-instance table, extraction, and the parameter tables |
 | `analysis.py` | the views over the database: instances side by side, metrics per step, pivots, the data of `compare.html`, runtimes, host and run samples |

@@ -357,6 +357,8 @@ def run_detail(row: Row, stage_rows: list[Row], metrics: list[Row], tail: str, n
                       f" ({hm(_age_s(row, now))} ago)  cost {cost(row, now):.1f} core-h"),
         Text(f"disk free {_s(row.get('disk_free_gb')) or '-'} GB  tree {_s(row.get('tree_gb')) or '-'} GB"),
     ]
+    if row.get("driver"):
+        parts.insert(2, Text(f"the backend says the driver is {row['driver']}", style="bold"))
     if gate and is_live(row):
         parts.insert(2, Text(f"gate waits for {gate}", style="yellow"))
     if any(s.get("task") for s in stage_rows):

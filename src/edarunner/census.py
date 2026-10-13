@@ -1,11 +1,11 @@
-"""The census: one look at every host and every live run of the user, and the work that needs it.
+"""The census: one look at every host and every live run of the user, and the checks across all projects.
 
 The process that holds `~/.edr/serve.lock` takes the census each cycle: one ssh call per host of
 every registered project's site, all at once, for the probe, the clock and the user's processes,
 and the live heartbeats of every registered project. From it that process alone checks for
 orphans, stops the newest run of a full host, sweeps the stale seat leases and sends the daily
 digest, once for all projects. `census.json` keeps the probes and the live runs for the watchers
-and the views, and `store.json` the alerts, clocks and digest time of this work between cycles.
+and the views, and `store.json` the alerts, clocks and digest time of these checks between cycles.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def probes(project: Project, max_age: float) -> dict[str, dict] | None:
     return None if set(project.site.hosts) - set(found) else {h: found[h] for h in project.site.hosts}
 
 
-# the work of the user
+# the checks across all projects
 
 def _event(project: Project, run_id: str, kind: str, text: str) -> None:
     """One event in the database of `project`; a database that does not open is logged."""
@@ -315,7 +315,7 @@ def _digest(found: dict[str, Project], notifiers: list[Notifier], store: Row, no
 
 
 def work(notifiers: list[Notifier], now: float | None = None, own: Project | None = None) -> Row:
-    """Take the census and do the work of the user; `own` is the project of a watcher that holds serve.lock."""
+    """Take the census and run the checks across all projects; `own` is the project of a watcher that holds serve.lock."""
     now = time.time() if now is None else now
     found = projects()
     if own is not None:

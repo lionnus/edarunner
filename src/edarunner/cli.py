@@ -559,10 +559,11 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         stages = sorted(c.db.stage_runs(run_id), key=lambda r: (r["stage"] != "setup", r["stage"], r["task"], r["attempt"]))
         mets = c.db.metrics(run_ids=[run_id])
         samples, flags = c.db.run_samples(run_id), c.db.flags([run_id])
+        code = _mark_live(c, [row]) if a.live else Exit.DONE
         c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples,
                                 flags=flags),
                {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples, "flags": flags})
-        return Exit.DONE
+        return code
     if a.all:
         rows = _all_rows(a)
         c.emit(board.wide(rows), {"runs": rows})
@@ -652,16 +653,19 @@ def _all_rows(a: argparse.Namespace) -> list[Row]:
 
 
 def _mark_live(c: Ctx, rows: list[Row]) -> int:
-    """Ask the backend, once, whether the driver of each live run exists; a gone driver marks the run dead."""
+    """Ask the backend, once, what it knows of the driver of each live run, a scheduler job that has not started
+    included; the answer goes into `driver` and `alive`, and a gone driver marks the run dead."""
     handles: dict[int, Handle] = {}
     for i, r in enumerate(rows):
         hb = c.heartbeat(r) if board.is_live(r) else {}
-        if hb.get("driver_pid") and r.get("host") and (h := run_handle(c.backend.name, r, hb)):
+        asked = hb.get("driver_pid") or board.is_live(r) and c.backend.name in SCHEDULERS
+        if asked and (h := run_handle(c.backend.name, r, hb)):
             handles[i] = h
     alive = c.backend.alive(list(handles.values())) if handles else {}
     code = Exit.DONE
     for i, h in handles.items():
-        state = alive[h][0]
+        state, why = alive[h]
+        rows[i]["driver"] = f"{state.value}: {why}" if why else state.value
         rows[i]["alive"] = None if state is Live.UNKNOWN else state is not Live.GONE
         if state is Live.UNKNOWN:
             code = Exit.HOSTS
@@ -1579,7 +1583,7 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_serve(c: Ctx, a: argparse.Namespace) -> int:
-    """The supervisor: one watcher per registered project, and the work of the user."""
+    """The supervisor: one watcher per registered project, and the checks across all projects."""
     if a.unit:
         cmd, exe, what = serve.pinned()
         if cmd:
@@ -1951,7 +1955,9 @@ def _parser() -> argparse.ArgumentParser:
         shows driver exit <n> (<phase>): the code of the driver, whose phase
         names the stage that failed. The command exit column of the stage table
         is the code of the stage command itself. The tasks line with the done
-        and failed counts appears only for a run with a task group.
+        and failed counts appears only for a run with a task group. With
+        --live, a live run also shows what its host or scheduler says of the
+        driver, such as running, pending, suspended or gone.
 
         --all prints the board of every registered project in one table, with
         the project in the first column; it needs no project directory.
@@ -1976,7 +1982,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--csv", action="store_true", help="the board as CSV on stdout")
     s.add_argument("--narrow", action="store_true", help="48 columns, two lines per live run, for an ssh app on a phone")
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s seconds; Ctrl-C ends it")
-    s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")
+    s.add_argument("--live", action="store_true", help="ask the backend about the driver of each live run, or of the one run; a gone driver shows dead")
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
     s.add_argument("--digest", action="store_true", help="the daily digest of this project, or with --all of every "
                                                          "project, as plain text")
@@ -2356,7 +2362,7 @@ def _parser() -> argparse.ArgumentParser:
                                                            "stages the tree has left")
     s.add_argument("--tasks", nargs="+", metavar="ID", help="the tasks of a task group; default the job's")
     s.add_argument("--from", dest="from_", metavar="CHECKPOINT", help="resume the first stage from this checkpoint")
-    s.add_argument("--on", metavar="HOST", help="the host; default auto")
+    s.add_argument("--on", metavar="HOST", help="the host; only the host of the tree passes, and it is the default")
     s.add_argument("--parallel", type=int, metavar="N", help="tasks at once; default the stage's parallel")
     s.add_argument("--collect", metavar="NAME", help="fetch a collect_on_request list instead")
     s = command("track", "run a command under the driver here, as a run of the project", """
@@ -2603,7 +2609,7 @@ def _parser() -> argparse.ArgumentParser:
         until the file loads again.
 
         Every watcher sends its alerts. When no supervisor runs, the first
-        watcher that takes ~/.edr/serve.lock also does the work of the user
+        watcher that takes ~/.edr/serve.lock also runs the checks across all projects
         and runs the Telegram bot for the commands and button presses of every
         project.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
@@ -2615,7 +2621,7 @@ def _parser() -> argparse.ArgumentParser:
     s = command("serve", "the supervisor: one watcher per registered project", """
         Runs the supervisor of the user: a cycle every minute that keeps one
         edr watch --served per registered project in the project directory,
-        does the work that belongs to the user once for every project, edits
+        runs the checks across all projects, edits
         one pinned global board, and runs the Telegram bot for the commands and
         button presses of every project. A watcher that exits starts again after
         1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
@@ -2628,7 +2634,7 @@ def _parser() -> argparse.ArgumentParser:
         READY=1 and, every cycle, WATCHDOG=1.
 
         --once runs one cycle: one edr watch --once --served per project, then
-        the work of the user, and exits. --dry-run lists the registered
+        the checks across all projects, and exits. --dry-run lists the registered
         projects and what the supervisor would do for each, and writes
         nothing. --check reads serve.json and nothing of any project; when
         the file is missing or older than three cycles, it alerts and exits

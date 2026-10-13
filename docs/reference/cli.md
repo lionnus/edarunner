@@ -168,7 +168,9 @@ run, the metrics, and the log tail from the heartbeat. A finished run
 shows driver exit &lt;n&gt; (&lt;phase&gt;): the code of the driver, whose phase
 names the stage that failed. The command exit column of the stage table
 is the code of the stage command itself. The tasks line with the done
-and failed counts appears only for a run with a task group.
+and failed counts appears only for a run with a task group. With
+--live, a live run also shows what its host or scheduler says of the
+driver, such as running, pending, suspended or gone.
 
 --all prints the board of every registered project in one table, with
 the project in the first column; it needs no project directory.
@@ -195,7 +197,7 @@ runs.
 | `--csv` | the board as CSV on stdout |
 | `--narrow` | 48 columns, two lines per live run, for an ssh app on a phone |
 | `--watch` | redraw every heartbeat_s seconds; Ctrl-C ends it |
-| `--live` | ask each host whether the driver exists; a gone driver shows dead |
+| `--live` | ask the backend about the driver of each live run, or of the one run; a gone driver shows dead |
 | `--triage` | every run not running, with one proposed command |
 | `--digest` | the daily digest of this project, or with --all of every project, as plain text |
 | `--all` | the runs of every registered project, with a project column |
@@ -775,7 +777,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 | `--stage S ...` | the stages to run on the tree, in this order; default the stages the tree has left |
 | `--tasks ID ...` | the tasks of a task group; default the job's |
 | `--from CHECKPOINT` | resume the first stage from this checkpoint |
-| `--on HOST` | the host; default auto |
+| `--on HOST` | the host; only the host of the tree passes, and it is the default |
 | `--parallel N` | tasks at once; default the stage's parallel |
 | `--collect NAME` | fetch a collect_on_request list instead |
 
@@ -1133,7 +1135,7 @@ the heartbeats, alerts and collects, but resumes and launches nothing
 until the file loads again.
 
 Every watcher sends its alerts. When no supervisor runs, the first
-watcher that takes ~/.edr/serve.lock also does the work of the user
+watcher that takes ~/.edr/serve.lock also runs the checks across all projects
 and runs the Telegram bot for the commands and button presses of every
 project.
 
@@ -1158,7 +1160,7 @@ edr serve [--dry-run] [--json] [--once] [--check] [--unit]
 
 Runs the supervisor of the user: a cycle every minute that keeps one
 edr watch --served per registered project in the project directory,
-does the work that belongs to the user once for every project, edits
+runs the checks across all projects, edits
 one pinned global board, and runs the Telegram bot for the commands and
 button presses of every project. A watcher that exits starts again after
 1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
@@ -1171,7 +1173,7 @@ gets one alert per error text. The supervisor holds
 READY=1 and, every cycle, WATCHDOG=1.
 
 --once runs one cycle: one edr watch --once --served per project, then
-the work of the user, and exits. --dry-run lists the registered
+the checks across all projects, and exits. --dry-run lists the registered
 projects and what the supervisor would do for each, and writes
 nothing. --check reads serve.json and nothing of any project; when
 the file is missing or older than three cycles, it alerts and exits

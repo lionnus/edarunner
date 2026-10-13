@@ -54,8 +54,8 @@ variable left in a shell never acts on the wrong one.
 ## One supervisor for all of them
 
 `edr serve` keeps one watcher per registered project, restarts a watcher
-that exits or stands still, and does the work that belongs to you and
-not to one project. Install it once per user, as
+that exits or stands still, and runs the checks that cover all your
+projects at once. Install it once per user, as
 [run.md](run.md#keep-a-watcher-behind-the-batch) shows; a project that
 you register later gets its watcher within a minute.
 
