@@ -70,10 +70,13 @@ means before the agent runs that command.
 After `edr launch <batch>`, the agent runs `edr wait --batch <batch>` in
 a background shell. The call returns when every run of the batch has
 ended and the watcher has collected its results, and then the agent
-reads `edr metrics --batch <batch>`. It exits 0 when every run is done
-and 1 when a run ended another way, when a run needs a decision, or
-when no watcher runs. `--timeout HOURS` ends the wait with exit 4. The
-output gives the proposed command for each run that is not done.
+reads `edr status --batch <batch> --metric <name>`, which gives each
+value at its step of record with its verdict, or `edr metrics --source
+<source>` for every row. `wait` exits 0 when every run is done and 1
+when a run ended another way, when a run needs a decision, or when no
+watcher has run for three cycles. `--timeout HOURS` ends the wait with
+exit 4. The output gives the proposed command for each run that is not
+done.
 
 An agent on another host calls it through ssh and starts it again when
 ssh drops, which exits 255:

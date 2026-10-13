@@ -132,7 +132,7 @@ class Database:
 
     def __init__(self, path: str | os.PathLike, threads: bool = False, readonly: bool = False) -> None:
         """`threads=True` lets another thread use the connection; the caller serialises the calls. `readonly` opens an
-        existing database for reading only, without the journal mode and the schema script, and creates no file."""
+        existing database for reading only, without the journal mode and the schema script, and never writes to it."""
         self.path = Path(path)
         self.network_fs, self.journal_mode, self._held = None, "", False
         if readonly:
@@ -154,9 +154,9 @@ class Database:
     def _read_uri(self) -> str:
         with self.path.open("rb") as fh:
             wal = fh.read(20)[18:19] == b"\x02"  # the header's write version: 2 is WAL
-        # mode=ro makes the -wal and -shm files of a WAL database. Without a -wal file no connection has the
-        # database open, so the file is whole, and immutable=1 reads it without making any file.
-        flag = "immutable=1" if wal and not Path(f"{self.path}-wal").exists() else "mode=ro"
+        # mode=ro makes the -wal and -shm files of a WAL database, so it fails in a directory it cannot write to.
+        # immutable=1 reads there, but it never sees a later commit, so it serves only that case.
+        flag = "immutable=1" if wal and not os.access(self.path.parent, os.W_OK) else "mode=ro"
         return f"{self.path.absolute().as_uri()}?{flag}"
 
     def _check_schema(self) -> None:

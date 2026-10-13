@@ -116,11 +116,11 @@ def _resolve(project: Project, ref: str) -> tuple[runid.Tag, dict[str, str]]:
 
 
 def _clone(src: Path, dst: Path, commit: str, dry_run: bool) -> None:
-    """Clone `src` into `dst` at `commit`, detached; `--local` hardlinks the objects."""
+    """Clone `src` into `dst` at `commit`, detached; git hardlinks the objects on the same filesystem and copies them across."""
     if dry_run:
-        print(f"dry: git clone --local --no-checkout {src} {dst} && git -C {dst} checkout --detach {commit}")
+        print(f"dry: git clone --no-checkout {src} {dst} && git -C {dst} checkout --detach {commit}")
         return
-    runid.git("clone", "-q", "--local", "--no-checkout", str(src), str(dst))
+    runid.git("clone", "-q", "--no-checkout", str(src), str(dst))
     runid.git("checkout", "-q", "--detach", commit, cwd=dst)
     # The clone of a clone would fetch from the repo copy; point it at the upstream instead.
     try:

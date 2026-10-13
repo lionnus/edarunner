@@ -218,9 +218,10 @@ Waits for the runs that a handle, --batch or EDR_BATCH names, and
 the watcher left it. It returns when every run has ended and the
 watcher has collected its results. It returns early when a run is
 dead, hung, looping, held or unreadable for longer than grace_s plus
-one cycle, since the watcher acts first, or when no watcher holds
-&lt;state_dir&gt;/watch.lock any more. Without a watcher at the start it
-refuses, since nothing would collect.
+one cycle, since the watcher acts first, or when no watcher has held
+&lt;state_dir&gt;/watch.lock for three cycles, which outlasts a restart by
+edr serve. Without a watcher at the start it refuses, since nothing
+would collect.
 
 It prints the board of the runs and, for each run that is not done,
 the command the triage proposes. --json gives {"runs": [...],
@@ -241,7 +242,7 @@ through ssh.
 
 | Exit | Meaning |
 |---|---|
-| 1 | a run ended other than done, a run needs a decision, no watcher runs, or the input is bad |
+| 1 | a run ended other than done, a run needs a decision, no watcher ran for three cycles, or the input is bad |
 | 4 | --timeout ran out |
 
 ## events

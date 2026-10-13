@@ -244,6 +244,17 @@ def test_store(tmp_path):
         assert db.get_store("x") == {"a": [1, 2, 3]}
 
 
+def test_a_reader_sees_a_commit_made_after_it_opened(tmp_path):
+    with Database(tmp_path / "edr.db") as db:
+        db.set_store("x", 1)
+    assert not (tmp_path / "edr.db-wal").exists()
+    with Database(tmp_path / "edr.db", readonly=True) as reader:
+        assert reader.get_store("x") == 1
+        with Database(tmp_path / "edr.db") as db:
+            db.set_store("x", 2)
+        assert reader.get_store("x") == 2
+
+
 def test_board_json(tmp_path, monkeypatch):
     board = tmp_path / "data" / "board" / "board.json"
     with Database(tmp_path / "edr.db") as db:

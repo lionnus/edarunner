@@ -102,7 +102,7 @@ _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
                             "notify", "plan", "coverage", "wait"})
-# These commands open the database read-only, so they write nothing, not even the -wal and -shm files of SQLite.
+# These commands open the database read-only and never write to it.
 _READ_ONLY = frozenset({"events", "metrics", "compare", "runtime", "coverage", "wait"})
 
 
@@ -179,8 +179,8 @@ class Ctx:
         """Print `out`; keep `data` (default: the text) for --json."""
         self.data = board.plain(out) if data is None else data
         if self.a.json:
-            return
-        if isinstance(out, str):
+            print(board.plain(out))
+        elif isinstance(out, str):
             print(out)
         else:
             self.console.print(out)
@@ -224,7 +224,8 @@ class Ctx:
         self.unreadable = watch.ingest(self.db, heartbeats) if heartbeats else {}
 
     def rows(self, batch: str | None = None) -> list[Row]:
-        """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
+        """The runs of the batches that are not retired, with the state a heartbeat age gives: `running` while it is
+        fresh, else `stale`, or the watcher's `dead`, which only a look at the host can tell; a run whose heartbeat
         the refresh could not use is `unreadable` and carries the error. A read-only command skips the refresh and
         reads what the watcher ingested last."""
         fresh = getattr(self.a, "command", None) not in _READ_ONLY
@@ -239,8 +240,10 @@ class Ctx:
                 r["state"] = None  # the refresh read it, and the watcher classifies it again
             # The watcher's own classes (hung, host_full, ...) stay; only the age classes follow the heartbeat.
             if board.is_live(r) and r.get("updated") is not None and r.get("state") in (None, "running", "stale", "dead"):
-                age = now - r["updated"]
-                r["state"] = "dead" if age > lim.dead_s else "stale" if age > lim.stale_s else "running"
+                if now - r["updated"] <= lim.stale_s:
+                    r["state"] = "running"
+                elif r.get("state") in (None, "running"):
+                    r["state"] = "stale"
         return rows
 
     def resolve(self, handle: str) -> Row:
@@ -702,11 +705,12 @@ def cmd_wait(c: Ctx, a: argparse.Namespace) -> int:
     lim, lock = c.project.limits, c.project.state_dir / "watch.lock"
     deadline = time.time() + a.timeout * 3600 if a.timeout is not None else None
     seen: dict[str, tuple[str, float]] = {}  # run id -> the state that needs a decision and when wait first saw it
-    first = True
+    first, missed = True, 0
     while True:
         watcher = home.holder(lock)
         if first and not watcher:
             raise Refuse(f"no watcher holds {lock}, so nothing collects; start edr watch or edr serve")
+        missed = 0 if watcher else missed + 1  # edr serve restarts a watcher that exited after 60 s
         rows = [r for r in c.rows(batch) if (not ids or r["run_id"] in ids) and (not a.source or r.get("source") in a.source)]
         if first and not rows:
             raise Refuse("no run matches")
@@ -722,7 +726,7 @@ def cmd_wait(c: Ctx, a: argparse.Namespace) -> int:
                 seen[r["run_id"]] = (state, now)
             since = min(seen[r["run_id"]][1], rec["since"] if rec.get("state") == state else now)
             late = late or now - since > lim.grace_s + lim.heartbeat_s  # the watcher acts in the cycle after grace_s
-        reason = ("ended" if all(done.values()) else "needs_decision" if late else "no_watcher" if not watcher
+        reason = ("ended" if all(done.values()) else "needs_decision" if late else "no_watcher" if missed > 3
                   else "timeout" if deadline is not None and now >= deadline else "")
         if reason:
             break
@@ -2048,9 +2052,10 @@ def _parser() -> argparse.ArgumentParser:
         the watcher left it. It returns when every run has ended and the
         watcher has collected its results. It returns early when a run is
         dead, hung, looping, held or unreadable for longer than grace_s plus
-        one cycle, since the watcher acts first, or when no watcher holds
-        <state_dir>/watch.lock any more. Without a watcher at the start it
-        refuses, since nothing would collect.
+        one cycle, since the watcher acts first, or when no watcher has held
+        <state_dir>/watch.lock for three cycles, which outlasts a restart by
+        edr serve. Without a watcher at the start it refuses, since nothing
+        would collect.
 
         It prints the board of the runs and, for each run that is not done,
         the command the triage proposes. --json gives {"runs": [...],
@@ -2060,8 +2065,8 @@ def _parser() -> argparse.ArgumentParser:
 
         docs/guides/agents.md shows how an agent on another host calls it
         through ssh.
-        """, exits={Exit.REFUSED: "a run ended other than done, a run needs a decision, no watcher runs, or the "
-                                  "input is bad",
+        """, exits={Exit.REFUSED: "a run ended other than done, a run needs a decision, no watcher ran for three "
+                                  "cycles, or the input is bad",
                     Exit.TIMEOUT: "--timeout ran out"})
     s.add_argument("handle", nargs="*", help=HANDLE)
     s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH")

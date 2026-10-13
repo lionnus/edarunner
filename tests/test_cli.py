@@ -157,7 +157,7 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     assert code == 0 and all(len(ln) <= 48 for ln in out.splitlines()) and "b_nodw" in out
     code, out, _ = edr(capsys, "--json", "status")
     rows = json.loads(out)["data"]["runs"]
-    assert code == 0 and {r["run_id"] for r in rows} == {a, b, q} and json.loads(out)["output"] == ""
+    assert code == 0 and {r["run_id"] for r in rows} == {a, b, q} and "b_nodw" in json.loads(out)["output"]
     code, out, _ = edr(capsys, "--json", "status", "--live")
     rows = {r["run_id"]: r for r in json.loads(out)["data"]["runs"]}
     assert code == 0 and rows[b]["alive"] is False and rows[b]["state"] == "dead" and "alive" not in rows[a]
@@ -942,15 +942,18 @@ def test_extract_writes_the_rows_of_a_run_in_one_commit(demo: Path, capsys, monk
     assert code == 0 and out == f"{a}: 1000 new, 0 changed, 0 unchanged, 0 failed, 0 removed\n" and commits == ["COMMIT"]
 
 
-def test_a_read_command_opens_the_database_read_only_and_creates_no_file(demo: Path, capsys, tmp_path: Path) -> None:
+def test_a_read_command_opens_the_database_read_only_and_writes_nothing_to_it(demo: Path, capsys, tmp_path: Path) -> None:
     a = seed(demo, "a", "done")
     add_metric(demo, a, "area_cell_um2", 1000.0)
     data, demand = demo / "data", tmp_path / "demand.csv"
     demand.write_text("label,stage,task\na,synth,\n")
     reads = (("metrics", "--source", "abc1234"), ("compare", a), ("runtime", a), ("events",), ("coverage", str(demand)))
+    before = (data / "edr.db").read_bytes()
     for argv in reads:
         assert edr(capsys, *argv)[0] in (0, 2)
-    assert sorted(p.name for p in data.iterdir()) == ["edr.db"]
+    assert (data / "edr.db").read_bytes() == before
+    for name in ("edr.db-wal", "edr.db-shm"):  # the empty files SQLite leaves next to a WAL database
+        (data / name).unlink(missing_ok=True)
     data.chmod(0o555)
     try:
         for argv in reads:
@@ -1389,6 +1392,18 @@ def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
     assert b"\x1b" in narrow.encode() and all(len(re.sub(r"\x1b\[[0-9;]*m", "", ln)) <= 48 for ln in narrow.splitlines())
 
 
+def test_an_old_heartbeat_gives_stale_and_only_the_watcher_gives_dead(demo: Path, capsys) -> None:
+    old = int(time.time()) - 100000
+    a = seed(demo, "a", "stage:synth", pid=dead_pid(), updated=old)
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=old, state="dead")
+    c = seed(demo, "c", "stage:synth", updated=old)
+    with Database(demo / "data" / "edr.db") as db:  # a resume submitted a new driver for c
+        db.upsert_run({"run_id": c, "state": "stale"})
+    code, out, _ = edr(capsys, "--json", "status")
+    states = {r["run_id"]: r["state"] for r in json.loads(out)["data"]["runs"]}
+    assert code == 0 and states == {a: "stale", b: "dead", c: "stale"}
+
+
 def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsys, monkeypatch) -> None:
     a = seed(demo, "a", "done")
     with Database(demo / "data" / "edr.db") as db:
@@ -1405,7 +1420,7 @@ def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsy
         forced = edr(capsys, "--json", *argv)[1]
         assert plain == forced and "\x1b" not in plain, argv
         env = json.loads(plain)
-        assert env["code"] == 0 and env["output"] == "" and env["data"], argv
+        assert env["code"] == 0 and env["output"].strip() and env["data"], argv
 
 
 def test_bad_input_exits_1(capsys) -> None:
@@ -1473,7 +1488,7 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
     hb.update(updated=now - 100000)
     hb_path.write_text(json.dumps(hb))
     row = {r["run_id"]: r for r in json.loads(edr(capsys, "--json", "status")[1])["data"]["runs"]}[b]
-    assert row["state"] == "dead"
+    assert row["state"] == "stale"  # only the watcher, which asks the host, says dead
     hb.update(phase="gate:synth", gate="demo: 0 free, 1 held by others, 1 needed", updated=now)
     hb_path.write_text(json.dumps(hb))
     code, out, _ = edr(capsys, "status", "b_nodw@demo")
@@ -1538,7 +1553,7 @@ def test_wait_returns_0_when_every_run_is_done_and_collected(demo: Path, capsys)
     code, data, out = _wait(capsys, "a@demo")
     os.close(fd)
     assert code == 0 and data["reason"] == "ended" and data["collected"] == {a: True} and "edr export" not in out
-    assert db.stat().st_mtime_ns == before and not Path(f"{db}-wal").exists()  # read-only
+    assert db.stat().st_mtime_ns == before  # read-only
 
 
 def test_wait_returns_1_when_a_run_ended_other_than_done(demo: Path, capsys) -> None:
@@ -1553,7 +1568,7 @@ def test_wait_returns_1_when_a_run_ended_other_than_done(demo: Path, capsys) -> 
 
 
 def test_wait_returns_1_when_a_run_needs_a_decision_after_the_grace(demo: Path, capsys, monkeypatch) -> None:
-    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 100000)
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 100000, state="dead")
     fd = _watcher(demo)
     now = _clock(monkeypatch)
     start = now[0]
@@ -1578,9 +1593,19 @@ def test_wait_returns_1_when_the_watcher_goes_and_4_at_the_timeout(demo: Path, c
     start = now[0]
     code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo", "--timeout", "0.01")
     assert code == 4 and json.loads(out)["data"]["reason"] == "timeout" and 36 <= now[0] - start < 41
-    monkeypatch.setattr(time, "sleep", lambda s: os.close(fd))
+    sleeps: list[float] = []
+
+    def sleep(s: float) -> None:
+        sleeps.append(s)
+        if len(sleeps) in (1, 4):  # the watcher exits, the second time for good
+            os.close(fds[-1])
+        elif len(sleeps) == 3:  # edr serve starts it again
+            fds.append(_watcher(demo))
+
+    fds = [fd]
+    monkeypatch.setattr(time, "sleep", sleep)
     code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo")
-    assert code == 1 and json.loads(out)["data"]["reason"] == "no_watcher"
+    assert code == 1 and json.loads(out)["data"]["reason"] == "no_watcher" and len(sleeps) == 7
 
 
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:

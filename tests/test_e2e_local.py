@@ -195,7 +195,7 @@ def test_plan_and_launch_check_out_a_missing_source(demo: Path, capsys, tmp_path
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=demo / "repo", check=True,
                           capture_output=True, text=True).stdout.strip()
     code, out, _ = edr(capsys, "plan", "demo", "--dry-run")
-    assert code == 0 and f"git clone --local --no-checkout {demo / 'repo'} {demo / 'wt' / head}" in out
+    assert code == 0 and f"git clone --no-checkout {demo / 'repo'} {demo / 'wt' / head}" in out
     assert f"checkout {head} {demo / 'wt' / head} (dry)" in out and not (demo / "wt").exists()
     code, out, err = edr(capsys, "launch", "demo", "--dry-run")
     assert code == 0, out + err
