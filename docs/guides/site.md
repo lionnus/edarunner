@@ -53,7 +53,10 @@ largest writable one, as `<scratch>/<user>/edr/<project>/<run_id>/`.
 `env` reaches every command on every host; [project.md](project.md#the-environment)
 says how it combines with the project's own `[env]`. `tool_procs` is a
 regular expression over process names, which the orphan check and
-`edr hosts` use to find your tool processes. The host `local` is the
+`edr hosts` use to find your tool processes. `orphan_min_age_s`, 300 s
+by default, is how long such a process must run before the orphan check
+alerts about it, when no edarunner run started it; a process that an
+ended run left behind alerts at once. The host `local` is the
 head node itself, reached without ssh.
 
 `host_free_min_gb`, 100 GB by default, is the floor of every scratch

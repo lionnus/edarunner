@@ -77,8 +77,8 @@ _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "ge_um2",
     "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "parameters", "checks", "env",
 }
-_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "host_free_min_gb", "hosts", "tools", "nfs_export",
-              "telegram", "scheduler"}
+_SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "orphan_min_age_s", "host_free_min_gb", "hosts", "tools",
+              "nfs_export", "telegram", "scheduler"}
 _EXTRACTORS = ("regex", "csv", "json", "python", "area_hier", "table")
 _REDUCE = ("first", "last", "min", "max", "sum")
 
@@ -312,7 +312,7 @@ def load_site(path: PathLike) -> Site:
              for n, t in _table(raw.get("tools", {}), None, file, "tools").items()}
     hosts = {n: _host(n, t, tools, file) for n, t in _table(raw.get("hosts", {}), None, file, "hosts").items()}
     commands = _commands(_table(raw.get("telegram", {}), {"commands"}, file, "telegram"), file)
-    given = {k: raw[k] for k in ("env", "tool_procs", "host_free_min_gb", "nfs_export") if k in raw}
+    given = {k: raw[k] for k in ("env", "tool_procs", "orphan_min_age_s", "host_free_min_gb", "nfs_export") if k in raw}
     given.update({f"ssh_{k}": v for k, v in ssh.items()})
     sched = _build(Scheduler, raw.get("scheduler", {}), file, "scheduler")
     if sched.backend not in BACKENDS:

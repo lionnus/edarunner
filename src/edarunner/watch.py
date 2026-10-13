@@ -84,7 +84,8 @@ STATES = {
     "orphan": State("a process of the current user that matches `tool_procs` and that no live run owns: its "
                     "`EDR_RUN_ID` names a run of a registered project that ended or whose driver is gone, or an "
                     "unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and "
-                    "no safety marker of a registered project in its cwd or command line",
+                    "no safety marker of a registered project in its cwd or command line and has run for "
+                    "`orphan_min_age_s`",
                     "`SIGTERM`, only with `kill_orphan` of the project the process belongs to", alert=True),
     "unreadable": State("a reader cannot use the heartbeat or the spec of the run, such as a heartbeat that an older "
                         "driver wrote", "none; the watcher skips the run until its files read again", alert=True),
