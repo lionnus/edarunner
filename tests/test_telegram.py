@@ -396,6 +396,39 @@ def test_poll_survives_a_bad_response(bot, monkeypatch):
     assert calls == ["getUpdates", "getUpdates"]
 
 
+def test_a_second_poller_alerts_once_on_every_channel_and_slows_the_poll(bot, monkeypatch, caplog):
+    conflict = "getUpdates: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"
+    answers = [conflict, conflict, conflict, [], conflict, "stop"]
+    waits: list[float] = []
+
+    def api(method, params, files=None):
+        if method != "getUpdates":
+            return FakeApi.call(bot.api, method, params, files)
+        a = answers.pop(0)
+        if a == "stop":
+            bot._stop.set()
+            return []
+        if isinstance(a, str):
+            raise tgapi.ApiError(a)
+        return a
+
+    class Peer:
+        sent: list[Alert] = []
+        send = sent.append
+
+    monkeypatch.setattr(bot.api, "call", api)
+    monkeypatch.setattr(bot._stop, "wait", waits.append)
+    bot.peers = [bot, Peer()]
+    with caplog.at_level(logging.WARNING, logger=tgbot.__name__):
+        bot._poll()
+    assert waits == [tgbot.CONFLICT_S] * 4
+    # One alert per conflict on every channel, edited in place on Telegram, and one log line per change.
+    assert [a.kind for a in Peer.sent] == ["bot", "bot"] and "another program polls the same bot token" in Peer.sent[0].about
+    assert len(bot.api.of("sendMessage")) == 1 and len(bot.api.of("editMessageText")) == 1
+    assert [r.message.split(";")[0] for r in caplog.records] == [
+        "telegram: another program polls this bot", "telegram: no other program polls this bot now"] * 2
+
+
 def test_api_turns_a_bad_body_into_apierror(monkeypatch):
     b = BotApi("123:ABC")
     monkeypatch.setattr(tgapi.time, "sleep", lambda s: None)

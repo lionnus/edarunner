@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from edarunner.model import Project, Site, Telegram
-from edarunner.notify import Notifier
+from edarunner.notify import Notifier, alerts
 from edarunner.notify.telegram import format as fmt
 from edarunner.notify.telegram.api import ApiError, BotApi
 from edarunner.notify.telegram.buttons import Buttons, markup
@@ -30,10 +30,10 @@ from edarunner.notify.telegram.commands import Commands, Reply, keyboard_word
 
 if TYPE_CHECKING:
     from edarunner.cli import Router
-    from edarunner.notify.alerts import Alert
 
 log = logging.getLogger(__name__)
 
+CONFLICT_S = 60  # the poll interval while another program polls the same token
 REPLY_DAYS = 7  # how long a reply to an alert and a button press still find its run
 MAX_DOCUMENT = 20 * 2**20  # the upload limit of the Bot API is 50 MB; a phone needs far less
 # The reaction on a command message. ⏳, ✅ and ❌ are not in the set of reactions that Telegram accepts.
@@ -76,7 +76,7 @@ class TelegramBot(Notifier):
 
     # Notifier
 
-    def send(self, alert: Alert) -> str | None:
+    def send(self, alert: alerts.Alert) -> str | None:
         """Send one alert; a repeat with the same kind and key edits it in place."""
         keys = markup(alert.buttons) if alert.buttons else None
         try:
@@ -187,20 +187,38 @@ class TelegramBot(Notifier):
             self._thread.join(timeout=1)
 
     def _poll(self) -> None:
-        offset = None
+        offset, conflict = None, False
         while not self._stop.is_set():
             try:
                 updates = self.api.get_updates(offset)
             except Exception as e:  # nothing restarts this thread
-                log.warning("telegram: %s", e)
-                time.sleep(5)
+                if "Conflict: terminated by other getUpdates request" not in str(e):
+                    log.warning("telegram: %s", e)
+                    time.sleep(5)
+                    continue
+                if not conflict:
+                    conflict = True
+                    log.warning("telegram: another program polls this bot; polling every %d s: %s", CONFLICT_S, e)
+                    self._alert_all(alerts.poll_alert(str(e), CONFLICT_S))
+                self._stop.wait(CONFLICT_S)
                 continue
+            if conflict:
+                conflict = False
+                log.warning("telegram: no other program polls this bot now; polling as usual")
             for u in updates:
                 offset = u["update_id"] + 1
                 try:
                     self.handle_update(u)
                 except Exception:  # one bad update must not end the thread
                     log.exception("telegram: update %s", u.get("update_id"))
+
+    def _alert_all(self, alert: alerts.Alert) -> None:
+        """Send `alert` on every channel; a channel that fails does not end the poll thread."""
+        for n in self.peers or [self]:
+            try:
+                n.send(alert)
+            except Exception:
+                log.exception("telegram: alert %s on %s", alert.kind, type(n).__name__)
 
     # The router
 

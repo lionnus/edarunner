@@ -56,6 +56,7 @@ other message is `<project>: <kind>`.
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
+| alert: `bot` | the bot that polls, once each time Telegram answers its `getUpdates` with a conflict because another program polls the same token; commands and button presses may go to that program, and the bot polls once a minute until the conflict ends | one message | one push | one mail |
 | alert: `done`, when `alerts` lists it | the watcher, once when a run ends `done` | one message | one push | one mail |
 | alert: `metrics`, when `alerts` lists it | the watcher, when it adds metric rows to a run | one message per run, edited in place | one low push per arrival | one mail per arrival |
 | `digest` | the supervisor once a day at `digest_at` of the user file, for every project in one message, and `edr notify --digest` | one message | one low push | one mail |
@@ -94,7 +95,10 @@ without a supervisor, in the first watcher that takes
 `~/.edr/serve.lock`. It keeps one pinned board and answers the commands
 and the button presses of one chat. Every watcher sends the alerts of
 its own project through the same bot. The bot uses long polling over
-outbound HTTPS, so it needs no open port and no webhook.
+outbound HTTPS, so it needs no open port and no webhook. Telegram takes
+one poller per token: when a second program polls it, such as a
+supervisor on another host, the bot sends the `bot` alert and polls once
+a minute until the other program stops.
 [reference/bot.md](../reference/bot.md) lists every command.
 
 ### Set up the bot
