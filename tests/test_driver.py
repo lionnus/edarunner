@@ -325,7 +325,7 @@ def test_budget_kill_ends_the_stage(tmp_path: Path) -> None:
 
 def test_per_task_budget_kills_that_task_only(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("power",), tasks=("k_small", "k_big"), parallel=2,
-                       env={"DEMO_SLEEP": "4"}, budgets={"power": {"hours": 0.0003, "per": "task"}})
+                       env={"DEMO_SLEEP": "4"}, budgets={"power": {"hours": 0.0003, "per": "task", "kill": True}})
     rc, hb = finish(start(spec), spec)
     assert (rc, hb["phase"], hb["exit"]) == (8, "INCOMPLETE:1f0s0h", 8)
     small, big = hb["tasks"]["power"]["k_small"], hb["tasks"]["power"]["k_big"]
@@ -333,6 +333,15 @@ def test_per_task_budget_kills_that_task_only(tmp_path: Path) -> None:
     assert big["phase"] == "done" and "over_budget" not in big  # its own 2 h budget holds
     assert "over_budget" not in hb and hb["killed_by"] is None
     assert sorted(os.listdir(Path(spec["queue_dir"]) / "power" / "done")) == ["k_big", "k_small"]
+
+
+def test_per_task_budget_without_kill_lets_the_task_run_to_its_end(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small",), env={"DEMO_SLEEP": "4"},
+                       budgets={"power": {"hours": 0.0003, "per": "task"}})
+    rc, hb = finish(start(spec), spec)
+    small = hb["tasks"]["power"]["k_small"]
+    assert small["phase"] == "done" and small["exit"] == 0 and small["over_budget"] is True
+    assert (rc, hb["phase"]) == (0, "done")
 
 
 def test_a_group_budget_lets_a_long_task_run_to_its_end(tmp_path: Path) -> None:
