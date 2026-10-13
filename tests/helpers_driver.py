@@ -7,7 +7,12 @@ import os
 import shutil
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
+
+from edarunner import launch
+from edarunner.config import load_project, resolve_task
+from edarunner.model import Budget
 
 REPO = Path(__file__).resolve().parents[1]
 DEMO = REPO / "examples" / "local-demo"
@@ -19,11 +24,6 @@ STAGES = ("synth", "pnr", "export", "power")
 STEPS = ["setup", "analyze", "elaborate", "synth", "cts", "route", "export"]
 PROGRESS = "ls reports 2>/dev/null | grep -cE '^[0-9]+$'"
 TOOL = {"name": "demo", "seats": 1, "probe": ["bash", "{root}/flow/seats.sh"]}
-TASKS = {
-    "k_small": {"kernel": "gemm", "test": "GEMM_M64_N64", "args": "M=64 N=64"},
-    "k_big": {"kernel": "softmax", "test": "SOFTMAX_N512", "args": "N=512", "budget": {"hours": 2}},
-    "k_bad": {"kernel": "bad", "test": "BAD", "args": ""},
-}
 LIMITS = {"host_free_min_gb": 0.1, "streak": 2, "heartbeat_s": 1, "gate_max_s": 30}
 
 
@@ -68,11 +68,14 @@ def render_spec(tmp_path: Path, stages=STAGES, tasks=("k_small", "k_big"), confi
             "name": "power", "cwd": str(root), "parallel": parallel,
             "after_each": "rm -f {task_dir}/wave.vcd",
             "needs": {"cores": 1, "disk_gb": 0.05}, "tools": [tool],
-            "budget": {"hours": 1, "per": "task"},
-            "tasks": [task_spec(t, ph) for t in tasks]},
+            "budget": {"hours": 1, "per": "task"}},
     }
     for name, budget in (budgets or {}).items():
         defs[name]["budget"] = budget
+    # The task specs come from launch, from the demo's power stage with the budget of this spec.
+    project = load_project(DEMO)
+    power = replace(project.stages["power"], budget=Budget(**defs["power"]["budget"]))
+    defs["power"]["tasks"] = [launch._task_spec(project, power, resolve_task(project, t), ph) for t in tasks]
     return {
         "schema": 1, "run_id": RUN_ID, "batch": "demo", "project": "demo", "label": "a",
         "config": config, "host": "local", "root": str(root),
@@ -83,16 +86,6 @@ def render_spec(tmp_path: Path, stages=STAGES, tasks=("k_small", "k_big"), confi
         "start_at": start_at or {"stage": stages[0], "checkpoint": None},
         "stages": [defs[s] for s in stages],
     }
-
-
-def task_spec(tid: str, ph: dict[str, str]) -> dict:
-    t = TASKS[tid]
-    cmd = "DEMO_CONFIG={config} bash {root}/flow/kernel.sh %s %s %s" % (t["kernel"], t["test"], t["args"])
-    spec = {"id": tid, "cmd": render(cmd, ph),
-            "dir": render("{root}/simulation/tests/{config}/" + t["test"], ph)}
-    if "budget" in t:
-        spec["budget"] = t["budget"]
-    return spec
 
 
 def write_spec(spec: dict) -> Path:

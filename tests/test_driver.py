@@ -335,6 +335,16 @@ def test_per_task_budget_kills_that_task_only(tmp_path: Path) -> None:
     assert sorted(os.listdir(Path(spec["queue_dir"]) / "power" / "done")) == ["k_big", "k_small"]
 
 
+def test_a_group_budget_lets_a_long_task_run_to_its_end(tmp_path: Path) -> None:
+    spec = render_spec(tmp_path, stages=("power",), tasks=("k_small",), env={"DEMO_SLEEP": "4"},
+                       budgets={"power": {"hours": 0.0003}})
+    assert spec["stages"][0]["tasks"][0]["budget"] == {}  # the budget of the group is no budget of the task
+    rc, hb = finish(start(spec), spec)
+    small = hb["tasks"]["power"]["k_small"]
+    assert small["phase"] == "done" and small["exit"] == 0 and "over_budget" not in small
+    assert (rc, hb["phase"], hb["over_budget"]) == (9, "OVER_BUDGET:power", "power")
+
+
 def test_checkpoint_resumes_the_first_stage_only(tmp_path: Path) -> None:
     spec = render_spec(tmp_path, stages=("synth", "pnr"), start_at={"stage": "synth", "checkpoint": "elaborate",
                                                                      "attempt": 3})

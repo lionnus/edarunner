@@ -128,13 +128,15 @@ def _tools(project: Project, needs: dict[str, int], values: dict[str, object]) -
 
 
 def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:
+    """The spec of one task; a budget only when the task has its own, since the driver reads a task budget as the
+    limit of that task and takes the stage budget per task only with `per = "task"`."""
     needs = _merge(stage.needs, task.needs)
     tools = needs.pop("tools")
     needs.pop("ram_gb")  # the scheduler's, not the driver's
     v = {**values, **{f"task.{k}": x for k, x in task.fields.items()}, "cores": needs["cores"]}
     v["task_dir"] = os.path.normpath(os.path.join(str(values["root"]), config.render(stage.task_dir, v)))
     out = {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"], "fields": task.fields,
-           "needs": needs, "budget": _budget(stage.budget, task.budget)}
+           "needs": needs, "budget": _budget(stage.budget, task.budget) if task.budget else {}}
     if task.needs and task.needs.tools:
         out["tools"] = _tools(project, tools, v)
     return out
