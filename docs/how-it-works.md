@@ -525,7 +525,9 @@ watcher and each `edr` call take a file lock there. A writer waits up to
 30 s for the lock of another, and the watcher, `edr import` and `edr
 extract` write the metric rows of a run in one transaction. `edr
 metrics`, `compare`, `runtime`, `events` and `coverage` open the
-database read-only and create no file next to it (`cli._READ_ONLY`).
+database read-only and never write to it (`cli._READ_ONLY`). They open
+it immutable only in a directory they cannot write to, since an
+immutable reader never sees a later commit (`db.Database._read_uri`).
 
 `edr metrics --source` and `edr export` match each source tag exactly,
 and read several tags only when each has its own `--source`, so two

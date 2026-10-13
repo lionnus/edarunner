@@ -132,7 +132,7 @@ class Database:
 
     def __init__(self, path: str | os.PathLike, threads: bool = False, readonly: bool = False) -> None:
         """`threads=True` lets another thread use the connection; the caller serialises the calls. `readonly` opens an
-        existing database for reading only, without the journal mode and the schema script, and creates no file."""
+        existing database for reading only, without the journal mode and the schema script, and never writes to it."""
         self.path = Path(path)
         self.network_fs, self.journal_mode, self._held = None, "", False
         if readonly:
