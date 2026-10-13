@@ -942,15 +942,18 @@ def test_extract_writes_the_rows_of_a_run_in_one_commit(demo: Path, capsys, monk
     assert code == 0 and out == f"{a}: 1000 new, 0 changed, 0 unchanged, 0 failed, 0 removed\n" and commits == ["COMMIT"]
 
 
-def test_a_read_command_opens_the_database_read_only_and_creates_no_file(demo: Path, capsys, tmp_path: Path) -> None:
+def test_a_read_command_opens_the_database_read_only_and_writes_nothing_to_it(demo: Path, capsys, tmp_path: Path) -> None:
     a = seed(demo, "a", "done")
     add_metric(demo, a, "area_cell_um2", 1000.0)
     data, demand = demo / "data", tmp_path / "demand.csv"
     demand.write_text("label,stage,task\na,synth,\n")
     reads = (("metrics", "--source", "abc1234"), ("compare", a), ("runtime", a), ("events",), ("coverage", str(demand)))
+    before = (data / "edr.db").read_bytes()
     for argv in reads:
         assert edr(capsys, *argv)[0] in (0, 2)
-    assert sorted(p.name for p in data.iterdir()) == ["edr.db"]
+    assert (data / "edr.db").read_bytes() == before
+    for name in ("edr.db-wal", "edr.db-shm"):  # the empty files SQLite leaves next to a WAL database
+        (data / name).unlink(missing_ok=True)
     data.chmod(0o555)
     try:
         for argv in reads:
@@ -1550,7 +1553,7 @@ def test_wait_returns_0_when_every_run_is_done_and_collected(demo: Path, capsys)
     code, data, out = _wait(capsys, "a@demo")
     os.close(fd)
     assert code == 0 and data["reason"] == "ended" and data["collected"] == {a: True} and "edr export" not in out
-    assert db.stat().st_mtime_ns == before and not Path(f"{db}-wal").exists()  # read-only
+    assert db.stat().st_mtime_ns == before  # read-only
 
 
 def test_wait_returns_1_when_a_run_ended_other_than_done(demo: Path, capsys) -> None:

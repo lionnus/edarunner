@@ -33,9 +33,9 @@ Read the tables with `sqlite3 data/edr.db` when a command does not answer
 the question. Only the head node opens the file, and a read command
 without the file reads an empty database in memory and creates nothing.
 `edr metrics`, `edr compare`, `edr runtime`, `edr events` and
-`edr coverage` open the database read-only. They write nothing next to it, not even the `-wal`
-and `-shm` files of SQLite, so they also read a copy in a directory you
-cannot write to.
+`edr coverage` open the database read-only and never write to it.
+Next to a database in WAL mode, SQLite may leave its empty `-wal` and
+`-shm` files. They also read a copy in a directory you cannot write to.
 [how-it-works.md](../how-it-works.md#where-the-results-end-up) says how
 the database works on a network filesystem.
 

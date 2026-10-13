@@ -102,7 +102,7 @@ _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
                             "notify", "plan", "coverage", "wait"})
-# These commands open the database read-only, so they write nothing, not even the -wal and -shm files of SQLite.
+# These commands open the database read-only and never write to it.
 _READ_ONLY = frozenset({"events", "metrics", "compare", "runtime", "coverage", "wait"})
 
 
