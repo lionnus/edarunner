@@ -83,7 +83,9 @@ site `[env]`.
 ### The run never writes a heartbeat
 
 The driver did not start, or stopped before its first heartbeat. Its
-log in the state directory names the reason. Typical causes are a host
+log in the state directory names the reason. Once the driver process is
+gone, the watcher ends the run `FAILED:setup` and sends an alert with
+the last lines of that log. Typical causes are a host
 whose `python3` is older than 3.6, a state directory that the host does
 not mount at the same path as the head node, and a run tree that is not
 a directory. [site.md](site.md#what-a-host-needs) lists what a host

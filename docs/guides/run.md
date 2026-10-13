@@ -118,6 +118,7 @@ metrics, `--source` and `--csv`.
 | `FAILED:<stage>` | 4 | the tool gate timed out after `gate_max_s` |
 | `FAILED:<stage>` | 5 | a command or `prepare` failed with no retry left, or the driver hit an error |
 | `FAILED:<stage>` | 2 | a checkpoint on a stage without `resume` |
+| `FAILED:setup` | 2 | the start stage is not in the spec; or, without an exit, the watcher found the driver gone before its first heartbeat |
 | `FAILED:runtime` | 5 | `[runtime] setup` failed; no stage ran, and `log/setup.log` says why |
 | `OVER_BUDGET:<stage>` | 9 | a budget passed; the command ended or was killed |
 | `STOPPED` | 10 | a stop file ended the run |

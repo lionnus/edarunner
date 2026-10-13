@@ -251,7 +251,7 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
             ended = state in ("over_budget", "stopped") and not board.is_live(run)
             left, held, why = launch.stages_left(project, db, run) if ended else ([], [], "")
             # A repeat send edits the earlier message in place and keeps its buttons.
-            hb = {} if state == "unreadable" else _hb(project, run)
+            hb = {} if state == "unreadable" else _hb(project, run) or {"last_log": _driver_tail(project, run)}
             alert = alerts.run_alert(project, run, state, reasons, hb, now, [] if why else left, db.runs(), held=held)
             ids = [n.send(alert) for n in wanted(notifiers, state)]
             msgs[state] = {"text": text, "ids": [i for i in ids if i]}
@@ -262,6 +262,17 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     except (HostError, Refuse, OSError, ValueError) as e:
         db.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
         rec["acted"] = True
+
+
+def _driver_tail(project: Project, run: Row) -> str:
+    """The end of the driver log of a run, where a driver that wrote no heartbeat says why."""
+    try:
+        with open(project.state_dir / str(run.get("batch")) / f"{run['run_id']}.driver.log", "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 4096))
+            return f.read().decode(errors="replace")
+    except OSError:
+        return ""
 
 
 # collect, extract, resume, queue
@@ -535,9 +546,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
 
 
 def _waiting(name: str, db: Database, seen: set[str]) -> dict[str, Any]:
-    """The live runs in a scheduler that wrote no heartbeat yet, with their handles."""
-    if name not in SCHEDULERS:
-        return {}
+    """The live runs that wrote no heartbeat yet, with their handles."""
     out = {}
     for r in db.runs():
         if r["run_id"] not in seen and board.is_live(r) and r.get("state") not in ("queued", "retired", "abandoned"):
@@ -546,12 +555,18 @@ def _waiting(name: str, db: Database, seen: set[str]) -> dict[str, Any]:
     return out
 
 
-def _unstarted(db: Database, run_id: str, live: Live, why: str, dry_run: bool) -> tuple[str, list[str]]:
-    """The state of a scheduler job before its first heartbeat; a job that left the queue failed."""
+def _unstarted(project: Project, db: Database, run: Row, live: Live, why: str, sched: bool,
+               dry_run: bool) -> tuple[str, list[str]]:
+    """The state of a run before its first heartbeat. A scheduler job that left the queue ends `FAILED:scheduler`, and
+    a driver that is gone ends `FAILED:setup`, unless it wrote its heartbeat after the cycle read them."""
+    run_id = run["run_id"]
     if live is Live.GONE:
+        if (project.state_dir / str(run.get("batch")) / f"{run_id}.json").exists():
+            return "running", []  # the next cycle reads it
         if not dry_run:
-            db.upsert_run({"run_id": run_id, "phase": "FAILED:scheduler", "exit": None})
-        return "failed", [f"the job left the scheduler before the driver started: {why}"]
+            db.upsert_run({"run_id": run_id, "phase": "FAILED:scheduler" if sched else "FAILED:setup", "exit": None})
+        return "failed", [f"the job left the scheduler before the driver started: {why}" if sched
+                          else f"the driver ended before its first heartbeat: {why}"]
     state = {Live.PENDING: "pending", Live.HELD: "held", Live.SUSPENDED: "suspended", Live.RUNNING: "running"}.get(live, "stale")
     if not dry_run:
         db.upsert_run({"run_id": run_id, "state": state})
@@ -578,12 +593,13 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     alive = backend.alive(list(handles.values())) if handles else {}
     states: dict[str, str] = {}
     for run_id, h in waiting.items():
-        state, reasons = _unstarted(db, run_id, *alive[h], dry_run)
+        run = db.run(run_id) or {"run_id": run_id}
+        state, reasons = _unstarted(project, db, run, *alive[h], backend.name in SCHEDULERS, dry_run)
         states[run_id] = state
         if dry_run:
             print(f"{run_id}: {state} {'; '.join(reasons)}".rstrip())
         else:
-            actions(project, ssh, db, notifiers, db.run(run_id) or {"run_id": run_id}, state, reasons, now, notes)
+            actions(project, ssh, db, notifiers, db.run(run_id) or run, state, reasons, now, notes)
     for batch, hb in heartbeats:
         run = db.run(hb["run_id"]) or {**hb, "batch": batch}
         h = handles.get(hb["run_id"])

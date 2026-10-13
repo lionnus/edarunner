@@ -13,7 +13,7 @@ from helpers_results import demo_qor
 from helpers_watch import NEW, NOW, Env, Rec, rid
 
 from edarunner import board, census, collect, config, launch, watch
-from edarunner.backend import Live
+from edarunner.backend import Live, LocalBackend
 from edarunner.hosts import HostProbe
 from edarunner.model import Parameter
 from helpers_backend import FakeBackend
@@ -576,6 +576,24 @@ def test_a_scheduler_job_before_its_first_heartbeat(env: Env) -> None:
     assert env.cycle(NOW + 2, backend=fake)[rid("p")] == "failed"
     assert env.db.run(rid("p"))["phase"] == "FAILED:scheduler" and rid("q") not in env.cycle(NOW + 3, backend=fake)
     assert fake.asked == [["1.0"]] * 3
+
+
+def test_a_driver_that_ends_before_its_first_heartbeat_fails_the_run(env: Env) -> None:
+    driver = env.tmp / "stub_driver.py"
+    driver.write_text("import sys\nsys.stderr.write('stub: cannot start\\n')\nsys.exit(1)\n")
+    run_id = rid("s")
+    env.db.upsert_run({"run_id": run_id, "batch": "demo", "label": "s", "phase": "setup", "host": "local"})
+    spec = env.project.state_dir / "demo" / f"{run_id}.spec.json"
+    config.save_json(spec, {"run_id": run_id})
+    backend = LocalBackend(env.ssh)
+    h = launch.submit(backend, env.db, env.project, run_id, "local", spec, driver)
+    deadline = time.time() + 10
+    while backend.alive([h])[h][0] is not Live.GONE and time.time() < deadline:
+        time.sleep(0.05)
+    assert env.cycle(backend=backend)[run_id] == "failed"
+    assert env.db.run(run_id)["phase"] == "FAILED:setup"
+    assert env.notifier.sent == [("failed", run_id)] and env.notifier.alerts[run_id].log == ["stub: cannot start"]
+    assert run_id not in env.cycle(NOW + 1, backend=backend)
 
 
 def test_a_fresh_census_saves_the_probe_of_the_boards(env: Env, user_root: Path, monkeypatch) -> None:
