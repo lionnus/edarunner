@@ -224,7 +224,8 @@ class Ctx:
         self.unreadable = watch.ingest(self.db, heartbeats) if heartbeats else {}
 
     def rows(self, batch: str | None = None) -> list[Row]:
-        """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
+        """The runs of the batches that are not retired, with the state a heartbeat age gives: `running` while it is
+        fresh, else `stale`, or the watcher's `dead`, which only a look at the host can tell; a run whose heartbeat
         the refresh could not use is `unreadable` and carries the error. A read-only command skips the refresh and
         reads what the watcher ingested last."""
         fresh = getattr(self.a, "command", None) not in _READ_ONLY
@@ -239,8 +240,10 @@ class Ctx:
                 r["state"] = None  # the refresh read it, and the watcher classifies it again
             # The watcher's own classes (hung, host_full, ...) stay; only the age classes follow the heartbeat.
             if board.is_live(r) and r.get("updated") is not None and r.get("state") in (None, "running", "stale", "dead"):
-                age = now - r["updated"]
-                r["state"] = "dead" if age > lim.dead_s else "stale" if age > lim.stale_s else "running"
+                if now - r["updated"] <= lim.stale_s:
+                    r["state"] = "running"
+                elif r.get("state") in (None, "running"):
+                    r["state"] = "stale"
         return rows
 
     def resolve(self, handle: str) -> Row:

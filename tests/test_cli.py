@@ -1389,6 +1389,18 @@ def test_pipe_and_no_color_carry_no_escape_codes(demo: Path) -> None:
     assert b"\x1b" in narrow.encode() and all(len(re.sub(r"\x1b\[[0-9;]*m", "", ln)) <= 48 for ln in narrow.splitlines())
 
 
+def test_an_old_heartbeat_gives_stale_and_only_the_watcher_gives_dead(demo: Path, capsys) -> None:
+    old = int(time.time()) - 100000
+    a = seed(demo, "a", "stage:synth", pid=dead_pid(), updated=old)
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=old, state="dead")
+    c = seed(demo, "c", "stage:synth", updated=old)
+    with Database(demo / "data" / "edr.db") as db:  # a resume submitted a new driver for c
+        db.upsert_run({"run_id": c, "state": "stale"})
+    code, out, _ = edr(capsys, "--json", "status")
+    states = {r["run_id"]: r["state"] for r in json.loads(out)["data"]["runs"]}
+    assert code == 0 and states == {a: "stale", b: "dead", c: "stale"}
+
+
 def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsys, monkeypatch) -> None:
     a = seed(demo, "a", "done")
     with Database(demo / "data" / "edr.db") as db:
@@ -1473,7 +1485,7 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
     hb.update(updated=now - 100000)
     hb_path.write_text(json.dumps(hb))
     row = {r["run_id"]: r for r in json.loads(edr(capsys, "--json", "status")[1])["data"]["runs"]}[b]
-    assert row["state"] == "dead"
+    assert row["state"] == "stale"  # only the watcher, which asks the host, says dead
     hb.update(phase="gate:synth", gate="demo: 0 free, 1 held by others, 1 needed", updated=now)
     hb_path.write_text(json.dumps(hb))
     code, out, _ = edr(capsys, "status", "b_nodw@demo")
@@ -1553,7 +1565,7 @@ def test_wait_returns_1_when_a_run_ended_other_than_done(demo: Path, capsys) -> 
 
 
 def test_wait_returns_1_when_a_run_needs_a_decision_after_the_grace(demo: Path, capsys, monkeypatch) -> None:
-    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 100000)
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 100000, state="dead")
     fd = _watcher(demo)
     now = _clock(monkeypatch)
     start = now[0]
