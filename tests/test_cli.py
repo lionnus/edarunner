@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from helpers_cli import DATE, bdir, dead_pid, edr, seed
+from helpers_cli import DATE, bdir, dead_pid, edr, seed, watch_once
 from helpers_results import demo_qor
 
 from edarunner import board, cli, config, home, launch, serve, watch
@@ -642,13 +642,14 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     assert code == 0 and f"rm -rf {roots[a]}/out on local (dry)" in out and (roots[a] / "out" / "11").is_dir()
     code, out, _ = edr(capsys, "retire", "a@demo", "--prune", "netlist", "--why", "x")
     assert code == 0 and not (roots[a] / "out").exists() and (roots[a] / "log").is_dir()
-    (demo / "data" / "results" / a / "log").mkdir(parents=True)
+    watch_once(demo)
     code, out, _ = edr(capsys, "retire", "a@demo", "--why", "x")
     assert code == 0 and not roots[a].exists()
     assert json.loads((state / "demo" / f"{a}.json").read_text())["phase"] == "done"
     code, _, err = edr(capsys, "retire", "c@other", "--uncollected", "--why", "x")
     assert code == 1 and "is alive" in err and roots[c].is_dir()
-    (roots[b] / "log").mkdir(exist_ok=True)
+    hb = json.loads((state / "demo" / f"{b}.json").read_text())
+    (state / "demo" / f"{b}.json").write_text(json.dumps({**hb, "step": 3}))  # the next collect has not run
     code, out, err = edr(capsys, "retire", "--batch", "demo", "--why", "gone", "--dry-run")
     assert code == 1 and "not collected" in err and "rm -rf" not in out  # a dry run still runs the guard
     code, _, err = edr(capsys, "retire", "--batch", "demo", "--why", "gone")
@@ -662,7 +663,7 @@ def test_retire_guards_prune_abandon_and_batch(demo: Path, capsys) -> None:
     with Database(demo / "data" / "edr.db") as db:
         assert db.batches()[0]["retired"] and db.run(b)["phase"] == "ABANDONED:gone"
         assert db.run(q)["state"] == "retired" and db.run(a)["phase"] == "done"
-        kinds = [(e["run_id"], e["kind"]) for e in db.events()]
+        kinds = [(e["run_id"], e["kind"]) for e in db.events() if e["actor"] == "user"]
     assert kinds == [(a, "prune"), (a, "retire"), (a, "retire"), (b, "retire"), (q, "retire")]
     assert edr(capsys, "status", "--batch", "demo")[1] == "no runs\n" and "c" in edr(capsys, "status")[1]
     assert edr(capsys, "retire", "--batch", "empty", "--why", "x")[0] == 2
@@ -1458,8 +1459,8 @@ def test_retire_collects_the_named_lists_first(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     root = Path(config.load_project(demo).site.scratch[0]) / getpass.getuser() / "edr" / "demo" / a
     results = demo / "data" / "results" / a
-    (results / "log").mkdir(parents=True)
     with_vars(demo, a)
+    watch_once(demo)
     code, out, _ = edr(capsys, "retire", "a@demo", "--collect", "netlist", "--why", "x", "--dry-run")
     assert code == 0 and "collect netlist: 1 files (dry)" in out and root.is_dir() and not (results / "out").exists()
     code, _, err = edr(capsys, "retire", "a@demo", "--collect", "netlist,nope", "--why", "x")
@@ -1467,7 +1468,7 @@ def test_retire_collects_the_named_lists_first(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "retire", "a@demo", "--collect", "netlist", "--why", "x")
     assert code == 0 and not root.exists() and (results / "out" / "11" / "netlist.v").is_file()
     with Database(demo / "data" / "edr.db") as db:
-        assert [e["kind"] for e in db.events(run_id=a)] == ["collect", "collect", "retire"]
+        assert [e["kind"] for e in db.events(run_id=a) if e["actor"] == "user"] == ["collect", "collect", "retire"]
 
 
 def test_retire_refuses_a_young_run_without_a_heartbeat(demo: Path, capsys) -> None:

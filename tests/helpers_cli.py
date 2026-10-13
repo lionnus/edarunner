@@ -8,8 +8,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from edarunner import board, cli, config
+from edarunner import board, cli, config, watch
 from edarunner.db import Database
+from edarunner.hosts import Ssh
 
 DATE = "20260926_1200"
 
@@ -55,3 +56,10 @@ def seed(root: Path, label: str, phase: str | None, pid: int | None = None, batc
         db.upsert_batch({"batch": batch, "project": "demo", "source": source})
         db.upsert_run(row)
     return run_id
+
+
+def watch_once(root: Path) -> None:
+    """One watcher cycle that starts nothing: it collects every run it can."""
+    project = config.load_project(root)
+    with Database(project.data / "edr.db") as db:
+        watch.cycle(project, Ssh(project.site), db, [], start=False)

@@ -249,6 +249,26 @@ def test_collect_extract_and_parameters_once(env: Env, monkeypatch) -> None:
     assert calls == [run_id] and len(env.db.metrics(run_ids=[run_id])) == 12
 
 
+def test_a_failed_collect_runs_again_and_the_run_counts_as_collected_only_after_it(env: Env, monkeypatch) -> None:
+    hb = env.heartbeat("a", phase="done", exit=0)
+    run_id, real, calls = hb["run_id"], collect.collect_run, []
+
+    def flaky(*a, **k):
+        calls.append(run_id)
+        return collect.CollectResult(failures=["log/: rsync rc 255: no answer"]) if len(calls) < 3 else real(*a, **k)
+
+    monkeypatch.setattr(collect, "collect_run", flaky)
+    env.cycle()
+    env.cycle(NOW + 1)
+    assert len(calls) == 2 and not watch.collected(env.project, env.db, env.db.run(run_id), hb)
+    env.cycle(NOW + 2)  # the tree has no reports/: a missing source is not retried
+    env.cycle(NOW + 3)
+    assert len(calls) == 3 and watch.collected(env.project, env.db, env.db.run(run_id), hb)
+    texts = [e["text"] for e in env.db.events(run_id=run_id) if e["kind"] == "collect"]
+    assert len(texts) == 2 and texts[0].endswith("no answer") and "rsync rc 23" in texts[1]
+    assert (env.project.data / "results" / run_id / "log" / "synth.log").is_file()
+
+
 def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
     root = Path(hb["root"])

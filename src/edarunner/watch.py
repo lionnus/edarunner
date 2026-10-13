@@ -277,27 +277,47 @@ def _parameters(run: Row, spec: dict) -> dict[str, dict[str, Any]]:
                          **{f"nested.{k}": v for k, v in nested.items()}}}
 
 
+def _collect_key(project: Project, hb: dict, spec: dict) -> list | None:
+    """What a collect of the run copies, or None when there is nothing to copy; the watcher collects again when it
+    changes. Lists, not tuples: the key goes through JSON between cycles."""
+    finished, running = collect.stage_state(project, hb, collect.spec_stages(spec))
+    tasks = sorted([s, t] for (s, t), phase in collect.task_phases(hb).items() if phase in ("done", "failed"))
+    if not (finished or tasks or running):
+        return None
+    return [finished, tasks, hb.get("step") if running else None, board.is_live(hb)]
+
+
+def collected(project: Project, db: Database, run: Row, hb: dict) -> bool:
+    """Whether the last collect of `run` copied all there was and saw the run as its heartbeat shows it now, so a
+    finished run counts only after the collect that followed its end. A run without a heartbeat, such as an imported
+    one, counts when its results hold `log/`."""
+    if not hb:
+        return (project.data / "results" / run["run_id"] / "log").is_dir()
+    key = _collect_key(project, hb, collect.load_spec(project, run))
+    return key is not None and (db.get_store("progress", {}).get(run["run_id"]) or {}).get("collected") == key
+
+
 def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progress: dict, host: str = "") -> str:
     """Collect and extract one run; the text of the `metrics` event when rows arrived, else ""."""
     spec = collect.load_spec(project, run)
     if spec.get("collect") is False:  # edr track without --collect
         return ""
-    only = collect.spec_stages(spec)
-    finished, running = collect.stage_state(project, hb, only)
-    tasks = {k: phase for k, phase in collect.task_phases(hb).items() if phase in ("done", "failed")}
-    # Lists, not tuples: the key goes through JSON between cycles.
-    key = [finished, sorted(map(list, tasks)), hb.get("step") if running else None, board.is_live(hb)]
-    rec = progress.setdefault(run["run_id"], {})
-    if rec.get("collected") == key or not (finished or tasks or running):
+    key, rec = _collect_key(project, hb, spec), progress.setdefault(run["run_id"], {})
+    if key is None or rec.get("collected") == key:
         return ""
-    rec["collected"] = key
     _pulse(project)
     res = collect.collect_run(project, ssh, db, run, hb, host=host)
-    if res.failures:
-        db.add_event("watch", run["run_id"], "collect", f"{len(res.failures)} failed: {res.failures[0]}")
+    # A source that is not on the host stays missing; any other failure, such as a host that did not answer, or an
+    # rsync timeout, makes the next cycle collect again.
+    if len(res.failures) == res.missing:
+        rec["collected"] = key
+    failed = f"{len(res.failures)} failed: {res.failures[0]}" if res.failures else ""
+    if failed and failed != rec.get("collect_failed"):
+        db.add_event("watch", run["run_id"], "collect", failed)
+    rec["collect_failed"] = failed
     # No new file does not mean no new metric: a file can arrive before its step or stage counts as
     # finished. Extraction is idempotent, so run it.
-    rows = extract_run(project, db, run, hb, spec, tasks)
+    rows = extract_run(project, db, run, hb, spec)
     with db.conn:  # one commit for the rows, parameters and flags of the run
         new = [r for r in rows if db.add_metric(r)]
         for origin, params in (_parameters(run, spec) if not rec.get("params") else {}).items():

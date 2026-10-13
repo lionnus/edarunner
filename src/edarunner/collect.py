@@ -28,11 +28,13 @@ _FORMAT = "--out-format=%i %l %n"
 
 @dataclass
 class CollectResult:
-    """How many files one collection copied, and what failed."""
+    """How many files one collection copied, and what failed; `missing` counts the failures of a source that is not
+    on the host."""
 
     files: int = 0
     failures: list[str] = field(default_factory=list)
     copied: list[str] = field(default_factory=list)
+    missing: int = 0
 
 
 def load_spec(project: Project, run: dict) -> dict:
@@ -246,6 +248,7 @@ class _Copier:
         if rc != 0:
             first = err.strip().splitlines()[:1]
             self.result.failures.append(f"{entry}: rsync rc {rc}: {first[0] if first else ''}")
+            self.result.missing += rc == 23 and "No such file or directory" in err
         for line in out.splitlines():
             code, size, name = line.split(" ", 2)
             if code[1:2] == "f":
