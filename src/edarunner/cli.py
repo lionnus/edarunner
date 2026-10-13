@@ -1123,7 +1123,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
         project.stages[s].parallel = a.parallel
     # The run joins the batch of the tree it continues; its label and the time keep its id apart.
     job.label = base = f"{row['label']}.{stages[0]}" + (f"-{stages[-1]}" if len(stages) > 1 else "")
-    taken, n = {r["label"] for r in c.db.runs(batch=str(row["batch"]))} if len(stages) > 1 else set(), 1
+    taken, n = {r["label"] for r in c.db.runs(batch=str(row["batch"]))}, 1
     while job.label in taken:
         n += 1
         job.label = f"{base}.{n}"

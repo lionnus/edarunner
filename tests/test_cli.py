@@ -24,7 +24,7 @@ from helpers_results import demo_qor
 
 from edarunner import board, cli, config, home, launch, serve, watch
 from edarunner import db as db_mod
-from edarunner.backend import Live
+from edarunner.backend import Handle, Live
 from edarunner.db import Database
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
@@ -1193,6 +1193,21 @@ def test_a_continue_whose_submit_fails_ends_its_run_and_does_not_block_the_tree(
         failed = [r for r in db.runs() if r["run_id"] != a]
         assert [(r["phase"], r["state"]) for r in failed] == [("FAILED:submit", "failed")] * 2
         assert [e["kind"] for e in db.events(run_id=failed[0]["run_id"])] == ["continue", "launch"]
+
+
+def test_two_continues_of_one_stage_in_one_minute_get_runs_of_their_own(demo: Path, capsys, monkeypatch) -> None:
+    a = seed(demo, "a", "done")
+    monkeypatch.setattr(launch, "submit", lambda *args: Handle("local", "local:1", "local"))
+    ids = []
+    for _ in range(2):
+        code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "export", "--on", "local")
+        ids.append(json.loads(out)["data"]["run_id"])
+        assert code == 0
+        with Database(demo / "data" / "edr.db") as db:
+            db.upsert_run({"run_id": ids[-1], "phase": "done"})  # the first ends before the second starts
+    with Database(demo / "data" / "edr.db") as db:
+        assert sorted(r["label"] for r in db.runs() if r["run_id"] != a) == ["a.export", "a.export.2"]
+    assert ids[0] != ids[1] and "_a.export.2_" in ids[1]
 
 
 def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monkeypatch) -> None:
