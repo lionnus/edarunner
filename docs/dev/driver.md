@@ -73,7 +73,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `state_file`, `queue_dir` | the heartbeat path and the task queue |
 | `shell`, `env` | every command runs through `shell -c` with `env` added; `env` holds `EDR_SOURCE`, `EDR_RUN_ID` and `EDR_TREE_ID` |
 | `limits` | `host_free_min_gb`, `streak`, `heartbeat_s`, `gate_max_s`, `lease_s` |
-| `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume` |
+| `start_at` | `{"stage": name, "checkpoint": null}`; a checkpoint makes the first stage run `resume`, and `attempt`, which a resume sets, numbers the first attempt of that stage |
 | `stages` | the stages in run order |
 | `runtime` | `{"setup": cmd, "when_changed": [files]}`, only when `[runtime] setup` is set; the driver runs `cmd` in `root` before the first stage and keeps the sha256 of each file in `<root>/.edr-runtime` |
 | `collect` | `false` for a run of `edr track` without `--collect`: the watcher collects nothing; the driver does not read it |

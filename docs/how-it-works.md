@@ -310,7 +310,8 @@ under `~/.edr/`. One cycle does this, in order:
    `metrics.py`).
 6. A `dead` run is resumed once, from the last step in its heartbeat,
    when its stage has a `resume` command and no process group of the run
-   is still alive on the host (`watch._resume`).
+   is still alive on the host (`watch._resume`). The new driver records
+   the stage as the next attempt.
 7. A queued job starts when a host now fits it, one per batch per cycle.
 8. It writes `data/board/`, edits the pinned Telegram board, and writes
    `<state_dir>/watch.json`, the watcher's own heartbeat that the

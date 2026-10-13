@@ -469,8 +469,7 @@ def _same_parameters(db: Database, run: Row) -> None:
                      if twins else [], "same_parameters")
 
 
-def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict,
-            now: float) -> None:
+def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row, hb: dict, progress: dict) -> None:
     rec, run_id = progress.setdefault(run["run_id"], {}), run["run_id"]
     spec_path = project.state_dir / str(run["batch"]) / f"{run_id}.spec.json"
     spec = config.load_json(spec_path)
@@ -491,15 +490,14 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
         return
     rec["resumed"] = True
     checkpoint = hb.get("step_name") if hb.get("step") else None
-    spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint}
+    attempt = ((hb.get("stages") or {}).get(stage["name"]) or {}).get("attempt") or 1
+    spec["start_at"] = {"stage": stage["name"], "checkpoint": checkpoint, "attempt": attempt + 1}
     config.save_json(spec_path, spec)
     try:
         handle = launch.submit(backend, db, project, run_id, host, spec_path, driver)
     except (HostError, OSError) as e:
         db.add_event("watch", run_id, "resume", f"failed: {e}")
         return
-    db.upsert_stage_run({"run_id": run_id, "stage": stage["name"], "attempt": 2, "started": int(now),
-                             "status": "resumed", "log": str(spec_path.with_name(f"{run_id}.driver.log"))})
     db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {handle}")
 
 
@@ -620,7 +618,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
                         for n in want:
                             n.send(alert)
                     if state == "dead" and start:
-                        _resume(project, ssh, backend, db, run, hb, progress, now)
+                        _resume(project, ssh, backend, db, run, hb, progress)
             except _UNREADABLE as e:  # a run whose files a reader cannot use leaves every other run watched
                 error = f"{type(e).__name__}: {e}"
         if error is not None:

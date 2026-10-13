@@ -345,7 +345,8 @@ def test_a_stage_that_did_not_exit_0_keeps_the_steps_it_finished(env: Env, phase
 
 
 def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
-    hb = env.heartbeat("c", age=200, step=2, step_name="elaborate")
+    synth = {"status": "running", "attempt": 1, "started": NOW - 3000, "ended": None, "exit": None}
+    hb = env.heartbeat("c", age=200, step=2, step_name="elaborate", stages={"synth": synth})
     spec_path = env.project.state_dir / "demo" / f"{hb['run_id']}.spec.json"
     spec_path.write_text(json.dumps({"run_id": hb["run_id"], "start_at": {"stage": "synth", "checkpoint": None},
                                      "driver": "/x/bin/edr_driver-0badc0de.py",
@@ -356,12 +357,12 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     assert [e for e in env.events() if e[1] == "resume"] == [(hb["run_id"], "resume")]
     env.ssh.alive[4300] = False
     assert env.cycle(backend=fake)[hb["run_id"]] == "dead"
-    assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate"}
+    assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate", "attempt": 2}
     starts = [(r.host, str(r.driver), r.spec) for r in fake.requests]
     assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
     assert env.db.run(hb["run_id"])["handle"] == "fake:1"
     rows = [tuple(r) for r in env.db.conn.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
-    assert rows == [("synth", 1, "running"), ("synth", 2, "resumed")]
+    assert rows == [("synth", 1, "running")]  # the resumed driver writes attempt 2
     assert env.events().count((hb["run_id"], "resume")) == 2
     env.cycle(NOW + 1, backend=fake)
     assert len(fake.requests) == 1

@@ -622,8 +622,8 @@ class Driver(object):
 
     # stages
 
-    def run_stage(self, st, checkpoint):
-        # type: (dict, str) -> None
+    def run_stage(self, st, checkpoint, first=1):
+        # type: (dict, str, int) -> None
         name = st["name"]
         cwd = os.path.join(self.root, st.get("cwd") or ".")
         cmd = st.get("cmd") or ""
@@ -640,7 +640,7 @@ class Driver(object):
             phase = "stage:" + name if not attempt else "retry:%s:%d" % (name, attempt)
             self.set_phase(phase, stage=name, log=log, step=None, step_name=None)
             started = int(time.time())
-            self.record_stage(name, "running", attempt=attempt + 1, started=started, ended=None, exit=None, log=log)
+            self.record_stage(name, "running", attempt=first + attempt, started=started, ended=None, exit=None, log=log)
             p = self.spawn(cmd, cwd, log)
             next_probe = 0.0
             while p.poll() is None:
@@ -822,8 +822,11 @@ class Driver(object):
                     self.record_stage(st["name"], "running", attempt=1, started=int(time.time()), ended=None, exit=None)
                     self.run_group(st)
                     self.record_stage(st["name"], "done", ended=int(time.time()), exit=0)
+                elif i == 0:
+                    # A resume counts its attempts on from those of the driver before it.
+                    self.run_stage(st, start_at.get("checkpoint"), int(start_at.get("attempt") or 1))
                 else:
-                    self.run_stage(st, start_at.get("checkpoint") if i == 0 else None)
+                    self.run_stage(st, None)
             finally:
                 self.release()
             if self.over_budget:
