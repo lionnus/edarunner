@@ -273,7 +273,7 @@ def test_a_run_that_ended_before_its_first_stage_collects_its_log(env: Env) -> N
     hb = env.heartbeat("a", phase="FAILED:runtime", exit=5, stage=None,
                        stages={"setup": {"status": "failed", "attempt": 1, "started": 1, "ended": 2, "exit": 1}})
     (Path(hb["root"]) / "log" / "setup.log").write_text("uv: command not found\n")
-    live = env.heartbeat("b", phase="setup", stage=None)
+    live = env.heartbeat("b", phase="setup", stage=None, stages={})
     env.cycle()
     assert (env.project.data / "results" / hb["run_id"] / "log" / "setup.log").is_file()
     assert watch.collected(env.project, env.db, env.db.run(hb["run_id"]), hb)
@@ -426,6 +426,16 @@ def test_stage_rows_follow_the_stages_map(env) -> None:
                                        (hb2["run_id"],)).fetchone()) == ("failed", 5)
     assert env.db.conn.execute("SELECT status FROM stage_runs WHERE run_id=? AND stage='synth'",
                                  (hb3["run_id"],)).fetchone()[0] == "killed"
+
+
+def test_a_heartbeat_at_a_gate_adds_no_row_for_the_stage_that_waits(env: Env) -> None:
+    first = env.heartbeat("g1", phase="gate:synth", stages={})
+    done = {"synth": {"status": "done", "attempt": 1, "started": 1, "ended": 2, "exit": 0}}
+    later = env.heartbeat("g2", phase="gate:pnr", stage="pnr", stages=done)
+    assert env.cycle() == {first["run_id"]: "running", later["run_id"]: "running"}
+    rows = [tuple(r) for r in env.db.conn.execute("SELECT run_id, stage, status FROM stage_runs ORDER BY run_id")]
+    assert rows == [(later["run_id"], "synth", "done")]
+    assert (env.db.run(first["run_id"])["phase"], env.db.run(later["run_id"])["stage"]) == ("gate:synth", "pnr")
 
 
 def test_power_only_spec_collects_and_extracts_power_only(env: Env) -> None:

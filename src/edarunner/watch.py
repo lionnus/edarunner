@@ -125,10 +125,8 @@ def read_heartbeats(project: Project, batches: set[str] | None = None) -> list[t
 
 def _stages(hb: dict) -> dict[str, dict]:
     """The stage entries of a heartbeat; a stage still running in a finished run ended with the run."""
-    stage = hb.get("stage") or ""
-    stages = hb.get("stages") or ({stage: {"log": hb.get("log")}} if stage else {})
     out = {}
-    for name, s in stages.items():
+    for name, s in (hb.get("stages") or {}).items():
         status = s.get("status") or "running"
         if status == "running" and not board.is_live(hb):
             status = board.state_of(hb)  # killed, stopped or failed

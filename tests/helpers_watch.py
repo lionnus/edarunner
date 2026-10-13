@@ -90,7 +90,9 @@ class Env:
         (root / "log" / "synth.log").write_text("step 1\n")
         hb = {"schema": 1, "run_id": run_id, "batch": batch, "label": label, "config": "demo", "host": "local",
               "root": str(root), "driver_pid": 4242, "pgids": [4300], "phase": phase, "stage": "synth", "step": 1,
-              "step_name": "analyze", "tasks": {}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0,
+              "step_name": "analyze", "tasks": {}, "stages": {"synth": {
+                  "status": "running", "attempt": 1, "started": NOW - 3600, "ended": None, "exit": None,
+                  "log": str(root / "log" / "synth.log")}}, "counts": {"done": 0, "failed": 0, "skipped": 0, "running": 0,
               "queued": 0}, "started": NOW - 3600, "updated": NOW - age, "elapsed_s": 3600 - age,
               "disk_free_gb": 100.0, "tree_gb": 1.0, "exit": None, "killed_by": None, "last_cmd": "x",
               "last_log": "step 1", "log": str(root / "log" / "synth.log")}
