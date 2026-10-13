@@ -214,7 +214,7 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
 # actions
 
 def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons: list[str], text: str,
-         now: float, notes: dict) -> bool:
+         now: float) -> bool:
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
     lim, host, run_id = project.limits, run.get("host"), run["run_id"]
     if config.kept(project, run, now):
@@ -238,7 +238,7 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     """An event per (run, state) transition, one alert per (run, kind), and the kills after grace_s."""
     notes = {} if notes is None else notes
     run_id, text = run["run_id"], "; ".join(reasons) or state
-    rec = notes.setdefault(run.get("key") or run_id, {})
+    rec = notes.setdefault(run_id, {})
     if rec.get("state") != state:
         if not (rec.get("state") is None and state == "running"):
             db.add_event("watch", run_id, state, text)
@@ -251,12 +251,13 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
             # A repeat send edits the earlier message in place and keeps its buttons.
             hb = {} if state == "unreadable" else _hb(project, run) or {"last_log": _driver_tail(project, run)}
             alert = alerts.run_alert(project, run, state, reasons, hb, now, [] if why else left, db.runs(), held=held)
-            ids = [n.send(alert) for n in wanted(notifiers, state)]
-            msgs[state] = {"text": text, "ids": [i for i in ids if i]}
+            for n in wanted(notifiers, state):
+                n.send(alert)
+            msgs[state] = {"text": text}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
     try:
-        rec["acted"] = _act(project, ssh, db, run, state, reasons, text, now, notes)
+        rec["acted"] = _act(project, ssh, db, run, state, reasons, text, now)
     except (HostError, Refuse, OSError, ValueError) as e:
         db.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
         rec["acted"] = True

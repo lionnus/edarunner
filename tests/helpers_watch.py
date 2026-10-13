@@ -9,7 +9,7 @@ from pathlib import Path
 from edarunner import watch
 from edarunner.config import load_project
 from edarunner.db import Database
-from edarunner.hosts import HostProbe, Proc, Ssh
+from edarunner.hosts import HostProbe, Ssh
 from edarunner.notify import Notifier
 from edarunner.notify.alerts import Alert
 from helpers_driver import DEMO
@@ -23,12 +23,11 @@ def rid(label: str, date: str = OLD, source: str = "gabc1234") -> str:
 
 
 class FakeSsh(Ssh):
-    """Real local commands; canned probe, pid check, tool processes and kills."""
+    """Real local commands; canned probe, pid check and kills."""
 
     def __init__(self, site) -> None:
         super().__init__(site)
         self.alive: dict[int, bool] = {}
-        self.procs: list[Proc] = []
         self.killed: list[tuple] = []
 
     def probe(self, host):
@@ -36,9 +35,6 @@ class FakeSsh(Ssh):
 
     def pids_alive(self, host, pids):
         return {p for p in pids if self.alive.get(p)}
-
-    def tool_processes(self, host, pattern):
-        return list(self.procs)
 
     def kill_pgid(self, host, pgid, sig="TERM"):
         self.killed.append(("pgid", pgid, sig))
