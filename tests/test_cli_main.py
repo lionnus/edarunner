@@ -12,7 +12,7 @@ from pathlib import Path
 
 from helpers_cli import edr
 
-from edarunner import checkout, cli, home, launch
+from edarunner import checkout, cli, config, home, launch
 from edarunner.hosts import HostProbe, Ssh
 
 
@@ -133,3 +133,24 @@ def test_a_locked_database_on_a_network_filesystem_names_the_head(demo: Path, ca
     monkeypatch.setattr(cli, "network_fs", lambda path: "nfs")
     code, _, err = edr(capsys, "status")
     assert code == 1 and "edr.db is locked on a network filesystem; only the head node opens it, so run edr on head" in err
+
+
+def test_a_project_unknown_on_this_host_runs_on_the_head_in_its_directory(demo: Path, capfd, monkeypatch,
+                                                                          tmp_path: Path) -> None:
+    log = _head(demo, tmp_path, monkeypatch)
+    (tmp_path / "site").mkdir()
+    shutil.copy(demo / "site.toml", tmp_path / "site" / "site.toml")
+    monkeypatch.setattr(config, "DEFAULT_SITE", str(tmp_path / "site" / "site.toml"))
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["-P", "elsewhere", "status"]) == 3
+    assert capfd.readouterr().out.startswith(f"pwd={tmp_path} argv=-P elsewhere status fwd=1")
+    assert not log.read_text().splitlines()[-1].startswith("sh -c 'cd ")
+
+
+def test_a_forwarded_command_enters_the_project_directory(demo: Path, capsys, monkeypatch, tmp_path: Path) -> None:
+    home.register("demo", demo)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EDR_FORWARDED", "1")
+    seen = []
+    monkeypatch.setattr(cli, "cmd_status", lambda c, a: seen.append(os.getcwd()) or 0)
+    assert edr(capsys, "-P", "demo", "status")[0] == 0 and seen == [os.path.realpath(demo)]
