@@ -22,6 +22,12 @@ request.
 - A loop that continues after a failure counts what it skipped and
   reports the count at the end. A run with a failed task ends
   `INCOMPLETE`, never `done`.
+- A change to a table, a column or an index in `DDL` of `db.py` raises
+  `SCHEMA` there by one, in the same commit. Nothing migrates a
+  database: an `edr` refuses a database of another version when it opens
+  it. The release notes name the change and the SQL that brings a
+  database of the old version to the new one;
+  [install.md](../install.md#upgrade) shows how an operator applies it.
 - The controller uses the standard library and `rich` only. A new
   dependency needs a reason that the standard library cannot meet.
 - The driver stays on the Python 3.6 subset, uses the standard library
@@ -70,6 +76,8 @@ inkscape docs/diagrams/<name>.svg --export-type=png --export-filename=/tmp/<name
 
 A release is one commit, `:bookmark: Release X.Y.Z`, on `devel` that sets `version` in
 `pyproject.toml` and `__version__` in `src/edarunner/__init__.py` to the same value.
+When `SCHEMA` changed since the last release, the release notes give the
+old and the new version and the SQL of each step between them.
 
 Merge `devel` into `main` once CI is green, tag `main` as `vX.Y.Z`, and
 push the tag. The site deploys from `main`.

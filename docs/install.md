@@ -29,6 +29,35 @@ only, so it needs no ssh at all.
 `edr` works from any directory below an `edr.toml`. Without one it stops
 with `no edr.toml in <dir> or above; run edr init`.
 
+## Upgrade
+
+Install the new release over the old one with `uv tool install --force
+git+https://github.com/lionnus/edarunner`, then restart the supervisor
+with `systemctl --user restart edr-serve`.
+
+The project database `data/edr.db` carries a schema version in SQLite's
+`user_version`. Each `edr` expects one version and refuses a database of
+any other version before it writes to it, read-only commands included:
+
+```
+edr: data/edr.db: the database has schema version 1, and edr 0.2.0 expects 2; the release notes and docs/dev/conventions.md say what changed and how to upgrade the database
+```
+
+Nothing upgrades a database on its own. A release that raises the
+version names in its release notes the SQL that brings a database of the
+old version to the new one. Do this in each project:
+
+1. Stop the supervisor: `systemctl --user stop edr-serve`.
+2. Back up the database: `sqlite3 data/edr.db ".backup data/edr.db.bak"`.
+3. Apply the SQL of the release notes: `sqlite3 data/edr.db < upgrade.sql`.
+4. Set the new version: `sqlite3 data/edr.db "PRAGMA user_version=2"`.
+5. Start the supervisor again.
+
+A database made before edr kept a version has version 0. Compare its
+tables with `DDL` in `src/edarunner/db.py`, add what is missing, for
+example `ALTER TABLE runs ADD COLUMN cores INTEGER;`, and set the version
+to 1.
+
 ## Run the OpenROAD example
 
 `examples/openroad-gcd` takes the GCD design of OpenROAD-flow-scripts

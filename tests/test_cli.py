@@ -126,6 +126,16 @@ def test_check_warns_about_a_database_on_nfs(demo: Path, capsys, monkeypatch) ->
 # status, events, handles
 
 
+def test_every_command_refuses_a_database_of_another_schema_version(demo: Path, capsys) -> None:
+    seed(demo, "a", "done")
+    path = demo / "data" / "edr.db"
+    with Database(path) as db:
+        db.conn.execute(f"PRAGMA user_version={db_mod.SCHEMA + 1}")
+    for argv in (["events"], ["status"], ["retire", "a@demo", "--why", "x"]):
+        code, out, err = edr(capsys, *argv)
+        assert code == 1 and out == "" and f"schema version {db_mod.SCHEMA + 1}, and edr" in err, argv
+
+
 def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     a = seed(demo, "a", "done")
     b = seed(demo, "b_nodw", "stage:synth", pid=dead_pid())

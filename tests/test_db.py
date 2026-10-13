@@ -2,6 +2,7 @@
 
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -35,6 +36,27 @@ def test_schema_twice(tmp_path):
         tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"batches", "runs", "stage_runs", "parameters", "metrics", "artifacts", "events", "store"} <= tables
         assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_a_new_database_gets_the_schema_version(tmp_path):
+    with Database(tmp_path / "edr.db") as db:
+        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == db_mod.SCHEMA >= 1
+    with Database(":memory:") as db:
+        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == db_mod.SCHEMA
+
+
+@pytest.mark.parametrize("version", [0, db_mod.SCHEMA + 1])
+@pytest.mark.parametrize("readonly", [False, True])
+def test_a_database_of_another_schema_version_is_refused_before_any_write(tmp_path, version, readonly):
+    path = tmp_path / "edr.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(f"CREATE TABLE runs(run_id TEXT PRIMARY KEY, phase TEXT); PRAGMA user_version={version};")
+    conn.close()
+    before = path.read_bytes()
+    with pytest.raises(db_mod.SchemaError, match=f"schema version {version}, and edr .* expects {db_mod.SCHEMA}; the "
+                                                 "release notes and docs/dev/conventions.md"):
+        Database(path, readonly=readonly)
+    assert path.read_bytes() == before and sorted(p.name for p in tmp_path.iterdir()) == ["edr.db"]
 
 
 def test_journal_mode_follows_the_filesystem(tmp_path, monkeypatch):
