@@ -38,7 +38,9 @@ the timeout ran out. Act on `data`, and quote `output` when you report.
 `docs/reference/cli.md` lists every command.
 
 To wait for a batch, launch it, run `edr wait --batch <batch>` from a
-background shell, then read `edr metrics --batch <batch>`. Over ssh, retry
+background shell, then read `edr status --batch <batch> --metric <name>`.
+It gives each value at its step of record with its verdict;
+`edr metrics --source <source>` gives every row. Over ssh, retry
 when ssh drops: `until ssh <head> ~/.local/bin/edr -P <name> wait --batch <batch>; [ $? -ne 255 ]; do sleep 60; done`.
 
 ## Triage
