@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import time
 from collections.abc import Iterable
@@ -58,14 +58,15 @@ NETWORK_FS = {0x6969: "nfs", 0xFF534D42: "cifs", 0xFE534D42: "smb2", 0x01021997:
 
 
 def fs_magic(path: str | os.PathLike) -> int | None:
-    """The statfs f_type of the filesystem that holds `path`, or None off Linux or on an error."""
+    """The statfs f_type of the filesystem that holds `path`, as `stat -f` gives it, or None off Linux or on an error."""
     if not sys.platform.startswith("linux"):
         return None
-    buf = ctypes.create_string_buffer(256)  # struct statfs, f_type first
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.statfs(os.fsencode(path), buf) != 0:
+    try:
+        out = subprocess.run(["stat", "-f", "-c", "%t", os.fspath(path)], capture_output=True, text=True, timeout=10,
+                             check=True).stdout
+        return int(out, 16) & 0xFFFFFFFF
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
-    return ctypes.c_ulong.from_buffer(buf).value & 0xFFFFFFFF
 
 
 def network_fs(path: str | os.PathLike) -> str | None:
