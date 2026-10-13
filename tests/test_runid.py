@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -325,4 +326,17 @@ def test_dry_run_writes_nothing(project, tmp_path, capsys):
     assert not old.path.exists() and old.nested == {"sub": a.nested["sub"]}
     assert "-dirty-" in dirty.source and not dirty.path.exists() and dirty.dirty
     out = capsys.readouterr().out
-    assert "git clone --local --no-checkout" in out and "rsync -a" in out
+    assert "git clone --no-checkout" in out and "rsync -a" in out
+
+
+def test_a_clone_across_filesystems_copies_the_objects(project, tmp_path):
+    other = Path("/dev/shm")
+    if not other.is_dir() or other.stat().st_dev == tmp_path.stat().st_dev:
+        pytest.skip("needs /dev/shm on another filesystem")
+    repo = project.source.repo
+    dst = Path(tempfile.mkdtemp(dir=other)) / "clone"
+    try:
+        checkout._clone(repo, dst, short(repo), dry_run=False)
+        assert short(dst) == short(repo)
+    finally:
+        shutil.rmtree(dst.parent)
