@@ -597,7 +597,7 @@ Information: elaborating top
 
 Run the stages left on the same tree:
 edr continue b_nodw@demo
-Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/20260926_1200_b_nodw_demo_DW0_gabc1234. On Telegram it asks once more.
+Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/20260926_1200_demo_b_nodw_demo_DW0_gabc1234. On Telegram it asks once more.
 
 [Continue]
 ```
@@ -624,7 +624,7 @@ Stop ends the run after its current task, and Free space removes the prune targe
 
 ```
 🟡 demo: newer run replaces b_nodw@demo
-A newer run of the same label runs at another source (20260927_0900_b_nodw_demo_gdef5678). edarunner stops this run after its running task, 1h after this alert, unless it has a keep.
+A newer run of the same label runs at another source (20260927_0900_demo2_b_nodw_demo_gdef5678). edarunner stops this run after its running task, 1h after this alert, unless it has a keep.
 
 stage: synth, step 3 elaborate
 host: hostA
@@ -730,7 +730,7 @@ Information: elaborating top
 
 Run the stages left on the same tree:
 edr continue b_nodw@demo
-Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/20260926_1200_b_nodw_demo_DW0_gabc1234. On Telegram it asks once more.
+Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/20260926_1200_demo_b_nodw_demo_DW0_gabc1234. On Telegram it asks once more.
 
 [Continue]
 ```
@@ -782,8 +782,8 @@ Your process fc_shell runs on hostA for the run demo/b_nodw@demo, whose driver i
 
 process: fc_shell, pid 5120
 running for: 2d
-directory: /scratch/me/edr/demo/20260926_1200_b_nodw_demo_gabc1234/pnr
-fc_shell -f /scratch/me/edr/demo/20260926_1200_b_nodw_demo_gabc1234/pnr/run.tcl
+directory: /scratch/me/edr/demo/20260926_1200_demo_b_nodw_demo_gabc1234/pnr
+fc_shell -f /scratch/me/edr/demo/20260926_1200_demo_b_nodw_demo_gabc1234/pnr/run.tcl
 
 Check it:
 ssh hostA ps -o pid,etime,args -p 5120

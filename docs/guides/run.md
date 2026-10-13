@@ -323,15 +323,15 @@ and `--root` it records a tree on a host, which `reuse` and
 `edr continue` can then use:
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --source abc1234 \
-    --host hostA --root /scratch/user/edr/myflow/20260830_0000_base_base_gabc1234
+edr import --run-id 20260830_0000_imported_base_base_gabc1234 --label base --source abc1234 \
+    --host hostA --root /scratch/user/edr/myflow/20260830_0000_imported_base_base_gabc1234
 ```
 
 With `--results` it links an archive of collected files instead, so
 `metrics` and `export` cover a result whose tree is gone:
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --source abc1234 \
+edr import --run-id 20260830_0000_imported_base_base_gabc1234 --label base --config base --source abc1234 \
     --results /archive/base --tasks k_small k_big --host hostA \
     --started 2026-08-30T00:00 --ended 2026-08-30T09:12 --phase FAILED:power \
     --param vars.netlist_stage=11 --why "tree gone, reports kept"
