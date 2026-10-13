@@ -134,7 +134,7 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
     cmd = board.triage_cmd(run, state, hb, runs)
     counts = hb.get("counts") or {}
-    a = Alert(state, str(run.get("key") or run["run_id"]), state, h, why,
+    a = Alert(state, run["run_id"], state, h, why,
               [("stage", _stage(run, hb)), ("host", host)], log=log_lines(hb))
     status = ("See the last stage and the log tail:", f"edr status {h}")
     more = state in KEEP_KINDS
@@ -254,7 +254,7 @@ def metrics_alert(run: Row, text: str, runs: list[Row] | None = None) -> Alert:
     """The opt-in alert of the metric rows the watcher added to a run; `text` is that of the `metrics` event, such as
     `6 new: area_um2, wns_ns at pnr 8, 9`. A channel that edits keeps one message per run."""
     h = board.handle(run, runs)
-    return Alert("metrics", str(run.get("key") or run["run_id"]), "new metrics of", h, text + ".",
+    return Alert("metrics", run["run_id"], "new metrics of", h, text + ".",
                  todo=[("See them:", f"edr metrics --run {h}")])
 
 

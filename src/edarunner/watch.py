@@ -136,22 +136,24 @@ def _stages(hb: dict) -> dict[str, dict]:
 
 def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> dict[str, str]:
     """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify. A heartbeat that this cannot
-    use stops only its own run: the result maps its run id to the error, and every other heartbeat goes in."""
+    use stops only its own run: the result maps its run id to the error, and every other heartbeat goes in. Each
+    heartbeat is one commit."""
     bad = {}
     for batch, hb in heartbeats:
         try:
-            db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
-            for name, s in _stages(hb).items():
-                db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
-                                     "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
-                                     "exit": s.get("exit"), "log": s.get("log")})
-            if hb.get("step_times"):
-                db.set_step_times(hb["run_id"], hb["step_times"])
-            db.add_run_sample(hb)
-            for stage, tasks in (hb.get("tasks") or {}).items():
-                for tid, t in tasks.items():
-                    db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
-                                         **{k: t.get(k) for k in _TASK_KEYS}})
+            with db.one_commit():
+                db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
+                for name, s in _stages(hb).items():
+                    db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
+                                         "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
+                                         "exit": s.get("exit"), "log": s.get("log")})
+                if hb.get("step_times"):
+                    db.set_step_times(hb["run_id"], hb["step_times"])
+                db.add_run_sample(hb)
+                for stage, tasks in (hb.get("tasks") or {}).items():
+                    for tid, t in tasks.items():
+                        db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
+                                             **{k: t.get(k) for k in _TASK_KEYS}})
         except _UNREADABLE as e:
             bad[hb["run_id"]] = f"{type(e).__name__}: {e}"
     return bad
@@ -214,7 +216,7 @@ def classify(project: Project, ssh: Ssh, db: Database, run: Row, heartbeat: dict
 # actions
 
 def _act(project: Project, ssh: Ssh, db: Database, run: Row, state: str, reasons: list[str], text: str,
-         now: float, notes: dict) -> bool:
+         now: float) -> bool:
     """The kill or stop of one state; True when it ran or is settled, False to try again next cycle."""
     lim, host, run_id = project.limits, run.get("host"), run["run_id"]
     if config.kept(project, run, now):
@@ -238,7 +240,7 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
     """An event per (run, state) transition, one alert per (run, kind), and the kills after grace_s."""
     notes = {} if notes is None else notes
     run_id, text = run["run_id"], "; ".join(reasons) or state
-    rec = notes.setdefault(run.get("key") or run_id, {})
+    rec = notes.setdefault(run_id, {})
     if rec.get("state") != state:
         if not (rec.get("state") is None and state == "running"):
             db.add_event("watch", run_id, state, text)
@@ -251,12 +253,13 @@ def actions(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier],
             # A repeat send edits the earlier message in place and keeps its buttons.
             hb = {} if state == "unreadable" else _hb(project, run) or {"last_log": _driver_tail(project, run)}
             alert = alerts.run_alert(project, run, state, reasons, hb, now, [] if why else left, db.runs(), held=held)
-            ids = [n.send(alert) for n in wanted(notifiers, state)]
-            msgs[state] = {"text": text, "ids": [i for i in ids if i]}
+            for n in wanted(notifiers, state):
+                n.send(alert)
+            msgs[state] = {"text": text}
     if rec.get("acted") or now - rec.get("since", now) < project.limits.grace_s:
         return
     try:
-        rec["acted"] = _act(project, ssh, db, run, state, reasons, text, now, notes)
+        rec["acted"] = _act(project, ssh, db, run, state, reasons, text, now)
     except (HostError, Refuse, OSError, ValueError) as e:
         db.add_event("watch", run_id, "kill", f"{state}: failed: {e}")
         rec["acted"] = True
@@ -496,6 +499,8 @@ def _resume(project: Project, ssh: Ssh, backend: Backend, db: Database, run: Row
     except (HostError, OSError) as e:
         db.add_event("watch", run_id, "resume", f"failed: {e}")
         return
+    # Its new driver lives, so until the first heartbeat the run is stale, not dead, and no continue starts on its tree.
+    db.upsert_run({"run_id": run_id, "state": "stale"})
     db.add_event("watch", run_id, "resume", f"{stage['name']} from {checkpoint or 'start'}, driver {handle}")
 
 
@@ -523,7 +528,7 @@ def _pulse(project: Project) -> None:
 
 
 def _boards(project: Project, backend: Backend, db: Database, notifiers: list[Notifier], now: float,
-            pin: bool = True) -> None:
+            pin: bool = True, compare: bool = True) -> None:
     # The census of the last two cycles saves an ssh call per host.
     probes = census.probes(project, 2 * project.limits.heartbeat_s)
     if probes is None:
@@ -531,11 +536,11 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     bdir = project.data / "board"
     db.add_host_samples(int(now), probes)
     db.write_board_json(bdir / "board.json", probes)
-    retired = {b["batch"] for b in db.batches() if b.get("retired")}
-    rows = [r for r in db.runs() if r["batch"] not in retired]
+    rows = db.runs(live_batches=True)
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
                                                            db.host_samples(int(now) - 86400)))
-    config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))
+    if compare:
+        config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
     for n in notifiers if pin else []:
         n.board(text)
@@ -570,11 +575,13 @@ def _unstarted(project: Project, db: Database, run: Row, live: Live, why: str, s
 
 
 def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], now: float | None = None,
-          dry_run: bool = False, backend: Backend | None = None, start: bool = True, served: bool = False) -> dict[str, str]:
+          dry_run: bool = False, backend: Backend | None = None, start: bool = True, served: bool = False,
+          compare: bool = True) -> dict[str, str]:
     """One cycle; returns {run_id: state}. A dry run reads, classifies and prints, and writes nothing.
 
     The backend answers once per cycle for the drivers of every live run. Without `start` the cycle
-    resumes and launches nothing. A `served` cycle leaves the pinned board to the supervisor."""
+    resumes and launches nothing. A `served` cycle leaves the pinned board to the supervisor. The cycle
+    rewrites compare.html with `compare` or after a `metrics` event."""
     now = time.time() if now is None else now
     backend = backend or make_backend(project.site, ssh)
     progress, notes = db.get_store("progress", {}), db.get_store("notified", {})
@@ -611,6 +618,7 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
                     db.upsert_run({"run_id": hb["run_id"], "state": state})
                     actions(project, ssh, db, notifiers, run, state, reasons, now, notes)
                     added = _collect(project, ssh, db, run, hb, progress, backend.file_host(run))
+                    compare = compare or bool(added)
                     if added and (want := wanted(notifiers, "metrics")):
                         alert = alerts.metrics_alert(run, added, db.runs())
                         for n in want:
@@ -631,9 +639,11 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
         return states
     if start:
         _launch_queued(project, ssh, db)
-    _boards(project, backend, db, notifiers, now, pin=not served)
-    db.set_store("progress", progress)
-    db.set_store("notified", notes)
+    _boards(project, backend, db, notifiers, now, pin=not served, compare=compare)
+    # The runs of a retired batch leave the watcher for good, and so their notes.
+    keep = {r["run_id"] for r in db.runs(live_batches=True)}
+    db.set_store("progress", {k: v for k, v in progress.items() if k in keep})
+    db.set_store("notified", {k: v for k, v in notes.items() if k in keep})
     n = int(config.load_json(project.state_dir / "watch.json").get("cycle") or 0) + 1
     config.save_json(project.state_dir / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states
@@ -646,8 +656,9 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
     A config that stops loading gets one alert per error text, and the cycles go on with the last one
     that loaded and start nothing until the file loads again. Unless the supervisor started it
     (`served`), the first watcher that takes `serve.lock` keeps it, starts to take the commands of
-    the bot, and runs the checks across all projects after each cycle."""
-    failed, broken, serve = False, "", None
+    the bot, and runs the checks across all projects after each cycle. The first cycle that ends
+    writes compare.html, and a later one only after a `metrics` event."""
+    failed, broken, serve, first = False, "", None, True
     try:
         while True:
             t0 = time.time()
@@ -666,7 +677,9 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
                 for n in notifiers:
                     if hasattr(n, "project"):
                         n.project = project
-                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken, served=served)
+                cycle(project, ssh, db, notifiers, backend=make_backend(project.site, ssh), start=not broken, served=served,
+                      compare=first)
+                first = False
             except Exception:  # the next cycle sees a fresh state; the log keeps the traceback
                 log.exception("watch cycle failed")
                 failed = True

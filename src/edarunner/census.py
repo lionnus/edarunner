@@ -54,11 +54,12 @@ def projects() -> dict[str, Project]:
     return out
 
 
-def live_runs(projects: Iterable[Project], now: float) -> list[Row]:
-    """The live runs: every heartbeat that is not terminal and younger than `dead_s` of its project."""
+def live_runs(projects: Iterable[Project], now: float, beats: dict[str, list] | None = None) -> list[Row]:
+    """The live runs: every heartbeat that is not terminal and younger than `dead_s` of its project. `beats` holds the
+    heartbeats of each project as the census read them; without it they are read now."""
     out = []
     for p in projects:
-        for batch, hb in watch.read_heartbeats(p):
+        for batch, hb in watch.read_heartbeats(p) if beats is None else beats[p.project]:
             if board.is_live(hb) and now - float(hb.get("updated") or 0) < p.limits.dead_s:
                 out.append({"project": p.project, "batch": batch, **{k: hb.get(k) for k in _LIVE_KEYS}})
     return out
@@ -114,7 +115,8 @@ def host_sites(projects: dict[str, Project]) -> dict[str, Site]:
 
 
 def take(projects: dict[str, Project], now: float) -> Row:
-    """Probe every ssh host of the sites of `projects` at once, with its clock and our processes, and add the live runs."""
+    """Probe every ssh host of the sites of `projects` at once, with its clock and our processes, and add the
+    heartbeats of each project and the live runs among them."""
     sites = host_sites(projects)
 
     def one(host: str) -> tuple[dict, list[Proc]]:
@@ -127,8 +129,10 @@ def take(projects: dict[str, Project], now: float) -> Row:
     names = list(sites)
     with ThreadPoolExecutor(max_workers=max(1, len(names))) as pool:
         found = dict(zip(names, pool.map(one, names)))
+    beats = {p.project: watch.read_heartbeats(p) for p in projects.values()}
     return {"ts": now, "hosts": {h: probe for h, (probe, _) in found.items()},
-            "procs": {h: procs for h, (_, procs) in found.items()}, "runs": live_runs(projects.values(), now)}
+            "procs": {h: procs for h, (_, procs) in found.items()}, "beats": beats,
+            "runs": live_runs(projects.values(), now, beats)}
 
 
 def read(max_age: float, now: float | None = None) -> Row:
@@ -174,7 +178,7 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
     so that a short tool call by hand raises no alert."""
     runs: dict[str, list[tuple[Project, dict]]] = {}
     for p in projects.values():
-        for batch, hb in watch.read_heartbeats(p):
+        for batch, hb in census["beats"][p.project]:
             runs.setdefault(hb["run_id"], []).append((p, {**hb, "batch": batch}))
     sites = host_sites(projects)
     out = []
@@ -262,12 +266,12 @@ def _full_hosts(census: Row, projects: dict[str, Project], store: Row, now: floa
             _event(p, target["run_id"], "kill", f"host_full: failed: {e}")
 
 
-def sweep_leases(projects: dict[str, Project], now: float) -> list[str]:
+def sweep_leases(census: Row, projects: dict[str, Project], now: float) -> list[str]:
     """Remove each stale seat lease with an event in its project, and return their paths.
 
     A lease is stale when its run has no heartbeat in a registered project, has ended, has a heartbeat
     older than `dead_s`, has left the lease's stage, or when the lease is older than its stage budget."""
-    heartbeats = {(p.project, hb["run_id"]): (p, hb) for p in projects.values() for _, hb in watch.read_heartbeats(p)}
+    heartbeats = {(p.project, hb["run_id"]): (p, hb) for p in projects.values() for _, hb in census["beats"][p.project]}
     out = []
     for f in sorted((home.root() / "leases").glob("*/*")):
         lease = config.load_json(f)
@@ -325,7 +329,7 @@ def work(notifiers: list[Notifier], now: float | None = None, own: Project | Non
     kept = home.Store()
     store = {k: kept.get_store(k, {}) for k in ("alerts", "full", "digest")}
     for step in (lambda: _orphans(census, found, notifiers, store, now), lambda: _full_hosts(census, found, store, now),
-                 lambda: sweep_leases(found, now), lambda: _clocks(census, notifiers, store, now),
+                 lambda: sweep_leases(census, found, now), lambda: _clocks(census, notifiers, store, now),
                  lambda: _digest(found, notifiers, store, now)):
         try:
             step()

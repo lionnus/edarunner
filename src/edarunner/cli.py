@@ -227,8 +227,7 @@ class Ctx:
         """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
         the refresh could not use is `unreadable` and carries the error."""
         self.refresh(batch)
-        retired = {b["batch"] for b in self.db.batches() if b.get("retired")}
-        rows = [r for r in self.db.runs(batch=batch) if r["batch"] not in retired]
+        rows = self.db.runs(batch=batch, live_batches=True)
         now, lim = time.time(), self.project.limits
         for r in rows:
             if r["run_id"] in self.unreadable:
@@ -1247,7 +1246,7 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     params = dict(a.param or [])
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
                source=a.source, dirty=int("-dirty" in a.source), host=a.host or "", root=root or None,
-               created=int(time.time()), phase=a.phase, state="imported", stage="", step=-1,
+               created=int(time.time()), phase=a.phase, state="imported", stage="", step=None,
                exit=0 if a.phase == "done" else None, started=a.started, updated=a.ended, counts={}, tree_id=a.run_id)
     spec = _import_spec(c.project, row, tasks, params)
     if (old := c.db.run(a.run_id)) and old.get("state") != "imported":

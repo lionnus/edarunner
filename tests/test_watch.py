@@ -34,6 +34,17 @@ def test_read_heartbeats_skips_retired_spec_keep_and_torn(env: Env) -> None:
     assert watch.read_heartbeats(env.project) == [("demo", a)]
 
 
+def test_a_cycle_drops_the_notes_of_the_runs_of_a_retired_batch(env: Env) -> None:
+    a, b = env.heartbeat("a"), env.heartbeat("b", batch="old", age=200)
+    env.cycle()
+    ids = {a["run_id"], b["run_id"]}
+    assert set(env.db.get_store("progress")) == ids == set(env.db.get_store("notified"))
+    (env.project.state_dir / "old" / "RETIRED").touch()
+    env.db.mark_batch_retired("old")
+    env.cycle(NOW + 1)
+    assert set(env.db.get_store("progress")) == {a["run_id"]} == set(env.db.get_store("notified"))
+
+
 def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     a = env.heartbeat("a")
     env.heartbeat("a", batch="demo2", date=NEW, source="gdef5678")
@@ -294,6 +305,20 @@ def test_collect_keeps_a_failed_row_and_names_it_in_the_metrics_event(env: Env) 
     assert text == f"1 new: area_cell_um2 at synth 0; area_cell_um2: 1 failed: {rows[1][1]}"
 
 
+def test_a_cycle_without_compare_writes_compare_html_only_after_a_metrics_event(env: Env) -> None:
+    page = env.project.data / "board" / "compare.html"
+    env.cycle(compare=False)
+    assert not page.exists()
+    hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth")
+    (Path(hb["root"]) / "reports" / "0").mkdir(parents=True)
+    (Path(hb["root"]) / "reports" / "0" / "area.rpt").write_text("i_top 1000.0\n")
+    env.cycle(NOW + 1, compare=False)
+    assert "b_nodw" in page.read_text()
+    page.unlink()
+    env.cycle(NOW + 2, compare=False)
+    assert not page.exists() and (page.parent / "status.html").exists()
+
+
 def test_done_and_metrics_alerts_go_only_to_a_user_who_asks_for_them(env: Env) -> None:
     hb = env.heartbeat("b_nodw", phase="done", exit=0, stage="synth", step=4, step_name="synth", elapsed_s=5400)
     (Path(hb["root"]) / "reports" / "0").mkdir(parents=True)
@@ -360,7 +385,8 @@ def test_dead_run_resumes_once_from_its_step(env: Env, monkeypatch) -> None:
     assert json.loads(spec_path.read_text())["start_at"] == {"stage": "synth", "checkpoint": "elaborate", "attempt": 2}
     starts = [(r.host, str(r.driver), r.spec) for r in fake.requests]
     assert starts == [("local", "/x/bin/edr_driver-0badc0de.py", spec_path)]
-    assert env.db.run(hb["run_id"])["handle"] == "fake:1"
+    assert env.db.run(hb["run_id"])["handle"] == "fake:1" and env.db.run(hb["run_id"])["state"] == "stale"
+    assert watch.launch.live_on_tree(env.db, env.db.run(hb["run_id"])) == "c@demo on the same tree has not ended"
     rows = [tuple(r) for r in env.db.conn.execute("SELECT stage, attempt, status FROM stage_runs WHERE run_id=? ORDER BY attempt", (hb["run_id"],))]
     assert rows == [("synth", 1, "running")]  # the resumed driver writes attempt 2
     assert env.events().count((hb["run_id"], "resume")) == 2

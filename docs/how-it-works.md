@@ -237,7 +237,7 @@ deletes a file:
 | `needs.disk_gb` of the first stage | the driver at start | below it the run fails with exit 3 |
 | `needs.disk_gb` of a task | the driver before each claim | below it the task is `skipped` and counted |
 | `budget.hours`, `budget.disk_gb` | the driver while a command runs | the phase becomes `OVER_BUDGET:<stage>`; with `kill = true` the process group gets `SIGTERM`, else the command runs to its end; the run then stops with exit 9, and `edr continue` runs the stages left |
-| `budget` with `per = "task"` | the driver per task | only that task gets `SIGTERM` |
+| `budget` with `per = "task"` | the driver per task | past `hours` the task gets the mark `over_budget`; with `kill = true` only that task gets `SIGTERM`, else it runs to its end; the other tasks go on |
 | `retry` | the driver after a failure | when `retry.match` is in the last 80 lines of the log, the stage runs again after `retry.wait_s`, up to `retry.max` times, as `retry:<stage>:<n>` |
 | `host_free_min_gb` of the site, or of the host | the driver between stages and before each claim | nothing new starts and `host_full` is set; after `grace_s` the watcher that holds `serve.lock` stops the newest run on that host, of any of your projects |
 | `limits.streak` | the driver per task group | `looping` is set and the group claims nothing more |

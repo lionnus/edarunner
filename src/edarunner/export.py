@@ -67,7 +67,7 @@ def export(
         raise Refuse(f"no run has the source {' or '.join(map(repr, sources))}" + (f" and a label in {labels}" if labels else ""))
     ids = [r["run_id"] for r in runs]
     metrics = analysis.mark_record(project, db.metrics(run_ids=ids))
-    retired = {b["batch"] for b in db.batches() if b.get("retired")}
+    live = {r["run_id"] for r in db.runs(live_batches=True)}
     params = [[r["run_id"], r["label"], r["source"], p["key"], p["value"], p["origin"]]
               for r in runs for p in db.parameters(r["run_id"])]
     fields = [[r["run_id"], r["label"], r["source"], f["task"], f["key"], f["value"], f["origin"]]
@@ -79,7 +79,7 @@ def export(
               **{k: f[k] for k in ("task", "check", "text")}} for f in db.flags(ids)]
 
     plan: list[tuple[str, Path | bytes, Row]] = [
-        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, retired, flags) for r in runs]), {}),
+        ("runs.csv", to_csv(RUN_COLUMNS, [_run_row(r, live, flags) for r in runs]), {}),
         ("metrics.csv", to_csv(METRIC_COLUMNS, [metric_row(m) for m in metrics]), {}),
         ("parameters.csv", to_csv(PARAMETER_COLUMNS, params), {}),
         ("task_fields.csv", to_csv(TASK_FIELD_COLUMNS, fields), {}),
@@ -188,12 +188,12 @@ def _ident(r: Row) -> Row:
     return {k: r.get(k) for k in ("run_id", "label", "source", "phase")}
 
 
-def _run_row(r: Row, retired: set[str], flags: list[Row]) -> list[Any]:
+def _run_row(r: Row, live: set[str], flags: list[Row]) -> list[Any]:
     """One runs.csv row; `flags` names the checks that flag the run, separated by spaces."""
     ended = "" if is_live(r) else r.get("updated")
     return [r["run_id"], r.get("label"), r.get("config"), r.get("build_tag"), r.get("source"), r.get("host"), r.get("phase"),
             r.get("started"), ended, r.get("batch"), r.get("dirty"), r.get("tree_id"),
-            int(r.get("state") == "retired" or r.get("batch") in retired),
+            int(r.get("state") == "retired" or r["run_id"] not in live),
             " ".join(sorted({f["check"] for f in flags if f["run_id"] == r["run_id"]}))]
 
 

@@ -742,7 +742,8 @@ class Driver(object):
                     tb = task.get("budget") or (budget if per_task else {})
                     if not self.hb["tasks"][name][tid].get("over_budget") and self.budget_over(tb, t0) == "hours":
                         self.record_task(name, tid, "running", over_budget=True)
-                        self.killpg(p.pid, signal.SIGTERM)
+                        if tb.get("kill"):
+                            self.killpg(p.pid, signal.SIGTERM)
                     continue
                 del running[tid]
                 self.forget(p)

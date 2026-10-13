@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -58,14 +59,15 @@ NETWORK_FS = {0x6969: "nfs", 0xFF534D42: "cifs", 0xFE534D42: "smb2", 0x01021997:
 
 
 def fs_magic(path: str | os.PathLike) -> int | None:
-    """The statfs f_type of the filesystem that holds `path`, or None off Linux or on an error."""
+    """The statfs f_type of the filesystem that holds `path`, as `stat -f` gives it, or None off Linux or on an error."""
     if not sys.platform.startswith("linux"):
         return None
-    buf = ctypes.create_string_buffer(256)  # struct statfs, f_type first
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.statfs(os.fsencode(path), buf) != 0:
+    try:
+        out = subprocess.run(["stat", "-f", "-c", "%t", os.fspath(path)], capture_output=True, text=True, timeout=10,
+                             check=True).stdout
+        return int(out, 16) & 0xFFFFFFFF
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
-    return ctypes.c_ulong.from_buffer(buf).value & 0xFFFFFFFF
 
 
 def network_fs(path: str | os.PathLike) -> str | None:
@@ -132,7 +134,7 @@ class Database:
         """`threads=True` lets another thread use the connection; the caller serialises the calls. `readonly` opens an
         existing database for reading only, without the journal mode and the schema script, and creates no file."""
         self.path = Path(path)
-        self.network_fs, self.journal_mode = None, ""
+        self.network_fs, self.journal_mode, self._held = None, "", False
         if readonly:
             self.conn = sqlite3.connect(self._read_uri(), uri=True, timeout=30, check_same_thread=not threads)
             self._check_schema()
@@ -187,6 +189,21 @@ class Database:
 
     # writes
 
+    def _commit(self) -> None:
+        if not self._held:
+            self.conn.commit()
+
+    @contextmanager
+    def one_commit(self) -> Iterator[None]:
+        """Hold the commits of the upserts, step times and run samples inside the block, and commit once at its end,
+        also when it raises."""
+        self._held = True
+        try:
+            yield
+        finally:
+            self._held = False
+            self.conn.commit()
+
     def _upsert(self, table: str, row: Row) -> None:
         cols = self._columns[table]
         bad = set(row) - set(cols)
@@ -204,7 +221,7 @@ class Database:
             + (f"UPDATE SET {', '.join(f'{k}=excluded.{k}' for k in update)}" if update else "NOTHING")
         )
         self.conn.execute(sql, [_text(row[k]) for k in keys])
-        self.conn.commit()
+        self._commit()
 
     def upsert_batch(self, row: Row) -> None:
         """Insert a batch, or update the columns given."""
@@ -286,7 +303,7 @@ class Database:
         self.conn.executemany(
             "INSERT OR REPLACE INTO step_runs(run_id, stage, step, started) VALUES(?, ?, ?, ?)",
             [(run_id, stage, int(step), int(ts)) for stage, steps in times.items() for step, ts in steps.items()])
-        self.conn.commit()
+        self._commit()
 
     def add_host_samples(self, ts: int, probes: dict[str, dict], keep_days: int = 30) -> None:
         """One row per host that answered, from the probe dicts of `hosts.HostProbe`; rows older than `keep_days` go."""
@@ -312,7 +329,7 @@ class Database:
         self.conn.execute("INSERT OR IGNORE INTO run_samples VALUES(?, ?, ?, ?, ?, ?)",
                           (hb["run_id"], int(hb["updated"]), hb.get("cpu_pct"), hb.get("rss_gb"), hb.get("tree_gb"),
                            hb.get("disk_free_gb")))
-        self.conn.commit()
+        self._commit()
 
     def run_samples(self, run_id: str) -> list[Row]:
         """The samples of one run in time order."""
@@ -384,13 +401,16 @@ class Database:
             row["counts"] = json.loads(row["counts"])
         return row
 
-    def runs(self, batch: str | None = None, state: str | None = None) -> list[Row]:
-        """Runs in run id order. `counts` comes back as a dict."""
+    def runs(self, batch: str | None = None, state: str | None = None, live_batches: bool = False) -> list[Row]:
+        """Runs in run id order, with `live_batches` only those of batches that are not retired. `counts` comes back
+        as a dict."""
         where, args = ["1"], []
         for col, val in (("batch", batch), ("state", state)):
             if val is not None:
                 where.append(f"{col}=?")
                 args.append(val)
+        if live_batches:
+            where.append("NOT EXISTS (SELECT 1 FROM batches b WHERE b.batch=runs.batch AND b.retired IS NOT NULL)")
         return [self._run_row(r) for r in self._rows(f"SELECT * FROM runs WHERE {' AND '.join(where)} ORDER BY run_id", args)]
 
     def run(self, run_id: str) -> Row | None:
@@ -501,10 +521,8 @@ class Database:
 
     def write_board_json(self, path: str | os.PathLike, hosts: dict[str, Any]) -> None:
         """Write runs of live batches, the last 50 events and `hosts` to `path` by a temporary file and rename."""
-        runs = self._rows(
-            "SELECT r.* FROM runs r LEFT JOIN batches b ON b.batch=r.batch WHERE b.retired IS NULL ORDER BY r.run_id"
-        )
-        board = {"schema": 1, "written": _now(), "runs": [self._run_row(r) for r in runs], "events": self.events(n=50), "hosts": hosts}
+        board = {"schema": 1, "written": _now(), "runs": self.runs(live_batches=True), "events": self.events(n=50),
+                 "hosts": hosts}
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(out.name + ".tmp")

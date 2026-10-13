@@ -542,13 +542,18 @@ def test_runtime_marks_an_open_step_and_counts_a_live_stage_up_to_now(demo: Path
                                                                 ["10m", "23m", "33m", "-"]]
 
 
-def test_ingest_keeps_the_step_times_and_a_resume_replaces_one(tmp_path: Path) -> None:
+def test_ingest_keeps_the_step_times_and_a_resume_replaces_one_in_one_commit(tmp_path: Path) -> None:
     from edarunner import watch
 
-    hb = {"run_id": "20260926_1200_a_demo_gabc1234", "phase": "stage:synth", "stage": "synth",
-          "step_times": {"synth": {"0": 100, "1": 160}}}
+    hb = {"run_id": "20260926_1200_a_demo_gabc1234", "phase": "stage:synth", "stage": "synth", "updated": 160,
+          "step_times": {"synth": {"0": 100, "1": 160}}, "stages": {"synth": {"started": 100}},
+          "tasks": {"synth": {"t1": {"phase": "running"}}}}
     with Database(tmp_path / "edr.db") as db:
+        sql: list[str] = []
+        db.conn.set_trace_callback(sql.append)
         watch.ingest(db, [("demo", hb)])
+        db.conn.set_trace_callback(None)
+        assert sql.count("COMMIT") == 1
         watch.ingest(db, [("demo", {**hb, "step_times": {"synth": {"1": 400, "2": 500}}})])
         rows = [tuple(r) for r in db.conn.execute("SELECT stage, step, started FROM step_runs ORDER BY step")]
     assert rows == [("synth", 0, 100), ("synth", 1, 400), ("synth", 2, 500)]

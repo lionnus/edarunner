@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+import sys
 
 import pytest
 
@@ -57,6 +58,12 @@ def test_a_database_of_another_schema_version_is_refused_before_any_write(tmp_pa
                                                  "release notes and docs/dev/conventions.md"):
         Database(path, readonly=readonly)
     assert path.read_bytes() == before and sorted(p.name for p in tmp_path.iterdir()) == ["edr.db"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="statfs magic numbers are Linux")
+def test_fs_magic_reads_the_statfs_type(tmp_path):
+    assert db_mod.fs_magic("/proc") == 0x9FA0  # PROC_SUPER_MAGIC
+    assert db_mod.fs_magic(tmp_path / "missing") is None
 
 
 def test_journal_mode_follows_the_filesystem(tmp_path, monkeypatch):
