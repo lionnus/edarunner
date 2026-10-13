@@ -26,7 +26,8 @@ vars = { netlist_step = 11 }
 ```
 
 `source` is the tag that `edr checkout` prints: the short hash of the
-commit, followed by `-n<short hash>` for each nested repository. A job
+commit, followed by `-n<short hash>` for each nested repository that is
+no git submodule. A job
 is one run: a label, an optional configuration name that the flow
 understands, optional overrides that reach the command as `KEY=VALUE`
 tokens through `{overrides}`, and optional `stages`, `tasks` and `host`

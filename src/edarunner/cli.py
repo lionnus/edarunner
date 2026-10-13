@@ -205,9 +205,13 @@ class Ctx:
         return self.resolve_source(b)
 
     def resolve_source(self, b: Batch) -> Batch:
-        """A ref as source becomes the source tag of its checked-out tree; CheckoutError when it is not checked out."""
-        if not runid.parse_tag(b.source, self.project.source.nested):
-            b.source = runid.source_tag(checkout.find(self.project, b.source), self.project.source.nested)
+        """A source becomes the tag of its checked-out tree; CheckoutError when it is not checked out and is no tag. A
+        short hash is both a ref and a tag, so the checked-out tree decides first."""
+        try:
+            b.source = checkout.find(self.project, b.source).name
+        except checkout.CheckoutError:
+            if not runid.parse_tag(b.source):
+                raise
         return b
 
     def refresh(self, batch: str | None = None) -> None:
@@ -1157,6 +1161,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
         raise Refuse(f"'{root}' is not a directory")
     try:
         source = a.source or runid.source_tag(root, project.source.nested)
+        nested = checkout.commits(project, source) if a.source else runid.heads(root, project.source.nested)
     except runid.GitError as e:
         raise Refuse(f"no source tag for {root}: {e}; pass --source") from None
     date, host = time.strftime(launch.DATE_FMT), socket.gethostname()
@@ -1172,9 +1177,8 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     spec["stages"][0]["cmd"] = shlex.join(argv)
     spec.pop("runtime", None)  # the tree of a tracked command is the caller's, as it is
     spec["collect"] = a.collect
-    parsed = runid.parse_tag(source, project.source.nested)
     plan_ = launch.RunPlan(run_id=run_id, label=a.label, host=host, root=str(root), spec=spec, queued=False, source=source,
-                           nested=parsed.nested if parsed else {})
+                           nested=nested)
     spec_path = project.state_dir / a.batch / f"{run_id}.spec.json"
     if spec_path.exists():
         raise Refuse(f"already tracked: {spec_path} exists")
@@ -1242,9 +1246,8 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     batch = next((b for b in c.db.batches() if b["batch"] == a.batch), None)
     if batch and batch.get("source") and batch["source"] != a.source:
         raise Refuse(f"batch {a.batch} holds the source {batch['source']}; give {a.source} a batch of its own with --batch")
-    if not runid.parse_tag(a.source, c.project.source.nested):
-        form = "<hash>" + "-n<hash>" * len(c.project.source.nested)
-        print(f"warning: {a.source} does not have the form of an edr checkout tag, {form} or {form}-dirty-<8 hex>")
+    if not runid.parse_tag(a.source):
+        print(f"warning: {a.source} does not have the form of an edr checkout tag, <hash>(-n<hash>)*(-dirty-<8 hex>)?")
     spec_path = c.project.state_dir / a.batch / f"{a.run_id}.spec.json"
     where = f"{a.host}:{root}" if root else f"results {results}"
     text = f"{where} as {a.label}@{a.batch}" + (f": {a.why}" if a.why else "")
@@ -2262,10 +2265,12 @@ def _parser() -> argparse.ArgumentParser:
         """, write=True, exits={Exit.NOTHING: "the project is not registered"})
     s = command("checkout", "check out a ref as a clone, or a dirty tree as a snapshot", """
         Fetches the repository, then makes a detached local clone of ref (default source.ref) at
-        <worktrees>/<tag>, and clones each source.nested repository into it at
+        <worktrees>/<tag>, and clones each source.nested repository into it:
+        a git submodule at the commit that the outer commit pins, any other at
         the HEAD the repository copy has. The tag is the short hash of the
-        commit, then -n<short hash> for each source.nested repository in the
-        order of that list. A tag as ref checks out the commits that it names.
+        commit, then -n<short hash> for each source.nested repository that is
+        no submodule, in the order of that list. A tag as ref checks out the
+        commits that it names.
         A local clone shares the git objects of the repository by hard links.
         It prints <source> <path>.
 
@@ -2414,8 +2419,8 @@ def _parser() -> argparse.ArgumentParser:
         empty. Each --param KEY=VALUE writes a parameter of origin import, next
         to config, build_tag and source. The dirty flag is set when the source
         tag holds -dirty, and a tag that edr checkout would not make, <hash>
-        with -n<hash> for each source.nested repository and an optional
-        -dirty-<8 hex>, gets a warning. --phase is a phase that the
+        with any number of -n<hash> and an optional -dirty-<8 hex>, gets a
+        warning. --phase is a phase that the
         driver ends a run with: done, INCOMPLETE:<n>f<m>s<k>h where a task
         failed, was skipped or was held, FAILED:<stage>, OVER_BUDGET:<stage>,
         STOPPED or KILLED:<signal>. A run whose driver died is

@@ -646,10 +646,12 @@ edr checkout [--dry-run] [--json] [--dirty DIR] [ref]
 ```
 
 Fetches the repository, then makes a detached local clone of ref (default source.ref) at
-&lt;worktrees&gt;/&lt;tag&gt;, and clones each source.nested repository into it at
+&lt;worktrees&gt;/&lt;tag&gt;, and clones each source.nested repository into it:
+a git submodule at the commit that the outer commit pins, any other at
 the HEAD the repository copy has. The tag is the short hash of the
-commit, then -n&lt;short hash&gt; for each source.nested repository in the
-order of that list. A tag as ref checks out the commits that it names.
+commit, then -n&lt;short hash&gt; for each source.nested repository that is
+no submodule, in the order of that list. A tag as ref checks out the
+commits that it names.
 A local clone shares the git objects of the repository by hard links.
 It prints &lt;source&gt; &lt;path&gt;.
 
@@ -879,8 +881,8 @@ and --ended give its host, start and end; without them these stay
 empty. Each --param KEY=VALUE writes a parameter of origin import, next
 to config, build_tag and source. The dirty flag is set when the source
 tag holds -dirty, and a tag that edr checkout would not make, &lt;hash&gt;
-with -n&lt;hash&gt; for each source.nested repository and an optional
--dirty-&lt;8 hex&gt;, gets a warning. --phase is a phase that the
+with any number of -n&lt;hash&gt; and an optional -dirty-&lt;8 hex&gt;, gets a
+warning. --phase is a phase that the
 driver ends a run with: done, INCOMPLETE:&lt;n&gt;f&lt;m&gt;s&lt;k&gt;h where a task
 failed, was skipped or was held, FAILED:&lt;stage&gt;, OVER_BUDGET:&lt;stage&gt;,
 STOPPED or KILLED:&lt;signal&gt;. A run whose driver died is

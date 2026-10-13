@@ -101,15 +101,21 @@ dirty tag, and the parameters of the run: its vars and overrides, and
 the values read from its own files. Give the tag next to every number
 you publish.
 
-The source tag names every commit that the source is made of. It starts
-with the short hash of the commit that `edr checkout` pinned and adds
-`-n<short hash>` for each repository that `source.nested` names, in the
-order of that list. With `nested = ["flow"]` a tag reads
-`3f9a2c1-n8e0d4b2`; a project without nested repositories gets the
-short hash alone. A commit in the nested flow repository therefore gives
-a new tag and a new clone, even when the outer commit stays the same,
-and `edr checkout 3f9a2c1-n8e0d4b2` checks out the same two commits
-after the flow repository has moved on.
+The source tag names exactly the commits that the outer commit does not
+pin. It starts with the short hash of the commit that `edr checkout`
+pinned. A repository in `source.nested` that is a git submodule adds
+nothing, because the outer commit already pins it, and moving the
+submodule to another commit shows in `git diff` and makes the tag dirty.
+Every other nested repository, a separate clone inside the tree, adds
+`-n<short hash>`, in the order of `source.nested`. With
+`nested = ["pdk", "flow"]`, where `pdk` is a submodule and `flow` a
+separate clone, a tag reads `3f9a2c1-n8e0d4b2`; a project whose nested
+repositories are all submodules, or that has none, gets the short hash
+alone. A commit in the flow repository therefore gives a new tag and a
+new clone, even when the outer commit stays the same, and
+`edr checkout 3f9a2c1-n8e0d4b2` checks out the same commits after the
+flow repository has moved on. The run records the commit of every
+nested repository, submodules included, as `nested.<name>`.
 
 A tree with changes gets `-dirty-<8 hex>` at the end, such as
 `3f9a2c1-n8e0d4b2-dirty-7b21c0d9`, where the hex digits start the sha256

@@ -479,10 +479,12 @@ class Source:
     worktrees: Path = doc("where `edr checkout` puts a local clone per source tag")
     ref: str = doc("the ref `edr checkout` takes without an argument, and the one `edr brief` counts the lag of each "
                    "source against", "HEAD")
-    nested: list[str] = doc("the nested repositories inside the tree. The source tag gives the commit of each as "
-                            "`-n<short hash>`, in this order. A checkout of a ref clones each at the HEAD that the "
-                            "repository copy has, a checkout of a tag at the commit that the tag names. A run records "
-                            "each commit as the parameter `nested.<name>`, and their changes count in a dirty tag. A "
+    nested: list[str] = doc("the nested repositories inside the tree, git submodules or separate clones. The source "
+                            "tag gives the commit of each separate clone as `-n<short hash>`, in this order; the outer "
+                            "commit pins a submodule, so a submodule adds nothing. A checkout clones a submodule at the "
+                            "commit that the outer commit pins, and a separate clone at the commit that a tag names, or "
+                            "for a ref at the HEAD that the repository copy has. A run records the commit of each as "
+                            "the parameter `nested.<name>`, and their changes count in a dirty tag. A "
                             "git repository in the tree that this list does not name and git does not ignore stops "
                             "`edr checkout --dirty`", factory=list)
     run_id: str = doc("the run id template; the `g` in the default marks the git source tag that follows",
@@ -624,7 +626,7 @@ class Job:
 @dataclass
 class Batch:
     """`jobs/<batch>.toml` holds the jobs of one batch on one source. A tag is the short hash of the commit, then
-    `-n<short hash>` for each nested repository, then `-dirty-<8 hex>` for a snapshot of a tree with uncommitted
+    `-n<short hash>` for each nested repository that is no submodule, then `-dirty-<8 hex>` for a snapshot of a tree with uncommitted
     changes, such as `3f9a2c1-n8e0d4b2-dirty-7b21c0d9`. The date is pinned once
     per batch in `<state_dir>/<batch>/RUN_DATE`, so `plan` and `launch` minutes apart name the same run
     ids. A batch name is used once; a second launch of the same batch finds its specs and does

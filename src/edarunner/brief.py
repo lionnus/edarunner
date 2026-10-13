@@ -70,7 +70,7 @@ def _sources(project: Project, runs: list[Row]) -> list[Row]:
 def _behind(project: Project, tag: str) -> int | None:
     """The commits of the tracking ref `[source] ref` that the commit of the source `tag` lacks, without its nested and
     dirty parts; None when the tag is not in the checkout form or git cannot count them."""
-    t = runid.parse_tag(tag, project.source.nested)
+    t = runid.parse_tag(tag)
     if not t:
         return None
     try:
