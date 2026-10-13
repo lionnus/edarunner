@@ -24,12 +24,14 @@ from helpers_results import demo_qor
 
 from edarunner import board, cli, config, home, launch, serve, watch
 from edarunner import db as db_mod
+from edarunner.backend import Live
 from edarunner.db import Database
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
 from edarunner.model import Telegram
 from edarunner.notify import Notifier
 from edarunner.notify.telegram import TelegramBot
+from helpers_backend import FakeBackend
 from helpers_driver import DEMO
 
 
@@ -170,6 +172,25 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     assert code == 1 and "nope" in err
     code, _, err = edr(capsys, "status", "#9")
     assert code == 1
+
+
+def test_status_of_one_run_with_live_asks_the_backend(demo: Path, capsys, monkeypatch) -> None:
+    b = seed(demo, "b_nodw", "stage:synth", pid=dead_pid(), state="stale")
+    seed(demo, "r", "stage:synth", pid=os.getpid())
+    code, out, _ = edr(capsys, "status", "b_nodw@demo")
+    assert code == 0 and "the backend says" not in out
+    code, out, _ = edr(capsys, "status", "b_nodw@demo", "--live")
+    assert code == 0 and "the backend says the driver is gone" in out and "dead" in out
+    code, out, _ = edr(capsys, "--json", "status", "r@demo", "--live")
+    assert code == 0 and json.loads(out)["data"]["run"]["driver"] == "running"
+    fake = FakeBackend()
+    fake.name, fake.states["7"] = "slurm", [Live.PENDING]
+    monkeypatch.setattr(cli, "make_backend", lambda *a: fake)
+    (bdir(demo) / f"{b}.json").unlink()
+    with Database(demo / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": b, "handle": "slurm:7", "state": "pending"})
+    code, out, _ = edr(capsys, "status", "b_nodw@demo", "--live")
+    assert code == 0 and "the backend says the driver is pending" in out and fake.asked == [["7"]]
 
 
 def test_the_triage_stops_a_live_run_over_its_budget_and_continues_one_that_ended(demo: Path, capsys) -> None:

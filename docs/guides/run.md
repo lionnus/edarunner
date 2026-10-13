@@ -74,6 +74,7 @@ from there. [how-it-works.md](../how-it-works.md#launch) says what
 edr status                    # the board
 edr status --live             # asks each host whether the driver exists
 edr status base@sweep1        # one run: stages, steps, metrics, log tail
+edr status base@sweep1 --live # one run, with what its host or scheduler says of the driver
 edr status --triage           # every run not running, with one proposed command
 edr status --metric area_um2  # a column with the area of each run at its step of record
 edr events --run base@sweep1  # the history of one run, with the reason of every action

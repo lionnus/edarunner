@@ -559,10 +559,11 @@ def cmd_status(c: Ctx, a: argparse.Namespace) -> int:
         stages = sorted(c.db.stage_runs(run_id), key=lambda r: (r["stage"] != "setup", r["stage"], r["task"], r["attempt"]))
         mets = c.db.metrics(run_ids=[run_id])
         samples, flags = c.db.run_samples(run_id), c.db.flags([run_id])
+        code = _mark_live(c, [row]) if a.live else Exit.DONE
         c.emit(board.run_detail(row, stages, mets, str(hb.get("last_log") or ""), gate=hb.get("gate"), samples=samples,
                                 flags=flags),
                {"run": row, "heartbeat": hb, "stages": stages, "metrics": mets, "samples": samples, "flags": flags})
-        return Exit.DONE
+        return code
     if a.all:
         rows = _all_rows(a)
         c.emit(board.wide(rows), {"runs": rows})
@@ -652,16 +653,19 @@ def _all_rows(a: argparse.Namespace) -> list[Row]:
 
 
 def _mark_live(c: Ctx, rows: list[Row]) -> int:
-    """Ask the backend, once, whether the driver of each live run exists; a gone driver marks the run dead."""
+    """Ask the backend, once, what it knows of the driver of each live run, a scheduler job that has not started
+    included; the answer goes into `driver` and `alive`, and a gone driver marks the run dead."""
     handles: dict[int, Handle] = {}
     for i, r in enumerate(rows):
         hb = c.heartbeat(r) if board.is_live(r) else {}
-        if hb.get("driver_pid") and r.get("host") and (h := run_handle(c.backend.name, r, hb)):
+        asked = hb.get("driver_pid") or board.is_live(r) and c.backend.name in SCHEDULERS
+        if asked and (h := run_handle(c.backend.name, r, hb)):
             handles[i] = h
     alive = c.backend.alive(list(handles.values())) if handles else {}
     code = Exit.DONE
     for i, h in handles.items():
-        state = alive[h][0]
+        state, why = alive[h]
+        rows[i]["driver"] = f"{state.value}: {why}" if why else state.value
         rows[i]["alive"] = None if state is Live.UNKNOWN else state is not Live.GONE
         if state is Live.UNKNOWN:
             code = Exit.HOSTS
@@ -1976,7 +1980,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--csv", action="store_true", help="the board as CSV on stdout")
     s.add_argument("--narrow", action="store_true", help="48 columns, two lines per live run, for an ssh app on a phone")
     s.add_argument("--watch", action="store_true", help="redraw every heartbeat_s seconds; Ctrl-C ends it")
-    s.add_argument("--live", action="store_true", help="ask each host whether the driver exists; a gone driver shows dead")
+    s.add_argument("--live", action="store_true", help="ask the backend about the driver of each live run, or of the one run; a gone driver shows dead")
     s.add_argument("--triage", action="store_true", help="every run not running, with one proposed command")
     s.add_argument("--digest", action="store_true", help="the daily digest of this project, or with --all of every "
                                                          "project, as plain text")

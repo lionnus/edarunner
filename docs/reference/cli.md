@@ -195,7 +195,7 @@ runs.
 | `--csv` | the board as CSV on stdout |
 | `--narrow` | 48 columns, two lines per live run, for an ssh app on a phone |
 | `--watch` | redraw every heartbeat_s seconds; Ctrl-C ends it |
-| `--live` | ask each host whether the driver exists; a gone driver shows dead |
+| `--live` | ask the backend about the driver of each live run, or of the one run; a gone driver shows dead |
 | `--triage` | every run not running, with one proposed command |
 | `--digest` | the daily digest of this project, or with --all of every project, as plain text |
 | `--all` | the runs of every registered project, with a project column |
