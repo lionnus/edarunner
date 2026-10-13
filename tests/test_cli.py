@@ -157,7 +157,7 @@ def test_status_boards_handles_live_and_triage(demo: Path, capsys) -> None:
     assert code == 0 and all(len(ln) <= 48 for ln in out.splitlines()) and "b_nodw" in out
     code, out, _ = edr(capsys, "--json", "status")
     rows = json.loads(out)["data"]["runs"]
-    assert code == 0 and {r["run_id"] for r in rows} == {a, b, q} and json.loads(out)["output"] == ""
+    assert code == 0 and {r["run_id"] for r in rows} == {a, b, q} and "b_nodw" in json.loads(out)["output"]
     code, out, _ = edr(capsys, "--json", "status", "--live")
     rows = {r["run_id"]: r for r in json.loads(out)["data"]["runs"]}
     assert code == 0 and rows[b]["alive"] is False and rows[b]["state"] == "dead" and "alive" not in rows[a]
@@ -1405,7 +1405,7 @@ def test_json_output_is_the_same_bytes_with_and_without_colour(demo: Path, capsy
         forced = edr(capsys, "--json", *argv)[1]
         assert plain == forced and "\x1b" not in plain, argv
         env = json.loads(plain)
-        assert env["code"] == 0 and env["output"] == "" and env["data"], argv
+        assert env["code"] == 0 and env["output"].strip() and env["data"], argv
 
 
 def test_bad_input_exits_1(capsys) -> None:

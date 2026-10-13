@@ -179,8 +179,8 @@ class Ctx:
         """Print `out`; keep `data` (default: the text) for --json."""
         self.data = board.plain(out) if data is None else data
         if self.a.json:
-            return
-        if isinstance(out, str):
+            print(board.plain(out))
+        elif isinstance(out, str):
             print(out)
         else:
             self.console.print(out)
