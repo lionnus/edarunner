@@ -136,22 +136,24 @@ def _stages(hb: dict) -> dict[str, dict]:
 
 def ingest(db: Database, heartbeats: list[tuple[str, dict]]) -> dict[str, str]:
     """Upsert `runs` and `stage_runs` from the heartbeats; `state` is left to classify. A heartbeat that this cannot
-    use stops only its own run: the result maps its run id to the error, and every other heartbeat goes in."""
+    use stops only its own run: the result maps its run id to the error, and every other heartbeat goes in. Each
+    heartbeat is one commit."""
     bad = {}
     for batch, hb in heartbeats:
         try:
-            db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
-            for name, s in _stages(hb).items():
-                db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
-                                     "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
-                                     "exit": s.get("exit"), "log": s.get("log")})
-            if hb.get("step_times"):
-                db.set_step_times(hb["run_id"], hb["step_times"])
-            db.add_run_sample(hb)
-            for stage, tasks in (hb.get("tasks") or {}).items():
-                for tid, t in tasks.items():
-                    db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
-                                         **{k: t.get(k) for k in _TASK_KEYS}})
+            with db.one_commit():
+                db.upsert_run({"batch": batch, **{k: hb.get(k) for k in _RUN_KEYS}})
+                for name, s in _stages(hb).items():
+                    db.upsert_stage_run({"run_id": hb["run_id"], "stage": name, "attempt": s.get("attempt") or 1,
+                                         "status": s["status"], "started": s.get("started"), "ended": s.get("ended"),
+                                         "exit": s.get("exit"), "log": s.get("log")})
+                if hb.get("step_times"):
+                    db.set_step_times(hb["run_id"], hb["step_times"])
+                db.add_run_sample(hb)
+                for stage, tasks in (hb.get("tasks") or {}).items():
+                    for tid, t in tasks.items():
+                        db.upsert_stage_run({"run_id": hb["run_id"], "stage": stage, "task": tid, "status": t.get("phase"),
+                                             **{k: t.get(k) for k in _TASK_KEYS}})
         except _UNREADABLE as e:
             bad[hb["run_id"]] = f"{type(e).__name__}: {e}"
     return bad

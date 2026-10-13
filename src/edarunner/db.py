@@ -8,7 +8,8 @@ import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -133,7 +134,7 @@ class Database:
         """`threads=True` lets another thread use the connection; the caller serialises the calls. `readonly` opens an
         existing database for reading only, without the journal mode and the schema script, and creates no file."""
         self.path = Path(path)
-        self.network_fs, self.journal_mode = None, ""
+        self.network_fs, self.journal_mode, self._held = None, "", False
         if readonly:
             self.conn = sqlite3.connect(self._read_uri(), uri=True, timeout=30, check_same_thread=not threads)
             self._check_schema()
@@ -188,6 +189,21 @@ class Database:
 
     # writes
 
+    def _commit(self) -> None:
+        if not self._held:
+            self.conn.commit()
+
+    @contextmanager
+    def one_commit(self) -> Iterator[None]:
+        """Hold the commits of the upserts, step times and run samples inside the block, and commit once at its end,
+        also when it raises."""
+        self._held = True
+        try:
+            yield
+        finally:
+            self._held = False
+            self.conn.commit()
+
     def _upsert(self, table: str, row: Row) -> None:
         cols = self._columns[table]
         bad = set(row) - set(cols)
@@ -205,7 +221,7 @@ class Database:
             + (f"UPDATE SET {', '.join(f'{k}=excluded.{k}' for k in update)}" if update else "NOTHING")
         )
         self.conn.execute(sql, [_text(row[k]) for k in keys])
-        self.conn.commit()
+        self._commit()
 
     def upsert_batch(self, row: Row) -> None:
         """Insert a batch, or update the columns given."""
@@ -287,7 +303,7 @@ class Database:
         self.conn.executemany(
             "INSERT OR REPLACE INTO step_runs(run_id, stage, step, started) VALUES(?, ?, ?, ?)",
             [(run_id, stage, int(step), int(ts)) for stage, steps in times.items() for step, ts in steps.items()])
-        self.conn.commit()
+        self._commit()
 
     def add_host_samples(self, ts: int, probes: dict[str, dict], keep_days: int = 30) -> None:
         """One row per host that answered, from the probe dicts of `hosts.HostProbe`; rows older than `keep_days` go."""
@@ -313,7 +329,7 @@ class Database:
         self.conn.execute("INSERT OR IGNORE INTO run_samples VALUES(?, ?, ?, ?, ?, ?)",
                           (hb["run_id"], int(hb["updated"]), hb.get("cpu_pct"), hb.get("rss_gb"), hb.get("tree_gb"),
                            hb.get("disk_free_gb")))
-        self.conn.commit()
+        self._commit()
 
     def run_samples(self, run_id: str) -> list[Row]:
         """The samples of one run in time order."""
