@@ -101,9 +101,9 @@ def _check_phase(project: Project, phase: str) -> None:
 _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
-                            "notify", "plan", "coverage"})
+                            "notify", "plan", "coverage", "wait"})
 # These commands open the database read-only, so they write nothing, not even the -wal and -shm files of SQLite.
-_READ_ONLY = frozenset({"events", "metrics", "compare", "runtime", "coverage"})
+_READ_ONLY = frozenset({"events", "metrics", "compare", "runtime", "coverage", "wait"})
 
 
 class Ctx:
@@ -225,14 +225,17 @@ class Ctx:
 
     def rows(self, batch: str | None = None) -> list[Row]:
         """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
-        the refresh could not use is `unreadable` and carries the error."""
-        self.refresh(batch)
+        the refresh could not use is `unreadable` and carries the error. A read-only command skips the refresh and
+        reads what the watcher ingested last."""
+        fresh = getattr(self.a, "command", None) not in _READ_ONLY
+        if fresh:
+            self.refresh(batch)
         rows = self.db.runs(batch=batch, live_batches=True)
         now, lim = time.time(), self.project.limits
         for r in rows:
             if r["run_id"] in self.unreadable:
                 r["state"], r["error"] = "unreadable", self.unreadable[r["run_id"]]
-            elif r.get("state") == "unreadable":
+            elif fresh and r.get("state") == "unreadable":
                 r["state"] = None  # the refresh read it, and the watcher classifies it again
             # The watcher's own classes (hung, host_full, ...) stay; only the age classes follow the heartbeat.
             if board.is_live(r) and r.get("updated") is not None and r.get("state") in (None, "running", "stale", "dead"):
@@ -683,6 +686,53 @@ def _triage(c: Ctx, rows: list[Row]) -> Text | str:
         lines.append(Text.assemble((f"{state:<11}", board.STYLE.get(state, "")), " ",
                                    (f"{board.handle(r, everyone):<28}", "bold"), f" {r.get('phase') or '-'}\n    {cmd}"))
     return Text("\n").join(lines) if lines else "nothing to triage"
+
+
+# The states that wait for a person once the watcher has had its grace to act.
+_DECIDE = ("dead", "hung", "looping", "held", "unreadable")
+
+
+def cmd_wait(c: Ctx, a: argparse.Namespace) -> int:
+    """Block until every selected run has ended and is collected, a run needs a decision, the watcher is gone, or the
+    timeout runs out."""
+    ids = {c.resolve(h)["run_id"] for h in a.handle}
+    batch = None if ids else a.batch or os.environ.get("EDR_BATCH")
+    if not ids and not batch:
+        raise Refuse("name the runs: a handle, --batch or EDR_BATCH")
+    lim, lock = c.project.limits, c.project.state_dir / "watch.lock"
+    deadline = time.time() + a.timeout * 3600 if a.timeout is not None else None
+    seen: dict[str, tuple[str, float]] = {}  # run id -> the state that needs a decision and when wait first saw it
+    first = True
+    while True:
+        watcher = home.holder(lock)
+        if first and not watcher:
+            raise Refuse(f"no watcher holds {lock}, so nothing collects; start edr watch or edr serve")
+        rows = [r for r in c.rows(batch) if (not ids or r["run_id"] in ids) and (not a.source or r.get("source") in a.source)]
+        if first and not rows:
+            raise Refuse("no run matches")
+        first, now, notes = False, time.time(), c.db.get_store("notified", {})
+        done = {r["run_id"]: not board.is_live(r) and board.state_of(r) != "unreadable"
+                and watch.collected(c.project, c.db, r, c.heartbeat(r)) for r in rows}
+        late = False
+        for r in rows:
+            state, rec = board.state_of(r), notes.get(r["run_id"]) or {}
+            if state not in _DECIDE:
+                continue
+            if seen.get(r["run_id"], ("",))[0] != state:
+                seen[r["run_id"]] = (state, now)
+            since = min(seen[r["run_id"]][1], rec["since"] if rec.get("state") == state else now)
+            late = late or now - since > lim.grace_s + lim.heartbeat_s  # the watcher acts in the cycle after grace_s
+        reason = ("ended" if all(done.values()) else "needs_decision" if late else "no_watcher" if not watcher
+                  else "timeout" if deadline is not None and now >= deadline else "")
+        if reason:
+            break
+        time.sleep(lim.heartbeat_s)
+    open_ = [r for r in rows if board.state_of(r) != "done"]
+    c.emit(Group(board.wide(rows), _triage(c, open_)) if open_ else board.wide(rows),
+           {"runs": rows, "collected": done, "reason": reason})
+    if reason == "timeout":
+        return Exit.TIMEOUT
+    return Exit.DONE if reason == "ended" and rows and not open_ else Exit.REFUSED
 
 
 def cmd_events(c: Ctx, a: argparse.Namespace) -> int:
@@ -1810,6 +1860,7 @@ class Exit(IntEnum):
     REFUSED = 1
     NOTHING = 2
     HOSTS = 3
+    TIMEOUT = 4
     INTERRUPTED = 130
 
 
@@ -1991,6 +2042,31 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--digest", action="store_true", help="the daily digest of this project, or with --all of every "
                                                          "project, as plain text")
     s.add_argument("--all", action="store_true", help="the runs of every registered project, with a project column")
+    s = command("wait", "block until the runs end and are collected", """
+        Waits for the runs that a handle, --batch or EDR_BATCH names, and
+        --source narrows. Every heartbeat_s seconds it reads the board as
+        the watcher left it. It returns when every run has ended and the
+        watcher has collected its results. It returns early when a run is
+        dead, hung, looping, held or unreadable for longer than grace_s plus
+        one cycle, since the watcher acts first, or when no watcher holds
+        <state_dir>/watch.lock any more. Without a watcher at the start it
+        refuses, since nothing would collect.
+
+        It prints the board of the runs and, for each run that is not done,
+        the command the triage proposes. --json gives {"runs": [...],
+        "collected": {run_id: bool}, "reason": ...}, where reason is ended,
+        needs_decision, no_watcher or timeout. It opens the database
+        read-only and writes nothing.
+
+        docs/guides/agents.md shows how an agent on another host calls it
+        through ssh.
+        """, exits={Exit.REFUSED: "a run ended other than done, a run needs a decision, no watcher runs, or the "
+                                  "input is bad",
+                    Exit.TIMEOUT: "--timeout ran out"})
+    s.add_argument("handle", nargs="*", help=HANDLE)
+    s.add_argument("--batch", metavar="B", help="one batch; default EDR_BATCH")
+    s.add_argument("--source", action="append", metavar="SOURCE", help="the runs of the exact source tag; repeatable")
+    s.add_argument("--timeout", type=float, metavar="HOURS", help="give up after this many hours")
     s = command("events", "the last events", """
         Prints the last N events, oldest first, with the time, the actor (user,
         watch or telegram), the run, the kind and the text.

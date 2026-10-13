@@ -180,8 +180,12 @@ A cron line tells you when the supervisor stopped. It reads
 `edr.toml` is broken. cron has a short `PATH`, so name `edr` in full:
 
 ```
-*/10 * * * * timeout 120 $HOME/.local/bin/edr serve --check
+*/10 * * * * timeout 120 $HOME/.local/bin/edr serve --check >/dev/null 2>&1
 ```
+
+The check sends its own alert through the notifiers, so the line drops
+the output; otherwise cron mails it to you every 10 minutes while the
+supervisor is down.
 
 `edr serve --check` prints why, sends an alert and exits 1 when the file
 is missing or older than three cycles. `edr serve --dry-run` lists the

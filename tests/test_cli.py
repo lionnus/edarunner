@@ -1490,6 +1490,99 @@ def test_status_follows_the_heartbeat_between_watcher_cycles(demo: Path, capsys)
         assert db.run(b)["phase"] == "INCOMPLETE:1f0s" and db.run(b)["exit"] == 8
 
 
+def _watcher(demo: Path) -> int:
+    """Hold watch.lock as a watcher would."""
+    fd = home.lock(config.load_project(demo).state_dir / "watch.lock")
+    assert fd is not None
+    return fd
+
+
+def _clock(monkeypatch) -> list[float]:
+    """A clock that time.sleep moves forward, so a wait of hours runs at once."""
+    now = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", lambda s: now.__setitem__(0, now[0] + s))
+    return now
+
+
+def _wait(capsys, *argv: str) -> tuple[int, dict, str]:
+    """The code and the data of a --json wait, and the text of the same wait without --json."""
+    code, out, _ = edr(capsys, "--json", "wait", *argv)
+    text = edr(capsys, "wait", *argv)
+    assert text[0] == code
+    return code, json.loads(out)["data"] or {}, text[1]
+
+
+def test_wait_refuses_without_selection_runs_or_watcher(demo: Path, capsys, monkeypatch) -> None:
+    seed(demo, "a", "done")
+    assert edr(capsys, "wait")[0] == 1
+    code, _, err = edr(capsys, "wait", "--batch", "demo")
+    assert code == 1 and "no watcher" in err
+    fd = _watcher(demo)
+    code, _, err = edr(capsys, "wait", "--batch", "other")
+    assert code == 1 and "no run matches" in err
+    monkeypatch.setenv("EDR_BATCH", "demo")
+    code, _, err = edr(capsys, "wait", "--source", "nope")
+    assert code == 1 and "no run matches" in err
+    os.close(fd)
+
+
+def test_wait_returns_0_when_every_run_is_done_and_collected(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "done")
+    fd = _watcher(demo)
+    code, data, _ = _wait(capsys, "--batch", "demo", "--timeout", "0")
+    assert code == 4 and data["reason"] == "timeout" and data["collected"] == {a: False}
+    watch_once(demo)
+    db = demo / "data" / "edr.db"
+    before = db.stat().st_mtime_ns
+    code, data, out = _wait(capsys, "a@demo")
+    os.close(fd)
+    assert code == 0 and data["reason"] == "ended" and data["collected"] == {a: True} and "edr export" not in out
+    assert db.stat().st_mtime_ns == before and not Path(f"{db}-wal").exists()  # read-only
+
+
+def test_wait_returns_1_when_a_run_ended_other_than_done(demo: Path, capsys) -> None:
+    seed(demo, "a", "done")
+    b = seed(demo, "b", "FAILED:synth")
+    watch_once(demo)
+    fd = _watcher(demo)
+    code, data, out = _wait(capsys, "--batch", "demo")
+    os.close(fd)
+    assert code == 1 and data["reason"] == "ended" and data["collected"][b] is True
+    assert "edr retire b@demo --why FAILED:synth" in out
+
+
+def test_wait_returns_1_when_a_run_needs_a_decision_after_the_grace(demo: Path, capsys, monkeypatch) -> None:
+    b = seed(demo, "b", "stage:synth", pid=dead_pid(), updated=int(time.time()) - 100000)
+    fd = _watcher(demo)
+    now = _clock(monkeypatch)
+    start = now[0]
+    code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo")
+    lim = config.load_project(demo).limits
+    assert code == 1 and json.loads(out)["data"]["reason"] == "needs_decision"
+    assert lim.grace_s + lim.heartbeat_s < now[0] - start <= lim.grace_s + 2 * lim.heartbeat_s
+    # The watcher's own clock counts: it saw the run dead long ago, so wait returns at once.
+    with Database(demo / "data" / "edr.db") as db:
+        db.set_store("notified", {b: {"state": "dead", "since": now[0] - 2 * lim.grace_s}})
+    start = now[0]
+    code, data, out = _wait(capsys, "--batch", "demo")
+    os.close(fd)
+    assert code == 1 and data["reason"] == "needs_decision" and now[0] == start
+    assert "edr continue b@demo --stage synth --from elaborate" in out
+
+
+def test_wait_returns_1_when_the_watcher_goes_and_4_at_the_timeout(demo: Path, capsys, monkeypatch) -> None:
+    seed(demo, "a", "stage:synth")
+    fd = _watcher(demo)
+    now = _clock(monkeypatch)
+    start = now[0]
+    code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo", "--timeout", "0.01")
+    assert code == 4 and json.loads(out)["data"]["reason"] == "timeout" and 36 <= now[0] - start < 41
+    monkeypatch.setattr(time, "sleep", lambda s: os.close(fd))
+    code, out, _ = edr(capsys, "--json", "wait", "--batch", "demo")
+    assert code == 1 and json.loads(out)["data"]["reason"] == "no_watcher"
+
+
 def test_run_on_an_imported_tree_needs_no_jobs_file(demo: Path, capsys, tmp_path: Path) -> None:
     root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_ref_demo_gabc1234"
     root.mkdir(parents=True)
