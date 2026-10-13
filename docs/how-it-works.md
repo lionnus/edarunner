@@ -61,10 +61,12 @@ them.
 `edr checkout <ref>` pins one commit of the flow's repository. It
 fetches the repository when it has a remote, and makes a detached local
 clone of the commit under `source.worktrees/<tag>`. Each repository that
-`source.nested` names gets its own clone inside that tree, at the HEAD
-that the repository copy has. The tag is the short hash of the commit
-followed by `-n<short hash>` for each nested repository, such as
-`3f9a2c1-n8e0d4b2`, or the short hash alone without nested repositories.
+`source.nested` names gets its own clone inside that tree: a git
+submodule at the commit that the outer commit pins, any other at the
+HEAD that the repository copy has. The tag is the short hash of the
+commit followed by `-n<short hash>` for each nested repository that is
+no submodule, such as `3f9a2c1-n8e0d4b2`, or the short hash alone when
+the outer commit pins every nested repository.
 It is the source tag of every run built from this tree, and the batch
 file names it as `source` (`checkout.py`). A checkout of a tag clones
 the commits that the tag names, so a tag names the same source after a
@@ -81,8 +83,8 @@ the clone and into `data/sources/<tag>/` (`runid.diff`, `runid.files`,
 `checkout._snapshot`). A git repository in the tree that
 `source.nested` does not name and git does not ignore stops the
 snapshot. `launch` refuses a dirty tag unless you pass `--allow-dirty`,
-and it records the commit of each nested repository that the tag names
-in the spec of every run.
+and it records the commit of each nested repository, submodules
+included, in the spec of every run.
 
 Apart from that `git fetch`, edarunner leaves your source repository
 alone, and the repository is never the target of a delete

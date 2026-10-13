@@ -135,15 +135,75 @@ def test_untracked_files_and_nested_edits_count_in_the_tag_and_the_diff(project,
     assert not (clone / "sub" / "secret.txt").exists()
 
 
-def test_parse_tag_round_trips_the_checkout_form():
-    for tag, names in (("3f9a2c1", []), ("3f9a2c1-dirty-0badc0de", []), ("3f9a2c1-n8e0d4b2", ["flow"]),
-                       ("3f9a2c1-n8e0d4b2-n1c2d3e4-dirty-7b21c0d9", ["flow", "pdk"])):
-        assert str(runid.parse_tag(tag, names)) == tag
-    assert runid.parse_tag("3f9a2c1-n8e0d4b2-n1c2d3e4-dirty-7b21c0d9", ["flow", "pdk"]) == runid.Tag(
-        "3f9a2c1", {"flow": "8e0d4b2", "pdk": "1c2d3e4"}, "7b21c0d9")
-    # A tag of another nested list, a tag that edr checkout does not make, and a ref are not tags of this project.
-    for text in ("3f9a2c1", "3f9a2c1-n8e0d4b2-n1c2d3e4", "3f9a2c1-dirty", "3f9a2c1-n8e0d4b2-dirty-0bad", "origin/main", ""):
-        assert runid.parse_tag(text, ["flow"]) is None
+def test_parse_tag_follows_the_grammar_alone():
+    for tag in ("3f9a2c1", "3f9a2c1-dirty-0badc0de", "3f9a2c1-n8e0d4b2", "3f9a2c1-n8e0d4b2-n1c2d3e4-dirty-7b21c0d9"):
+        assert str(runid.parse_tag(tag)) == tag
+    assert runid.parse_tag("3f9a2c1-n8e0d4b2-n1c2d3e4-dirty-7b21c0d9") == runid.Tag(
+        "3f9a2c1", ["8e0d4b2", "1c2d3e4"], "7b21c0d9")
+    for text in ("3f9a2c1-dirty", "3f9a2c1-n8e0d4b2-dirty-0bad", "3f9a2c1-n", "origin/main", ""):
+        assert runid.parse_tag(text) is None
+
+
+def add_submodule(repo: Path, tmp_path: Path) -> None:
+    """A submodule `pdk` of `repo`, pinned at the first of the two commits of its upstream."""
+    up = tmp_path / "pdk_up"
+    up.mkdir()
+    git("init", "-q", "-b", "main", cwd=up)
+    for text in ("v1\n", "v2\n"):
+        (up / "cells.txt").write_text(text)
+        commit_all(up, text)
+    git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(up), "pdk", cwd=repo)
+    git("checkout", "-q", "HEAD~1", cwd=repo / "pdk")
+    git("add", "pdk", cwd=repo)
+    git("commit", "-q", "-m", "pdk", cwd=repo)
+
+
+@pytest.mark.parametrize("nested", [[], ["pdk"], ["sub"], ["sub", "pdk"]])
+def test_the_tag_names_the_commits_that_the_outer_commit_does_not_pin(project, tmp_path, nested):
+    repo = project.source.repo
+    if "pdk" in nested:
+        add_submodule(repo, tmp_path)
+    if "sub" not in nested:
+        shutil.rmtree(repo / "sub")
+    project.source.nested = nested
+    commits = {n: short(repo / n) for n in nested}
+    tag = short(repo) + (f"-n{commits['sub']}" if "sub" in nested else "")
+    a = checkout.checkout(project, "HEAD")
+    assert a.source == tag == runid.source_tag(repo, nested) == runid.source_tag(a.path, nested)
+    assert a.nested == commits == checkout.commits(project, tag)
+    assert {n: short(a.path / n) for n in nested} == commits
+    shutil.rmtree(a.path)
+    assert checkout.commits(project, tag) == commits  # from the repository copy
+    assert checkout.ensure(project, tag) == a
+    (repo / "README").write_text("changed\n")
+    d = checkout.checkout(project, dirty_dir=repo)
+    assert d.source.startswith(f"{tag}-dirty-") and d.nested == commits == checkout.commits(project, d.source)
+
+
+def test_a_moved_submodule_is_a_change_and_each_tag_checks_out_its_commits(project, tmp_path):
+    repo = project.source.repo
+    add_submodule(repo, tmp_path)
+    nested = project.source.nested = ["sub", "pdk"]
+    head, pinned = short(repo), short(repo / "pdk")
+    a = checkout.checkout(project, "HEAD")
+    git("checkout", "-q", "main", cwd=repo / "pdk")
+    moved = checkout.checkout(project, dirty_dir=repo)
+    assert moved.source.startswith(f"{head}-n{short(repo / 'sub')}-dirty-") and "Subproject commit" in (
+        moved.path / "source.diff").read_text()
+    assert moved.nested == {"sub": a.nested["sub"], "pdk": short(repo / "pdk")} != a.nested
+    assert (moved.path / "pdk" / "cells.txt").read_text() == "v2\n"
+    git("checkout", "-q", pinned, cwd=repo / "pdk")
+    assert runid.source_tag(repo, nested) == a.source
+    # A commit in the independent repository gives a new tag; the old tag checks out its own commits again.
+    (repo / "sub" / "secret.txt").write_text("43\n")
+    commit_all(repo / "sub", "sub 2")
+    b = checkout.checkout(project, "HEAD")
+    assert b.source == f"{head}-n{short(repo / 'sub')}" != a.source and b.nested["pdk"] == pinned
+    shutil.rmtree(a.path)
+    assert checkout.ensure(project, a.source) == a and (a.path / "sub" / "secret.txt").read_text() == "42\n"
+    assert short(a.path / "pdk") == pinned and checkout.find(project, head) == b.path
+    with pytest.raises(runid.GitError, match="names 2 nested commits, but \\[source\\] nested holds 1 that"):
+        checkout.checkout(project, f"{a.source}-n{pinned}")
 
 
 def test_a_nested_commit_gives_a_new_tag_and_a_fresh_clone(project):
@@ -159,7 +219,7 @@ def test_a_nested_commit_gives_a_new_tag_and_a_fresh_clone(project):
     assert (b.path / "sub" / "secret.txt").read_text() == "43\n" and (a.path / "sub" / "secret.txt").read_text() == "42\n"
     # The same diff over another nested commit is another snapshot.
     assert dirty.source.startswith(f"{head}-n{old}-dirty-") and again.source.startswith(f"{head}-n{new}-dirty-")
-    assert runid.parse_tag(dirty.source, ["sub"]).dirty == runid.parse_tag(again.source, ["sub"]).dirty
+    assert runid.parse_tag(dirty.source).dirty == runid.parse_tag(again.source).dirty
     assert again.path != dirty.path and (again.path / "sub" / "secret.txt").read_text() == "43\n"
     assert json.loads((again.path / "source.json").read_text())["nested"] == {"sub": new}
     # A ref follows the nested HEAD; a tag keeps its commits and checks them out again once its clone is gone.
@@ -194,7 +254,8 @@ def test_brief_counts_the_lag_from_the_commit_of_the_tree(project):
     repo = project.source.repo
     old, sub = git("rev-parse", "--short", "HEAD~1", cwd=repo), short(repo / "sub")
     assert brief._behind(project, f"{old}-n{sub}") == 1 == brief._behind(project, f"{old}-n{sub}-dirty-0badc0de")
-    assert brief._behind(project, f"{short(repo)}-n{sub}") == 0 and brief._behind(project, old) is None
+    assert brief._behind(project, f"{short(repo)}-n{sub}") == 0 == brief._behind(project, short(repo))
+    assert brief._behind(project, "origin/main") is None
 
 
 def test_the_spec_records_the_nested_commits_of_the_checkout(project, tmp_path):

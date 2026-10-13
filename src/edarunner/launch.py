@@ -43,7 +43,7 @@ class RunPlan:
     reuse: str = ""  # the run id whose tree this run continues, or whose archive it restores
     restore: str = ""  # the collect_on_request list copied back from data/results of `reuse`
     values: dict[str, object] = field(default_factory=dict)
-    nested: dict[str, str] = field(default_factory=dict)  # the commit of each nested repository that the source tag names
+    nested: dict[str, str] = field(default_factory=dict)  # the commit of each nested repository of the source
 
 
 # --- date pin and build tag
@@ -347,11 +347,10 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             spec = _spec(project, batch, job, names, tasks, v)
         except (ConfigError, Refuse, KeyError) as e:
             problems.append(str(e))
-    parsed = runid.parse_tag(source, project.source.nested)
     return RunPlan(run_id=run_id, label=job.label, host=host, root=root, spec=spec,
                    queued=not spec and not problems, problems=problems, source=source, build_tag=tag,
                    tree_host="local" if sched and _fresh(job) else host or "", reuse=reused, restore=restore, values=v,
-                   nested=parsed.nested if parsed else {})
+                   nested=checkout.commits(project, source))
 
 
 def plan(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, date: str | None = None,
@@ -467,7 +466,7 @@ def _src_dir(project: Project, source: str, src_dir: Path | None, dry_run: bool 
         return Path(checkout.find(project, source))
     except checkout.CheckoutError:
         # A dry run checked nothing out; the tree would be at the path of the checkout.
-        if dry_run and runid.parse_tag(source, project.source.nested):
+        if dry_run and runid.parse_tag(source):
             return project.source.worktrees / source
         raise
 

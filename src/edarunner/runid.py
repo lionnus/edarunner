@@ -20,22 +20,22 @@ class GitError(Exception):
 
 @dataclass
 class Tag:
-    """The parts of a source tag: the short hash of the tree, the short hash of each nested repository by name, and
-    the 8 hex digits of the sha256 of the diff when the tree or a nested repository has changes, else ''."""
+    """The parts of a source tag: the short hash of the tree, the short hash of each nested repository that is no
+    submodule of the tree's commit, and the 8 hex digits of the sha256 of the diff when the tree or a nested repository
+    has changes, else ''."""
 
     base: str
-    nested: dict[str, str] = field(default_factory=dict)
+    nested: list[str] = field(default_factory=list)
     dirty: str = ""
 
     def __str__(self) -> str:
-        return self.base + "".join(f"-n{h}" for h in self.nested.values()) + (f"-dirty-{self.dirty}" if self.dirty else "")
+        return self.base + "".join(f"-n{h}" for h in self.nested) + (f"-dirty-{self.dirty}" if self.dirty else "")
 
 
-def parse_tag(text: str, nested: Sequence[str]) -> Tag | None:
-    """The parts of a tag that `source_tag` makes with the nested repositories `nested`; None for any other text."""
+def parse_tag(text: str) -> Tag | None:
+    """The parts of a tag of the form `<hex>(-n<hex>)*(-dirty-<8 hex>)?`; None for any other text."""
     m = TAG_RE.fullmatch(text)
-    heads = m[2].split("-n")[1:] if m else []
-    return Tag(m[1], dict(zip(nested, heads)), m[3] or "") if m and len(heads) == len(nested) else None
+    return Tag(m[1], m[2].split("-n")[1:], m[3] or "") if m else None
 
 
 def git(*args: str, cwd: Path | None = None, ok: tuple[int, ...] = (0,)) -> str:
@@ -53,6 +53,29 @@ def nested_repo(tree: Path, name: str) -> Path:
     if not (tree / name / ".git").exists():
         raise GitError(f"[source] nested names {name}, but {tree / name} is not a git repository")
     return tree / name
+
+
+def heads(tree: Path, nested: Sequence[str]) -> dict[str, str]:
+    """The short hash of the HEAD of each nested repository of a tree."""
+    return {n: git("rev-parse", "--short", "HEAD", cwd=nested_repo(tree, n)) for n in nested}
+
+
+def independent(repo: Path, commit: str, nested: Sequence[str]) -> list[str]:
+    """The repositories of `nested` that are no submodule of `commit`, in order. The source tag names the commit of
+    each; `commit` pins the commit of a submodule already."""
+    out = git("ls-tree", "-z", commit, "--", *nested, cwd=repo) if nested else ""
+    subs = {e.split("\t", 1)[1] for e in out.split("\0") if e.startswith("160000 ")}
+    return [n for n in nested if n not in subs]
+
+
+def named(repo: Path, tag: Tag, nested: Sequence[str]) -> dict[str, str]:
+    """The `-n` parts of a tag by the name of their repository, the `independent` repositories of the tag's commit;
+    GitError when their number differs from the parts."""
+    own = independent(repo, tag.base, nested)
+    if len(own) != len(tag.nested):
+        raise GitError(f"{tag} names {len(tag.nested)} nested commits, but [source] nested holds {len(own)} that "
+                       f"{tag.base} does not pin as submodules")
+    return dict(zip(own, tag.nested))
 
 
 def diff(tree: Path, nested: Sequence[str]) -> str:
@@ -89,14 +112,16 @@ def _untracked(repo: Path, prefix: str, nested: Sequence[str]) -> list[str]:
 
 def _changes(repo: Path, prefix: str, nested: Sequence[str]) -> str:
     opts = ["--no-optional-locks", "diff", f"--src-prefix=a/{prefix}", f"--dst-prefix=b/{prefix}"]
-    parts = [git(*opts, "HEAD", cwd=repo)]
+    # A submodule at another commit than HEAD pins is a change, whatever the ignore and format settings say.
+    parts = [git(*opts, "--ignore-submodules=untracked", "--submodule=short", "HEAD", cwd=repo)]
     parts += [git(*opts, "--no-index", "--", "/dev/null", rel, cwd=repo, ok=(0, 1)) for rel in _untracked(repo, prefix, nested)]
     return "\n".join(p for p in parts if p)
 
 
 def source_tag(tree: Path, nested: Sequence[str]) -> str:
-    """The short hash of the tree, then `-n<short hash>` for each nested repository in the order of `nested`, then
-    `-dirty-<8 hex>` of the sha256 of `diff` when the tree or a nested repository has changes."""
+    """The short hash of the tree, then `-n<short hash>` for each nested repository that is no submodule of its HEAD, in
+    the order of `nested`, then `-dirty-<8 hex>` of the sha256 of `diff` when the tree or a nested repository has
+    changes."""
     tree = Path(tree)
     meta = tree / "source.json"
     if meta.exists():
@@ -104,7 +129,7 @@ def source_tag(tree: Path, nested: Sequence[str]) -> str:
         data = json.loads(meta.read_text())
         if not (tree / ".git").exists() or data.get("dirty"):
             return str(data["source"])
-    head = git("rev-parse", "--short", "HEAD", cwd=tree)
-    heads = {n: git("rev-parse", "--short", "HEAD", cwd=nested_repo(tree, n)) for n in nested}
+    head, commits = git("rev-parse", "--short", "HEAD", cwd=tree), heads(tree, nested)
     text = diff(tree, nested)
-    return str(Tag(head, heads, hashlib.sha256(text.encode()).hexdigest()[:8] if text else ""))
+    return str(Tag(head, [commits[n] for n in independent(tree, "HEAD", nested)],
+                   hashlib.sha256(text.encode()).hexdigest()[:8] if text else ""))

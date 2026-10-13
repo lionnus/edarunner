@@ -261,14 +261,14 @@ def test_parameters_run_columns_commands_and_the_diff_of_a_dirty_source(world, t
     assert [(p["run_id"], p["label"], p["source"], p["key"], p["value"], p["origin"]) for p in params] == [
         (run, "x", tag, "config", "demo", "spec"), (run, "x", tag, "nested.sub", "fed4321", "checkout"),
         (run, "x", tag, "source", tag, "checkout"), (run, "x", tag, "vars.netlist_stage", "15", "spec")]
-    # A dirty source whose diff was never kept is listed with the commits of its tag and without a sha256; a tag that
-    # edr checkout does not make names no commit.
+    # A dirty source whose diff was never kept is listed with its base and without a sha256; the nested commits come
+    # from the repository copy, which does not know this base. A tag that edr checkout does not make names no commit.
     lost = ["ddd444-nfed4321-dirty-0ddba11c", "ddd444-dirty"]
     for label, source in zip("yz", lost):
         db.upsert_run({"run_id": f"20261005_0800_{label}_demo_g{source}", "batch": "old", "label": label, "source": source,
                        "phase": "done"})
     assert export.export(project, db, lost, tmp_path / "lost")["dirty_sources"] == [
-        {"source": lost[0], "base": "ddd444", "nested": {"sub": "fed4321"}, "diff_sha256": None},
+        {"source": lost[0], "base": "ddd444", "nested": {}, "diff_sha256": None},
         {"source": lost[1], "base": None, "nested": {}, "diff_sha256": None}]
 
 
