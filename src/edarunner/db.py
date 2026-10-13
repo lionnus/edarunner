@@ -384,13 +384,16 @@ class Database:
             row["counts"] = json.loads(row["counts"])
         return row
 
-    def runs(self, batch: str | None = None, state: str | None = None) -> list[Row]:
-        """Runs in run id order. `counts` comes back as a dict."""
+    def runs(self, batch: str | None = None, state: str | None = None, live_batches: bool = False) -> list[Row]:
+        """Runs in run id order, with `live_batches` only those of batches that are not retired. `counts` comes back
+        as a dict."""
         where, args = ["1"], []
         for col, val in (("batch", batch), ("state", state)):
             if val is not None:
                 where.append(f"{col}=?")
                 args.append(val)
+        if live_batches:
+            where.append("NOT EXISTS (SELECT 1 FROM batches b WHERE b.batch=runs.batch AND b.retired IS NOT NULL)")
         return [self._run_row(r) for r in self._rows(f"SELECT * FROM runs WHERE {' AND '.join(where)} ORDER BY run_id", args)]
 
     def run(self, run_id: str) -> Row | None:
@@ -501,10 +504,8 @@ class Database:
 
     def write_board_json(self, path: str | os.PathLike, hosts: dict[str, Any]) -> None:
         """Write runs of live batches, the last 50 events and `hosts` to `path` by a temporary file and rename."""
-        runs = self._rows(
-            "SELECT r.* FROM runs r LEFT JOIN batches b ON b.batch=r.batch WHERE b.retired IS NULL ORDER BY r.run_id"
-        )
-        board = {"schema": 1, "written": _now(), "runs": [self._run_row(r) for r in runs], "events": self.events(n=50), "hosts": hosts}
+        board = {"schema": 1, "written": _now(), "runs": self.runs(live_batches=True), "events": self.events(n=50),
+                 "hosts": hosts}
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(out.name + ".tmp")

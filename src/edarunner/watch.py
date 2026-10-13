@@ -531,8 +531,7 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     bdir = project.data / "board"
     db.add_host_samples(int(now), probes)
     db.write_board_json(bdir / "board.json", probes)
-    retired = {b["batch"] for b in db.batches() if b.get("retired")}
-    rows = [r for r in db.runs() if r["batch"] not in retired]
+    rows = db.runs(live_batches=True)
     config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
                                                            db.host_samples(int(now) - 86400)))
     config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))

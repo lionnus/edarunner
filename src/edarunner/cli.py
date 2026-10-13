@@ -227,8 +227,7 @@ class Ctx:
         """The runs of the batches that are not retired, with the state a heartbeat age gives; a run whose heartbeat
         the refresh could not use is `unreadable` and carries the error."""
         self.refresh(batch)
-        retired = {b["batch"] for b in self.db.batches() if b.get("retired")}
-        rows = [r for r in self.db.runs(batch=batch) if r["batch"] not in retired]
+        rows = self.db.runs(batch=batch, live_batches=True)
         now, lim = time.time(), self.project.limits
         for r in rows:
             if r["run_id"] in self.unreadable:

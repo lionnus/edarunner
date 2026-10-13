@@ -46,8 +46,7 @@ def text(projects: dict[str, Project], start: float, now: float) -> str:
 
 
 def _block(name: str, project: Project, db: Database, start: float, now: float) -> str:
-    retired = {b["batch"] for b in db.batches() if b.get("retired")}
-    rows = board.order([r for r in db.runs() if r["batch"] not in retired])
+    rows = board.order(db.runs(live_batches=True))
     live = [r for r in rows if board.is_live(r)]
     ended = [r for r in rows if not board.is_live(r) and (r.get("updated") or 0) >= start]
     notes = db.get_store("notified", {})
