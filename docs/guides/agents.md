@@ -65,6 +65,23 @@ with one proposed command, and
 [reference/states.md](../reference/states.md) says what each state
 means before the agent runs that command.
 
+## Wait for a batch
+
+After `edr launch <batch>`, the agent runs `edr wait --batch <batch>` in
+a background shell. The call returns when every run of the batch has
+ended and the watcher has collected its results, and then the agent
+reads `edr metrics --batch <batch>`. It exits 0 when every run is done
+and 1 when a run ended another way, when a run needs a decision, or
+when no watcher runs. `--timeout HOURS` ends the wait with exit 4. The
+output gives the proposed command for each run that is not done.
+
+An agent on another host calls it through ssh and starts it again when
+ssh drops, which exits 255:
+
+```sh
+until ssh head ~/.local/bin/edr -P myflow wait --batch b1; [ $? -ne 255 ]; do sleep 60; done
+```
+
 ## Report to the phone
 
 `edr notify` sends a message through every alert channel of the project,

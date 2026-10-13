@@ -33,9 +33,13 @@ Pass `--json` on every call. The result is one object:
 Read `code` first: 0 means done, 1 means a guard refused or the input was
 bad, 2 means there was nothing to do, and 3 means some hosts failed. On
 `launch`, 2 means every job was already launched; on `stop`, 3 means the
-driver is still alive and `--now` is the next step. Act on `data`, and
-quote `output` when you report. `docs/reference/cli.md` lists every
-command.
+driver is still alive and `--now` is the next step; on `wait`, 4 means
+the timeout ran out. Act on `data`, and quote `output` when you report.
+`docs/reference/cli.md` lists every command.
+
+To wait for a batch, launch it, run `edr wait --batch <batch>` from a
+background shell, then read `edr metrics --batch <batch>`. Over ssh, retry
+when ssh drops: `until ssh <head> ~/.local/bin/edr -P <name> wait --batch <batch>; [ $? -ne 255 ]; do sleep 60; done`.
 
 ## Triage
 

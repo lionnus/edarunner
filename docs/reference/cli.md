@@ -38,8 +38,8 @@ event, not even an empty database.
 text goes into the events table together with the actor.
 
 These commands never create data/edr.db: brief, check, compare, coverage,
-events, hosts, metrics, notify, plan, projects, runtime, status, tools.
-Without the file they read an empty database in memory.
+events, hosts, metrics, notify, plan, projects, runtime, status, tools,
+wait. Without the file they read an empty database in memory.
 
 A table on a terminal has colour: a run is green while it runs, cyan when
 queued, yellow when stale, red when dead, hung, over budget, an orphan or
@@ -80,6 +80,7 @@ A command below says where it refines a code.
 |---|---|
 | [brief](#brief) | what a session reads first: the project, its flow, site and state |
 | [status](#status) | the board, or one run |
+| [wait](#wait) | block until the runs end and are collected |
 | [events](#events) | the last events |
 | [hosts](#hosts) | probe every host: its free room, and your runs on it |
 | [projects](#projects) | every registered project, its watcher and its live runs |
@@ -205,6 +206,43 @@ runs.
 | Exit | Meaning |
 |---|---|
 | 3 | with --live, a host did not answer |
+
+## wait
+
+```
+edr wait [--json] [--batch B] [--source SOURCE] [--timeout HOURS] [handle ...]
+```
+
+Waits for the runs that a handle, --batch or EDR_BATCH names, and
+--source narrows. Every heartbeat_s seconds it reads the board as
+the watcher left it. It returns when every run has ended and the
+watcher has collected its results. It returns early when a run is
+dead, hung, looping, held or unreadable for longer than grace_s plus
+one cycle, since the watcher acts first, or when no watcher holds
+&lt;state_dir&gt;/watch.lock any more. Without a watcher at the start it
+refuses, since nothing would collect.
+
+It prints the board of the runs and, for each run that is not done,
+the command the triage proposes. --json gives {"runs": [...],
+"collected": {run_id: bool}, "reason": ...}, where reason is ended,
+needs_decision, no_watcher or timeout. It opens the database
+read-only and writes nothing.
+
+docs/guides/agents.md shows how an agent on another host calls it
+through ssh.
+
+| Flag | Meaning |
+|---|---|
+| `handle ...` | label@batch, label@source, a run id prefix, or #n from the last board |
+| `--json` | the same as edr --json wait |
+| `--batch B` | one batch; default EDR_BATCH |
+| `--source SOURCE` | the runs of the exact source tag; repeatable |
+| `--timeout HOURS` | give up after this many hours |
+
+| Exit | Meaning |
+|---|---|
+| 1 | a run ended other than done, a run needs a decision, no watcher runs, or the input is bad |
+| 4 | --timeout ran out |
 
 ## events
 
