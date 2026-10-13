@@ -12,7 +12,9 @@ to read the code.
 
 The **head node** is the machine you work on. It runs `edr`, the command
 you type, and `edr serve`, the one long-running process per user, which
-keeps one watcher process, `edr watch --served`, per project. The
+keeps one watcher process, `edr watch --served`, per project. With
+`head` in the site file, `edr` on another host runs each command on the
+head node over ssh ([site.md](guides/site.md#call-edr-from-another-host)). The
 project directory is where you run `edr`. It holds the project database,
 a single SQLite file `data/edr.db` that records every run, as well as the
 checked-out copies of your source and the results collected from the

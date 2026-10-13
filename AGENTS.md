@@ -40,8 +40,9 @@ the timeout ran out. Act on `data`, and quote `output` when you report.
 To wait for a batch, launch it, run `edr wait --batch <batch>` from a
 background shell, then read `edr status --batch <batch> --metric <name>`.
 It gives each value at its step of record with its verdict;
-`edr metrics --source <source>` gives every row. Over ssh, retry
-when ssh drops: `until ssh <head> ~/.local/bin/edr -P <name> wait --batch <batch>; [ $? -ne 255 ]; do sleep 60; done`.
+`edr metrics --source <source>` gives every row. On a host other than
+the head node, edr runs each command there over ssh when the site sets
+`head`. Retry when ssh drops: `until edr -P <name> wait --batch <batch>; [ $? -ne 255 ]; do sleep 60; done`.
 
 ## Triage
 

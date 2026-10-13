@@ -102,6 +102,8 @@ _REGISTERS = frozenset({"launch", "continue", "track", "import", "watch"})
 # These commands never create data/edr.db; `notify` reads the bot's message ids only.
 _READ_COMMANDS = frozenset({"brief", "status", "events", "hosts", "projects", "tools", "metrics", "compare", "runtime", "check",
                             "notify", "plan", "coverage", "wait"})
+# These commands run on the host that calls them, also when the site names another head node.
+_HERE = frozenset({"init", "track"})
 # These commands open the database read-only and never write to it.
 _READ_ONLY = frozenset({"events", "metrics", "compare", "runtime", "coverage", "wait"})
 
@@ -2746,15 +2748,43 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+def _forward(c: Ctx, argv: list[str]) -> int | None:
+    """Run the command on the head node that the site names, over ssh in the same directory, and return its exit code;
+    None when it runs here. Only the head node opens the database."""
+    if c.a.command in _HERE or os.environ.get("EDR_FORWARDED"):
+        return None
+    try:
+        root = c.project_dir()
+    except Refuse:
+        root = None  # -P may name a project that only the head node has registered
+    default = Path(config.DEFAULT_SITE).expanduser()
+    site = c.project.site if root else config.load_site(default) if default.is_file() else None
+    if site is None or not site.head or site.head.split(".")[0] == socket.gethostname().split(".")[0]:
+        return None
+    cwd = Path(os.getcwd())
+    wd = cwd if root is None or root in (cwd, *cwd.parents) else root
+    env = [f"{k}={shlex.quote(os.environ[k])}" for k in ("EDR_PROJECT", "EDR_BATCH") if os.environ.get(k)]
+    text = f"cd {shlex.quote(str(wd))} && EDR_FORWARDED=1 {' '.join(env)} exec {shlex.join([os.path.abspath(sys.argv[0]), *argv])}"
+    code = subprocess.run(["ssh", *site.ssh_options, site.head, "sh -c " + shlex.quote(text)]).returncode
+    if code == 255:
+        print(f"edr: ssh {site.head} failed; edr runs this command on the head node {site.head}, which opens the "
+              "database", file=sys.stderr)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return its exit code."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+    argv = sys.argv[1:] if argv is None else argv
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else Exit.REFUSED
     c, buf = Ctx(a), io.StringIO()
     try:
+        forwarded = _forward(c, argv)
+        if forwarded is not None:
+            return forwarded
         with contextlib.redirect_stdout(buf) if a.json else contextlib.nullcontext():
             if a.command in _REGISTERS and not a.dry_run:
                 home.register(c.project.project, c.project.root)
