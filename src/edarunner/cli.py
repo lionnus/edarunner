@@ -1246,7 +1246,7 @@ def cmd_import(c: Ctx, a: argparse.Namespace) -> int:
     params = dict(a.param or [])
     row = dict(run_id=a.run_id, batch=a.batch, label=a.label, config=a.config, build_tag=a.build_tag or "",
                source=a.source, dirty=int("-dirty" in a.source), host=a.host or "", root=root or None,
-               created=int(time.time()), phase=a.phase, state="imported", stage="", step=-1,
+               created=int(time.time()), phase=a.phase, state="imported", stage="", step=None,
                exit=0 if a.phase == "done" else None, started=a.started, updated=a.ended, counts={}, tree_id=a.run_id)
     spec = _import_spec(c.project, row, tasks, params)
     if (old := c.db.run(a.run_id)) and old.get("state") != "imported":
