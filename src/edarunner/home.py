@@ -2,7 +2,7 @@
 
 `projects/<name>` is a link to the directory of each project, so the commands that span
 projects find them. A lock is an `flock` that a process holds until it exits; the lock file
-holds its pid. `store.json` is the memory of the work of the user and of the bot that polls.
+holds its pid. `store.json` is the memory of the checks across all projects and of the bot that polls.
 """
 
 from __future__ import annotations

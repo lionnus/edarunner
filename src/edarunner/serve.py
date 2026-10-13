@@ -5,7 +5,7 @@ project whose files do not load and that has no watcher of its own gets one aler
 It keeps one `edr watch --served` per project in the project directory. A watcher that exits
 starts again after 1, 2, 4, 8, 16 and at most 30 minutes, and the first exit of a series alerts.
 A watcher whose `watch.json` stood still for max(3 heartbeat_s, 900 s) while its config loads is
-killed and started again, with an alert. Then the supervisor does the work of the user
+killed and started again, with an alert. Then the supervisor runs the checks across all projects
 (`census.work`), edits the pinned global board, writes `serve.json` and tells systemd that it
 lives. Every cycle starts from the files, so a restart of the supervisor loses nothing.
 """

@@ -327,14 +327,14 @@ an older driver wrote, stops only its own run. The watcher marks that run
 other run goes through the cycle as usual. `edr status`, `edr brief` and
 the bot show the run as `unreadable` with the error.
 
-### The work of the user
+### Checks across all projects
 
-Some work belongs to the user and not to one project: a host, a tool
+Some checks cover all your projects at once, since a host, a tool
 process and a seat lease are one each, whatever project they serve. The
-supervisor `edr serve` holds `~/.edr/serve.lock` and does this work once
-a minute for every registered project (`census.work`). Without a
+supervisor `edr serve` holds `~/.edr/serve.lock` and runs these checks
+once a minute for every registered project (`census.work`). Without a
 supervisor, the first watcher that takes the lock keeps it for its life
-and does the work after each of its cycles:
+and runs them after each of its cycles:
 
 1. It takes the census: one ssh call per host of the site of every
    registered project, all at once, for the probe, the clock of the host
@@ -381,7 +381,7 @@ watcher that the supervisor started never tries.
 `edr serve` runs a cycle every minute (`serve.Supervisor`). It loads
 every registered project, and keeps one `edr watch --served` per project
 in the project directory. A served watcher takes its host probes from
-the census, leaves the work of the user and the pinned board to the
+the census, leaves the checks across all projects and the pinned board to the
 supervisor, and writes `watch.json` also before each collect and each
 launch, so a long copy counts as progress.
 
@@ -394,7 +394,7 @@ launch, so a long copy counts as progress.
   alert per error text and no watcher until the files load. A watcher
   that runs goes on with its last good config, as above.
 
-After the watchers it does the work of the user, edits one pinned board
+After the watchers it runs the checks across all projects, edits one pinned board
 with the live runs of every project and the hosts that hold them, and
 writes `~/.edr/serve.json`, its own heartbeat that `edr serve --check`
 reads. Under systemd it sends `READY=1` once it holds the lock and

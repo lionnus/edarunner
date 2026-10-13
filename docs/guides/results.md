@@ -1224,40 +1224,13 @@ hold each run; [Where a number comes from](#where-a-number-comes-from)
 shows the column. [reference/cli.md](../reference/cli.md) lists every
 flag of `metrics` and `export`.
 
-### A paper composes its result set
+### An analysis reads snapshots
 
-An analysis should never read the live database, because the database
-changes with every watcher cycle and a number you quote must stay the
-number you read. Instead, the analysis keeps its snapshots under its own
-`data/`, one directory per export. Every table and figure comes from the
-tables of those snapshots:
-
-```
-report/
-  data/3f9a2c1/           an export, copied as is
-  data/7c0d9e2/
-  pins.json               which run feeds which number, and why
-  Makefile                reads data/<pin>/metrics.csv
-```
-
-A paper seldom takes every number from one source. The small builds may
-come from one commit and the wide ones from a later commit, or one test
-may run again after a fix. edarunner does not choose among them. The
-paper keeps its choice in a pin table of its own, under version control:
-a base export, and the labels or tasks it takes from another export,
-each with the reason. The script that composes the result set then does
-three things:
-
-- It moves the rows and the files of a pinned run together, by run and
-  task: the rows of `metrics.csv` and `instances.csv` with that run id and
-  task, and the entries of `files` that name them.
-- It stops when a pinned label, task or file is missing, or when a
-  whole-run pin did not end done.
-- It takes a dirty source only when the snapshot carries its diff.
-
-The analysis records its own commit, the diff of its scripts and the
-sha256 of each output next to the pin table, so a figure can be traced
-to the snapshot and to the script that made it.
+An analysis reads its numbers from the exports it keeps under its own
+`data/`, never from the live database, which changes with every watcher
+cycle. A paper that takes numbers from several exports records which run
+feeds which number, and why, in a pin table of its own under version
+control.
 
 The source tag in the manifest is the commit the numbers came from, and
 the manifest's sha256 per file lets a `make check` prove that the copy is

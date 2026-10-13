@@ -1583,7 +1583,7 @@ def cmd_watch(c: Ctx, a: argparse.Namespace) -> int:
 
 
 def cmd_serve(c: Ctx, a: argparse.Namespace) -> int:
-    """The supervisor: one watcher per registered project, and the work of the user."""
+    """The supervisor: one watcher per registered project, and the checks across all projects."""
     if a.unit:
         cmd, exe, what = serve.pinned()
         if cmd:
@@ -2609,7 +2609,7 @@ def _parser() -> argparse.ArgumentParser:
         until the file loads again.
 
         Every watcher sends its alerts. When no supervisor runs, the first
-        watcher that takes ~/.edr/serve.lock also does the work of the user
+        watcher that takes ~/.edr/serve.lock also runs the checks across all projects
         and runs the Telegram bot for the commands and button presses of every
         project.
         """, write=True, exits={Exit.REFUSED: "with --once, the cycle failed or the config did not load; "
@@ -2621,7 +2621,7 @@ def _parser() -> argparse.ArgumentParser:
     s = command("serve", "the supervisor: one watcher per registered project", """
         Runs the supervisor of the user: a cycle every minute that keeps one
         edr watch --served per registered project in the project directory,
-        does the work that belongs to the user once for every project, edits
+        runs the checks across all projects, edits
         one pinned global board, and runs the Telegram bot for the commands and
         button presses of every project. A watcher that exits starts again after
         1, 2, 4, 8, 16 and at most 30 minutes, with one alert. A watcher whose
@@ -2634,7 +2634,7 @@ def _parser() -> argparse.ArgumentParser:
         READY=1 and, every cycle, WATCHDOG=1.
 
         --once runs one cycle: one edr watch --once --served per project, then
-        the work of the user, and exits. --dry-run lists the registered
+        the checks across all projects, and exits. --dry-run lists the registered
         projects and what the supervisor would do for each, and writes
         nothing. --check reads serve.json and nothing of any project; when
         the file is missing or older than three cycles, it alerts and exits

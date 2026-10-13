@@ -4,21 +4,15 @@
 
 Each run has one of the states below. The table shows how the watcher finds the state, whether it sends an alert, what it does after `grace_s` and the command the triage proposes.
 
-The state is the watcher's verdict on a run; the phase is the driver's word in the heartbeat for
-where the run is or how it ended. A live run gets its state from the heartbeat and the database;
-a finished run from its phase.
-Every change of state writes an event. A state that alerts sends one alert per run and reason,
-and a new reason edits that alert in place. A run that ends `done` alerts only a user who asks
-for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
-the stop of `superseded` for N hours; the full-host stop never waits for a keep.
-The triage proposes no retire for a run without a tree, such as one imported with `--results`,
-since a retire would only mark its row. For a run that ended `OVER_BUDGET` or `STOPPED` it
-proposes `edr continue` while the tree has stages or held tasks that `edr continue` runs without
-`--stage`. When the tree has none, it proposes nothing for `OVER_BUDGET` and a retire for
-`STOPPED`. While `edr continue` refuses, such as for a stage that did not end with exit 0, it
-proposes neither, since a retire would take the tree that such a stage needs. When another run
-has the same label and batch, the command names the run by the shortest unique prefix of its run
-id instead of `<label>@<batch>`.
+The state is the watcher's verdict on a run, and the phase is the driver's word for where the run is or how
+it ended. A live run gets its state from the heartbeat and the database, a finished run from its phase. Each
+change of state writes an event. A state that alerts sends one alert per run and reason, and a new reason
+edits that alert; `done` alerts only a user who lists it in `alerts` of user.toml.
+
+The triage proposes no retire for a run without a tree, since a retire would only mark its row. For a run
+that ended `OVER_BUDGET` or `STOPPED` while `edr continue` refuses it, it proposes nothing, since a retire
+would take the tree that its stages need. When two runs share a label and batch, the command names the run
+by the shortest unique prefix of its run id.
 
 | State | Mark | Test | Alert | Action | Proposed command |
 |---|---|---|---|---|---|

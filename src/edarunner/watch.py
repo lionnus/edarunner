@@ -4,8 +4,8 @@ The cycle reads, classifies, acts, collects, resumes, launches and writes
 the boards. It never deletes a tree. Its memory between cycles is two rows
 of the database's store table: progress (what each run looked like last
 time) and notified (states, alerts, grace clocks). The watcher that holds
-`serve.lock` also does the work of the user after its cycle; `census.py`
-has it.
+`serve.lock` also runs the checks across all projects after its cycle;
+`census.py` has them.
 """
 
 from __future__ import annotations
@@ -42,21 +42,15 @@ _UNREADABLE = (ArithmeticError, AttributeError, LookupError, TypeError, ValueErr
 class State:
     """One run state: the test that finds it, whether it alerts, and what the watcher does after `grace_s`.
 
-    The state is the watcher's verdict on a run; the phase is the driver's word in the heartbeat for
-    where the run is or how it ended. A live run gets its state from the heartbeat and the database;
-    a finished run from its phase.
-    Every change of state writes an event. A state that alerts sends one alert per run and reason,
-    and a new reason edits that alert in place. A run that ends `done` alerts only a user who asks
-    for `done` in `alerts` of user.toml. A keep of N hours holds off the kill of `hung` and
-    the stop of `superseded` for N hours; the full-host stop never waits for a keep.
-    The triage proposes no retire for a run without a tree, such as one imported with `--results`,
-    since a retire would only mark its row. For a run that ended `OVER_BUDGET` or `STOPPED` it
-    proposes `edr continue` while the tree has stages or held tasks that `edr continue` runs without
-    `--stage`. When the tree has none, it proposes nothing for `OVER_BUDGET` and a retire for
-    `STOPPED`. While `edr continue` refuses, such as for a stage that did not end with exit 0, it
-    proposes neither, since a retire would take the tree that such a stage needs. When another run
-    has the same label and batch, the command names the run by the shortest unique prefix of its run
-    id instead of `<label>@<batch>`.
+    The state is the watcher's verdict on a run, and the phase is the driver's word for where the run is or how
+    it ended. A live run gets its state from the heartbeat and the database, a finished run from its phase. Each
+    change of state writes an event. A state that alerts sends one alert per run and reason, and a new reason
+    edits that alert; `done` alerts only a user who lists it in `alerts` of user.toml.
+
+    The triage proposes no retire for a run without a tree, since a retire would only mark its row. For a run
+    that ended `OVER_BUDGET` or `STOPPED` while `edr continue` refuses it, it proposes nothing, since a retire
+    would take the tree that its stages need. When two runs share a label and batch, the command names the run
+    by the shortest unique prefix of its run id.
     """
 
     test: str
@@ -619,7 +613,7 @@ def run_forever(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifi
     A config that stops loading gets one alert per error text, and the cycles go on with the last one
     that loaded and start nothing until the file loads again. Unless the supervisor started it
     (`served`), the first watcher that takes `serve.lock` keeps it, starts to take the commands of
-    the bot, and does the work of the user after each cycle."""
+    the bot, and runs the checks across all projects after each cycle."""
     failed, broken, serve = False, "", None
     try:
         while True:
