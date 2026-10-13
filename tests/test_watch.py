@@ -34,6 +34,17 @@ def test_read_heartbeats_skips_retired_spec_keep_and_torn(env: Env) -> None:
     assert watch.read_heartbeats(env.project) == [("demo", a)]
 
 
+def test_a_cycle_drops_the_notes_of_the_runs_of_a_retired_batch(env: Env) -> None:
+    a, b = env.heartbeat("a"), env.heartbeat("b", batch="old", age=200)
+    env.cycle()
+    ids = {a["run_id"], b["run_id"]}
+    assert set(env.db.get_store("progress")) == ids == set(env.db.get_store("notified"))
+    (env.project.state_dir / "old" / "RETIRED").touch()
+    env.db.mark_batch_retired("old")
+    env.cycle(NOW + 1)
+    assert set(env.db.get_store("progress")) == {a["run_id"]} == set(env.db.get_store("notified"))
+
+
 def test_cycle_classifies_events_and_alerts(env: Env) -> None:
     a = env.heartbeat("a")
     env.heartbeat("a", batch="demo2", date=NEW, source="gdef5678")

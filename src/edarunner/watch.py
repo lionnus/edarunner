@@ -638,8 +638,10 @@ def cycle(project: Project, ssh: Ssh, db: Database, notifiers: list[Notifier], n
     if start:
         _launch_queued(project, ssh, db)
     _boards(project, backend, db, notifiers, now, pin=not served, compare=compare)
-    db.set_store("progress", progress)
-    db.set_store("notified", notes)
+    # The runs of a retired batch leave the watcher for good, and so their notes.
+    keep = {r["run_id"] for r in db.runs(live_batches=True)}
+    db.set_store("progress", {k: v for k, v in progress.items() if k in keep})
+    db.set_store("notified", {k: v for k, v in notes.items() if k in keep})
     n = int(config.load_json(project.state_dir / "watch.json").get("cycle") or 0) + 1
     config.save_json(project.state_dir / "watch.json", {"ts": now, "cycle": n, "pid": os.getpid()})
     return states
