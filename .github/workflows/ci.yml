@@ -48,7 +48,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: pytest
-        run: uv run --no-project --with pytest pytest tests/test_driver.py -q
+        run: uv run --with pytest pytest tests/test_driver.py -q
 
   openroad:
     # The GCD design of ORFS on nangate45 through synth, floorplan and place, under edr.

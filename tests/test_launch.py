@@ -81,7 +81,7 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     plans = launch.plan(project, batch, ssh, db, date=DATE)
     a, b = plans
     assert [p.problems for p in plans] == [[], []] and not a.queued
-    assert a.run_id == f"{DATE}_a_demo_gHEAD" and b.run_id == f"{DATE}_b_nodw_demo_DW0_gHEAD"
+    assert a.run_id == f"{DATE}_demo_a_demo_gHEAD" and b.run_id == f"{DATE}_demo_b_nodw_demo_DW0_gHEAD"
     root = f"{tmp_path}/scratch/{getpass.getuser()}/edr/demo/{a.run_id}"
     assert a.host == "local" and a.root == root
     spec = a.spec
@@ -105,7 +105,7 @@ def test_plan_renders_the_demo_spec(env, tmp_path: Path) -> None:
     assert small["dir"] == f"{root}/simulation/tests/demo/GEMM_M64_N64"
     assert small["cmd"] == f"DEMO_CONFIG=demo bash {root}/flow/kernel.sh gemm GEMM_M64_N64 M=64 N=64"
     assert small["fields"] == {"kernel": "gemm", "test": "GEMM_M64_N64", "args": "M=64 N=64"}
-    assert small["needs"] == {"cores": 1, "disk_gb": 0.05} and small["budget"] == {"hours": 1, "per": "task"}
+    assert small["needs"] == {"cores": 1, "disk_gb": 0.05} and small["budget"] == {}
     assert big["budget"] == {"hours": 2, "per": "task"} and "tools" not in small and "tools" not in big
     left = [s for s in strings(spec) if "{" in s.replace("{checkpoint}", "").replace("{task_dir}", "")]
     assert left == []
@@ -199,7 +199,7 @@ def test_a_job_without_config(env, tmp_path: Path) -> None:
     job.config = ""
     assert launch.build_tag(project, job) == ""
     (p,) = launch.plan(project, batch, ssh, db, date=DATE)
-    assert p.problems == [] and p.run_id == f"{DATE}_a_gHEAD" and p.spec["config"] == ""
+    assert p.problems == [] and p.run_id == f"{DATE}_demo_a_gHEAD" and p.spec["config"] == ""
     job.overrides = {"DW": "0"}
     assert launch.build_tag(project, job) == "DW0"
     hook = tmp_path / "tag.py"
@@ -226,7 +226,7 @@ def test_plan_reuses_the_pick_of_the_label_at_the_batch_source(env) -> None:
     batch.jobs[0].stages = ["pnr"]
     a = launch.plan(project, batch, ssh, db, date=DATE)[0]
     assert a.problems == [] and a.reuse == f"{DATE}_a_demo_gOLD" and a.source == "OLD"
-    assert a.root == "/x/edr/old" and a.run_id == f"{DATE}_a_demo_gOLD"
+    assert a.root == "/x/edr/old" and a.run_id == f"{DATE}_demo_a_demo_gOLD"
     assert a.spec["start_at"]["stage"] == "pnr" and a.spec["stages"][0]["cwd"] == "/x/edr/old"
     batch.jobs[0].reuse = {"label": "nope", "latest": True}
     a = launch.plan(project, batch, ssh, db, date=DATE)[0]
@@ -328,10 +328,10 @@ def test_dry_run_writes_nothing(env, tmp_path: Path, capsys) -> None:
     out = launch.launch(project, batch, ssh, db, dry_run=True, src_dir=src_tree(tmp_path))
     assert listing(state) == before and not (tmp_path / "scratch").exists()
     assert db.runs() == [] and db.events() == [] and db.batches() == []
-    assert [r["run_id"] for r in out] == [f"{DATE}_a_demo_gHEAD", f"{DATE}_b_nodw_demo_DW0_gHEAD"]
+    assert [r["run_id"] for r in out] == [f"{DATE}_demo_a_demo_gHEAD", f"{DATE}_demo_b_nodw_demo_DW0_gHEAD"]
     assert all(not r["started"] and r["problems"] == [] for r in out)
     text = capsys.readouterr().out
-    assert "rsync -a --delete -e " not in text and "rsync -a --delete " in text and f"{DATE}_a_demo_gHEAD" in text
+    assert "rsync -a --delete -e " not in text and "rsync -a --delete " in text and f"{DATE}_demo_a_demo_gHEAD" in text
     assert launch.stop(ssh, db, {"run_id": "r", "host": "local", "batch": "demo"}, {"driver_pid": 1, "pgids": [2]},
                        dry_run=True) and db.events() == []
 
@@ -387,6 +387,45 @@ def test_launch_says_when_it_waits_for_the_stagger(env, tmp_path: Path, monkeypa
     rows = launch.launch(project, batch, ssh, db, stagger_s=7, src_dir=src_tree(tmp_path))
     assert [r["started"] for r in rows] == [True, True] and waits == [7]
     assert "waiting 7 s (stagger) before b_nodw\n" in capsys.readouterr().out
+
+
+def test_a_run_id_that_another_run_holds_is_a_plan_problem(env) -> None:
+    project, batch, ssh, db = env
+    project.source.run_id = "{date}_{label}_{build_tag}_g{source}"  # no {batch}: two batches can render one id
+    a, b = launch.plan(project, batch, ssh, db, date=DATE)
+    db.upsert_run({"run_id": a.run_id, "batch": "other", "label": "a"})
+    db.upsert_run({"run_id": b.run_id, "batch": "demo", "label": "b_nodw", "state": "queued"})  # this very job
+    a, b = launch.plan(project, batch, ssh, db, date=DATE)
+    assert a.problems == [f"run id {a.run_id} belongs to a@other; launch a minute later or rename the label"]
+    assert not a.spec and b.problems == [] and b.spec
+
+
+def test_launch_claims_the_run_id_before_the_sync_and_checks_it_after_the_stagger(env, tmp_path: Path, monkeypatch,
+                                                                                 capsys) -> None:
+    project, batch, ssh, db = env
+    project.source.run_id = "{date}_{label}_{build_tag}_g{source}"
+    (project.state_dir / "demo").mkdir(parents=True)
+    (project.state_dir / "demo" / "RUN_DATE").write_text(DATE + "\n")
+    a, b = launch.plan(project, batch, ssh, db, date=DATE)
+    synced = []
+    monkeypatch.setattr(launch.sync, "sync_tree", lambda ssh, host, src, root, *x: not synced.append(db.run(Path(root).name)))
+    # Another batch takes the id of b_nodw while this launch waits for its stagger.
+    monkeypatch.setattr(launch.time, "sleep", lambda s: db.upsert_run({"run_id": b.run_id, "batch": "other", "label": "b_nodw"}))
+    monkeypatch.setattr(launch, "submit", lambda *x, **k: Handle("local", "local:1", "local"))
+    rows = launch.launch(project, batch, ssh, db, stagger_s=1, src_dir=src_tree(tmp_path))
+    assert [r["started"] for r in rows] == [True, False] and [(r["batch"], r["phase"]) for r in synced] == [("demo", "setup")]
+    why = f"run id {b.run_id} belongs to b_nodw@other; launch a minute later or rename the label"
+    assert rows[1]["problems"] == [why] and f"{b.run_id}: {why}\n" in capsys.readouterr().out
+    assert db.run(b.run_id)["batch"] == "other" and not (project.state_dir / "demo" / f"{b.run_id}.spec.json").exists()
+
+
+def test_a_failed_sync_ends_the_run_it_claimed(env, tmp_path: Path, monkeypatch) -> None:
+    project, batch, ssh, db = env
+    synth_only(batch)
+    monkeypatch.setattr(launch.sync, "sync_tree", lambda *a, **k: False)
+    (row,) = launch.launch(project, batch, ssh, db, src_dir=src_tree(tmp_path))
+    run = db.run(row["run_id"])
+    assert row["problems"] == ["sync failed"] and (run["phase"], run["state"]) == ("FAILED:sync", "failed")
 
 
 def test_launch_refuses_a_dirty_source(env) -> None:

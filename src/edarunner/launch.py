@@ -63,6 +63,15 @@ def pin_date(state: Path, batch: str, dry_run: bool = False) -> str:
     return date
 
 
+def taken(db: Database, run_id: str, batch: str, label: str, hint: str = "launch a minute later or rename the label") -> str:
+    """Why a new run of `label` in `batch` cannot take `run_id`, or "": a run of another batch or label holds it, and
+    its tree and spec are that run's."""
+    old = db.run(run_id)
+    if old is None or (old.get("batch"), old.get("label")) == (batch, label):
+        return ""
+    return f"run id {run_id} belongs to {old.get('label')}@{old.get('batch')}; {hint}"
+
+
 def build_tag(project: Project, job: Job, source: str = "") -> str:
     """The build tag of a job: the source hook, else config plus one token per override.
 
@@ -119,13 +128,15 @@ def _tools(project: Project, needs: dict[str, int], values: dict[str, object]) -
 
 
 def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, object]) -> dict[str, Any]:
+    """The spec of one task; a budget only when the task has its own, since the driver reads a task budget as the
+    limit of that task and takes the stage budget per task only with `per = "task"`."""
     needs = _merge(stage.needs, task.needs)
     tools = needs.pop("tools")
     needs.pop("ram_gb")  # the scheduler's, not the driver's
     v = {**values, **{f"task.{k}": x for k, x in task.fields.items()}, "cores": needs["cores"]}
     v["task_dir"] = os.path.normpath(os.path.join(str(values["root"]), config.render(stage.task_dir, v)))
     out = {"id": task.id, "cmd": config.render(stage.cmd, v), "dir": v["task_dir"], "fields": task.fields,
-           "needs": needs, "budget": _budget(stage.budget, task.budget)}
+           "needs": needs, "budget": _budget(stage.budget, task.budget) if task.budget else {}}
     if task.needs and task.needs.tools:
         out["tools"] = _tools(project, tools, v)
     return out
@@ -240,6 +251,20 @@ def _fresh(job: Job) -> bool:
     return not job.reuse or bool(job.reuse.get("restore"))
 
 
+def _tree(runs: list[dict[str, Any]], run: dict[str, Any]) -> list[dict[str, Any]]:
+    """The runs of `runs` on the tree of `run`: `run` and every run with its root."""
+    return [r for r in runs if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
+
+
+def live_on_tree(db: Database, run: dict[str, Any]) -> str:
+    """Why no new run may start on the tree of `run`, or "": a run on it has not ended. `run` itself does not count
+    while the watcher has found it dead, since its triage proposes `edr continue --stage` for its own tree."""
+    everyone = db.runs()
+    live = [r for r in _tree(everyone, run) if board.is_live(r)
+            and not (r["run_id"] == run["run_id"] and r.get("state") == "dead")]
+    return f"{board.handle(live[0], everyone)} on the same tree has not ended" if live else ""
+
+
 def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[list[str], list[str], str]:
     """The stages the tree of `run` has left, the held tasks of the first of them, and why `edr continue` without
     `--stage` does not run them, or "".
@@ -249,8 +274,7 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
     run on the tree held it back or skipped it, and no run on the tree started it. The stages left follow the last
     stage that ended with exit 0 and holds no task. A run without a spec, such as an imported one, adds no stage.
     """
-    everyone = db.runs()
-    runs = [r for r in everyone if r["run_id"] == run["run_id"] or (run.get("root") and r.get("root") == run["root"])]
+    runs = _tree(db.runs(), run)
     names = {n for r in runs for n in collect.spec_stages(collect.load_spec(project, r)) or []}
     rows = [s for r in runs for s in db.stage_runs(r["run_id"])]
     last = {s["stage"]: s for s in sorted((s for s in rows if not s["task"]), key=lambda s: (s["started"] or 0, s["ended"] or 0))}
@@ -261,8 +285,8 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
     ok = [i for i, n in enumerate(order) if n in last and last[n]["exit"] == 0 and not held.get(n)]
     left = order[ok[-1] + 1:] if ok else order
     tasks = held.get(left[0], []) if left else []
-    if live := [board.handle(r, everyone) for r in runs if board.is_live(r)]:
-        return left, tasks, f"{live[0]} on the same tree has not ended"
+    if why := live_on_tree(db, run):
+        return left, tasks, why
     # A first stage that ended with exit 0 is left for its held tasks alone.
     if not left or left[0] not in last or last[left[0]]["exit"] == 0:
         return left, tasks, ""
@@ -312,6 +336,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
                             build_tag=tag, source=source, overrides=job.overrides, vars=job.vars)
     run_id = render_run_id(project.source.run_id, v)
+    if why := taken(db, run_id, batch.batch, job.label):
+        problems.append(why)
     if _fresh(job) and sched:
         # The scheduler picks the host, and the tree lies where every node reads it.
         host = None if job.host == "auto" else job.host
@@ -516,6 +542,14 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
         if started and stagger > 0:
             print(f"waiting {stagger} s (stagger) before {p.label}")
             time.sleep(stagger)
+        # Another launch may have taken the run id since the plan; the row claims it before the sync.
+        if why := taken(db, p.run_id, batch.batch, p.label):
+            p.problems.append(why)
+            census.unreserve(project, p.run_id)
+            print(f"{p.run_id}: {why}")
+            continue
+        if not dry_run:
+            db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         if not p.reuse or p.restore:
             ok = sync.sync_tree(ssh, p.tree_host, _src_dir(project, p.source, src_dir, dry_run), p.root, project.sync.exclude,
                                 project.safety.marker, project.safety.min_depth, dry_run)
@@ -531,13 +565,15 @@ def launch(project: Project, batch: Batch, ssh: hosts.Ssh, db: Database, dry_run
             if not ok:
                 p.problems.append("sync failed")
                 census.unreserve(project, p.run_id)
+                if not dry_run:
+                    db.upsert_run({"run_id": p.run_id, "phase": "FAILED:sync", "state": "failed"})
+                    db.add_event("user", p.run_id, "launch", "sync failed")
                 continue
         path = write_spec(state, batch.batch, p, driver, dry_run)
         where = f"{p.run_id}: {p.host or backend.name} {p.root}"
         if dry_run:
             print(f"{where} (dry)")
             continue
-        db.upsert_run({**run_row(p, batch), "phase": "setup", "state": "running", "started": int(time.time())})
         db.add_event("user", p.run_id, "launch", f"{p.host or backend.name} {p.root}")
         try:
             handle = start(backend, db, project, p.run_id, p.host, path, driver)

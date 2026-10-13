@@ -24,7 +24,7 @@ from helpers_results import demo_qor
 
 from edarunner import board, cli, config, home, launch, serve, watch
 from edarunner import db as db_mod
-from edarunner.backend import Live
+from edarunner.backend import Handle, Live
 from edarunner.db import Database
 from edarunner.guards import Refuse
 from edarunner.hosts import HostError, HostProbe, Ssh
@@ -1055,7 +1055,7 @@ def test_continue_reuse_dry_and_collect(demo: Path, capsys) -> None:
     code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "pnr", "--on", "local", "--from", "cts", "--dry-run")
     data = json.loads(out)["data"]
     assert code == 0 and data["batch"] == "demo" and data["host"] == "local"
-    assert re.fullmatch(r"\d{8}_\d{4}_a\.pnr_demo_gabc1234", data["run_id"])
+    assert re.fullmatch(r"\d{8}_\d{4}_demo_a\.pnr_demo_gabc1234", data["run_id"])
     spec = data["spec"]
     assert spec["start_at"] == {"stage": "pnr", "checkpoint": "cts"} and [s["name"] for s in spec["stages"]] == ["pnr"]
     assert spec["root"] == spec["stages"][0]["cwd"] and f"pnr {data['run_id']} demo" in spec["stages"][0]["cmd"]
@@ -1083,7 +1083,7 @@ def test_continue_without_stage_runs_what_the_tree_has_left(demo: Path, capsys) 
     edr(capsys, "status")
     code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--dry-run")
     run_id, stages = stages_of(out)
-    assert code == 0 and stages == ["export", "power"] and re.fullmatch(r"\d{8}_\d{4}_a\.export-power_demo_gabc1234", run_id)
+    assert code == 0 and stages == ["export", "power"] and re.fullmatch(r"\d{8}_\d{4}_demo_a\.export-power_demo_gabc1234", run_id)
     assert json.loads(out)["data"]["spec"]["start_at"] == {"stage": "export", "checkpoint": None}
     code, out, _ = edr(capsys, "--json", "continue", "b_nodw@demo", "--dry-run")
     assert code == 0 and stages_of(out)[1] == ["pnr"] and "_b_nodw.pnr_demo_DW0_g" in stages_of(out)[0]
@@ -1193,6 +1193,37 @@ def test_a_continue_whose_submit_fails_ends_its_run_and_does_not_block_the_tree(
         failed = [r for r in db.runs() if r["run_id"] != a]
         assert [(r["phase"], r["state"]) for r in failed] == [("FAILED:submit", "failed")] * 2
         assert [e["kind"] for e in db.events(run_id=failed[0]["run_id"])] == ["continue", "launch"]
+
+
+def test_two_continues_of_one_stage_in_one_minute_get_runs_of_their_own(demo: Path, capsys, monkeypatch) -> None:
+    a = seed(demo, "a", "done")
+    monkeypatch.setattr(launch, "submit", lambda *args: Handle("local", "local:1", "local"))
+    ids = []
+    for _ in range(2):
+        code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "export", "--on", "local")
+        ids.append(json.loads(out)["data"]["run_id"])
+        assert code == 0
+        with Database(demo / "data" / "edr.db") as db:
+            db.upsert_run({"run_id": ids[-1], "phase": "done"})  # the first ends before the second starts
+    with Database(demo / "data" / "edr.db") as db:
+        assert sorted(r["label"] for r in db.runs() if r["run_id"] != a) == ["a.export", "a.export.2"]
+    assert ids[0] != ids[1] and "_a.export.2_" in ids[1]
+
+
+def test_continue_with_stage_refuses_a_live_tree_except_a_dead_run_itself(demo: Path, capsys) -> None:
+    a = seed(demo, "a", "stage:pnr")
+    argv = ("continue", "a@demo", "--stage", "pnr", "--from", "cts", "--dry-run")
+    code, _, err = edr(capsys, *argv)
+    assert code == 1 and "a@demo: a@demo on the same tree has not ended" in err
+    with Database(demo / "data" / "edr.db") as db:
+        db.upsert_run({"run_id": a, "state": "dead"})  # the triage proposes continue --stage --from for it
+    code, out, _ = edr(capsys, "--json", *argv)
+    assert code == 0 and json.loads(out)["data"]["spec"]["start_at"] == {"stage": "pnr", "checkpoint": "cts"}
+    with Database(demo / "data" / "edr.db") as db:  # another run on the tree has not ended
+        db.upsert_run({"run_id": "20260926_1300_a.pnr_demo_gabc1234", "batch": "demo", "label": "a.pnr",
+                       "root": db.run(a)["root"], "phase": "stage:pnr", "state": "running"})
+    code, _, err = edr(capsys, *argv)
+    assert code == 1 and "a@demo: a.pnr@demo on the same tree has not ended" in err
 
 
 def test_the_continue_button_runs_the_stages_left_once(demo: Path, capsys, monkeypatch) -> None:
@@ -1404,6 +1435,21 @@ def test_import_records_a_foreign_tree(demo: Path, capsys, tmp_path: Path) -> No
     other.mkdir()
     assert edr(capsys, "import", "--run-id", other.name, "--label", "noconf", "--source", "abc1234", "--host", "local",
                "--root", str(other))[0] == 0  # a job's config is optional, so it is here too
+
+
+def test_track_and_import_refuse_a_run_id_that_another_run_holds(demo: Path, capsys, tmp_path: Path) -> None:
+    toml = demo / "edr.toml"
+    # A template without {date} stands for a track in the same minute as the import.
+    toml.write_text(re.sub(r'(?m)^run_id = .*$', 'run_id = "20260904_0411_{label}_g{source}"', toml.read_text()))
+    root = tmp_path / "scratch" / "user" / "edr" / "old" / "20260904_0411_t_gabc1234"
+    root.mkdir(parents=True)
+    argv = ["import", "--run-id", root.name, "--label", "t", "--source", "abc1234", "--host", "local", "--root", str(root)]
+    assert edr(capsys, *argv, "--batch", "b1")[0] == 0
+    assert edr(capsys, *argv, "--batch", "b1")[0] == 0  # the same run again updates it
+    code, _, err = edr(capsys, *argv, "--batch", "b2")
+    assert code == 1 and "run id 20260904_0411_t_gabc1234 belongs to t@b1; give another --run-id" in err
+    code, _, err = edr(capsys, "track", "--label", "t", "--stage", "synth", "--source", "abc1234", "--dry-run", "--", "true")
+    assert code == 1 and "run id 20260904_0411_t_gabc1234 belongs to t@b1; track a minute later or rename the label" in err
 
 
 def test_an_incomplete_phase_carries_the_held_tasks() -> None:

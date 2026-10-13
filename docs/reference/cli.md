@@ -720,9 +720,11 @@ and starts one driver per run, stagger_s apart, with a waiting line
 before each wait. Prints &lt;n&gt; started, &lt;n&gt; queued, &lt;n&gt; with problems.
 --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec
-exists is already launched; a batch name is used once. A run whose
-submit fails ends FAILED:submit with the error in an event, and launch
-exits 1.
+exists is already launched; a batch name is used once. A job whose run
+id a run of another batch or label holds has a problem, and the row of
+a run claims its id before the sync. A run whose sync fails ends
+FAILED:sync. A run whose submit fails ends FAILED:submit with the error
+in an event, and launch exits 1.
 
 | Flag | Meaning |
 |---|---|
@@ -750,11 +752,13 @@ of that run. Without --stage it runs the stages the tree has left. Each
 run on the tree was launched with a list of stages, and the stages left
 are those after the last one that ended with exit 0, so a run that
 ended OVER_BUDGET or STOPPED at the end of a stage goes on with the next
-one. It refuses while a run on the tree has not ended. It also refuses
-when the first stage left started but did not end with exit 0; name the
-stages with --stage then, and a checkpoint with --from when the stage
-has a resume command, because a stage that runs from its start can
-delete the checkpoints it needs.
+one. It refuses when the first stage left started but did not end with
+exit 0; name the stages with --stage then, and a checkpoint with --from
+when the stage has a resume command, because a stage that runs from its
+start can delete the checkpoints it needs.
+
+With or without --stage, continue refuses while a run on the tree has
+not ended, except the run itself when the watcher found it dead.
 
 --stage names the stages to run, in the order given. The new run gets
 the label &lt;label&gt;.&lt;stage&gt; for one stage and &lt;label&gt;.&lt;first&gt;-&lt;last&gt; for

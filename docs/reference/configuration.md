@@ -47,7 +47,7 @@ rules hold for every file:
 | `worktrees` | where `edr checkout` puts a local clone per source tag | required |
 | `ref` | the ref `edr checkout` takes without an argument, and the one `edr brief` counts the lag of each source against | `"HEAD"` |
 | `nested` | the nested repositories inside the tree, git submodules or separate clones. The source tag gives the commit of each separate clone as `-n<short hash>`, in this order; the outer commit pins a submodule, so a submodule adds nothing. A checkout clones a submodule at the commit that the outer commit pins, and a separate clone at the commit that a tag names, or for a ref at the HEAD that the repository copy has. A run records the commit of each as the parameter `nested.<name>`, and their changes count in a dirty tag. A git repository in the tree that this list does not name and git does not ignore stops `edr checkout --dirty` | `[]` |
-| `run_id` | the run id template; the `g` in the default marks the git source tag that follows | `"{date}_{label}_{build_tag}_g{source}"` |
+| `run_id` | the run id template; the `g` in the default marks the git source tag that follows, and `{batch}` keeps apart two batches with the same labels that launch in the same minute. A launch refuses a run id that a run of another batch or label holds | `"{date}_{batch}_{label}_{build_tag}_g{source}"` |
 | `build_tag` | a hook that returns the build tag from `(config, overrides, worktree)` or from `(config, overrides)`; empty gives the config name followed by `_KEYVALUE` for each override, such as `base_FREQ500` | `""` |
 
 ### [sync]

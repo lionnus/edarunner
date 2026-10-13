@@ -248,7 +248,7 @@ error, so a broken rule shows up instead of passing in silence.
 
 ```
 $ edr extract lanes4@sweep1
-20260902_0221_lanes4_demo_g3f9a2c1: 6 new, 0 changed, 0 unchanged, 0 failed, 0 removed, 14 parameters, 3 flags
+20260902_0221_sweep1_lanes4_demo_g3f9a2c1: 6 new, 0 changed, 0 unchanged, 0 failed, 0 removed, 14 parameters, 3 flags
   flag declared_vs_observed: ENABLE_X is 1 in the run's files and 0 by spec
   flag same_results k_big: window_ns and power_w equal those of k_small
   flag same_results k_small: window_ns and power_w equal those of k_big
@@ -285,7 +285,7 @@ error lists each run with its source and phase:
 
 ```
 $ edr status base@sweep1
-edr: base@sweep1: 2 runs have label 'base' in batch 'sweep1'; name one by its run id or as label@source: 20260902_0221_base_demo_g3f9a2c1 (3f9a2c1, FAILED:pnr), 20260902_0221_base_demo_g3f9a2c1-dirty-7b21c0d9 (3f9a2c1-dirty-7b21c0d9, done)
+edr: base@sweep1: 2 runs have label 'base' in batch 'sweep1'; name one by its run id or as label@source: 20260902_0221_sweep1_base_demo_g3f9a2c1 (3f9a2c1, FAILED:pnr), 20260902_0221_sweep1_base_demo_g3f9a2c1-dirty-7b21c0d9 (3f9a2c1-dirty-7b21c0d9, done)
 ```
 
 A name after the `@` that is both a batch and a source is refused as
@@ -337,7 +337,7 @@ the first error:
 
 ```
 $ edr extract base@g8
-20260902_0221_base_demo_g3f9a2c1: 0 new, 2 changed, 30 unchanged, 1 failed, 4 removed
+20260902_0221_g8_base_demo_g3f9a2c1: 0 new, 2 changed, 30 unchanged, 1 failed, 4 removed
   energy_nj: 1 failed: simulation/tests/demo/SOFTMAX_N512/power/phases.json: power.csv has no WHOLE row
 ```
 
@@ -1174,8 +1174,8 @@ A file keeps its path under the run id, and its entry in `files` names
 the run, stage, step and task:
 
 ```json
-{"path": "20260911_0930_base_cfg_a_g3f9a2c1/simulation/tests/cfg_a/GEMM_M64_N64/power/phases.json",
- "bytes": 412, "sha256": "9c1e...", "run_id": "20260911_0930_base_cfg_a_g3f9a2c1",
+{"path": "20260911_0930_sweep1_base_cfg_a_g3f9a2c1/simulation/tests/cfg_a/GEMM_M64_N64/power/phases.json",
+ "bytes": 412, "sha256": "9c1e...", "run_id": "20260911_0930_sweep1_base_cfg_a_g3f9a2c1",
  "stage": "power", "step": null, "task": "k_small"}
 ```
 
@@ -1313,7 +1313,7 @@ args = "N=512 LIMIT=-4.0"
 ```
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --source abc1234 \
+edr import --run-id 20260830_0000_imported_base_base_gabc1234 --label base --source abc1234 \
     --results /archive/base --tasks k_small k_big --task-fields ran.toml
 ```
 

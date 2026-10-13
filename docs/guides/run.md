@@ -35,12 +35,15 @@ entries. The `vars` table holds any other value the flow
 needs, and each key becomes a placeholder `{vars.<name>}` for the stage
 strings, `[env]` and `collect`.
 
-The run id is `<date>_<label>_<build_tag>_g<source>`. The build tag is the
-configuration name followed by `_KEYVALUE` for each override, such as
-`base_DW0`; a job without either has an empty build tag, and the run id
-drops that part with its `_`. A batch name is used once. A second
+The run id is `<date>_<batch>_<label>_<build_tag>_g<source>`. The build
+tag is the configuration name followed by `_KEYVALUE` for each override,
+such as `base_DW0`; a job without either has an empty build tag, and the
+run id drops that part with its `_`. A batch name is used once. A second
 launch of the same batch finds the specs and starts nothing, so a new
-sweep needs a new name.
+sweep needs a new name. The batch in the run id keeps apart two batches
+with the same labels that launch in the same minute. A project whose
+`run_id` template leaves out `{batch}` gets a plan problem instead, since
+a run id that another run holds names that run's tree.
 
 ## Check out and launch
 
@@ -258,7 +261,9 @@ A task that failed was started, so it is not held; name it with
 
 `continue` refuses to guess in two cases. While a run on the tree has
 not ended, such as a continue that is still running, a second call
-starts nothing. And when the first stage left started but did not end
+starts nothing, with `--stage` or without. The one exception is the run
+you name when the watcher found it `dead`: its triage proposes
+`--stage` with `--from` on its own tree. And when the first stage left started but did not end
 with exit 0, because it failed, was killed or was stopped halfway, a new
 run would start that stage from its first step. A flow that sets up its
 library in that first step deletes the checkpoints that a resume needs,
@@ -318,15 +323,15 @@ and `--root` it records a tree on a host, which `reuse` and
 `edr continue` can then use:
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --source abc1234 \
-    --host hostA --root /scratch/user/edr/myflow/20260830_0000_base_base_gabc1234
+edr import --run-id 20260830_0000_imported_base_base_gabc1234 --label base --source abc1234 \
+    --host hostA --root /scratch/user/edr/myflow/20260830_0000_imported_base_base_gabc1234
 ```
 
 With `--results` it links an archive of collected files instead, so
 `metrics` and `export` cover a result whose tree is gone:
 
 ```sh
-edr import --run-id 20260830_0000_base_base_gabc1234 --label base --config base --source abc1234 \
+edr import --run-id 20260830_0000_imported_base_base_gabc1234 --label base --config base --source abc1234 \
     --results /archive/base --tasks k_small k_big --host hostA \
     --started 2026-08-30T00:00 --ended 2026-08-30T09:12 --phase FAILED:power \
     --param vars.netlist_stage=11 --why "tree gone, reports kept"

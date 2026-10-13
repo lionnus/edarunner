@@ -10,7 +10,8 @@ from pathlib import Path
 
 from helpers_cli import edr
 
-from edarunner import board, cli, config
+from edarunner import board, cli, config, launch
+from edarunner.backend import Handle
 from edarunner.db import Database
 
 
@@ -69,7 +70,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "launch", "demo")
     assert code == 0 and "2 started" in out
     date = (state / "demo" / "RUN_DATE").read_text().strip()
-    ids = {"a": f"{date}_a_demo_g{source}", "b_nodw": f"{date}_b_nodw_demo_DW0_g{source}"}
+    ids = {"a": f"{date}_demo_a_demo_g{source}", "b_nodw": f"{date}_demo_b_nodw_demo_DW0_g{source}"}
     (driver,) = (state / "bin").iterdir()
     spec = json.loads((state / "demo" / f"{ids['a']}.spec.json").read_text())
     assert driver.name.startswith("edr_driver-") and spec["driver"] == str(driver)
@@ -139,7 +140,7 @@ def test_demo_end_to_end(demo: Path, capsys, tmp_path: Path, monkeypatch) -> Non
     code, out, _ = edr(capsys, "--json", "continue", "a@demo", "--stage", "export", "--on", "local")
     new = json.loads(out)["data"]
     assert code == 0 and new["batch"] == "demo" and new["root"] == str(roots["a"])
-    assert re.fullmatch(rf"\d{{8}}_\d{{4}}_a\.export_demo_g{source}", new["run_id"]) and new["run_id"] != ids["a"]
+    assert re.fullmatch(rf"\d{{8}}_\d{{4}}_demo_a\.export_demo_g{source}", new["run_id"]) and new["run_id"] != ids["a"]
     rows = wait_terminal(capsys, 3)
     assert {r["run_id"]: (r["label"], r["phase"]) for r in rows}[new["run_id"]] == ("a.export", "done")
     assert [p for p in (state / "bin").iterdir()] == [driver]  # one copy per driver version
@@ -204,6 +205,35 @@ def test_plan_and_launch_check_out_a_missing_source(demo: Path, capsys, tmp_path
     assert (demo / "wt" / head / "flow" / "flow.sh").is_file()
     code, out, _ = edr(capsys, "plan", "demo")
     assert code == 0 and "checkout " not in out
+
+
+def test_two_batches_launched_in_one_minute_keep_their_trees(demo: Path, capsys, tmp_path: Path, monkeypatch) -> None:
+    setup_repo(demo)
+    jobs = demo / "jobs"
+    state = tmp_path / ".edr" / "demo"
+    for name in ("one", "two", "three", "four"):
+        (jobs / f"{name}.toml").write_text((jobs / "demo.toml").read_text().replace('batch = "demo"', f'batch = "{name}"'))
+        (state / name).mkdir(parents=True)
+        (state / name / "RUN_DATE").write_text("20261001_0900\n")  # every batch launches in the same minute
+    monkeypatch.setattr(launch, "submit", lambda *a, **k: Handle("local", "local:1", "local"))
+
+    def roots() -> dict[str, str]:
+        with Database(demo / "data" / "edr.db") as db:
+            return {r["run_id"]: r["root"] for r in db.runs()}
+
+    # The default template carries {batch}, so two batches with the same labels get runs of their own.
+    assert edr(capsys, "launch", "one")[0] == 0 and edr(capsys, "launch", "two")[0] == 0
+    before = roots()
+    assert len(set(before.values())) == 4
+    toml = demo / "edr.toml"
+    toml.write_text(toml.read_text().replace("{date}_{batch}_{label}", "{date}_{label}"))
+    assert edr(capsys, "launch", "three")[0] == 0
+    kept = Path(next(r for i, r in roots().items() if i not in before and "_a_demo_g" in i)) / "kept"
+    kept.write_text("x")
+    code, out, _ = edr(capsys, "launch", "four")
+    assert code == 1 and "0 started" in out and kept.is_file()
+    assert re.search(r"_a_demo_g\w+: run id \S+ belongs to a@three; launch a minute later or rename the label", out)
+    assert len(roots()) == 6
 
 
 def test_plan_refuses_a_dirty_source_that_is_not_checked_out(demo: Path, capsys) -> None:
