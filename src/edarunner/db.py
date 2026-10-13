@@ -13,6 +13,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+
 DDL = """
 CREATE TABLE IF NOT EXISTS batches(batch TEXT PRIMARY KEY, project TEXT, source TEXT, created INTEGER, retired INTEGER, run_date TEXT);
 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, batch TEXT, label TEXT, config TEXT, build_tag TEXT, source TEXT, dirty INTEGER,
@@ -37,6 +39,10 @@ CREATE TABLE IF NOT EXISTS instances(run_id TEXT, stage TEXT, step INTEGER, task
   depth INTEGER, value REAL, local REAL, cells INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS instances_key ON instances(run_id, stage, ifnull(step, -1), task, name, part, instance);
 """
+
+# The schema version in PRAGMA user_version. Raise it with every change of DDL, and name in the release notes the SQL
+# that brings a database of the old version to the new one.
+SCHEMA = 1
 
 _PK = {
     "batches": ("batch",),
@@ -77,6 +83,10 @@ def _now() -> int:
 
 def _text(value: Any) -> Any:
     return json.dumps(value) if isinstance(value, (dict, list)) else value
+
+
+class SchemaError(sqlite3.DatabaseError):
+    """A database whose schema version is not the one this edr expects. Nothing upgrades it."""
 
 
 class NotFound(KeyError):
@@ -125,9 +135,11 @@ class Database:
         self.network_fs, self.journal_mode = None, ""
         if readonly:
             self.conn = sqlite3.connect(self._read_uri(), uri=True, timeout=30, check_same_thread=not threads)
+            self._check_schema()
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.conn = sqlite3.connect(self.path, timeout=30, check_same_thread=not threads)
+            self._check_schema()
             self.network_fs = None if str(path) == ":memory:" else network_fs(self.path.parent)
             mode = "DELETE" if self.network_fs else "WAL"
             self.journal_mode = self.conn.execute(f"PRAGMA journal_mode={mode}").fetchone()[0]
@@ -145,6 +157,16 @@ class Database:
         flag = "immutable=1" if wal and not Path(f"{self.path}-wal").exists() else "mode=ro"
         return f"{self.path.absolute().as_uri()}?{flag}"
 
+    def _check_schema(self) -> None:
+        """Refuse a database with another schema version before anything writes to it; a new, empty one passes."""
+        version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == SCHEMA or (version == 0 and not self.conn.execute("SELECT 1 FROM sqlite_master").fetchone()):
+            return
+        self.conn.close()
+        raise SchemaError(f"{self.path}: the database has schema version {version}, and edr {__version__} expects "
+                          f"{SCHEMA}; the release notes and docs/dev/conventions.md say what changed and how to upgrade "
+                          "the database")
+
     def __enter__(self) -> Database:
         return self
 
@@ -157,8 +179,8 @@ class Database:
         self.conn.close()
 
     def init_schema(self) -> None:
-        """Create every table that does not exist yet."""
-        self.conn.executescript(DDL)
+        """Create every table that does not exist yet, and set the schema version."""
+        self.conn.executescript(DDL + f"PRAGMA user_version={SCHEMA};")
 
     def _table_columns(self, table: str) -> tuple[str, ...]:
         return tuple(r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})"))

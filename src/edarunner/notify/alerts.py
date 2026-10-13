@@ -324,6 +324,18 @@ def serve_alert(age: float | None, pid: object) -> Alert:
         todo=[("See why it stopped:", "systemctl --user status edr-serve"), ("Start it again:", "systemctl --user restart edr-serve")])
 
 
+def poll_alert(error: str, every_s: int) -> Alert:
+    """The alert of a bot whose getUpdates another program with the same token answers with a conflict."""
+    return Alert(
+        "bot", "poll", "another program polls the bot", "",
+        "Telegram refused getUpdates because another program polls the same bot token. Commands and button presses "
+        f"may go to that program and not to edr. Alerts still go out; edr polls every {every_s} s until the conflict "
+        "ends.",
+        [("error", cut(error))],
+        todo=[("Stop the other poller, for example a second supervisor on another host; check each host with:",
+               "systemctl --user status edr-serve")])
+
+
 def watch_alert(project: Project, age: float | None, pid: object) -> Alert:
     """The alert of a watcher that has not finished a cycle for `age` seconds; None for no watch.json."""
     return Alert(

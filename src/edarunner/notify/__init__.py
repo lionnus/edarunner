@@ -31,6 +31,7 @@ class Notifier:
     that the user file asks for."""
 
     kinds: frozenset[str] = frozenset()
+    peers: list[Notifier] = []  # every channel of make_notifiers, so a channel can alert on the others
 
     def start(self) -> None:
         """Start to take commands, when the channel can; only the holder of `serve.lock` calls it."""
@@ -98,5 +99,5 @@ def make_notifiers(user: User, site: Site | None, project: Project, db: Database
 
         out.append(MailNotifier(project, mail))
     for n in out:
-        n.kinds = frozenset(user.alerts)
+        n.kinds, n.peers = frozenset(user.alerts), out
     return out

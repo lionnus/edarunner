@@ -718,7 +718,9 @@ and starts one driver per run, stagger_s apart, with a waiting line
 before each wait. Prints &lt;n&gt; started, &lt;n&gt; queued, &lt;n&gt; with problems.
 --show-spec prints the rendered spec of each run as plan does. A job that no host fits is
 queued; the watcher starts it when a host frees up. A job whose spec
-exists is already launched; a batch name is used once.
+exists is already launched; a batch name is used once. A run whose
+submit fails ends FAILED:submit with the error in an event, and launch
+exits 1.
 
 | Flag | Meaning |
 |---|---|
@@ -732,7 +734,7 @@ exists is already launched; a batch name is used once.
 | Exit | Meaning |
 |---|---|
 | 0 | a run started or was queued |
-| 1 | a job has a problem |
+| 1 | a job has a problem, or a submit failed |
 | 2 | every job was already launched |
 
 ## continue
@@ -759,6 +761,9 @@ several, with .2, .3 and so on when the batch has that label already.
 host (default: the tree's host). --from fills {checkpoint} in the resume
 command of the first stage, and is refused when that stage has none.
 
+A new run whose submit fails ends FAILED:submit with the error in an
+event, so it does not block the tree.
+
 --collect NAME instead copies the collect_on_request list NAME of every
 stage from the tree into data/results/&lt;run id&gt;/.
 
@@ -776,7 +781,7 @@ stage from the tree into data/results/&lt;run id&gt;/.
 
 | Exit | Meaning |
 |---|---|
-| 1 | the plan has a problem, --from names a stage without resume, or without --stage the tree cannot go on by itself |
+| 1 | the plan has a problem, --from names a stage without resume, without --stage the tree cannot go on by itself, or the submit failed |
 | 2 | without --stage, no stage is left on the tree |
 | 3 | with --collect, a copy failed |
 
@@ -1172,7 +1177,9 @@ nothing. --check reads serve.json and nothing of any project; when
 the file is missing or older than three cycles, it alerts and exits
 1, so a cron line can run it.
 
---unit prints the systemd user unit. When this edr runs from a
+--unit prints the systemd user unit, with ConditionHost set to this
+host, so a home shared over NFS starts the supervisor on this host
+only. When this edr runs from a
 checkout, an editable install, it first installs a copy of the
 checkout's HEAD commit with uv tool install, and the unit runs that
 copy, so a later edit or git pull in the checkout never changes the

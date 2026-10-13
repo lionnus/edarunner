@@ -158,6 +158,7 @@ def test_the_unit_runs_a_pinned_copy_of_a_checkout(two, capsys, monkeypatch) -> 
     repo = Path(serve.__file__).resolve().parents[2]
     assert code == 0 and err.startswith(f"dry: uv tool install --force git+file://{repo}@")
     assert "Type=notify" in out and "WatchdogSec=600" in out and "Restart=always" in out
+    assert f"After=network-online.target\nConditionHost={socket.gethostname()}\n\n[Service]" in out
     exe = next(ln for ln in out.splitlines() if ln.startswith("ExecStart=")).split("=", 1)[1]
     assert exe.endswith("/edr serve") and not exe.startswith(str(repo)) and f"of {repo}" in out
     monkeypatch.setattr(serve.importlib.metadata, "distribution", lambda name: type("D", (), {"read_text": lambda s, f: None})())

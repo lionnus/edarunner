@@ -156,6 +156,14 @@ copy of the checkout's HEAD commit with `uv tool install` and prints a
 unit that runs that copy. After an upgrade, run it again and restart
 the service.
 
+The supervisor runs on one head node. A home directory on NFS shares
+`~/.config/systemd/user` with every host, and each host with a user
+systemd instance would start its own `edr serve` from the same file. So
+the unit carries `ConditionHost=` with the name of the host that
+rendered it, and starts there only. To move the supervisor, stop it with
+`systemctl --user disable --now edr-serve` on the old host, then render
+and enable the unit on the new host with the commands above.
+
 A cron line tells you when the supervisor stopped. It reads
 `~/.edr/serve.json` and no project file, so it works while every
 `edr.toml` is broken. cron has a short `PATH`, so name `edr` in full:
