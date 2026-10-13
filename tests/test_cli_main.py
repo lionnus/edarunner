@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -122,3 +123,13 @@ def test_the_head_and_init_run_here_and_a_failed_ssh_names_the_head(demo: Path, 
     monkeypatch.setattr(socket, "gethostname", lambda: "host1")
     assert edr(capsys, "init", "--site", str(demo), "--dry-run")[0] in (0, 1) and not log.exists()
 
+
+def test_a_locked_database_on_a_network_filesystem_names_the_head(demo: Path, capsys, monkeypatch) -> None:
+    def locked(c, a):
+        c.project.site.head = "head"
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(cli, "cmd_status", locked)
+    monkeypatch.setattr(cli, "network_fs", lambda path: "nfs")
+    code, _, err = edr(capsys, "status")
+    assert code == 1 and "edr.db is locked on a network filesystem; only the head node opens it, so run edr on head" in err

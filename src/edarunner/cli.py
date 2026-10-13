@@ -20,6 +20,7 @@ import re
 import shlex
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -2795,6 +2796,13 @@ def main(argv: list[str] | None = None) -> int:
     except HostError as e:
         print(f"edr: {e}", file=sys.stderr)
         code = Exit.HOSTS
+    except sqlite3.OperationalError as e:
+        p = c._project
+        if "locked" in str(e) and p is not None and network_fs(p.data):
+            e = Refuse(f"{p.data / 'edr.db'} is locked on a network filesystem; only the head node opens it, so run "
+                       f"edr on {p.site.head or 'the head node, or set head in site.toml'}")
+        print(f"edr: {e}", file=sys.stderr)
+        code = Exit.REFUSED
     except KeyboardInterrupt:
         code = Exit.INTERRUPTED
     except Exception as e:  # the exit code and the --json envelope must survive any fault
