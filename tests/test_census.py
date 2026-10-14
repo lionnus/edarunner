@@ -107,7 +107,7 @@ def test_the_work_sends_one_digest_of_every_project_a_day_and_keeps_the_keys_of_
 
 def orphan_procs(alpha, beta) -> list[Proc]:
     live, dead, done = (heartbeat(alpha, "a")["run_id"], heartbeat(beta, "d", age=beta.limits.dead_s + 1)["run_id"],
-                        heartbeat(beta, "g", phase="done")["run_id"])
+                        heartbeat(beta, "g", phase="done", age=300)["run_id"])
     return [Proc(501, 60, 99.0, "sleep", "sleep 1", "/home/me", live),
             Proc(502, 60, 99.0, "sleep", "sleep 2", "/home/me", dead),
             Proc(503, 60, 99.0, "sleep", "sleep 3", "/home/me", done),
@@ -123,7 +123,7 @@ def test_one_alert_per_orphan_over_every_project(two, fake) -> None:
     fake.procs = orphan_procs(two["alpha"], two["beta"])
     rec = Rec()
     census.work([rec], NOW)
-    found = {k.rsplit(":", 1)[1]: a.about.removesuffix(" It may hold a licence seat.")
+    found = {k.split(":")[2]: a.about.removesuffix(" It may hold a licence seat.")
              for k, a in rec.alerts.items() if a.kind == "orphan"}
     you = "Your process sleep runs on local"
     assert found == {"502": f"{you} for the run beta/d@demo, whose driver is gone.",
@@ -144,6 +144,15 @@ def test_a_process_of_no_run_alerts_once_it_is_old_enough(two, fake) -> None:
     census.work([rec], NOW + 60)
     census.work([rec], NOW + 120)
     assert rec.sent == [("orphan", "orphan:local:601")]
+
+
+def test_a_tool_of_a_run_that_just_ended_alerts_only_after_orphan_min_age_s(two, fake) -> None:
+    run_id = heartbeat(two["beta"], "k", phase="KILLED:SIGTERM", age=0)["run_id"]
+    fake.procs, rec = [Proc(603, 7200, 99.0, "sleep", "sleep 3", "/home/me", run_id)], Rec()
+    census.work([rec], NOW + 299)  # the tool is still on its way down after the stop
+    assert rec.sent == []
+    census.work([rec], NOW + 300)
+    assert rec.sent == [("orphan", f"orphan:local:603:{run_id}")]
 
 
 def test_a_restart_does_not_reset_the_age_of_a_process(two, fake) -> None:

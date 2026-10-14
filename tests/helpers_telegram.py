@@ -66,6 +66,12 @@ class FakeActions:
         self.calls.append(("compare_page", (handles,), {}))
         return b"<html>compare</html>"
 
+    def orphan(self, key: str) -> dict:
+        self.calls.append(("orphan", (key,), {}))
+        return {"host": "hostA", "pid": "4711", "comm": "fc_shell", "user": "me", "lstart": "Wed Oct 14 23:12:01 2026",
+                "cwd": "/w", "args": "fc_shell -f run.tcl", "owner_handle": "a@demo", "state": "killed",
+                "line": "ssh hostA 'kill 4711'"}
+
     def run_info(self, handle: str) -> dict:
         self.calls.append(("run_info", (handle,), {}))
         return {"handle": "a@demo", "run_id": handle, "run_root": "/scratch/edr/demo/" + handle, "host": "hostA"}

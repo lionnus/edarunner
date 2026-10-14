@@ -229,7 +229,7 @@ def test_callback_buttons_act_on_the_run_of_their_alert(two):
     assert edits[-1]["entities"] == [{"offset": 0, "length": 4, "type": "bold"}]  # the bold title stays
     assert edits[-1]["reply_markup"]["inline_keyboard"]  # the buttons stay
     assert two.db.events == []  # the action records its own event
-    two.handle_update(callback("retire:demo"))
+    two.handle_update(callback("nuke:demo"))
     assert two.api.of("answerCallbackQuery")[-1]["text"] == "unknown button"
     two.handle_update(callback("keep6:demo", mid=7))
     assert two.api.of("answerCallbackQuery")[-1]["text"].startswith("this alert is older than 7 days")
@@ -295,7 +295,7 @@ def test_alert_send_edits_a_repeat(bot):
     sent = bot.api.of("sendMessage")[-1]
     assert mid == "1" and sent["disable_notification"] is False
     assert sent["text"] == ("🔴 <b>demo: no progress in</b> <code>a@demo</code>\nno progress &lt;3 h\n\n"
-                            "Stop it:\n<code>edr stop a@demo --why hung</code>")
+                            "Stop it:\n<pre>edr stop a@demo --why hung</pre>")
     assert [(b["text"], b["callback_data"]) for b in sent["reply_markup"]["inline_keyboard"][0]] == [
         ("Stop", "stop:demo"), ("+6h", "keep6:demo"), ("+12h", "keep12:demo"), ("+24h", "keep24:demo")]
     assert bot.send(hung(about="no progress for 3 h", buttons=False)) == "1"
@@ -674,6 +674,36 @@ def test_continue_asks_and_runs_the_stages_left_on_the_tree(bot):
     bot.handle_update(press("continueyes:demo", edit["text"]))
     assert bot.router.calls[-1] == ("continue_run", ("run1", "telegram"), {})
     assert bot.api.of("editMessageText")[-1]["text"] == alert + "\ncontinue_run ok"
+
+
+def test_status_replies_and_retire_asks_then_retires_the_run_of_the_alert(bot):
+    bot.router.replies[("demo", 5)] = "run1"
+    bot.handle_update(press("status:demo", "failed run a@demo"))
+    assert bot.router.calls == [("status_text", ("run1",), {})]
+    assert last_reply(bot) == "status_text ok" and bot.api.of("editMessageText")[-1]["text"] == "failed run a@demo"
+    bot.handle_update(press("retire:demo", "failed run a@demo"))
+    edit = bot.api.of("editMessageText")[-1]
+    assert edit["text"] == "failed run a@demo\nRetire a@demo? This removes its tree /scratch/edr/demo/run1 on hostA."
+    assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == ["retireyes:demo", "retireno:demo"]
+    assert not any(c[0] == "retire" for c in bot.router.calls)
+    bot.handle_update(press("retireyes:demo", edit["text"]))
+    assert bot.router.calls[-1] == ("retire", ("run1", "telegram"), {})
+
+
+def test_the_orphan_buttons_take_their_target_from_the_alert_key_and_end_it_asks_with_what_dies(bot):
+    bot.db.store["telegram"] = {"replies": {"5": ["orphan:hostA:4711:run1", time.time()]}}
+    bot.handle_update(press("check:demo", "tool process on hostA"))
+    assert bot.router.calls == [("check_orphan", ("orphan:hostA:4711:run1",), {})]
+    bot.handle_update(press("end:demo", "tool process on hostA"))
+    question = bot.api.of("editMessageText")[-1]["text"].split("\n")[1:]
+    assert question[0] == "Send SIGTERM to this process?" and "started: Wed Oct 14 23:12:01 2026" in question
+    assert question[-2:] == ["owner run: a@demo (killed)", "the same as: ssh hostA 'kill 4711'"]
+    bot.handle_update(press("endyes:demo", "tool process on hostA"))
+    assert bot.router.calls[-1][0] == "end_orphan" and bot.router.calls[-1][1][0] == "orphan:hostA:4711:run1"
+    assert bot.router.calls[-1][1][1]["lstart"] == "Wed Oct 14 23:12:01 2026"  # what the question showed
+    bot.db.store["telegram"]["replies"]["5"][0] = "run1"  # the alert of a run, not of an orphan
+    bot.handle_update(press("end:demo", "hung a@demo"))
+    assert bot.api.of("answerCallbackQuery")[-1]["text"].startswith("this alert is older than 7 days")
 
 
 def test_the_reply_keyboard_sends_plain_words(bot):

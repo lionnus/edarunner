@@ -310,7 +310,7 @@ shell of a host may be `csh` or `tcsh`.
 | `ssh.options` | the options of every ssh call | `["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]` |
 | `ssh.timeout_s` | seconds a remote command may take | `45` |
 | `tool_procs` | a regex over process names, for the orphan check and the host table | `""` |
-| `orphan_min_age_s` | seconds since its start before a tool process without `EDR_RUN_ID` and outside every project counts as an orphan; a short tool call by hand raises no alert | `300` |
+| `orphan_min_age_s` | seconds since its start before a tool process without `EDR_RUN_ID` and outside every project counts as an orphan, and seconds since the last heartbeat of an ended run before a tool process of that run does; a short tool call by hand and a tool on its way down raise no alert | `300` |
 | `host_free_min_gb` | free scratch below which the driver starts nothing new on a host and placement sends no run there; one floor per disk, whatever project fills it | `100.0` |
 | `nfs_export` | a path the head node reads when ssh to a host fails at collect | `""` |
 | `head` | the host name of the head node; `edr` on any other host runs the command there over ssh, in the same project directory | `""` |

@@ -51,8 +51,8 @@ other message is `<project>: <kind>`.
 
 | Kind | Sent by | Telegram | ntfy | mail |
 |---|---|---|---|---|
-| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `unreadable`, `held`, `incomplete`, `failed`, `killed`, `stopped` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, one on a full host Stop and Free space, and a run that ended `OVER_BUDGET` or `STOPPED` with stages left Continue | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
-| alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process, no buttons | one push, the same text | one mail, the same text |
+| alert: `dead`, `hung`, `looping`, `over_budget`, `host_full`, `superseded`, `unreadable`, `held`, `incomplete`, `failed`, `killed`, `stopped` | the watcher, when a run enters the state or its reason changes | one message, edited in place, with the next command; a live run that is `hung`, `looping`, `over_budget` or `superseded` also gets the buttons Stop, +6h, +12h and +24h, one on a full host Stop and Free space, a run that ended `OVER_BUDGET` or `STOPPED` with stages left Continue, an alert whose next command is `edr status` Status, and an ended run whose next command is `edr retire` Retire | one push per change, with the next command and the button commands, the first three also as copy buttons | one mail per change, with the next command and the button commands |
+| alert: `orphan` | the watcher that holds `serve.lock`, once for all projects | one message with the commands to check and end the process; a process with an owner run in a project also gets the buttons Check and End it | one push, the same text and the button commands | one mail, the same text and the button commands |
 | alert: `clock` | the watcher that holds `serve.lock`, once per host whose clock is more than 60 s off | one message | one push | one mail |
 | alert: `watch` | `edr watch --check` and `edr serve --check`; the supervisor, when a watcher exits or stands still | one message | one urgent push | one mail |
 | alert: `config` | the watcher, once per error text, when `edr.toml`, `tasks.toml` or the site file stops loading | one message | one push | one mail |
@@ -151,14 +151,21 @@ any other mode.
 
 The bot never runs a shell string or free text. A custom command is an
 argv list from the site file or the user file, and every argument from
-the phone must match its allowlist regex in full. The bot never kills a
-process, and never runs `launch` or `rm`. `/stop` and the Stop button
-write the `after-task` stop file, `/keep` and the +6h, +12h and +24h
-buttons write the keep file, the Free space button runs
-`edr retire --host <host> --prune <names>`, and the Continue button runs
-`edr continue <handle>`, each through the same code as the command
-line. Every action goes into the events of its project with the actor
-`telegram`, and a refusal goes where a `rejected` event goes.
+the phone must match its allowlist regex in full. A button is a fixed
+action; the watcher fills its target, the run or the host and pid of
+the process, from its own data and never from the text of a message,
+and the bot checks the target again at the press. The bot never runs
+`launch`. `/stop` and the Stop button write the `after-task` stop file,
+`/keep` and the +6h, +12h and +24h buttons write the keep file, the
+Free space button runs `edr retire --host <host> --prune <names>`, the
+Retire button runs `edr retire <handle> --why <state>`, the Continue
+button runs `edr continue <handle>`, and the Status button replies what
+`/status <handle>` replies, each through the same code as the command
+line. The one process the bot kills is an orphan, with End it: it
+sends `SIGTERM` only while the process has the start time and the
+`EDR_RUN_ID` that its question showed. Every action goes into the
+events of its project with the actor `telegram`, and a refusal goes
+where a `rejected` event goes.
 
 ### Replies on the phone
 
@@ -173,9 +180,11 @@ The first line is `<project>: <title>`. Each run line starts with one
 mark for its state; [reference/states.md](../reference/states.md) lists
 them.
 
-A `<pre>` block holds only text whose width the bot does not control:
-the last log lines of `/status <handle>`, the columns of `/compare` and
-`/metric`, and the output of a custom command. A message stays under
+A `<pre>` block holds only text whose width the bot does not control,
+or text that you copy whole: the last log lines of `/status <handle>`,
+the columns of `/compare` and `/metric`, the output of a custom
+command, and in an alert the command line of the process and each
+command to run, one block each, so a tap copies one command. A message stays under
 the limit of 4096 characters; the bot cuts a long reply at a line end.
 `/compare` keeps its first rows and ends with `… N more rows`.
 
@@ -189,10 +198,11 @@ four parts:
   then the run handle or the host in monospace;
 - one or two sentences on what edarunner saw and why it matters;
 - the facts: the stage and step, the host, and the command line in
-  monospace, cut to 120 characters, then the last four lines of the log
-  of the running stage or task in one block, each cut to 100 characters;
-- what to do: the command to run next in monospace, and what edarunner
-  does by itself.
+  its own block, cut to 120 characters, then the last four lines of the
+  log of the running stage or task in one block, each cut to 100
+  characters;
+- what to do: each command to run next in its own block, and what
+  edarunner does by itself.
 
 [What each alert says](#what-each-alert-says) shows every kind. The
 alert of a live run carries the buttons that stop it or give it time,
@@ -203,6 +213,9 @@ and the alert of a run that ended with stages left carries Continue:
 | `hung`, `looping`, `over_budget`, `superseded`, while the run lives | Stop, +6h, +12h, +24h |
 | `host_full` | Stop, and Free space when the project declares prune targets |
 | `over_budget` or `stopped` of a run that ended with stages left on its tree | Continue |
+| an alert whose next command is `edr status <handle>` | Status |
+| `failed`, `killed` or `incomplete` of a run with a tree, whose next command is `edr retire` | Retire |
+| `orphan` of a process with an owner run in a project | Check, End it |
 
 | Button | Action |
 |---|---|
@@ -210,6 +223,10 @@ and the alert of a run that ended with stages left carries Continue:
 | +6h, +12h, +24h | `edr keep <handle> --hours 6`, 12 or 24: that many more hours on the budget of the running stage or task, and for as long the watcher neither kills the run as `hung` nor stops it as `superseded` |
 | Free space | asks once more, then `edr retire --host <host> --prune <names>` with every prune name of the project: it removes the prune targets of the finished runs of the project on the full host, except those of a run whose tree has stages left |
 | Continue | asks once more, then `edr continue <handle>`: it runs the stages left on the tree of the run as one new run, on the same host; a task group that held tasks back runs only those |
+| Status | replies what `/status <handle>` replies |
+| Retire | asks once more, then `edr retire <handle> --why <state>`: it removes the tree of the run and marks it retired |
+| Check | reads the start time, the user, the command line, the cwd and `EDR_RUN_ID` of the process on its host |
+| End it | reads the process again and asks once more with what ends: the host, the pid, the name, the user, the start time, the cwd, the command line, the owner run and its state, and the same shell line; the yes sends `SIGTERM` only while the start time and `EDR_RUN_ID` are still those of the question |
 
 A keep never holds off the stop of a full host. A full scratch disk
 blocks every other user of the host, so after `grace_s` the watcher
@@ -224,13 +241,15 @@ group, the host and the tree.
 
 The `callback_data` of a button names the action and the project, such
 as `keep6:demo`, and the run is the one of the alert: the watcher that
-sent it keeps its message id for 7 days.
+sent it keeps its message id for 7 days. The bot of the supervisor
+sends the orphan alerts and keeps the host, the pid and the owner run
+of each the same way.
 [reference/bot.md](../reference/bot.md#alert-buttons) lists them. The
 bot answers every press, appends the result to the alert text, and
 keeps the buttons. Each press records one event in the database of the
 project, the event of that action, with the actor `telegram`.
 
-Stop, Free space and Continue act only on a second tap. The first tap
+Stop, Free space, Retire, Continue and End it act only on a second tap. The first tap
 adds a question to the alert, such as `Stop b_nodw@demo after its
 current task?`, and shows two buttons, `Yes, stop` and `No`. `No`
 restores the buttons of the alert. A question older than 10 minutes is stale: a tap
@@ -652,6 +671,8 @@ host: hostA
 
 See the run and the error:
 edr status b_nodw@demo
+
+[Status]
 ```
 
 `held`: the scheduler holds the job.
@@ -680,6 +701,9 @@ Information: elaborating top
 
 See which tasks failed and the log tail:
 edr status b_nodw@demo
+Retire removes the tree of the run and marks it retired; on Telegram it asks once more.
+
+[Status]  [Retire]
 ```
 
 `failed`: the run ended `FAILED`. The exit code is the driver's, not
@@ -697,6 +721,9 @@ Information: elaborating top
 
 See the stage that failed and the log tail:
 edr status b_nodw@demo
+Retire removes the tree of the run and marks it retired; on Telegram it asks once more.
+
+[Status]  [Retire]
 ```
 
 `killed`: a signal ended the run.
@@ -712,6 +739,9 @@ Information: elaborating top
 
 See the last stage and the log tail:
 edr status b_nodw@demo
+Retire removes the tree of the run and marks it retired; on Telegram it asks once more.
+
+[Status]  [Retire]
 ```
 
 `stopped`: a stop file ended the run, after `edr stop --after-task` or
@@ -753,8 +783,11 @@ driver sets it for every stage command of every project.
 - A process without `EDR_RUN_ID` raises no alert until it has run for
   `orphan_min_age_s` of the site, 5 min by default, so a short `vsim` by
   hand stays quiet. The age counts from the start of the process, so a
-  restart of the watcher does not reset it. A process that a run of
-  edarunner left behind alerts at once.
+  restart of the watcher does not reset it.
+- A process of a run whose heartbeat ended raises no alert until
+  `orphan_min_age_s` has passed since that heartbeat, so a tool that is
+  still on its way down after `edr stop` stays quiet. A run whose driver
+  is gone has waited `dead_s` already, so its processes alert at once.
 
 A tool process that no run owns:
 
@@ -768,7 +801,7 @@ directory: /home/me/work
 fc_shell -f /home/me/work/run.tcl
 
 Check it:
-ssh hostA ps -o pid,etime,args -p 5120
+ssh hostA ps -o pid,lstart,etime,user,args -p 5120
 If it is yours and stale, end it:
 ssh hostA kill 5120
 edarunner never kills a process that belongs to no project.
@@ -786,11 +819,33 @@ directory: /scratch/me/edr/demo/20260926_1200_demo_b_nodw_demo_gabc1234/pnr
 fc_shell -f /scratch/me/edr/demo/20260926_1200_demo_b_nodw_demo_gabc1234/pnr/run.tcl
 
 Check it:
-ssh hostA ps -o pid,etime,args -p 5120
+ssh hostA ps -o pid,lstart,etime,user,args -p 5120
 If it is yours and stale, end it:
-ssh hostA kill 5120
+ssh hostA 'grep -qz "^EDR_RUN_ID=20260926_1200_demo_b_nodw_demo_gabc1234$" /proc/5120/environ && kill 5120'
 edarunner never kills it, since kill_orphan is off.
+
+[Check]  [End it]
 ```
+
+On Telegram, End it first reads the process again and asks:
+
+```
+Send SIGTERM to this process?
+host: hostA
+pid: 5120
+name: fc_shell
+user: me
+started: Wed Oct 14 23:12:01 2026
+cwd: /scratch/me/edr/demo/20260926_1200_demo_b_nodw_demo_gabc1234/pnr
+command: fc_shell -f /scratch/me/edr/demo/20260926_1200_demo_b_nodw_demo_gabc1234/pnr/run.tcl
+owner run: b_nodw@demo (dead)
+the same as: ssh hostA 'grep -qz "^EDR_RUN_ID=20260926_1200_demo_b_nodw_demo_gabc1234$" /proc/5120/environ && kill 5120'
+```
+
+The yes reads the process once more and sends `SIGTERM` only when the
+start time and `EDR_RUN_ID` are still those of the question; else it
+kills nothing and says why. Mail and ntfy show the two buttons as
+these command lines.
 
 `clock`: the clock of a host is more than 60 s off the head node.
 

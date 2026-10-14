@@ -170,7 +170,8 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
     """Our tool processes that no live run of a registered project owns, each with the project it belongs to.
 
     A process with `EDR_RUN_ID` belongs to that run, of whichever project has it. A live run owns it; a
-    run whose heartbeat ended, or whose driver is gone after `dead_s`, leaves it an orphan. A run id
+    run whose driver is gone after `dead_s` leaves it an orphan, and so does a run whose heartbeat ended, once
+    `orphan_min_age_s` has passed since that heartbeat, so that a tool still on its way down raises no alert. A run id
     that no project knows belongs to an unregistered project and is left alone, unless the cwd or
     the command line of the process lies in the tree `/<project>/<run_id>` of a registered project
     under its safety marker. A process without `EDR_RUN_ID` is owned when its cwd or command line
@@ -197,6 +198,8 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
                 if any(not s for _, _, s in states):
                     continue
                 owner, run, ended = states[0]
+                if ended != "dead" and now - float(run.get("updated") or 0) < site.orphan_min_age_s:
+                    continue
             elif proc.run_id:
                 owner = next((p for p in projects.values() if any(
                     p.safety.marker in t and f"/{p.project}/{proc.run_id}" in t for t in texts)), None)
@@ -206,7 +209,9 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
             elif any(p.safety.marker in t for p in projects.values() for t in texts) \
                     or proc.etimes < site.orphan_min_age_s:
                 continue
-            out.append({"key": f"orphan:{host}:{proc.pid}", "host": host, "pid": proc.pid, "label": proc.comm,
+            # The key names the owner too, so a button of the alert finds the process it was sent for.
+            key = f"orphan:{host}:{proc.pid}" + (f":{proc.run_id}" if proc.run_id else "")
+            out.append({"key": key, "host": host, "pid": proc.pid, "label": proc.comm,
                         "phase": proc.args, "etimes": proc.etimes, "cwd": proc.cwd, "owner": proc.run_id,
                         "owner_handle": f"{owner.project}/{board.handle(run)}" if run and owner else "", "owner_state": ended,
                         "project": owner.project if owner else "", "run_id": run["run_id"] if run else ""})

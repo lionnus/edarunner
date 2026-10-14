@@ -8,6 +8,7 @@ the facts, and the command to run next.
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,7 +42,27 @@ BUTTONS = {
     "continue": ("Continue", "edr continue {handle}", "asks once more, then runs the stages the tree of the run has "
                                                      "left as one new run on that tree; a task group that held tasks "
                                                      "back runs only those"),
+    "status": ("Status", "edr status {handle}", "replies what `/status <handle>` replies"),
+    "retire": ("Retire", "edr retire {handle} --why {why}", "asks once more, then removes the tree of the run and marks "
+                                                           "it retired, as `edr retire <handle> --why <state>` does"),
+    "check": ("Check", "{cmd}", "reads the start time, the user, the command line, the cwd and `EDR_RUN_ID` of the "
+                                "orphan process on its host"),
+    "end": ("End it", "{cmd}", "reads the orphan process again and asks once more with what ends: the host, the pid, "
+                               "the name, the user, the start time, the cwd, the command line, the owner run and its "
+                               "state, and the same shell line; the yes sends SIGTERM only while the start time and "
+                               "`EDR_RUN_ID` are still those it showed"),
 }
+
+
+def check_line(host: str, pid: int) -> str:
+    """The shell line that shows a process of `host`."""
+    return ("" if host == "local" else f"ssh {host} ") + f"ps -o pid,lstart,etime,user,args -p {pid}"
+
+
+def kill_line(host: str, pid: int, owner: str) -> str:
+    """The shell line that sends SIGTERM to a process of `host` only while it carries `EDR_RUN_ID=<owner>`."""
+    cmd = f'grep -qz "^EDR_RUN_ID={owner}$" /proc/{pid}/environ && kill {pid}'
+    return cmd if host == "local" else f"ssh {host} {shlex.quote(cmd)}"
 
 
 def button(action: str, project: str, **values: str) -> Button:
@@ -127,8 +148,10 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
     A live run on a full host gets Stop, and Free space when the project declares prune targets; a
     keep does not hold off the full-host stop, since a full disk blocks every other user of the
     host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages or held tasks
-    left on its tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show
-    each button as a command line. A run that ended `done` gets the opt-in alert `done`, without log lines."""
+    left on its tree, gets Continue. An alert that tells you to run `edr status <handle>` gets Status, and the
+    alert of an ended run whose next command is `edr retire` gets Retire. Each alert says in one line what its
+    buttons do. Mail and ntfy show each button as a command line. A run that ended `done` gets the opt-in alert
+    `done`, without log lines."""
     h, lim = board.handle(run, runs), project.limits
     host = str(hb.get("host") or run.get("host") or "-")
     why = next((r.split(": ", 1)[1] for r in reasons if r.startswith(state + ": ")), "; ".join(reasons))
@@ -247,6 +270,11 @@ def run_alert(project: Project, run: Row, state: str, reasons: list[str], hb: di
                        f"{project.project} on {host} whose trees have no stage left. On Telegram both ask once more."
                        if prune else
                        f"{stop}; on Telegram it asks once more.", None))
+    if f"edr status {h}" in (c for _, c in a.todo):
+        a.buttons.append(button("status", project.project, handle=h))
+    if cmd and cmd.startswith("edr retire ") and not board.is_live(hb or run):
+        a.buttons.append(button("retire", project.project, handle=h, why=state))
+        a.todo.append(("Retire removes the tree of the run and marks it retired; on Telegram it asks once more.", None))
     return a
 
 
@@ -261,9 +289,12 @@ def metrics_alert(run: Row, text: str, runs: list[Row] | None = None) -> Alert:
 def orphan_alert(project: Project | None, o: Row) -> Alert:
     """The alert of a tool process that no live run owns; `project` is the one it belongs to, None for none.
 
-    `owner` is the run id of its `EDR_RUN_ID`, and `owner_handle` that run as `project/label@batch`."""
+    `owner` is the run id of its `EDR_RUN_ID`, and `owner_handle` that run as `project/label@batch`. A process with
+    an owner run in a project gets Check and End it; the line that ends it sends SIGTERM only while the process
+    still carries that `EDR_RUN_ID`."""
     host, pid, owner, state = o["host"], int(o["pid"]), o.get("owner"), o.get("owner_state")
     ssh = "" if host == "local" else f"ssh {host} "
+    check, kill = check_line(host, pid), kill_line(host, pid, owner) if owner else f"{ssh}kill {pid}"
     you = f"Your process {o['label']} runs on {host}"
     if not owner:
         title, about = "tool process with no run on", f"{you}, and no edarunner run owns it."
@@ -280,11 +311,13 @@ def orphan_alert(project: Project | None, o: Row) -> Alert:
         [("process", f"{o['label']}, pid {pid}"), ("running for", board.hm(o.get("etimes"))),
          ("directory", o.get("cwd") or "-")],
         cut(o["phase"]),
-        [("Check it:", f"{ssh}ps -o pid,etime,args -p {pid}"),
-         ("If it is yours and stale, end it:", f"{ssh}kill {pid}"),
+        [("Check it:", check),
+         ("If it is yours and stale, end it:", kill),
          (f"edarunner sends it SIGTERM {_after(project)}, since kill_orphan is on." if project and project.limits.kill_orphan
           else "edarunner never kills it, since kill_orphan is off." if project
-          else "edarunner never kills a process that belongs to no project.", None)])
+          else "edarunner never kills a process that belongs to no project.", None)],
+        [button("check", project.project, cmd=check), button("end", project.project, cmd=kill)] if owner and project
+        else [])
 
 
 def clock_alert(host: str, skew: float) -> Alert:

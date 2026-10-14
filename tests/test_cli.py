@@ -211,6 +211,31 @@ def test_the_triage_stops_a_live_run_over_its_budget_and_continues_one_that_ende
     assert "<code>edr continue a@demo</code>" in acts.status_text("a@demo") and "<code>edr " not in acts.status_text("z@demo")
 
 
+def test_end_it_kills_an_orphan_only_while_its_start_time_holds(demo: Path, monkeypatch) -> None:
+    run_id = seed(demo, "a", "KILLED:SIGTERM")
+    config.save_json(home.root() / "census.json", {"ts": time.time(), "hosts": {"local": {}}})
+    starts, cmds = ["Wed Oct 14 23:12:01 2026"], []
+
+    def run(self, host, cmd, timeout_s=None):
+        cmds.append(cmd)
+        return 0, "" if cmd.startswith("kill") else (f"lstart={starts[-1]}\netime=   02:00\nuser=me\ncomm=dgcom_exec\n"
+                                                    f"args=dgcom_exec -x\ncwd=/w\nrun_id={run_id}\n"), ""
+
+    monkeypatch.setattr(Ssh, "run", run)
+    acts, key = cli.Actions(cli.Ctx(argparse.Namespace(json=False, dry_run=False))), f"orphan:local:4711:{run_id}"
+    shown = acts.orphan(key)
+    assert (shown["comm"], shown["etime"], shown["owner_handle"], shown["state"]) == ("dgcom_exec", "02:00", "a@demo", "killed")
+    starts.append("Wed Oct 14 23:20:00 2026")  # the pid now names another process
+    with pytest.raises(Refuse, match="started Wed Oct 14 23:20:00 2026, not Wed Oct 14 23:12:01 2026; nothing killed"):
+        acts.end_orphan(key, shown, "telegram")
+    assert not [c for c in cmds if c.startswith("kill")]
+    starts.pop()
+    assert acts.end_orphan(key, shown, "telegram") == "orphan: TERM pid 4711 on local" and cmds[-1] == "kill -TERM 4711"
+    assert [(e["actor"], e["kind"]) for e in acts.c.db.events(run_id=run_id, kind="kill")] == [("telegram", "kill")]
+    with pytest.raises(Refuse, match="no host of the census"):
+        acts.orphan(f"orphan:hostZ:4711:{run_id}")
+
+
 def test_the_triage_continues_a_stopped_run_with_work_left_and_retires_one_without(demo: Path, capsys) -> None:
     a = seed(demo, "a", "STOPPED")
     ran(demo, a, "STOPPED", {"synth": ("done", 0), "pnr": ("done", 0)})  # export and power are left

@@ -122,7 +122,8 @@ def test_a_run_that_ended_at_the_end_of_a_stage_offers_the_stages_left(env: Env)
     over, stopped = env.notifier.alerts[rid("o")], env.notifier.alerts[rid("s")]
     assert [b[:2] for b in over.buttons] == [("Continue", "continue:demo")] and over.about.endswith("It did not run export and power.")
     assert over.todo[0] == ("Run the stages left on the same tree:", "edr continue o@demo")
-    assert stopped.buttons == [] and stopped.about == "A stop ended the run in stage power."
+    assert [b[:2] for b in stopped.buttons] == [("Status", "status:demo")]
+    assert stopped.about == "A stop ended the run in stage power."
 
 
 def test_a_group_that_held_tasks_back_offers_them(env: Env) -> None:
