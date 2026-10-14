@@ -753,8 +753,11 @@ driver sets it for every stage command of every project.
 - A process without `EDR_RUN_ID` raises no alert until it has run for
   `orphan_min_age_s` of the site, 5 min by default, so a short `vsim` by
   hand stays quiet. The age counts from the start of the process, so a
-  restart of the watcher does not reset it. A process that a run of
-  edarunner left behind alerts at once.
+  restart of the watcher does not reset it.
+- A process of a run whose heartbeat ended raises no alert until
+  `orphan_min_age_s` has passed since that heartbeat, so a tool that is
+  still on its way down after `edr stop` stays quiet. A run whose driver
+  is gone has waited `dead_s` already, so its processes alert at once.
 
 A tool process that no run owns:
 

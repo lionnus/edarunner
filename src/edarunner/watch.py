@@ -76,7 +76,8 @@ STATES = {
     "superseded": State("a newer batch runs the same label at another source",
                         "`stop --after-task`, while no keep holds", alert=True),
     "orphan": State("a process of the current user that matches `tool_procs` and that no live run owns: its "
-                    "`EDR_RUN_ID` names a run of a registered project that ended or whose driver is gone, or an "
+                    "`EDR_RUN_ID` names a run of a registered project whose heartbeat ended `orphan_min_age_s` ago or whose "
+                    "driver is gone, or an "
                     "unknown run whose tree `/<project>/<run_id>` holds the process, or it has no `EDR_RUN_ID` and "
                     "no safety marker of a registered project in its cwd or command line and has run for "
                     "`orphan_min_age_s`",

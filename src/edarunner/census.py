@@ -170,7 +170,8 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
     """Our tool processes that no live run of a registered project owns, each with the project it belongs to.
 
     A process with `EDR_RUN_ID` belongs to that run, of whichever project has it. A live run owns it; a
-    run whose heartbeat ended, or whose driver is gone after `dead_s`, leaves it an orphan. A run id
+    run whose driver is gone after `dead_s` leaves it an orphan, and so does a run whose heartbeat ended, once
+    `orphan_min_age_s` has passed since that heartbeat, so that a tool still on its way down raises no alert. A run id
     that no project knows belongs to an unregistered project and is left alone, unless the cwd or
     the command line of the process lies in the tree `/<project>/<run_id>` of a registered project
     under its safety marker. A process without `EDR_RUN_ID` is owned when its cwd or command line
@@ -197,6 +198,8 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
                 if any(not s for _, _, s in states):
                     continue
                 owner, run, ended = states[0]
+                if ended != "dead" and now - float(run.get("updated") or 0) < site.orphan_min_age_s:
+                    continue
             elif proc.run_id:
                 owner = next((p for p in projects.values() if any(
                     p.safety.marker in t and f"/{p.project}/{proc.run_id}" in t for t in texts)), None)

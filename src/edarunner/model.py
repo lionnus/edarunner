@@ -195,7 +195,9 @@ class Site:
     ssh_timeout_s: int = doc("seconds a remote command may take", 45, key="ssh.timeout_s")
     tool_procs: str = doc("a regex over process names, for the orphan check and the host table", "")
     orphan_min_age_s: int = doc("seconds since its start before a tool process without `EDR_RUN_ID` and outside "
-                                "every project counts as an orphan; a short tool call by hand raises no alert", 300)
+                                "every project counts as an orphan, and seconds since the last heartbeat of an "
+                                "ended run before a tool process of that run does; a short tool call by hand and "
+                                "a tool on its way down raise no alert", 300)
     host_free_min_gb: float = doc("free scratch below which the driver starts nothing new on a host and placement "
                                   "sends no run there; one floor per disk, whatever project fills it", 100.0)
     nfs_export: str = doc("a path the head node reads when ssh to a host fails at collect", "")

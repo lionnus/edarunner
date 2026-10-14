@@ -55,8 +55,10 @@ says how it combines with the project's own `[env]`. `tool_procs` is a
 regular expression over process names, which the orphan check and
 `edr hosts` use to find your tool processes. `orphan_min_age_s`, 300 s
 by default, is how long such a process must run before the orphan check
-alerts about it, when no edarunner run started it; a process that an
-ended run left behind alerts at once. The host `local` is the
+alerts about it, when no edarunner run started it. A process that an
+ended run left behind alerts once the same time has passed since the
+last heartbeat of the run, so a tool that is still on its way down
+after a stop raises no alert. The host `local` is the
 head node itself, reached without ssh.
 
 `host_free_min_gb`, 100 GB by default, is the floor of every scratch
