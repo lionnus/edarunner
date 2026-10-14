@@ -69,12 +69,12 @@ def head(project: str, title: str) -> str:
 
 
 def alert(project: str, a: Alert) -> str:
-    """An alert: the mark and the bold title, then what was seen, the facts, the log lines in a <pre> block and each
-    command in monospace."""
+    """An alert: the mark and the bold title, then what was seen, the facts, and the log lines, the command line of
+    the process and each command to run, each in its own <pre> block, so a tap copies it whole."""
     from edarunner.notify.alerts import blocks
 
     title = f"{MARK.get(a.kind, '🔴')} <b>{esc(project)}: {esc(a.title)}</b>" + (f" <code>{esc(a.who)}</code>" if a.who else "")
-    return fit(title + "\n" + blocks(a, lambda c: f"<code>{esc(c)}</code>", esc, lambda lines: pre("\n".join(lines))))
+    return fit(title + "\n" + blocks(a, pre, esc, lambda lines: pre("\n".join(lines))))
 
 
 # A state in plain words, for the legend under a board.

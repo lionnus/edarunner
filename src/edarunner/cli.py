@@ -44,7 +44,7 @@ from .db import Database, SchemaError, has_label, network_fs, pick
 from .guards import Refuse, assert_run_id, assert_safe_target
 from .hosts import HostError, HostProbe, Ssh, floor, probe_all
 from .model import SCHEDULERS, Batch, Job, Placement, Project, Stage
-from .notify import digest, make_notifiers, untag
+from .notify import alerts, digest, make_notifiers, untag
 from .notify.telegram import format as tgfmt
 from .notify.telegram.bot import REPLY_DAYS
 
@@ -403,6 +403,12 @@ def _metrics_table(rows: list[Row], root: Path) -> Table | str:
                        right=("step", "value")) if rows else "no metrics"
 
 
+# Each field of a process as one `name=value` line; exit 3 when the pid is gone.
+_PROC = ("p={pid}; [ -d /proc/$p ] || exit 3; for f in lstart etime user comm args; do echo \"$f=$(ps -o $f= -p $p)\"; "
+         "done; echo \"cwd=$(readlink /proc/$p/cwd)\"; "
+         "echo \"run_id=$(tr '\\0' '\\n' </proc/$p/environ | sed -n 's/^EDR_RUN_ID=//p')\"")
+
+
 def _keep(c: Ctx, row: Row, hours: int, actor: str) -> str:
     """Write the keep file next to the spec: `hours` more on the budget, and the watcher waits that long."""
     run_id, note = row["run_id"], f"keep {hours} h"
@@ -456,9 +462,63 @@ class Actions:
                                   "why": f"{row['host']} full: {actor}"})
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = cmd_retire(self.c, a)
+            code = cmd_retire(self.c, a, actor)
         return (out.getvalue().strip() or f"no finished run of {self.c.project.project} with a tree on {row['host']}") + (
             "" if code == Exit.DONE else f"\nexit {int(code)}")
+
+    def retire(self, handle: str, actor: str) -> str:
+        """Remove the tree of one run and mark it retired, as edr retire <handle> --why <state> does."""
+        a = argparse.Namespace(**{**vars(self.c.a), "handle": handle, "batch": None, "host": None, "prune": None,
+                                  "collect": None, "uncollected": False, "dry_run": False,
+                                  "why": board.state_of(self.c.resolve(handle))})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cmd_retire(self.c, a, actor)
+        return out.getvalue().strip() + ("" if code == Exit.DONE else f"\nexit {int(code)}")
+
+    def orphan(self, key: str) -> dict[str, str]:
+        """The process of the orphan alert `key`, `orphan:<host>:<pid>:<owner>`, as its host shows it now, with its
+        owner run and that run's state. Refuse a host the census did not see, and a process that is gone, no longer
+        carries `EDR_RUN_ID=<owner>`, or whose run runs again."""
+        _, host, pid_text, owner = key.split(":", 3)
+        pid = int(pid_text)
+        if host not in (census.read(float("inf")).get("hosts") or {}):
+            raise Refuse(f"{host}: no host of the census")
+        rc, out, err = self.c.ssh.run(host, _PROC.format(pid=pid))
+        if rc == 3:
+            raise Refuse(f"pid {pid} is gone from {host}")
+        if rc:
+            raise Refuse(f"{host}: {err.strip() or f'exit {rc}'}")
+        found = {k: v.strip() for k, v in (ln.split("=", 1) for ln in out.splitlines() if "=" in ln)}
+        if found.get("run_id") != owner:
+            raise Refuse(f"pid {pid} on {host} carries EDR_RUN_ID={found.get('run_id') or '(none)'}, not {owner}")
+        row = self.c.db.run(owner)
+        state = board.state_of({**row, **self.c.heartbeat(row)}) if row else "unknown"
+        if state == "running":
+            raise Refuse(f"the run {owner} of pid {pid} on {host} runs again")
+        return {**found, "args": alerts.cut(found.get("args", ""), 1000), "host": host, "pid": str(pid), "owner": owner,
+                "state": state,
+                "owner_handle": board.handle(row, self.c.db.runs()) if row else owner,
+                "line": alerts.kill_line(host, pid, owner)}
+
+    def check_orphan(self, key: str) -> str:
+        """What the host shows now of the process of the orphan alert `key`."""
+        p = self.orphan(key)
+        return (f"pid {p['pid']} on {p['host']}: {p['comm']}, user {p['user']}, started {p['lstart']}, running for "
+                f"{p['etime']}\ncwd: {p['cwd']}\ncommand: {p['args']}\nEDR_RUN_ID: {p['owner']} "
+                f"({p['owner_handle']}, {p['state']})")
+
+    def end_orphan(self, key: str, shown: dict[str, str], actor: str) -> str:
+        """Send SIGTERM to the process of the orphan alert `key` while its start time and `EDR_RUN_ID` are still those
+        of `shown`, and record the kill."""
+        now = self.orphan(key)
+        if now["lstart"] != shown.get("lstart"):
+            raise Refuse(f"pid {now['pid']} on {now['host']} started {now['lstart']}, not {shown.get('lstart')}; "
+                         "nothing killed")
+        rc, _, err = self.c.ssh.run(now["host"], f"kill -TERM {int(now['pid'])}")
+        text = f"orphan: TERM pid {now['pid']} on {now['host']}" + (f": {err.strip()}" if rc else "")
+        self.c.db.add_event(actor, now["owner"], "kill", text)
+        return text
 
     def stop_after_task(self, handle: str, actor: str, why: str) -> str:
         c, row = self.c, self.c.resolve(handle)
@@ -1476,7 +1536,7 @@ def cmd_stop(c: Ctx, a: argparse.Namespace) -> int:
     return Exit.DONE if ok else Exit.HOSTS
 
 
-def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
+def cmd_retire(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
     """Remove the run tree, or the prune targets, after the guard; --batch marks RETIRED."""
     if sum(map(bool, (a.handle, a.batch, a.host))) != 1:
         raise Refuse("retire needs one of a handle, --batch and --host")
@@ -1523,7 +1583,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
             if res.failures:
                 raise Refuse(f"{row['run_id']}: collect {name}: {res.failures[0]}; nothing removed")
             if not a.dry_run:
-                c.db.add_event("user", row["run_id"], "collect", f"{name}: {res.files} files")
+                c.db.add_event(actor, row["run_id"], "collect", f"{name}: {res.files} files")
     failed, done = 0, []
     for row, hb, host, root, targets in checked:
         run_id = row["run_id"]
@@ -1547,7 +1607,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
             c.db.upsert_run({"run_id": run_id, "phase": phase, "exit": 1, "state": "retired"})
         elif not a.prune:
             c.db.upsert_run({"run_id": run_id, "state": "retired"})
-        c.db.add_event("user", run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
+        c.db.add_event(actor, run_id, "prune" if a.prune else "retire", f"{a.why}: " + (" ".join(targets) or "no tree"))
         done.append(run_id)
     if a.batch and not a.prune and not a.dry_run:
         (project.state_dir / a.batch).mkdir(parents=True, exist_ok=True)
@@ -1558,7 +1618,7 @@ def cmd_retire(c: Ctx, a: argparse.Namespace) -> int:
         if not a.dry_run:
             try:
                 shutil.rmtree(worktree)
-                c.db.add_event("user", "", "retire", f"{a.why}: worktree {worktree}")
+                c.db.add_event(actor, "", "retire", f"{a.why}: worktree {worktree}")
             except OSError as e:
                 failed += 1
                 print(f"{a.batch}: worktree not removed: {e}", file=sys.stderr)

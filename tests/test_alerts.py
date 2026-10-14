@@ -78,12 +78,12 @@ EXPECTED = {
         'process: fc_shell, pid 4711\n'
         'running for: 3h\n'
         'directory: /home/me/work\n'
-        '<code>fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…</code>\n'
+        '<pre>fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…</pre>\n'
         '\n'
         'Check it:\n'
-        '<code>ssh hostA ps -o pid,etime,args -p 4711</code>\n'
+        '<pre>ssh hostA ps -o pid,lstart,etime,user,args -p 4711</pre>\n'
         'If it is yours and stale, end it:\n'
-        '<code>ssh hostA kill 4711</code>\n'
+        '<pre>ssh hostA kill 4711</pre>\n'
         'edarunner never kills a process that belongs to no project.',
         '🔴 demo: tool process with no run on hostA\n'
         'Your process fc_shell runs on hostA, and no edarunner run owns it. It may hold a licence seat.\n'
@@ -94,7 +94,7 @@ EXPECTED = {
         '    fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…\n'
         '\n'
         'Check it:\n'
-        '    ssh hostA ps -o pid,etime,args -p 4711\n'
+        '    ssh hostA ps -o pid,lstart,etime,user,args -p 4711\n'
         'If it is yours and stale, end it:\n'
         '    ssh hostA kill 4711\n'
         'edarunner never kills a process that belongs to no project.\n',
@@ -106,12 +106,12 @@ EXPECTED = {
         'process: fc_shell, pid 4711\n'
         'running for: 3h\n'
         'directory: /home/me/work\n'
-        '<code>fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…</code>\n'
+        '<pre>fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…</pre>\n'
         '\n'
         'Check it:\n'
-        '<code>ssh hostA ps -o pid,etime,args -p 4711</code>\n'
+        '<pre>ssh hostA ps -o pid,lstart,etime,user,args -p 4711</pre>\n'
         'If it is yours and stale, end it:\n'
-        '<code>ssh hostA kill 4711</code>\n'
+        '<pre>ssh hostA \'grep -qz "^EDR_RUN_ID=20260926_1200_b_demo_gabc1234$" /proc/4711/environ &amp;&amp; kill 4711\'</pre>\n'
         'edarunner never kills it, since kill_orphan is off.',
         '🔴 demo: tool process of an ended run on hostA\n'
         'Your process fc_shell runs on hostA for the run demo/b@demo, whose driver is gone. It may hold a licence seat.\n'
@@ -122,10 +122,13 @@ EXPECTED = {
         '    fc_shell -f /home/me/work/run.tcl -x yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…\n'
         '\n'
         'Check it:\n'
-        '    ssh hostA ps -o pid,etime,args -p 4711\n'
+        '    ssh hostA ps -o pid,lstart,etime,user,args -p 4711\n'
         'If it is yours and stale, end it:\n'
-        '    ssh hostA kill 4711\n'
-        'edarunner never kills it, since kill_orphan is off.\n',
+        '    ssh hostA \'grep -qz "^EDR_RUN_ID=20260926_1200_b_demo_gabc1234$" /proc/4711/environ && kill 4711\'\n'
+        'edarunner never kills it, since kill_orphan is off.\n'
+        '\n'
+        'Check: ssh hostA ps -o pid,lstart,etime,user,args -p 4711\n'
+        'End it: ssh hostA \'grep -qz "^EDR_RUN_ID=20260926_1200_b_demo_gabc1234$" /proc/4711/environ && kill 4711\'\n',
     ),
     'dead': (
         '🔴 <b>demo: driver gone for</b> <code>b@demo</code>\n'
@@ -137,7 +140,7 @@ EXPECTED = {
         '<pre>Information: elaborating top</pre>\n'
         '\n'
         'Resume it from the last step:\n'
-        '<code>edr continue b@demo --stage synth --from elaborate</code>\n'
+        '<pre>edr continue b@demo --stage synth --from elaborate</pre>\n'
         'edarunner resumes it once by itself when the stage has a resume command.',
         '🔴 demo: driver gone for b@demo\n'
         'The run has written no heartbeat for 50m, and its driver 4711 is gone from hostA. Nothing runs until it is resumed.\n'
@@ -161,7 +164,7 @@ EXPECTED = {
         '<pre>Information: elaborating top</pre>\n'
         '\n'
         'If it is stuck, stop it:\n'
-        '<code>edr stop b@demo --why hung</code>\n'
+        '<pre>edr stop b@demo --why hung</pre>\n'
         'edarunner sends SIGTERM to its processes 1h after this alert unless it has a keep.\n'
         '+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.',
         '🔴 demo: no progress in b@demo\n'
@@ -192,7 +195,7 @@ EXPECTED = {
         '<pre>Information: elaborating top</pre>\n'
         '\n'
         'Stop it now if the rest of the stage is of no use:\n'
-        '<code>edr stop b@demo --why over-budget</code>\n'
+        '<pre>edr stop b@demo --why over-budget</pre>\n'
         '+6h, +12h and +24h give the run that much more time on its budget, and for that long edarunner takes no automatic action on it unless its host runs out of scratch. Stop ends the run after its current task; on Telegram it asks once more.',
         '🔴 demo: over budget in b@demo\n'
         'Stage synth went past its budget of 1 h and 1 GB. The stage runs to its end; more time on the budget before then lets the run go on.\n'
@@ -221,7 +224,7 @@ EXPECTED = {
         '<pre>Information: elaborating top</pre>\n'
         '\n'
         'Run the stages left on the same tree:\n'
-        '<code>edr continue b@demo</code>\n'
+        '<pre>edr continue b@demo</pre>\n'
         'Continue runs pnr and export as one new run on hostA, in the tree /scratch/user/edr/demo/b. On Telegram it asks once more.',
         '🔴 demo: over budget in b@demo\n'
         'Stage synth went past its budget of 1 h and 1 GB. The run ended OVER_BUDGET. It did not run pnr and export.\n'
@@ -247,7 +250,7 @@ EXPECTED = {
         '<pre>Information: elaborating top</pre>\n'
         '\n'
         'Run the stages left on the same tree:\n'
-        '<code>edr continue b@demo</code>\n'
+        '<pre>edr continue b@demo</pre>\n'
         'Continue runs pnr as one new run on hostA, in the tree /scratch/user/edr/demo/b. On Telegram it asks once more.',
         '⚫ demo: stopped run b@demo\n'
         'A stop ended the run in stage synth. It did not run pnr.\n'
@@ -270,7 +273,7 @@ EXPECTED = {
         'job: slurm:4711\n'
         '\n'
         'Release it with the scheduler, or cancel it:\n'
-        '<code>edr stop b@demo --why held</code>',
+        '<pre>edr stop b@demo --why held</pre>',
         '🟠 demo: scheduler holds b@demo\n'
         'The scheduler holds the job, and it starts only after someone releases it.\n'
         '\n'
@@ -287,7 +290,7 @@ EXPECTED = {
         'host: hostA\n'
         '\n'
         'See its numbers:\n'
-        '<code>edr metrics --run b@demo</code>',
+        '<pre>edr metrics --run b@demo</pre>',
         '⚪ demo: run done b@demo\n'
         'The run ended done after 1h.\n'
         '\n'
@@ -302,7 +305,7 @@ EXPECTED = {
         '6 new: area_um2, wns_ns at pnr 8, 9.\n'
         '\n'
         'See them:\n'
-        '<code>edr metrics --run b@demo</code>',
+        '<pre>edr metrics --run b@demo</pre>',
         '⚪ demo: new metrics of b@demo\n'
         '6 new: area_um2, wns_ns at pnr 8, 9.\n'
         '\n'
@@ -344,9 +347,17 @@ def test_which_alert_gets_which_buttons():
     assert [b[0] for b in alerts.run_alert(bare, RUN, "host_full", ["host_full: x"], HB, NOW).buttons] == ["Stop"]
     killing = replace(PROJECT, stages={**PROJECT.stages, "synth": replace(PROJECT.stages["synth"], budget=replace(
         PROJECT.stages["synth"].budget, kill=True))})
-    for project, state, hb in ((PROJECT, "over_budget", {**HB, "phase": "OVER_BUDGET:synth", "exit": 9}),
-                               (killing, "over_budget", HB), (PROJECT, "dead", HB), (PROJECT, "failed", {"phase": "FAILED:synth"})):
-        assert alerts.run_alert(project, RUN, state, [], hb, NOW).buttons == [], state
+    for project, state, hb, labels in ((PROJECT, "over_budget", {**HB, "phase": "OVER_BUDGET:synth", "exit": 9}, ["Status"]),
+                                       (killing, "over_budget", HB, ["Status"]), (PROJECT, "dead", HB, [])):
+        assert [b[0] for b in alerts.run_alert(project, RUN, state, [], hb, NOW).buttons] == labels, state
+    failed = alerts.run_alert(PROJECT, {**ENDED, "phase": "FAILED:synth"}, "failed", [], {"phase": "FAILED:synth"}, NOW)
+    assert [(b[1], b[2]) for b in failed.buttons] == [("status:demo", "edr status b@demo"),
+                                                      ("retire:demo", "edr retire b@demo --why failed")]
+    assert [b[1] for b in alerts.run_alert(PROJECT, RUN, "failed", [], {"phase": "FAILED:synth"}, NOW).buttons] == [
+        "status:demo"]  # no tree, so nothing to retire
+    orphan = ALERTS["orphan of a dead run"]
+    assert [(b[0], b[1]) for b in orphan.buttons] == [("Check", "check:demo"), ("End it", "end:demo")]
+    assert ALERTS["orphan"].buttons == []
     assert [(b[0], b[1]) for b in ALERTS["over_budget, ended"].buttons] == [("Continue", "continue:demo")]
     assert [(b[0], b[1]) for b in ALERTS["stopped"].buttons] == [("Continue", "continue:demo")]
     assert alerts.run_alert(PROJECT, ENDED, "stopped", [], {**HB, "phase": "STOPPED"}, NOW).todo == [

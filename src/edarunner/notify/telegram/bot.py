@@ -299,11 +299,14 @@ class TelegramBot(Notifier):
         return ok
 
     def _press(self, q: dict) -> None:
-        """Answer a button press and rewrite its alert."""
-        assert self.buttons is not None
+        """Answer a button press and rewrite its alert; a press that names a command gets that command's reply too."""
+        assert self.buttons is not None and self.commands is not None
         p = self.buttons.press(q)
         self._call(self.api.answer_callback, q["id"], p.answer)
         m = q.get("message")
         if m:
             # Plain text plus the old entities keeps the bold title; a note goes after the last entity.
             self._call(self.api.edit_message, self.chat_id, m["message_id"], p.text, p.markup, m.get("entities") or [])
+        if p.command:
+            thread = (m or {}).get("message_thread_id") if (m or {}).get("is_topic_message") else None
+            self._reply(self.commands.run(p.command[0], p.command[1:], "/" + " ".join(p.command), None, None), thread)

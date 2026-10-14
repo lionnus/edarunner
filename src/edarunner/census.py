@@ -209,7 +209,9 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
             elif any(p.safety.marker in t for p in projects.values() for t in texts) \
                     or proc.etimes < site.orphan_min_age_s:
                 continue
-            out.append({"key": f"orphan:{host}:{proc.pid}", "host": host, "pid": proc.pid, "label": proc.comm,
+            # The key names the owner too, so a button of the alert finds the process it was sent for.
+            key = f"orphan:{host}:{proc.pid}" + (f":{proc.run_id}" if proc.run_id else "")
+            out.append({"key": key, "host": host, "pid": proc.pid, "label": proc.comm,
                         "phase": proc.args, "etimes": proc.etimes, "cwd": proc.cwd, "owner": proc.run_id,
                         "owner_handle": f"{owner.project}/{board.handle(run)}" if run and owner else "", "owner_state": ended,
                         "project": owner.project if owner else "", "run_id": run["run_id"] if run else ""})

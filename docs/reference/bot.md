@@ -67,8 +67,10 @@ A live run that is `hung`, `looping`, `over_budget` or `superseded` gets Stop, +
 A live run on a full host gets Stop, and Free space when the project declares prune targets; a
 keep does not hold off the full-host stop, since a full disk blocks every other user of the
 host. A run that ended `OVER_BUDGET` or `STOPPED` at the end of a stage, with stages or held tasks
-left on its tree, gets Continue. Each alert says in one line what its buttons do. Mail and ntfy show
-each button as a command line. A run that ended `done` gets the opt-in alert `done`, without log lines.
+left on its tree, gets Continue. An alert that tells you to run `edr status <handle>` gets Status, and the
+alert of an ended run whose next command is `edr retire` gets Retire. Each alert says in one line what its
+buttons do. Mail and ntfy show each button as a command line. A run that ended `done` gets the opt-in alert
+`done`, without log lines.
 
 | Button | callback_data | Effect |
 |---|---|---|
@@ -78,6 +80,10 @@ each button as a command line. A run that ended `done` gets the opt-in alert `do
 | +24h | `keep24:<project>` | the same for 24 hours |
 | Free space | `free:<project>` | asks once more, then removes the prune targets of the finished runs of the project on the full host; a run whose tree has stages left keeps them |
 | Continue | `continue:<project>` | asks once more, then runs the stages the tree of the run has left as one new run on that tree; a task group that held tasks back runs only those |
+| Status | `status:<project>` | replies what `/status <handle>` replies |
+| Retire | `retire:<project>` | asks once more, then removes the tree of the run and marks it retired, as `edr retire <handle> --why <state>` does |
+| Check | `check:<project>` | reads the start time, the user, the command line, the cwd and `EDR_RUN_ID` of the orphan process on its host |
+| End it | `end:<project>` | reads the orphan process again and asks once more with what ends: the host, the pid, the name, the user, the start time, the cwd, the command line, the owner run and its state, and the same shell line; the yes sends SIGTERM only while the start time and `EDR_RUN_ID` are still those it showed |
 
 ## Custom commands
 

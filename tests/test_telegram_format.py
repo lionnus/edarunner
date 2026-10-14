@@ -4,7 +4,16 @@ import time
 
 from helpers_board import NOW, RUN, board_row, board_rows
 
+from edarunner.notify.alerts import Alert
 from edarunner.notify.telegram import format as fmt
+
+
+def test_an_alert_puts_the_command_line_and_each_command_in_its_own_pre_block():
+    a = Alert("orphan", "k", "tool process on", "hostA", "seen", code="fc_shell -f run.tcl",
+              todo=[("Check it:", "ps -p 1"), ("End it:", "kill 1 && echo <ok>"), ("Nothing more.", None)])
+    assert fmt.alert("demo", a).split("\n")[1:] == [
+        "seen", "", "<pre>fc_shell -f run.tcl</pre>", "", "Check it:", "<pre>ps -p 1</pre>", "End it:",
+        "<pre>kill 1 &amp;&amp; echo &lt;ok&gt;</pre>", "Nothing more."]
 
 
 def test_board_has_running_and_finished_sections_then_the_counts_and_a_legend():
