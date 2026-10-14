@@ -1,0 +1,6 @@
+run_id,label,config,build_tag,source,host,stage,step,task,metric,canonical,value,unit,source_file,record
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,floorplan,,,area_floorplan_um2,design__instance__area,698.25,um2,logs/nangate45/gcd/base/2_1_floorplan.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,floorplan,,,wns_floorplan_ns,timing__setup__ws,-0.155306,ns,logs/nangate45/gcd/base/2_1_floorplan.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,place,,,area_place_um2,design__instance__area,827.526,um2,logs/nangate45/gcd/base/3_5_place_dp.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,place,,,wns_place_ns,timing__setup__ws,-0.151547,ns,logs/nangate45/gcd/base/3_5_place_dp.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,synth,,,area_synth_um2,design__instance__area,626.696,um2,reports/nangate45/gcd/base/synth_stat.txt:56,

@@ -1,0 +1,206 @@
+﻿2026-10-14T23:18:46.7422135Z Current runner version: '2.337.0'
+2026-10-14T23:18:46.7442821Z ##[group]Runner Image Provisioner
+2026-10-14T23:18:46.7443502Z Hosted Compute Agent
+2026-10-14T23:18:46.7443943Z Version: 20261002.596
+2026-10-14T23:18:46.7444326Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-14T23:18:46.7444800Z Build Date: 2026-10-02T22:28:27Z
+2026-10-14T23:18:46.7445257Z Worker ID: {4d09b2da-b32a-4007-9476-06d303c73288}
+2026-10-14T23:18:46.7445678Z Region: centralus
+2026-10-14T23:18:46.7446046Z Cloud: Azure
+2026-10-14T23:18:46.7446378Z ##[endgroup]
+2026-10-14T23:18:46.7447388Z ##[group]Operating System
+2026-10-14T23:18:46.7447800Z Ubuntu
+2026-10-14T23:18:46.7448127Z 24.04.5
+2026-10-14T23:18:46.7448478Z LTS
+2026-10-14T23:18:46.7448801Z ##[endgroup]
+2026-10-14T23:18:46.7449127Z ##[group]Runner Image
+2026-10-14T23:18:46.7449597Z Image: ubuntu-24.04
+2026-10-14T23:18:46.7449946Z Version: 20261004.327.1
+2026-10-14T23:18:46.7450779Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-14T23:18:46.7452046Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-14T23:18:46.7452788Z ##[endgroup]
+2026-10-14T23:18:46.7453455Z ##[group]GITHUB_TOKEN Permissions
+2026-10-14T23:18:46.7454958Z Contents: read
+2026-10-14T23:18:46.7455314Z Metadata: read
+2026-10-14T23:18:46.7455755Z ##[endgroup]
+2026-10-14T23:18:46.7457229Z Secret source: Actions
+2026-10-14T23:18:46.7457802Z Cache mode: write
+2026-10-14T23:18:46.7458390Z Prepare workflow directory
+2026-10-14T23:18:46.7690370Z Prepare all required actions
+2026-10-14T23:18:46.7723394Z Getting action download info
+2026-10-14T23:18:46.9785385Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-14T23:18:47.0780310Z Download action repository 'astral-sh/setup-uv@v6' (SHA:d0cc045d04ccac9d8b7881df0226f9e82c39688e)
+2026-10-14T23:18:47.8059177Z Complete job name: docs
+2026-10-14T23:18:47.8591946Z ##[group]Run actions/checkout@v4
+2026-10-14T23:18:47.8592388Z with:
+2026-10-14T23:18:47.8592914Z   repository: lionnus/edarunner
+2026-10-14T23:18:47.8595327Z   token: ***
+2026-10-14T23:18:47.8595717Z   ssh-strict: true
+2026-10-14T23:18:47.8596073Z   ssh-user: git
+2026-10-14T23:18:47.8596439Z   persist-credentials: true
+2026-10-14T23:18:47.8596750Z   clean: true
+2026-10-14T23:18:47.8596999Z   sparse-checkout-cone-mode: true
+2026-10-14T23:18:47.8597291Z   fetch-depth: 1
+2026-10-14T23:18:47.8597532Z   fetch-tags: false
+2026-10-14T23:18:47.8597781Z   show-progress: true
+2026-10-14T23:18:47.8598030Z   lfs: false
+2026-10-14T23:18:47.8598260Z   submodules: false
+2026-10-14T23:18:47.8598516Z   set-safe-directory: true
+2026-10-14T23:18:47.8598808Z   allow-unsafe-pr-checkout: false
+2026-10-14T23:18:47.8599237Z ##[endgroup]
+2026-10-14T23:18:47.9341927Z Syncing repository: lionnus/edarunner
+2026-10-14T23:18:47.9343730Z ##[group]Getting Git version info
+2026-10-14T23:18:47.9344459Z Working directory is '/home/runner/work/edarunner/edarunner'
+2026-10-14T23:18:47.9345430Z [command]/usr/bin/git version
+2026-10-14T23:18:47.9385763Z git version 2.55.0
+2026-10-14T23:18:47.9402413Z ##[endgroup]
+2026-10-14T23:18:47.9414276Z Temporarily overriding HOME='/home/runner/work/_temp/d65a449d-560e-4bea-8901-4ff614400680' before making global git config changes
+2026-10-14T23:18:47.9415672Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-14T23:18:47.9418554Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-10-14T23:18:47.9466734Z Deleting the contents of '/home/runner/work/edarunner/edarunner'
+2026-10-14T23:18:47.9474117Z ##[group]Initializing the repository
+2026-10-14T23:18:47.9474757Z [command]/usr/bin/git init /home/runner/work/edarunner/edarunner
+2026-10-14T23:18:47.9591624Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-14T23:18:47.9592970Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-14T23:18:47.9594153Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-14T23:18:47.9595272Z hint: call:
+2026-10-14T23:18:47.9595600Z hint:
+2026-10-14T23:18:47.9596022Z hint: 	git config --global init.defaultBranch <name>
+2026-10-14T23:18:47.9596531Z hint:
+2026-10-14T23:18:47.9597033Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-14T23:18:47.9597818Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-14T23:18:47.9598441Z hint:
+2026-10-14T23:18:47.9598769Z hint: 	git branch -m <name>
+2026-10-14T23:18:47.9599146Z hint:
+2026-10-14T23:18:47.9599658Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-14T23:18:47.9600509Z Initialized empty Git repository in /home/runner/work/edarunner/edarunner/.git/
+2026-10-14T23:18:47.9613671Z [command]/usr/bin/git remote add origin https://github.com/lionnus/edarunner
+2026-10-14T23:18:47.9655226Z ##[endgroup]
+2026-10-14T23:18:47.9655905Z ##[group]Disabling automatic garbage collection
+2026-10-14T23:18:47.9659697Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-14T23:18:47.9696901Z ##[endgroup]
+2026-10-14T23:18:47.9697434Z ##[group]Setting up auth
+2026-10-14T23:18:47.9703736Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-14T23:18:47.9739955Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-14T23:18:48.0056106Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-14T23:18:48.0085812Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-14T23:18:48.0266834Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-14T23:18:48.0297657Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-14T23:18:48.0468602Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-14T23:18:48.0502461Z ##[endgroup]
+2026-10-14T23:18:48.0503202Z ##[group]Fetching the repository
+2026-10-14T23:18:48.0510122Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +cbd6dc9afe1540c01517186be39073f555085970:refs/remotes/origin/main
+2026-10-14T23:18:48.6089781Z From https://github.com/lionnus/edarunner
+2026-10-14T23:18:48.6091093Z  * [new ref]         cbd6dc9afe1540c01517186be39073f555085970 -> origin/main
+2026-10-14T23:18:48.6096274Z ##[endgroup]
+2026-10-14T23:18:48.6097095Z ##[group]Determining the checkout info
+2026-10-14T23:18:48.6098028Z ##[endgroup]
+2026-10-14T23:18:48.6099590Z [command]/usr/bin/git sparse-checkout disable
+2026-10-14T23:18:48.6146337Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-14T23:18:48.6178855Z ##[group]Checking out the ref
+2026-10-14T23:18:48.6179992Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-10-14T23:18:48.6328504Z Switched to a new branch 'main'
+2026-10-14T23:18:48.6331302Z branch 'main' set up to track 'origin/main'.
+2026-10-14T23:18:48.6338162Z ##[endgroup]
+2026-10-14T23:18:48.6377045Z [command]/usr/bin/git log -1 --format=%H
+2026-10-14T23:18:48.6401629Z cbd6dc9afe1540c01517186be39073f555085970
+2026-10-14T23:18:48.6704451Z ##[group]Run astral-sh/setup-uv@v6
+2026-10-14T23:18:48.6705220Z with:
+2026-10-14T23:18:48.6705747Z   python-version: 3.11
+2026-10-14T23:18:48.6706390Z   activate-environment: false
+2026-10-14T23:18:48.6707233Z   working-directory: /home/runner/work/edarunner/edarunner
+2026-10-14T23:18:48.6708120Z   server-url: https://github.com
+2026-10-14T23:18:48.6714099Z   github-token: ***
+2026-10-14T23:18:48.6714678Z   enable-cache: auto
+2026-10-14T23:18:48.6716234Z   cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+2026-10-14T23:18:48.6717765Z   restore-cache: true
+2026-10-14T23:18:48.6718335Z   save-cache: true
+2026-10-14T23:18:48.6718875Z   prune-cache: true
+2026-10-14T23:18:48.6719530Z   ignore-nothing-to-cache: false
+2026-10-14T23:18:48.6720235Z   ignore-empty-workdir: false
+2026-10-14T23:18:48.6720928Z   add-problem-matchers: true
+2026-10-14T23:18:48.6721582Z ##[endgroup]
+2026-10-14T23:18:48.8010480Z (node:2100) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-14T23:18:48.8013689Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-14T23:18:48.8147302Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/uv.toml
+2026-10-14T23:18:48.8149497Z Could not find file: /home/runner/work/edarunner/edarunner/uv.toml
+2026-10-14T23:18:48.8151524Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-10-14T23:18:48.8169792Z Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+2026-10-14T23:18:48.8173325Z Getting latest version from GitHub API...
+2026-10-14T23:18:49.1443453Z manifest-file not provided, reading from local file.
+2026-10-14T23:18:49.1444166Z manifest-file does not contain version 0.13.1, arch x86_64, platform unknown-linux-gnu. Falling back to GitHub releases.
+2026-10-14T23:18:49.1444842Z Downloading uv from "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-10-14T23:18:49.5915498Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/cac4cf7e-b94b-41ad-b985-0bf5721b9186 -f /home/runner/work/_temp/0801911b-7c9b-4d7f-b693-12ee140dee6f
+2026-10-14T23:18:49.9592212Z Added /home/runner/.local/bin to the path
+2026-10-14T23:18:49.9598642Z Added /opt/hostedtoolcache/uv/0.13.1/x86_64 to the path
+2026-10-14T23:18:49.9604006Z Set UV_PYTHON to 3.11
+2026-10-14T23:18:49.9626220Z Set UV_CACHE_DIR to /home/runner/work/_temp/setup-uv-cache
+2026-10-14T23:18:49.9626727Z Successfully installed uv version 0.13.1
+2026-10-14T23:18:49.9628413Z Searching files using cache dependency glob: /home/runner/work/edarunner/edarunner/**/*requirements*.txt,/home/runner/work/edarunner/edarunner/**/*requirements*.in,/home/runner/work/edarunner/edarunner/**/*constraints*.txt,/home/runner/work/edarunner/edarunner/**/*constraints*.in,/home/runner/work/edarunner/edarunner/**/pyproject.toml,/home/runner/work/edarunner/edarunner/**/uv.lock,/home/runner/work/edarunner/edarunner/**/*.py.lock
+2026-10-14T23:18:49.9736656Z /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-10-14T23:18:49.9809547Z Found 1 files to hash.
+2026-10-14T23:18:49.9864743Z Trying to restore uv cache from GitHub Actions cache with key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-10-14T23:18:50.1260485Z Cache hit for: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-10-14T23:18:50.1329252Z (node:2100) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-14T23:18:50.9751784Z Received 12354870 of 12354870 (100.0%), 17.3 MBs/sec
+2026-10-14T23:18:50.9752993Z Cache Size: ~12 MB (12354870 B)
+2026-10-14T23:18:50.9770737Z [command]/usr/bin/tar -xf /home/runner/work/_temp/eb7d0505-89ea-40bd-9d23-a28723045a50/cache.tzst -P -C /home/runner/work/edarunner/edarunner --use-compress-program unzstd
+2026-10-14T23:18:51.0122353Z Cache restored successfully
+2026-10-14T23:18:51.0131873Z uv cache restored from GitHub Actions cache with key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-10-14T23:18:51.0274312Z ##[group]Run uv sync
+2026-10-14T23:18:51.0274512Z [36;1muv sync[0m
+2026-10-14T23:18:51.0500574Z shell: /usr/bin/bash -e {0}
+2026-10-14T23:18:51.0500781Z env:
+2026-10-14T23:18:51.0500914Z   UV_PYTHON: 3.11
+2026-10-14T23:18:51.0501094Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-10-14T23:18:51.0501287Z ##[endgroup]
+2026-10-14T23:18:51.1709850Z Downloading cpython-3.11.17-linux-x86_64-gnu (download) (29.4MiB)
+2026-10-14T23:18:51.6862302Z  Downloaded cpython-3.11.17-linux-x86_64-gnu (download)
+2026-10-14T23:18:51.7703294Z Using CPython 3.11.17
+2026-10-14T23:18:51.7703603Z Creating virtual environment at: .venv
+2026-10-14T23:18:52.0765662Z Resolved 127 packages in 305ms
+2026-10-14T23:18:52.0820606Z    Building edarunner @ file:///home/runner/work/edarunner/edarunner
+2026-10-14T23:18:52.1128909Z Downloading pygments (1.2MiB)
+2026-10-14T23:18:52.1814764Z  Downloaded pygments
+2026-10-14T23:18:52.5716589Z       Built edarunner @ file:///home/runner/work/edarunner/edarunner
+2026-10-14T23:18:52.5725369Z Prepared 5 packages in 491ms
+2026-10-14T23:18:52.5793461Z Installed 5 packages in 6ms
+2026-10-14T23:18:52.5793701Z  + edarunner==0.1.0 (from file:///home/runner/work/edarunner/edarunner)
+2026-10-14T23:18:52.5793921Z  + markdown-it-py==4.2.0
+2026-10-14T23:18:52.5794062Z  + mdurl==0.1.2
+2026-10-14T23:18:52.5794199Z  + pygments==2.21.0
+2026-10-14T23:18:52.5794325Z  + rich==15.0.0
+2026-10-14T23:18:52.5920636Z ##[group]Run uv run tools/gen_docs.py --check
+2026-10-14T23:18:52.5920867Z [36;1muv run tools/gen_docs.py --check[0m
+2026-10-14T23:18:52.5976127Z shell: /usr/bin/bash -e {0}
+2026-10-14T23:18:52.5976273Z env:
+2026-10-14T23:18:52.5976385Z   UV_PYTHON: 3.11
+2026-10-14T23:18:52.5976537Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-10-14T23:18:52.5976718Z ##[endgroup]
+2026-10-14T23:18:52.9946626Z Post job cleanup.
+2026-10-14T23:18:53.0722970Z Cache hit occurred on key setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c, not saving cache.
+2026-10-14T23:18:53.0724085Z (node:2165) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-14T23:18:53.0724751Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-14T23:18:53.0831584Z Post job cleanup.
+2026-10-14T23:18:53.1351949Z [command]/usr/bin/git version
+2026-10-14T23:18:53.1382860Z git version 2.55.0
+2026-10-14T23:18:53.1405396Z Temporarily overriding HOME='/home/runner/work/_temp/bc82624c-c94d-4a41-9358-4b085e04d194' before making global git config changes
+2026-10-14T23:18:53.1406142Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-14T23:18:53.1408233Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-10-14T23:18:53.1439200Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-14T23:18:53.1465130Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-14T23:18:53.1659502Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-14T23:18:53.1682897Z http.https://github.com/.extraheader
+2026-10-14T23:18:53.1698806Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-14T23:18:53.1728533Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-14T23:18:53.1920152Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-14T23:18:53.1950602Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-14T23:18:53.2232783Z Cleaning up orphan processes
+2026-10-14T23:18:53.2455853Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, astral-sh/setup-uv@v6. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

@@ -1,0 +1,54 @@
+repo ready at /__w/edarunner/edarunner/examples/openroad-gcd/repo, HEAD 7ff7157
+ok: 1 hosts, 3 stages, 5 metrics, 1 batches
+20261014_2319_gcd_gcd_nangate45_g7ff7157: local /tmp/root/edr/gcd/20261014_2319_gcd_gcd_nangate45_g7ff7157
+20261014_2319_gcd_gcd_nangate45_g7ff7157: local /tmp/root/edr/gcd/20261014_2319_gcd_gcd_nangate45_g7ff7157
+1 started, 0 queued, 0 with problems
+2026-10-14 23:19:57,450 INFO edarunner.watch: 20261014_2319_gcd_gcd_nangate45_g7ff7157: 1 files, 0 new metrics
+2026-10-14 23:20:07,991 INFO edarunner.watch: 20261014_2319_gcd_gcd_nangate45_g7ff7157: 22 files, 3 new metrics
+2026-10-14 23:20:18,502 INFO edarunner.watch: 20261014_2319_gcd_gcd_nangate45_g7ff7157: 10 files, 2 new metrics
+#   label  source   host   state  phase  stage/step  age  fail/done  core-h
+───────────────────────────────────────────────────────────────────────────
+#1  gcd    7ff7157  local  done   done   place        0m      0f/0d     0.0
+20261014_2319_gcd_gcd_nangate45_g7ff7157
+done  place  driver exit 0 (done)
+label gcd  config nangate45  batch gcd  source 7ff7157
+host local  root /tmp/root/edr/gcd/20261014_2319_gcd_gcd_nangate45_g7ff7157
+started 2026-10-14 23:19  updated 2026-10-14 23:20 (0m ago)  cost 0.0 core-h
+disk free 80.959 GB  tree 0.001 GB
+
+stages
+stage      task  attempt  status  command exit  started           ended             took  signature
+───────────────────────────────────────────────────────────────────────────────────────────────────
+floorplan        1        done    0             2026-10-14 23:20  2026-10-14 23:20    0m  -        
+place            1        done    0             2026-10-14 23:20  2026-10-14 23:20    0m  -        
+synth            1        done    0             2026-10-14 23:19  2026-10-14 23:20    0m  -        
+
+samples 2026-10-14 23:19 to 2026-10-14 23:20, from run_samples
+sample     over the run               peak   last  unit  n
+──────────────────────────────────────────────────────────
+CPU        ▁                      ▁      0      0  %     2
+RSS        ▁                █     ▁  0.126      0  GB    3
+tree       █                      █  0.001  0.001  GB    2
+disk free  █                █     █  80.97  80.96  GB    3
+
+metrics
+stage      step  task  name                    value  unit
+──────────────────────────────────────────────────────────
+floorplan     -        area_floorplan_um2     698.25  um2 
+floorplan     -        wns_floorplan_ns    -0.155306  ns  
+place         -        area_place_um2        827.526  um2 
+place         -        wns_place_ns        -0.151547  ns  
+synth         -        area_synth_um2        626.696  um2 
+
+log tail
+Log                       Ext     Elapsed/s Peak Memory/MB sha1sum result [0:20)
+3_5_place_dp              .odb            0            115 b266d993604ee032cf36
+cp /tmp/root/edr/gcd/20261014_2319_gcd_gcd_nangate45_g7ff7157/results/nangate45/gcd/base/3_5_place_…
+make: Leaving directory '/OpenROAD-flow-scripts/flow'
+run_id,label,config,build_tag,source,host,stage,step,task,metric,canonical,value,unit,source_file,record
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,floorplan,,,area_floorplan_um2,design__instance__area,698.25,um2,logs/nangate45/gcd/base/2_1_floorplan.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,floorplan,,,wns_floorplan_ns,timing__setup__ws,-0.155306,ns,logs/nangate45/gcd/base/2_1_floorplan.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,place,,,area_place_um2,design__instance__area,827.526,um2,logs/nangate45/gcd/base/3_5_place_dp.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,place,,,wns_place_ns,timing__setup__ws,-0.151547,ns,logs/nangate45/gcd/base/3_5_place_dp.json,
+20261014_2319_gcd_gcd_nangate45_g7ff7157,gcd,nangate45,nangate45,7ff7157,local,synth,,,area_synth_um2,design__instance__area,626.696,um2,reports/nangate45/gcd/base/synth_stat.txt:56,
+data/exports/7ff7157: 1 runs (0 not done), 0 skipped, 6 files
