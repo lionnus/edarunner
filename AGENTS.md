@@ -139,8 +139,9 @@ number came from before you put it in a table.
 - Never write a site string into the public repository: a host name, a
   licence server, a user name, a chat id. See
   [docs/dev/conventions.md](docs/dev/conventions.md).
-- Never read the private file of a flow under NDA, `data/private/`, or
-  `.edr/private/` of a run tree, and never try to recover a text that
+- Never read the private file of a flow under NDA, `data/private/`, the
+  private part of a checkout, the specs in `<state_dir>` or a run tree, and
+  never try to recover a text that
   edr printed as `‹nda›` or `‹private›`. Tune the tools through the knobs
   that `edr brief` lists; a setting that no knob covers is a request to a
   person. See [docs/guides/private.md](docs/guides/private.md).

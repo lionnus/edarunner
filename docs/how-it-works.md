@@ -255,9 +255,9 @@ agreement. Its raw output stays in `.edr/private/` of the run tree, and
 `log/<stage>.log` gets only the lines that the private file lets
 through, redacted. Its raw reports go to `data/private/` on the head
 node, and the watcher publishes them as public files, with the area in
-gate equivalents, which the metrics read. Every output of edr passes the
-redaction of the private file
-([guides/private.md](guides/private.md)).
+gate equivalents, which the metrics read. What edr prints and sends
+passes the redaction of the private file, and
+[guides/private.md](guides/private.md) says where that boundary ends.
 
 ### The heartbeat
 

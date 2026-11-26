@@ -21,7 +21,7 @@ are yours.
 | stage names, steps, needs, budgets, states | the commands of a private stage, its `resume`, `progress`, `prepare` and `after_each` |
 | tool names and their free seats | the tool scripts, and the lines each knob writes for the tool |
 | the knobs, their types, ranges and help | the private file and every string in it |
-| `log/<stage>.log`: the lines the private file keeps, redacted | the raw output of the tools, in `.edr/private/log/` on the host |
+| `log/<stage>.log`: the lines the private file keeps, redacted by its regexes and its strings | the raw output of the tools, in `.edr/private/log/` on the host |
 | `data/results/<run_id>/public/`: area in GE, timing paths, values | the raw reports, in `data/private/<run_id>/` on the head node |
 | metrics over the public files | `ge_um2`, cell names, library names, PDK paths |
 
@@ -33,9 +33,12 @@ edr.toml                  public: the stages, the knobs, the metrics; the agent 
 data/results/<run>/public the public form of the reports, which the metrics read
 ```
 
-`private` in `edr.toml` names the private file. Keep that file, and the
-scripts it calls, outside the project and outside every directory the
-agent reads, such as a clone of the private part of the flow.
+`private` in `edr.toml` names the private file. Keep it outside the
+project. The scripts it calls usually come with the flow, as a private
+part of the flow repository such as `nonfree/`, so they land in each
+checkout under `source.worktrees` and in each run tree; the agent's
+settings must deny those directories, as
+[the limits](#the-limits-of-the-boundary) below show.
 
 ## Declare the knobs
 
@@ -95,8 +98,14 @@ budget = { hours = 6 }
 ```
 
 `edr check` refuses a private stage that sets `cmd`, `resume`,
-`progress`, `prepare` or `after_each`, and a `collect` path under
-`.edr/private/` of the run tree (`config._check_stage`).
+`progress`, `prepare`, `after_each`, `collect` or `collect_on_request`:
+its files leave the host only through the private file
+(`config._check_stage`). No public `collect` of any stage copies a
+withheld path of the run tree: `.edr/private/`, the `collect` paths of the
+private stages, and the `paths` of the private file. Each copy excludes
+them relative to its own root, so `collect = ["./"]` copies the rest of
+the tree and leaves them out, and an absolute path or one with `..` is
+not copied at all (`collect._Copier.excludes`).
 
 ## Write the private file
 
@@ -119,6 +128,9 @@ keep = ['^\[flow\]', '^(Error|Warning): .*\(\w+-\d+\)$']
 cells = { NAND2 = 'ND2X(?P<drive>\d+)', INV = 'INVX(?P<drive>\d+)', DFF = 'DFF' }
 
 env = { PDK_ROOT = "/path/to/pdk" }
+
+# Paths of the run tree that no public collect copies, such as the private part of the flow.
+paths = ["nonfree/"]
 
 [stages.synth]
 cmd = "fc_shell -f {root}/nonfree/synth.tcl -x 'source {knob_file}'"
@@ -229,25 +241,44 @@ and `--unit kGE` prints a GE metric in kGE.
 Every string of the private file, in pieces of at least 8 characters
 between its placeholders, becomes `‹private›`, and every match of a
 `redact` regex becomes `‹nda›`. One combined regex makes a single pass, so
-one replacement never cuts the text another pattern needs. The redaction
-applies to everything that leaves edr (`private.redact`):
+one replacement never cuts the text another pattern needs. The driver
+applies both to each kept line before it reaches the public log. edr
+applies them again to what it prints and sends (`private.redact`):
 
 - every line `edr` prints or logs, including errors and `--json`
   (`cli.main`, `private.Stream`, `private.LogFilter`);
-- `--show-spec` and the `spec` of `edr plan --json` and `edr continue
-  --json`, where a field of the private file reads `‹private›`
+- `--show-spec`, the `spec` of `edr plan`, `launch` and `continue` with
+  `--json`, `edr track --dry-run`, and the commands in the manifest of
+  `edr export`, where a field of the private file reads `‹private›`
   (`private.public_spec`);
+- the manifest of `edr export`;
 - every event, and so every alert, digest and board built from events
   (`Database.add_event`);
 - every Telegram call, ntfy post and mail, and every text file the bot
   sends;
-- `status.html`, `compare.html` and `board.json`.
+- `status.html`, `compare.html` and `board.json`;
+- the command line of a tool process in an orphan alert or its Check
+  button, which shows only the process name once a private file is
+  loaded.
+
+A literal is found only as the private file writes it. A script path that
+a tool prints in another form, a piece shorter than 8 characters, or a
+text that HTML escaping or a cut changed, passes. That is why the keep
+list decides first what may leave the host, and why the `redact` regexes
+should name the library, cell and PDK strings themselves rather than
+leave them to the literals. Names that the reports carry, such as the
+start and end points or the scenario of a timing path, pass the `redact`
+regexes only.
 
 ## The limits of the boundary
 
 edr runs as you, and so does an agent that runs in your shell. edr keeps
-the private text out of everything it prints, but it cannot stop another
-program of the same user from reading a file. The boundary therefore
+the private text out of what it prints, but it cannot stop another
+program of the same user from reading a file. The private text lies in
+these places on the head node: the private file and its hooks, the
+private part of each checkout under `source.worktrees`, `data/private/`,
+the specs in the state directory (`~/.edr/<project>/`, which hold the
+rendered commands and knob lines), and the run trees of the host `local`. The boundary therefore
 holds against a mistake, such as an agent that reads a log tail or greps
 the results, and not against an agent that sets out to read the private
 file. Close the rest with the agent's own settings, and for a hard
@@ -261,21 +292,24 @@ outside the sandbox and deny the private paths to everything else:
 ```json
 {
   "permissions": {
-    "deny": ["Read(~/nda/**)", "Read(//path/to/project/data/private/**)"]
+    "deny": ["Read(~/nda/**)", "Read(//path/to/project/data/private/**)", "Read(~/.edr/**)",
+             "Read(//path/to/rtl-wt/**/nonfree/**)", "Read(//path/to/scratch/**)"]
   },
   "sandbox": {
     "enabled": true,
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
     "excludedCommands": ["edr *"],
-    "filesystem": { "denyRead": ["~/nda", "/path/to/project/data/private"] }
+    "filesystem": { "denyRead": ["~/nda", "/path/to/project/data/private", "~/.edr", "/path/to/scratch"] }
   }
 }
 ```
 
-`allowUnsandboxedCommands = false` keeps the agent from retrying a command
-outside the sandbox. Give `denyRead` absolute directories; deny the
-private part of each checkout too when the flow repository holds one.
+`allowUnsandboxedCommands: false` keeps the agent from retrying a command
+outside the sandbox. Give `denyRead` absolute directories, and add the
+private part of each checkout as it appears; whether `denyRead` takes a
+glob is not documented, so list the directories themselves. An agent that
+works only through `edr` never needs the state directory or a run tree.
 
 Every command of a Bash call must match `excludedCommands` for the call
 to leave the sandbox, so `edr status; cat x` stays inside it. Check the

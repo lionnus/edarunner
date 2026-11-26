@@ -33,7 +33,7 @@ the command through the spec; `$VAR` in a value expands on the host.
 | File in the run tree | Holds |
 |---|---|
 | `log/<stage>.log` | stdout and stderr of a stage command; every attempt is appended. Of a private stage, the lines of its raw log that `keep` matches, redacted, then a count of the lines held back |
-| `.edr/private/log/<stage>.log` | the raw output of a private command, with its `# edr: <cmd>` header; never collected into `data/results` |
+| `.edr/private/log/<stage>.log` | the raw output of a private command, with its `# edr: <cmd>` header; the watcher copies it to `data/private/<run_id>/log/`, and every public collect excludes it |
 | `.edr/private/knobs/<stage>.knobs` | the `{knob_file}` of a private stage, from the stage's `files` |
 | `log/<stage>.prepare.log` | the `prepare` command of a task group |
 | `log/<stage>.<task>.log` | one task, then its `after_each` |
@@ -80,7 +80,7 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `runtime` | `{"setup": cmd, "when_changed": [files]}`, only when `[runtime] setup` is set; the driver runs `cmd` in `root` before the first stage and keeps the sha256 of each file in `<root>/.edr-runtime` |
 | `collect` | `false` for a run of `edr track` without `--collect`: the watcher collects nothing; the driver does not read it |
 | `knobs` | the value of every knob of the project, only when it has knobs; the watcher writes them into `parameters` as `knob.<name>`, and the driver does not read them, since `env` holds them as `EDR_KNOB_<NAME>` |
-| `private` | `{"dir", "redact", "env"}` of a project with a private file: the private directory of the tree, the `redact` regexes, and the names of the variables of `env` that come from the private file |
+| `private` | `{"dir", "redact", "literals", "env"}` of a project with a private file: the private directory of the tree, the `redact` regexes, the strings of the private file that the public log never shows, and the names of the variables of `env` that come from the private file |
 
 A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
 `steps`, `progress`, `budget`, `retry` and `tools`. A private stage also
@@ -132,7 +132,7 @@ wrote, shows its run as `unreadable` and leaves the other runs alone
 | `sched_id` | the job id of a scheduler: `EDR_SCHED_ID`, else `SLURM_JOB_ID`, else `LSB_JOBID`; null without one |
 | `driver_pid`, `pgids` | what `edr stop` signals |
 | `cpu_s`, `rss_gb` | the CPU time in seconds and the summed RSS of every process in `pgids`, read in one pass over `/proc` at every heartbeat; the CPU time includes reaped children. Without `/proc`, both come from `ps -e -o pgid=,cputimes=,rss=`, which gives whole seconds and leaves out the children |
-| `log_bytes` | the size of `log` in bytes; every heartbeat |
+| `log_bytes` | the size of `log` in bytes, of a private command its raw log; every heartbeat |
 | `stages` | per stage started: `status` (`running`, `done`, `failed`, `over_budget`), `attempt`, `started`, `ended`, `exit`, `log` |
 | `tasks` | per task group, then per task, since a task id is unique within its group only: `phase` (`running`, `done`, `failed`, `skipped` or `held`), `pid`, `pgid`, `started`, `ended`, `exit`, `signature`, `log` |
 | `counts` | `done`, `failed`, `skipped`, `held`, `running`, `queued`, over every task group of the run; a task still pending when its group ends counts as `held`, not `queued` |
