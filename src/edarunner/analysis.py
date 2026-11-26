@@ -160,14 +160,15 @@ GE = {"kGE": 1e3, "MGE": 1e6}
 
 def to_ge(project: Project, unit: str | None, rows: list[Row], keys: tuple[str, ...] = ("value",)) -> list[Row]:
     """`rows` with the numbers under `keys` of each row in um2, a number or a dict by run, in `unit`, kGE or MGE, by
-    the project's `ge_um2`; such a row takes the unit. Without `unit`, `rows` as they are."""
+    the project's `ge_um2`, and of each row in GE, such as a published area of a private flow, by 1000 or 1000000;
+    such a row takes the unit. Without `unit`, `rows` as they are."""
     if unit is None:
         return rows
-    if not project.ge_um2:
+    if not project.ge_um2 and any(r.get("unit") == "um2" for r in rows):
         raise Refuse(f"--unit {unit} needs ge_um2 in edr.toml, the area of one gate equivalent in um2")
-    f = 1 / (project.ge_um2 * GE[unit])
     for r in rows:
-        if r.get("unit") == "um2":
+        if r.get("unit") in ("um2", "GE"):
+            f = 1 / ((project.ge_um2 if r["unit"] == "um2" else 1.0) * GE[unit])
             for k in set(keys) & set(r):
                 v = r[k]
                 r[k] = {i: x if x is None else x * f for i, x in v.items()} if isinstance(v, dict) else v if v is None else v * f

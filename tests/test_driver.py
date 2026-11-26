@@ -584,3 +584,44 @@ def test_runtime_setup_runs_again_only_when_a_watched_file_changed(tmp_path: Pat
     assert runs() == 2
     spec["runtime"]["when_changed"] = []
     assert runs() == 3  # nothing watched: every run
+
+
+def _private_spec(tmp_path: Path, cmd: str, keep: list[str], tasks: bool = False) -> dict:
+    """The export stage, or the power group, as a private stage: its raw output goes under .edr/private/log."""
+    spec = render_spec(tmp_path, stages=("power",) if tasks else ("export",))
+    root = spec["root"]
+    st = spec["stages"][0]
+    st["private"] = {"stage": st["name"], "keep": keep}
+    st["files"] = {root + "/.edr/private/knobs/" + st["name"] + ".knobs": "# edr: the knobs\nset KNOB_SECRET 1\n"}
+    if tasks:
+        for t in st["tasks"]:
+            t["cmd"] = cmd
+    else:
+        st["cmd"] = cmd
+    spec["private"] = {"dir": root + "/.edr/private", "redact": ["SECRET\\w*", "SC8T_\\w+"], "env": []}
+    return spec
+
+
+def test_a_private_stage_keeps_its_raw_log_on_the_host_and_mirrors_the_kept_lines(tmp_path: Path) -> None:
+    cmd = ("cat .edr/private/knobs/export.knobs; echo 'Vendor SECRET shell'; echo '[flow] cell u_SC8T_SECRET ok'; "
+           "for i in $(seq 3); do echo noise $i; done; printf '[flow] end without a newline'")
+    spec = _private_spec(tmp_path, cmd, ["^\\[flow\\]"])
+    code, hb = finish(start(spec), spec)
+    root = Path(spec["root"])
+    assert code == 0 and hb["phase"] == "done" and hb["last_cmd"] == "the private command of stage export"
+    assert "SECRET" not in json.dumps(hb)
+    assert (root / "log" / "export.log").read_text().splitlines() == [
+        "# edr: the private command of stage export", "[flow] cell u_‹nda› ok", "[flow] end without a newline",
+        "# edr: 6 lines held back in the private log"]
+    raw = (root / ".edr" / "private" / "log" / "export.log").read_text()
+    assert raw.startswith("# edr: cat .edr/private/knobs/export.knobs;") and "set KNOB_SECRET 1" in raw
+
+
+def test_a_private_task_group_mirrors_each_task_and_counts_the_signature_on_the_public_log(tmp_path: Path) -> None:
+    spec = _private_spec(tmp_path, "echo 'Error: SECRET_LIB missing'; echo '[flow] failed'; exit 1", ["^\\[flow\\]"],
+                         tasks=True)
+    code, hb = finish(start(spec), spec)
+    sigs = {t["signature"] for t in hb["tasks"]["power"].values()}
+    assert code == 8 and len(sigs) == 1 and sigs.pop().startswith("private:") and "SECRET" not in json.dumps(hb)
+    log = Path(spec["root"]) / "log" / "power.k_small.log"
+    assert "SECRET" not in log.read_text() and "[flow] failed" in log.read_text()

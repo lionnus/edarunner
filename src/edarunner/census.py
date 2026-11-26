@@ -21,7 +21,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from . import board, config, home, hosts, launch, watch
+from . import board, config, home, hosts, launch, private, watch
 from .db import Database
 from .guards import Refuse
 from .hosts import HostError, HostProbe, Proc, Ssh
@@ -211,8 +211,9 @@ def orphans(census: Row, projects: dict[str, Project], now: float) -> list[Row]:
                 continue
             # The key names the owner too, so a button of the alert finds the process it was sent for.
             key = f"orphan:{host}:{proc.pid}" + (f":{proc.run_id}" if proc.run_id else "")
+            # The command line of a tool of a private flow names its scripts; its name is the tool's public name.
             out.append({"key": key, "host": host, "pid": proc.pid, "label": proc.comm,
-                        "phase": proc.args, "etimes": proc.etimes, "cwd": proc.cwd, "owner": proc.run_id,
+                        "phase": proc.comm if private.active() else proc.args, "etimes": proc.etimes, "cwd": proc.cwd, "owner": proc.run_id,
                         "owner_handle": f"{owner.project}/{board.handle(run)}" if run and owner else "", "owner_state": ended,
                         "project": owner.project if owner else "", "run_id": run["run_id"] if run else ""})
     return out

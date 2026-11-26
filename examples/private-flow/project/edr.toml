@@ -1,0 +1,112 @@
+# The public half of a flow under NDA: what an agent reads and edits. The stages name no
+# command; ../nda/private.toml gives them. The knobs are the interface the agent tunes the
+# tools through, and the metrics read the public files that the private file publishes.
+schema = 1
+project = "chip"
+site = "../site.toml"
+private = "../nda/private.toml"
+
+[source]
+repo = "../rtl"
+worktrees = "../rtl-wt"
+ref = "HEAD"
+
+[placement]
+max_per_host = 2
+min_free_cores = 4
+min_free_ram_gb = 16
+
+# --- the knobs: a wide space with ranges and choices lets an agent search well
+
+[knobs.clock_ns]
+default = 2.0
+min = 0.5
+max = 20.0
+help = "the target clock period in ns"
+
+[knobs.retime]
+default = false
+help = "move registers across the logic during synthesis"
+stages = ["synth"]
+
+[knobs.effort]
+choices = ["low", "medium", "high"]
+default = "medium"
+help = "the optimization effort of synthesis"
+stages = ["synth"]
+
+[knobs.max_fanout]
+default = 32
+min = 4
+max = 128
+help = "the largest fanout of a net before the tool buffers it"
+stages = ["synth"]
+
+[knobs.vt]
+choices = ["regular", "low", "mixed"]
+default = "regular"
+help = "the threshold-voltage flavour of the cells the tool may use"
+stages = ["synth"]
+
+[knobs.ungroup]
+default = false
+help = "flatten the hierarchy below the top, which hides the per-block area"
+stages = ["synth"]
+
+# --- the stages: private, so their commands live in the private file
+
+[stages.synth]
+private = true
+needs = { cores = 8, disk_gb = 20, tools = ["fc"] }
+budget = { hours = 8 }
+
+[stages.sta]
+private = true
+needs = { cores = 4, disk_gb = 5, tools = ["pt"] }
+budget = { hours = 2 }
+
+# --- the metrics, over data/results/<run_id>/public/
+
+[metrics.area_ge]
+stage = "synth"
+file = "public/synth_area.csv"
+table = { instance = "instance", value = "ge", local = "local_ge", depth = "depth", top = { instance = "<top>" } }
+unit = "GE"
+better = "lower"
+
+[metrics.wns_synth_ns]
+stage = "synth"
+file = "public/synth_qor.json"
+json = "values.wns_ns"
+unit = "ns"
+canonical = "timing__setup__ws"
+better = "higher"
+
+[metrics.tns_synth_ns]
+stage = "synth"
+file = "public/synth_qor.json"
+json = "values.tns_ns"
+unit = "ns"
+canonical = "timing__setup__tns"
+better = "higher"
+
+[metrics.cells]
+stage = "synth"
+file = "public/synth_qor.json"
+json = "values.cells"
+canonical = "design__instance__count"
+
+[metrics.wns_sta_ns]
+stage = "sta"
+file = "public/sta_timing.json"
+json = "summary.max.worst_slack"
+unit = "ns"
+better = "higher"
+
+[metrics.whs_sta_ns]
+stage = "sta"
+file = "public/sta_timing.json"
+json = "summary.min.worst_slack"
+unit = "ns"
+better = "higher"
+optional = true

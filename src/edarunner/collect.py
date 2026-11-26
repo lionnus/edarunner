@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import board
+from . import board, private
 from .config import ConfigError, load_json, placeholders, render, resolve_task
 from .db import Database
 from .guards import Refuse, assert_run_id
@@ -110,15 +110,28 @@ def collect_run(
         return c.result
     finished, running = stage_state(project, heartbeat, only)
     tasks = [k for k, phase in task_phases(heartbeat).items() if phase in _TASK_END]
-    paths = ["log/"]
+    paths, raw = ["log/"], []
     for name in finished:
         paths += c.render(project.stages[name], project.stages[name].collect, tasks)
+        raw += c.render(project.stages[name], _raw_collect(project, name), tasks)
     stage, step = project.stages.get(running or ""), heartbeat.get("step")
     if stage and stage.steps and step is not None:
         for entry in c.render(stage, stage.collect, tasks):
             paths += c.final_steps(entry, step)
+        for entry in c.render(stage, _raw_collect(project, stage.name), tasks):
+            raw += c.final_steps(entry, step)
     c.copy_all(paths, "always")
+    if any(project.stages[n].private for n in (only or project.stages) if n in project.stages):
+        # The raw logs land in data/private/<run_id>/log/, where a person reads them.
+        c.copy_all([f"{private.TREE_DIR}/log/"], "private", private=True, dest="log/")
+    c.copy_all(raw, "private", private=True)
     return c.result
+
+
+def _raw_collect(project: Project, stage: str) -> list[str]:
+    """The raw collect paths the private file gives a stage; they go to data/private, never to data/results."""
+    ps = project.private.stages.get(stage) if project.private else None
+    return list(ps.collect) if ps else []
 
 
 def collect_on_request(
@@ -184,6 +197,7 @@ class _Copier:
         if not self.host or not self.root:
             self.result.failures.append(f"{self.run_id}: the run has no host or root")
         self.results = project.data / "results" / self.run_id
+        self.private = project.data / "private" / self.run_id
 
     def render(self, stage: Stage, entries: list[str], tasks: list[tuple[str, str]]) -> list[str]:
         """Render `entries` with the run values; a task group renders once per task of its own among `tasks`, the
@@ -222,18 +236,19 @@ class _Copier:
         return [posixpath.relpath(d, self.root) + "/" for d in dirs
                 if (n := posixpath.basename(d)).isdecimal() and int(n) < step]
 
-    def copy_all(self, paths: list[str], klass: str) -> None:
-        """Copy every distinct path; an empty entry is a counted failure."""
+    def copy_all(self, paths: list[str], klass: str, private: bool = False, dest: str | None = None) -> None:
+        """Copy every distinct path; an empty entry is a counted failure. A `private` copy goes to data/private and
+        is no artifact of the run; `dest` replaces the relative directory a path lands in."""
         for entry in dict.fromkeys(paths):
             if entry:
-                self._copy(entry, klass)
+                self._copy(entry, klass, private, dest)
             else:
                 self.result.failures.append("empty collect entry")
 
-    def _copy(self, entry: str, klass: str) -> None:
+    def _copy(self, entry: str, klass: str, private: bool = False, dest_dir: str | None = None) -> None:
         # A path without a trailing slash lands in its parent, so a second copy does not nest it.
-        base = entry if entry.endswith("/") else entry[: entry.rfind("/") + 1]
-        dest = f"{self.results}/{base}"
+        base = dest_dir or (entry if entry.endswith("/") else entry[: entry.rfind("/") + 1])
+        dest = f"{self.private if private else self.results}/{base}"
         src = posixpath.join(self.root, entry)
         if not self.dry_run:
             Path(dest).mkdir(parents=True, exist_ok=True)
@@ -247,11 +262,14 @@ class _Copier:
                 err = str(e)
         if rc != 0:
             first = err.strip().splitlines()[:1]
-            self.result.failures.append(f"{entry}: rsync rc {rc}: {first[0] if first else ''}")
+            what = f"a private collect path of {klass}" if private else entry
+            self.result.failures.append(f"{what}: rsync rc {rc}" + ("" if private else f": {first[0] if first else ''}"))
             self.result.missing += rc == 23 and "No such file or directory" in err
         for line in out.splitlines():
             code, size, name = line.split(" ", 2)
-            if code[1:2] == "f":
+            if code[1:2] == "f" and private:
+                self.result.files += 1
+            elif code[1:2] == "f":
                 self._record(base + name, int(size), klass)
 
     def push(self, entry: str) -> None:

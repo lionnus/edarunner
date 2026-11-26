@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//path/to/nda/**)",
+      "Read(//path/to/project/data/private/**)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": ["edr *"],
+    "filesystem": {
+      "denyRead": ["/path/to/nda", "/path/to/project/data/private"]
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [{ "type": "command", "command": "cd \"$CLAUDE_PROJECT_DIR\" && edr brief" }]
+      }
+    ]
+  }
+}

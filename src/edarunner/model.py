@@ -305,6 +305,10 @@ class Stage:
                                    "1 of the regex is a unix time, and group 2, when present, the step number. With "
                                    "`{step}` in `file`, each file is the log of one step and its first match starts "
                                    "it; `*` matches any part of a name", factory=dict)
+    private: bool = doc("the commands of the stage come from the private file, and edr.toml gives none of `cmd`, "
+                        "`resume`, `progress`, `prepare` and `after_each`; the raw output stays on the host and "
+                        "`log/<stage>.log` gets only the lines the private file lets through. "
+                        "`docs/guides/private.md` explains it", False)
 
     @property
     def is_group(self) -> bool:
@@ -433,6 +437,149 @@ class Parameter:
     python: str = doc("a hook that gets the file path and returns a dict of keys and values", "", shown="one of the three")
     head_bytes: int = doc("how many bytes from the start of the file `regex` reads, for the head of a large log; 0 "
                           "reads the whole file", 0)
+
+
+# The knob types; a knob with `choices` is a `choice`.
+KNOB_TYPES = ("bool", "int", "float", "str", "choice")
+
+
+@dataclass
+class Knob:
+    """A knob is one setting of the flow that a job may choose, such as `retime` or `clock_ns`. The knobs of
+    edr.toml are the public interface of the flow: a job sets them by name, `check` and `plan` refuse a name or a
+    value outside it, and `edr brief` lists each with its help. A private flow reads only its knobs, so an agent
+    can tune the tools without a line of their scripts.
+
+    ```toml
+    [knobs.retime]
+    default = false
+    help = "move registers across the logic during synthesis"
+    stages = ["synth"]
+
+    [knobs.clock_ns]
+    default = 2.0
+    min = 0.5
+    max = 20.0
+    help = "the target clock period"
+    ```
+
+    Every stage gets each value as `EDR_KNOB_<NAME>` in its environment, and every stage string as
+    `{knob.<name>}`. A value that differs from the default goes into the build tag as one token, `retime`,
+    `noretime` or `clock_ns1p6`, so two builds never share a tag, and into the `parameters` table as
+    `knob.<name>`.
+    """
+
+    name: str
+    default: bool | int | float | str = doc("the value of a job that does not set the knob", shown="required")
+    type: str = doc("`\"bool\"`, `\"int\"`, `\"float\"`, `\"str\"` or `\"choice\"`", "",
+                    shown="`choice` with `choices`, else the type of `default`")
+    help: str = doc("what the knob does; `edr brief` prints it", "")
+    choices: list[str] = doc("the values a `choice` knob takes", factory=list)
+    min: float | None = doc("the smallest value of an `int` or `float` knob", None)
+    max: float | None = doc("the largest value of an `int` or `float` knob", None)
+    stages: list[str] = doc("the stages the knob acts on; `{knob_file}` of these stages holds its line", factory=list,
+                            shown="every stage")
+
+
+@dataclass
+class PrivateStage:
+    """`[stages.<name>]` of the private file gives the commands of a stage that edr.toml marks `private = true`. The
+    strings take the placeholders of the stage strings, and `{knob_file}`, the file in the run tree where edr writes
+    the lines of `[knobs.<name>]` for this stage."""
+
+    name: str
+    cmd: str = doc("the command; in a task group it runs once per task", "", shown="required")
+    resume: str = doc("the command with `{checkpoint}`, for a resume", "")
+    progress: str = doc("a command that prints the number of the step that runs now", "")
+    prepare: str = doc("a command once before a group starts", "")
+    after_each: str = doc("a command after each task, with `{task_dir}`", "")
+    collect: list[str] = doc("raw files under the run tree that the watcher copies into `data/private/<run_id>/`, "
+                             "where `[publish]` reads them", factory=list)
+    retry: Retry | None = doc("`{ match, wait_s, max }`, over the raw output; replaces the retry of edr.toml", None)
+    keep: list[str] = doc("more regexes of output lines that reach `log/<stage>.log`, on top of the file's `keep`",
+                          factory=list)
+
+
+@dataclass
+class KnobMap:
+    """`[knobs.<name>]` of the private file maps a knob of edr.toml onto the tool. Before each stage the knob acts on,
+    the driver writes one line per knob into `{knob_file}`, in the order of edr.toml, so the stage's script sources
+    one file in its own language:
+
+    ```toml
+    [knobs.retime]
+    line = { true = "set_app_options -name <option> -value true", false = "" }
+
+    [knobs.clock_ns]
+    line = "set CLOCK_NS {value}"
+    ```
+    """
+
+    name: str
+    line: str | dict[str, str] = doc("a line with `{value}`, or a table from each value to its line; a value the table "
+                                     "lacks, and an empty line, write nothing", shown="required")
+
+
+# The converters of `[publish.<name>]`.
+PUBLISH_KINDS = ("area", "timing", "values", "text", "python")
+
+
+@dataclass
+class Publish:
+    """`[publish.<name>]` of the private file turns one raw file of `data/private/<run_id>/` into a public file of
+    `data/results/<run_id>/public/`, which the metrics of edr.toml read. The watcher publishes after each collect and
+    before each extraction; `edr extract` publishes too. Every text that goes into a public file passes the
+    redaction of the private file.
+
+    | `kind` | reads | writes |
+    |---|---|---|
+    | `area` | a hierarchical area report of Synopsys or OpenROAD | `<name>.csv`: `instance, depth, ge, local_ge, cells`, the area in gate equivalents of `ge_um2`, with `<top>` first |
+    | `timing` | `report_timing` of Synopsys or `report_checks` of OpenROAD | `<name>.json`: per path the group, type, start and end, slack, arrival, required, logic levels and the points with the class of each cell from `cells`, and a summary of the setup (`max`) and hold (`min`) paths per path group |
+    | `values` | any text file | `<name>.json`: one number per entry of `values`, group 1 of its regex; `ge = true` divides an area in um2 by `ge_um2` |
+    | `text` | any text file | `<name>.txt`: the lines that `keep` lets through, redacted |
+    | `python` | anything | `<name>.json`: the dict a hook returns from `(path, ctx)`; `ctx` gives `ge_um2`, `cell(name)` and `redact(text)` |
+
+    With `{step}` in `file`, each step directory gives `public/<step>/<name>.<ext>`, which a metric reads with
+    `step = "*"`.
+    """
+
+    name: str
+    stage: str = doc("the stage whose collect brings the file", "", shown="required")
+    file: str = doc("the raw file under `data/private/<run_id>/`; `{step}` and `*` allowed", "", shown="required")
+    kind: str = doc("`\"area\"`, `\"timing\"`, `\"values\"`, `\"text\"` or `\"python\"`", "", shown="required")
+    depth: int = doc("`area`: the deepest instance depth to keep; 0 keeps all", 0)
+    paths: int = doc("`timing`: the most paths to keep, worst first", 50)
+    points: bool = doc("`timing`: keep the points of each path, not only its summary", True)
+    values: dict[str, object] = doc("`values`: name to a regex, or to `{ regex, ge, scale, reduce }`", factory=dict)
+    keep: list[str] = doc("`text`: the regexes of the lines to keep", factory=list)
+    python: str = doc("`python`: the hook `<file>:<function>`, relative to the private file", "")
+
+
+@dataclass
+class Private:
+    """The private file holds the part of a flow under a non-disclosure agreement: the commands of the private
+    stages, how each knob reaches the tool, what of the raw output and the raw reports may leave the host, and the
+    strings that never may. A person writes it, it lives outside the project, and `private` in edr.toml names it.
+    An agent never reads it; edr reads it and prints none of it. `docs/guides/private.md` sets it up.
+    """
+
+    path: Path
+    ge_um2: float = doc("the area of one gate equivalent in um2, such as the NAND2 of the library; every area of "
+                        "`[publish]` is divided by it", 0.0, shown="unset; an `area` publish is then an error")
+    redact: list[str] = doc("regexes of text that never leaves: library and cell names, PDK paths, the foundry. A match "
+                            "in a public log line, a published file, an event, an alert or any output of edr becomes "
+                            "`‹nda›`", factory=list)
+    keep: list[str] = doc("regexes of the output lines of a private stage that reach `log/<stage>.log`, after the "
+                          "redaction; every other line stays in the raw log on the host", factory=list,
+                          shown="none; the public log holds only edr's own lines")
+    cells: dict[str, str] = doc("`{ CLASS = regex }`: the class of a cell in a published timing path is the first "
+                                "class whose regex matches the cell name, followed by `x<drive>` when the regex has a "
+                                "group `drive`; an unmatched cell is `‹cell›`", factory=dict)
+    env: dict[str, str] = doc("variables the stages need on top of the env of edr.toml, such as a PDK path; they take "
+                              "the run placeholders", factory=dict)
+    stages: dict[str, PrivateStage] = field(default_factory=dict)
+    knobs: dict[str, KnobMap] = field(default_factory=dict)
+    publish: dict[str, Publish] = field(default_factory=dict)
 
 
 @dataclass
@@ -596,6 +743,9 @@ class Project:
                               factory=dict)
     tasks: dict[str, Task] = field(default_factory=dict)
     task_resolver: str = doc("a hook `id -> table` for ids the file does not list", "", key="pattern.resolver")
+    knobs: dict[str, Knob] = field(default_factory=dict)  # in file order
+    private: Private | None = doc("the path of the private file of an NDA flow, outside the project", None,
+                                  shown="unset; no stage is private")
 
 
 @dataclass
@@ -622,6 +772,8 @@ class Job:
     overrides: dict[str, str] = doc("`KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens", factory=dict)
     vars: dict[str, str] = doc("`{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; "
                                "`{vars.<name>}` in the stage strings, `[env]` and `collect`", factory=dict)
+    knobs: dict[str, bool | int | float | str] = doc("`{ name = value }` of the `[knobs]` of edr.toml; a knob the job "
+                                                     "leaves out takes its default", factory=dict)
     reuse: dict[str, object] | None = doc(
         "`{ run_id = \"...\" }` with a run id or another handle, or `{ label = \"...\", latest = true }` for the newest "
         "run by start time of that label at the batch's source that ended done, else its newest run. The job starts "

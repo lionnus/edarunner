@@ -1,0 +1,95 @@
+# The private half of the flow: a person under the agreement writes this file by hand and keeps
+# it, with the scripts it calls, where no agent reads. edr loads it, runs its commands and prints
+# none of its text. Every <...> below is yours to fill in; nothing here is a real tool option.
+schema = 1
+
+# The area of one gate equivalent, the NAND2 of your library, in um2. Every published area is
+# divided by it, so no area in um2 leaves this side.
+ge_um2 = 1.0  # <the NAND2 area of your library>
+
+# Text that never leaves, as regexes: the library and cell prefixes, the PDK and tool paths,
+# the foundry and the node. A match anywhere in a public log, a published file or an edr output
+# becomes ‹nda›.
+redact = [
+  '(?i)<foundry name>',
+  '<library prefix>\w*',
+  '/path/to/pdk\S*',
+  '/path/to/tools\S*',
+]
+
+# The output lines of a private stage that reach log/<stage>.log, after the redaction. Your own
+# flow's lines first, then errors and warnings with their message ids, so an agent can tell one
+# failure from another. Every other line stays in the raw log on the host.
+keep = [
+  '^\[flow\]',
+  '^(Error|Warning): .*\(\w+-\d+\)\s*$',
+]
+
+# The class of each cell in a published timing path; a group `drive` keeps the drive strength.
+cells = { NAND2 = '<nand2 pattern>X(?P<drive>\d+)', NOR2 = '<nor2 pattern>', INV = '<inv pattern>', BUF = '<buf pattern>', DFF = '<flop pattern>' }
+
+# Variables the stages need, which name the private paths.
+env = { PDK_ROOT = "/path/to/pdk" }
+
+# --- the commands of the private stages of edr.toml
+
+# The script sources {knob_file}, which holds one line per knob below, then runs as before.
+[stages.synth]
+cmd = "cd {root}/nonfree/synth && fc_shell -f scripts/run.tcl -x 'set KNOBS {knob_file}'"
+collect = ["nonfree/synth/reports/"]
+
+[stages.sta]
+cmd = "cd {root}/nonfree/sta && pt_shell -f scripts/run.tcl -x 'set KNOBS {knob_file}'"
+collect = ["nonfree/sta/reports/"]
+
+# --- the line each knob writes into {knob_file}, in the language of the tool
+
+[knobs.clock_ns]
+line = "set CLOCK_PERIOD {value}"
+
+[knobs.retime]
+line = { true = "<the line that turns on retiming>", false = "" }
+
+[knobs.effort]
+line = { low = "<the line for low effort>", medium = "", high = "<the line for high effort>" }
+
+[knobs.max_fanout]
+line = "<the line that sets the fanout limit to {value}>"
+
+[knobs.vt]
+line = { regular = "", low = "<the line that allows the low-VT cells>", mixed = "<the line for a mix>" }
+
+[knobs.ungroup]
+line = { true = "<the line that flattens the hierarchy>", false = "" }
+
+# --- what of the raw reports becomes public, under data/results/<run_id>/public/
+
+[publish.synth_area]
+stage = "synth"
+file = "nonfree/synth/reports/area_hier.rpt"   # report_area -hierarchy
+kind = "area"
+depth = 4
+
+[publish.synth_qor]
+stage = "synth"
+file = "nonfree/synth/reports/qor.rpt"         # report_qor
+kind = "values"
+values = { wns_ns = 'Critical Path Slack:\s+(-?[0-9.]+)', tns_ns = 'Total Negative Slack:\s+(-?[0-9.]+)', cells = 'Leaf Cell Count:\s+(\d+)', cell_ge = { regex = 'Cell Area:\s+([0-9.]+)', ge = true } }
+
+[publish.synth_timing]
+stage = "synth"
+file = "nonfree/synth/reports/timing.rpt"      # report_timing -max_paths 50
+kind = "timing"
+paths = 50
+
+[publish.synth_check]
+stage = "synth"
+file = "nonfree/synth/reports/check_design.rpt"
+kind = "text"
+keep = ['^Warning: ']
+
+[publish.sta_timing]
+stage = "sta"
+file = "nonfree/sta/reports/timing.rpt"        # report_timing -delay_type min_max
+kind = "timing"
+paths = 100

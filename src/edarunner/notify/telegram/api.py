@@ -15,6 +15,8 @@ import uuid
 from typing import Any
 from urllib.request import Request, urlopen
 
+from edarunner import private
+
 # Only an idempotent call is sent again after a network failure; a resent sendMessage posts twice.
 RETRIES = {"getUpdates", "editMessageText", "answerCallbackQuery"}
 
@@ -35,6 +37,14 @@ def _multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes]]) -> t
     return bytes(out), f"multipart/form-data; boundary={b}"
 
 
+def _redact_bytes(data: bytes) -> bytes:
+    """A text file, redacted; a file that is not UTF-8 text goes as it is."""
+    try:
+        return private.redact(data.decode("utf-8")).encode("utf-8")
+    except UnicodeDecodeError:
+        return data
+
+
 class BotApi:
     """One bot token. A method returns the `result` of its call or raises ApiError."""
 
@@ -42,8 +52,12 @@ class BotApi:
         self.token = token
 
     def call(self, method: str, params: dict[str, Any], files: dict[str, tuple[str, bytes]] | None = None) -> Any:
-        """One Bot API call. Obeys a 429; retries a network failure twice for a method in RETRIES."""
+        """One Bot API call. Obeys a 429; retries a network failure twice for a method in RETRIES. Every text and
+        every text file passes the redaction of the private files, since the call leaves the head node."""
+        params = private.redact_obj(params)
         fields = {k: (json.dumps(v) if isinstance(v, (dict, list)) else str(v)) for k, v in params.items() if v is not None}
+        if files and private.active():
+            files = {k: (name, _redact_bytes(data)) for k, (name, data) in files.items()}
         if files:
             body, ctype = _multipart(fields, files)
         else:

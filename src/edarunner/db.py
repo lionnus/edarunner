@@ -14,7 +14,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, private
 
 DDL = """
 CREATE TABLE IF NOT EXISTS batches(batch TEXT PRIMARY KEY, project TEXT, source TEXT, created INTEGER, retired INTEGER, run_date TEXT);
@@ -340,9 +340,11 @@ class Database:
         self._upsert("artifacts", {"collected_at": _now(), **row})
 
     def add_event(self, actor: str, run_id: str | None, kind: str, text: str) -> int:
-        """Append an event and return its id."""
+        """Append an event and return its id; the text passes the redaction of the private files, since every
+        channel and board shows it."""
         cur = self.conn.execute(
-            "INSERT INTO events(ts, actor, run_id, kind, text) VALUES(?, ?, ?, ?, ?)", (_now(), actor, run_id, kind, text)
+            "INSERT INTO events(ts, actor, run_id, kind, text) VALUES(?, ?, ?, ?, ?)",
+            (_now(), actor, run_id, kind, private.redact(text)),
         )
         self.conn.commit()
         return int(cur.lastrowid)
@@ -527,7 +529,7 @@ class Database:
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(out.name + ".tmp")
         try:
-            tmp.write_text(json.dumps(board, indent=1) + "\n")
+            tmp.write_text(json.dumps(private.redact_obj(board), indent=1) + "\n")
             os.replace(tmp, out)
         except BaseException:
             tmp.unlink(missing_ok=True)

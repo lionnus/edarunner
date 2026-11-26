@@ -1,0 +1,14 @@
+# The site of the template: the head node and two licensed tools, with placeholder names.
+schema = 1
+scratch = ["/tmp"]
+env = {}
+ssh = { options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"], timeout_s = 20 }
+tool_procs = "^(fc_shell|pt_shell)$"
+
+[hosts.local]
+cores = 8
+ram_gb = 32
+
+# A real site gives each tool a seat probe; examples/site/ shows one for FlexLM.
+[tools.fc]
+[tools.pt]

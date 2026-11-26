@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from edarunner import private
 from edarunner.model import Ntfy
 from edarunner.notify import Button, Notifier, alerts, button_cmds, untag
 
@@ -32,8 +33,8 @@ class NtfyNotifier(Notifier):
         """POST one message as JSON to the server root; True on a 2xx answer.
 
         A server that refuses the actions with a 400 gets the message again without them."""
-        body = {"topic": self.cfg.topic, "title": title, "message": text,
-                "priority": priority, **({"actions": actions} if actions else {})}
+        body = {"topic": self.cfg.topic, "title": private.redact(title), "message": private.redact(text),
+                "priority": priority, **({"actions": private.redact_obj(actions)} if actions else {})}
         req = urllib.request.Request(self.cfg.url.rstrip("/") + "/", data=json.dumps(body).encode(), method="POST",
                                      headers={"Content-Type": "application/json",
                                               **({"Authorization": f"Bearer {self.token}"} if self.token else {})})

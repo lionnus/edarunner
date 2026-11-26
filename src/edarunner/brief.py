@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from . import analysis, board, census, runid, watch
+from . import analysis, board, census, private, runid, watch
 from .hosts import HostProbe, floor
 from .model import SCHEDULERS, Project
 
@@ -82,7 +82,25 @@ def _behind(project: Project, tag: str) -> int | None:
 def _stages(project: Project) -> list[Row]:
     return [{"stage": name, "group": st.is_group, "parallel": st.parallel if st.is_group else None,
              "steps": len(st.steps), "collect": list(st.collect), "on_request": sorted(st.collect_on_request),
-             "tools": sorted(st.needs.tools)} for name, st in project.stages.items()]
+             "tools": sorted(st.needs.tools), "private": st.private} for name, st in project.stages.items()]
+
+
+def _knobs(project: Project) -> list[Row]:
+    return [{"name": n, "type": private.knob_type(k), "default": k.default, "choices": list(k.choices), "min": k.min,
+             "max": k.max, "stages": list(k.stages), "help": k.help,
+             "mapped": bool(project.private and n in project.private.knobs)} for n, k in project.knobs.items()]
+
+
+def _private(project: Project) -> Row | None:
+    """What an agent may know of the private flow: its stages, the public files and the rules; none of its text."""
+    p = project.private
+    if p is None:
+        return None
+    return {"file": str(p.path), "stages": [n for n, st in project.stages.items() if st.private],
+            "keeps_lines": bool(p.keep or any(st.keep for st in p.stages.values())),
+            "publish": [{"name": x.name, "kind": x.kind, "stage": x.stage,
+                         "file": f"public/{'<step>/' if '{step}' in x.file else ''}{x.name}.{private.EXT[x.kind]}"}
+                        for x in p.publish.values()]}
 
 
 def _hosts(project: Project) -> Row:
@@ -129,7 +147,8 @@ def project_data(c: Any, tools: list[Row]) -> Row:
     return {
         "project": project.project, "root": str(project.root), "repo": str(project.source.repo),
         "ref": project.source.ref, "worktrees": str(project.source.worktrees), "sources": _sources(project, everyone),
-        "backend": project.site.scheduler.backend, "stages": _stages(project),
+        "backend": project.site.scheduler.backend, "stages": _stages(project), "knobs": _knobs(project),
+        "private": _private(project),
         "hosts": _hosts(project), "tools": tools,
         "batches": [{"batch": b, "sources": [{"source": t, "behind": lag[t]} for t in tags[b]], "states": dict(n)}
                     for b, n in per_batch.items()],
@@ -171,7 +190,8 @@ def run_data(c: Any, row: Row, file_host: str) -> Row:
 
 def _stage_line(s: Row) -> str:
     kind = f"is a task group that runs {_count(s['parallel'], 'task')} at a time" if s["group"] else \
-        "runs one command" + (f" through {_count(s['steps'], 'step')}" if s["steps"] else "")
+        f"runs one {'private ' if s.get('private') else ''}command" + (f" through {_count(s['steps'], 'step')}"
+                                                                       if s["steps"] else "")
     parts = [kind]
     parts.append(f"collects {_code(s['collect'])}" if s["collect"] else "collects nothing when it ends")
     if s["on_request"]:
@@ -179,6 +199,35 @@ def _stage_line(s: Row) -> str:
     if s["tools"]:
         parts.append(f"needs {'the tool' if len(s['tools']) == 1 else 'the tools'} {_code(s['tools'])}")
     return f"- `{s['stage']}` {board.join(parts)}."
+
+
+_KIND = {"area": "the area of every instance in gate equivalents", "timing": "the timing paths, worst first",
+         "values": "numbers from a report", "text": "lines of a report", "python": "a table of the project's converter"}
+
+
+def _knob_line(k: Row) -> str:
+    what = f"one of {_code(k['choices'])}" if k["type"] == "choice" else \
+        k["type"] + (f" from {k['min']:g}" if k["min"] is not None else "") + (f" to {k['max']:g}" if k["max"] is not None else "")
+    on = f", on {_code(k['stages'])}" if k["stages"] else ""
+    default = private.knob_text(k["default"])
+    return f"- `{k['name']}` ({what}, default `{default}`{on})" + (f": {k['help']}" if k["help"] else ".")
+
+
+def _private_text(p: Row) -> list[str]:
+    stages = _code(p["stages"])
+    lines = "the lines the private file lets through" if p["keeps_lines"] else "only edr's own lines"
+    out = ["## The private flow", "",
+           f"{'The stage' if len(p['stages']) == 1 else 'The stages'} {stages} run commands that a person keeps in a "
+           f"private file, `{p['file']}`, because they fall under a non-disclosure agreement. Never read that file, "
+           "`data/private/` or the `.edr/private/` directory of a run tree, and never ask a host for them; edr prints "
+           f"none of their text. The raw output stays on the host, and `log/<stage>.log` holds {lines}. `‹nda›` and "
+           "`‹private›` mark text that edr took out.", ""]
+    if p["publish"]:
+        out += ["The reports reach `data/results/<run_id>/` in a public form, which the metrics read:", "",
+                *(f"- `{x['file']}` from `{x['stage']}`: {_KIND.get(x['kind'], x['kind'])}" for x in p["publish"]), ""]
+    out += ["Change what the tools do through the knobs. A setting that no knob covers needs a person, who adds the "
+            "knob to edr.toml and its line to the private file.", ""]
+    return out
 
 
 def _host_line(h: Row) -> str:
@@ -247,6 +296,13 @@ def project_text(d: Row, now: float | None = None) -> str:
     if d["stages"]:
         out += ["## The flow", "", "A run passes these stages in this order:", "",
                 *(_stage_line(s) for s in d["stages"]), ""]
+    if d.get("knobs"):
+        out += ["## The knobs", "",
+                "The knobs are the settings a job may choose, in `knobs = { <name> = <value> }` of its `[[job]]`. "
+                "`edr plan` refuses any other name, and a value outside the range or the choices:", "",
+                *(_knob_line(k) for k in d["knobs"]), ""]
+    if d.get("private"):
+        out += _private_text(d["private"])
     if d["hosts"]["names"] or d["tools"]:
         out += ["## The site", ""]
         if d["hosts"]["names"] and not d["hosts"]["hosts"]:

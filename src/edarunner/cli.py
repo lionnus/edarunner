@@ -31,13 +31,13 @@ from datetime import datetime
 from enum import IntEnum
 from pathlib import Path
 from string import Template
-from typing import Any
+from typing import Any, TextIO
 
 from rich.console import Console, Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, runid, serve, sync, watch
+from . import __version__, analysis, board, brief, census, checkout, collect, config, export, home, launch, metrics, private, runid, serve, sync, watch
 from .backend import Backend, Handle, Live, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, SchemaError, has_label, network_fs, pick
@@ -950,6 +950,9 @@ def cmd_extract(c: Ctx, a: argparse.Namespace) -> int:
             held.setdefault((x["stage"], x["step"], x["task"], x["name"]), set()).add(tuple(x[k] for k in inst))
         n = dict.fromkeys(("new", "changed", "unchanged", "failed", "removed", "kept"), 0)
         hb = c.heartbeat(run)
+        # A changed converter of the private file rewrites the public files before the metrics read them.
+        _, unpublished = private.publish_run(c.project, run["run_id"], dry_run=a.dry_run, force=True)
+        lines += [f"{run['run_id']}: {x}" for x in unpublished]
         rows = watch.extract_run(c.project, c.db, run, hb, actor=None if a.dry_run else "user")
         write = []
         for r in rows:
@@ -1175,7 +1178,7 @@ def cmd_plan(c: Ctx, a: argparse.Namespace) -> int:
                            *[Text.assemble("\n    ", ("problem", "red"), f": {x}") for x in p.problems]) for p in plans]
     c.emit(Text("\n").join(lines),
            [{"run_id": p.run_id, "label": p.label, "host": p.host, "root": p.root, "queued": p.queued,
-             "problems": p.problems, "spec": p.spec} for p in plans])
+             "problems": p.problems, "spec": private.public_spec(p.spec)} for p in plans])
     if a.show_spec:
         print("\n\n".join(launch.spec_text(c.project, p.spec) for p in plans if p.spec))
     return Exit.REFUSED if any(p.problems for p in plans) else Exit.DONE
@@ -1191,7 +1194,8 @@ def cmd_launch(c: Ctx, a: argparse.Namespace) -> int:
     started, queued = sum(r["started"] for r in rows), sum(r["queued"] for r in rows)
     problems = [r["problems"] for r in rows if r["problems"]]
     c.emit(Text.assemble((f"{started} started", "green" if started else ""), ", ", (f"{queued} queued", "cyan" if queued else ""),
-                         ", ", (f"{len(problems)} with problems", "red" if problems else ""), " (dry)" if a.dry_run else ""), rows)
+                         ", ", (f"{len(problems)} with problems", "red" if problems else ""), " (dry)" if a.dry_run else ""),
+           [{**r, "spec": private.public_spec(r["spec"])} if r.get("spec") else r for r in rows])
     if any(p.startswith("submit failed") for ps in problems for p in ps):
         return Exit.REFUSED
     if started or queued or (a.dry_run and not problems):
@@ -1266,7 +1270,7 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
         c.db.add_event(actor, p.run_id, "continue", f"{board.left_text(stages, held)} on {run_id}" + (f" from {a.from_}" if a.from_ else ""))
         launch.start(c.backend, c.db, project, p.run_id, p.host, spec_path, driver, actor)
     c.emit(f"{p.run_id}: {board.left_text(stages, held)} on {p.host} {p.root}" + (" (dry)" if a.dry_run else ""),
-           {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": p.spec})
+           {"run_id": p.run_id, "batch": batch.batch, "host": p.host, "root": p.root, "spec": private.public_spec(p.spec)})
     return Exit.DONE
 
 
@@ -1298,7 +1302,7 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
         raise Refuse(why)
     v.update(run_id=run_id, tree_id=run_id, host=None, mount="", root=str(root))
     # The command runs as given; only the stage's steps, progress, budget, retry and tools come from edr.toml.
-    spec = launch._spec(project, batch, job, [], [], v, stages=[replace(stage, cmd="", resume="")])
+    spec = launch._spec(project, batch, job, [], [], v, stages=[replace(stage, cmd="", resume="", private=False)])
     spec["stages"][0]["cmd"] = shlex.join(argv)
     spec.pop("runtime", None)  # the tree of a tracked command is the caller's, as it is
     spec["collect"] = a.collect
@@ -2835,8 +2839,23 @@ def _forward(c: Ctx, argv: list[str]) -> int | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run one command and return its exit code."""
+    """Run one command and return its exit code. Every line it prints, logs or returns in --json passes the
+    redaction of the private files it loaded."""
+    out, err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = private.Stream(out), private.Stream(err)
+    try:
+        return _main(argv, out)
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.stdout, sys.stderr = out, err
+
+
+def _main(argv: list[str] | None, raw_out: TextIO) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+    for h in logging.getLogger().handlers:
+        if not any(isinstance(f, private.LogFilter) for f in h.filters):
+            h.addFilter(private.LogFilter())
     argv = sys.argv[1:] if argv is None else argv
     try:
         a = _parser().parse_args(argv)
@@ -2877,7 +2896,12 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         c.close()
     if a.json:
-        print(json.dumps({"code": code, "data": c.data, "output": buf.getvalue()}, indent=1, default=str))
+        # Redacted as data, not as text, so a regex never cuts through the JSON.
+        envelope = private.redact_obj(json.loads(json.dumps({"code": code, "data": c.data, "output": buf.getvalue()},
+                                                            default=str)))
+        sys.stdout.flush()
+        raw_out.write(json.dumps(envelope, indent=1) + "\n")
+        raw_out.flush()
     return code
 
 

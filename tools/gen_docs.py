@@ -38,7 +38,7 @@ Part = type | tuple[type, list[str]]
 # The sections of configuration.md: the heading, the dataclasses (or some of their fields) it lists, and the
 # prose above the table; "" takes the docstring of the first dataclass.
 CONFIG: list[tuple[str, list[Part], str]] = [
-    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "ge_um2", "env"])], ""),
+    ("## edr.toml", [(model.Project, ["project", "site", "state_dir", "data", "run_prefix", "ge_um2", "env", "private"])], ""),
     ("### [source]", [model.Source], ""),
     ("### [sync]", [model.Sync], ""),
     ("### [runtime]", [model.Runtime], ""),
@@ -52,6 +52,12 @@ CONFIG: list[tuple[str, list[Part], str]] = [
     ("### [metrics.<name>]", [model.Metric], ""),
     ("### [parameters.<name>]", [model.Parameter], ""),
     ("### [checks]", [model.Checks], ""),
+    ("### [knobs.<name>]", [model.Knob], ""),
+    ("## The private file", [model.Private], ""),
+    ("### [stages.<name>] of the private file", [model.PrivateStage], ""),
+    ("#### retry of a private stage", [model.Retry], ""),
+    ("### [knobs.<name>] of the private file", [model.KnobMap], ""),
+    ("### [publish.<name>]", [model.Publish], ""),
     ("## site.toml", [(model.Site, ["scratch", "env", "ssh_options", "ssh_timeout_s", "tool_procs", "orphan_min_age_s",
                                     "host_free_min_gb", "nfs_export", "head"])], ""),
     ("### [scheduler]", [model.Scheduler], ""),

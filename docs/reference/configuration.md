@@ -6,8 +6,9 @@ This page lists every key of the five TOML files that configure a project and it
 
 `edr.toml` and `tasks.toml` live in the project directory, one `jobs/<batch>.toml` per batch next
 to them, `site.toml`, wherever `site` points, with the hosts, the tools and the lab's bot
-commands, and `user.toml` in `~/.config/edarunner/`, with your chat and the digest time. These
-rules hold for every file:
+commands, and `user.toml` in `~/.config/edarunner/`, with your chat and the digest time. A flow
+under a non-disclosure agreement adds a private file, wherever `private` points, which
+`docs/guides/private.md` describes. These rules hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
   key path, so `cores = "16"` stops the load.
@@ -36,6 +37,7 @@ rules hold for every file:
 | `run_prefix` | the run tree prefix under the host scratch | `"{user}/edr/{project}"` |
 | `ge_um2` | the area of one gate equivalent in um2, such as a NAND2 of the library; `--unit kGE` or `MGE` of `edr compare` and `edr metrics` divides an area in um2 by it, and an export records it | unset |
 | `env` | the variables every command of every stage needs, on top of the site `env`; a value takes the run placeholders. A `$NAME` or `${NAME}` that the site sets takes the site value, so `PATH = "{root}/.venv/bin:$PATH"` keeps the site path; a value without a reference replaces the site value, and any other `$VAR` expands on the host | `{}` |
+| `private` | the path of the private file of an NDA flow, outside the project | unset; no stage is private |
 
 ### [source]
 
@@ -174,6 +176,7 @@ takes tasks from the same pool; `docs/guides/run.md` explains the queue and shar
 | `task_dir` | the directory of a task, relative to the tree; required in a group | `""` |
 | `after_each` | a command after each task, with `{task_dir}` | `""` |
 | `step_log` | `{ file, regex }`: step start times the flow writes into collected files; group 1 of the regex is a unix time, and group 2, when present, the step number. With `{step}` in `file`, each file is the log of one step and its first match starts it; `*` matches any part of a name | `{}` |
+| `private` | the commands of the stage come from the private file, and edr.toml gives none of `cmd`, `resume`, `progress`, `prepare` and `after_each`; the raw output stays on the host and `log/<stage>.log` gets only the lines the private file lets through. `docs/guides/private.md` explains it | `false` |
 
 #### needs
 
@@ -295,6 +298,131 @@ a run rewrites its flags. Three checks are built in:
 |---|---|---|
 | `same_results` | the metrics whose values, all equal, flag two tasks of one run | `[]` |
 | `python` | a hook for the project's own rules: it gets the run's row, its parameter rows and its metric rows, and returns a (task, check, text) for each flag, with the task `""` for the run | `""` |
+
+### [knobs.<name>]
+
+A knob is one setting of the flow that a job may choose, such as `retime` or `clock_ns`. The knobs of
+edr.toml are the public interface of the flow: a job sets them by name, `check` and `plan` refuse a name or a
+value outside it, and `edr brief` lists each with its help. A private flow reads only its knobs, so an agent
+can tune the tools without a line of their scripts.
+
+```toml
+[knobs.retime]
+default = false
+help = "move registers across the logic during synthesis"
+stages = ["synth"]
+
+[knobs.clock_ns]
+default = 2.0
+min = 0.5
+max = 20.0
+help = "the target clock period"
+```
+
+Every stage gets each value as `EDR_KNOB_<NAME>` in its environment, and every stage string as
+`{knob.<name>}`. A value that differs from the default goes into the build tag as one token, `retime`,
+`noretime` or `clock_ns1p6`, so two builds never share a tag, and into the `parameters` table as
+`knob.<name>`.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `default` | the value of a job that does not set the knob | required |
+| `type` | `"bool"`, `"int"`, `"float"`, `"str"` or `"choice"` | `choice` with `choices`, else the type of `default` |
+| `help` | what the knob does; `edr brief` prints it | `""` |
+| `choices` | the values a `choice` knob takes | `[]` |
+| `min` | the smallest value of an `int` or `float` knob | unset |
+| `max` | the largest value of an `int` or `float` knob | unset |
+| `stages` | the stages the knob acts on; `{knob_file}` of these stages holds its line | every stage |
+
+## The private file
+
+The private file holds the part of a flow under a non-disclosure agreement: the commands of the private
+stages, how each knob reaches the tool, what of the raw output and the raw reports may leave the host, and the
+strings that never may. A person writes it, it lives outside the project, and `private` in edr.toml names it.
+An agent never reads it; edr reads it and prints none of it. `docs/guides/private.md` sets it up.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `ge_um2` | the area of one gate equivalent in um2, such as the NAND2 of the library; every area of `[publish]` is divided by it | unset; an `area` publish is then an error |
+| `redact` | regexes of text that never leaves: library and cell names, PDK paths, the foundry. A match in a public log line, a published file, an event, an alert or any output of edr becomes `‹nda›` | `[]` |
+| `keep` | regexes of the output lines of a private stage that reach `log/<stage>.log`, after the redaction; every other line stays in the raw log on the host | none; the public log holds only edr's own lines |
+| `cells` | `{ CLASS = regex }`: the class of a cell in a published timing path is the first class whose regex matches the cell name, followed by `x<drive>` when the regex has a group `drive`; an unmatched cell is `‹cell›` | `{}` |
+| `env` | variables the stages need on top of the env of edr.toml, such as a PDK path; they take the run placeholders | `{}` |
+
+### [stages.<name>] of the private file
+
+`[stages.<name>]` of the private file gives the commands of a stage that edr.toml marks `private = true`. The
+strings take the placeholders of the stage strings, and `{knob_file}`, the file in the run tree where edr writes
+the lines of `[knobs.<name>]` for this stage.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `cmd` | the command; in a task group it runs once per task | required |
+| `resume` | the command with `{checkpoint}`, for a resume | `""` |
+| `progress` | a command that prints the number of the step that runs now | `""` |
+| `prepare` | a command once before a group starts | `""` |
+| `after_each` | a command after each task, with `{task_dir}` | `""` |
+| `collect` | raw files under the run tree that the watcher copies into `data/private/<run_id>/`, where `[publish]` reads them | `[]` |
+| `retry` | `{ match, wait_s, max }`, over the raw output; replaces the retry of edr.toml | unset |
+| `keep` | more regexes of output lines that reach `log/<stage>.log`, on top of the file's `keep` | `[]` |
+
+#### retry of a private stage
+
+A stage that fails runs again when `match` is found in the last 80 lines of its log.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `match` | a regex over the last 80 log lines | required |
+| `wait_s` | seconds before the next attempt | `900` |
+| `max` | attempts after the first | `3` |
+
+### [knobs.<name>] of the private file
+
+`[knobs.<name>]` of the private file maps a knob of edr.toml onto the tool. Before each stage the knob acts on,
+the driver writes one line per knob into `{knob_file}`, in the order of edr.toml, so the stage's script sources
+one file in its own language:
+
+```toml
+[knobs.retime]
+line = { true = "set_app_options -name <option> -value true", false = "" }
+
+[knobs.clock_ns]
+line = "set CLOCK_NS {value}"
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `line` | a line with `{value}`, or a table from each value to its line; a value the table lacks, and an empty line, write nothing | required |
+
+### [publish.<name>]
+
+`[publish.<name>]` of the private file turns one raw file of `data/private/<run_id>/` into a public file of
+`data/results/<run_id>/public/`, which the metrics of edr.toml read. The watcher publishes after each collect and
+before each extraction; `edr extract` publishes too. Every text that goes into a public file passes the
+redaction of the private file.
+
+| `kind` | reads | writes |
+|---|---|---|
+| `area` | a hierarchical area report of Synopsys or OpenROAD | `<name>.csv`: `instance, depth, ge, local_ge, cells`, the area in gate equivalents of `ge_um2`, with `<top>` first |
+| `timing` | `report_timing` of Synopsys or `report_checks` of OpenROAD | `<name>.json`: per path the group, type, start and end, slack, arrival, required, logic levels and the points with the class of each cell from `cells`, and a summary of the setup (`max`) and hold (`min`) paths per path group |
+| `values` | any text file | `<name>.json`: one number per entry of `values`, group 1 of its regex; `ge = true` divides an area in um2 by `ge_um2` |
+| `text` | any text file | `<name>.txt`: the lines that `keep` lets through, redacted |
+| `python` | anything | `<name>.json`: the dict a hook returns from `(path, ctx)`; `ctx` gives `ge_um2`, `cell(name)` and `redact(text)` |
+
+With `{step}` in `file`, each step directory gives `public/<step>/<name>.<ext>`, which a metric reads with
+`step = "*"`.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `stage` | the stage whose collect brings the file | required |
+| `file` | the raw file under `data/private/<run_id>/`; `{step}` and `*` allowed | required |
+| `kind` | `"area"`, `"timing"`, `"values"`, `"text"` or `"python"` | required |
+| `depth` | `area`: the deepest instance depth to keep; 0 keeps all | `0` |
+| `paths` | `timing`: the most paths to keep, worst first | `50` |
+| `points` | `timing`: keep the points of each path, not only its summary | `true` |
+| `values` | `values`: name to a regex, or to `{ regex, ge, scale, reduce }` | `{}` |
+| `keep` | `text`: the regexes of the lines to keep | `[]` |
+| `python` | `python`: the hook `<file>:<function>`, relative to the private file | `""` |
 
 ## site.toml
 
@@ -475,6 +603,7 @@ plan problem.
 | `tasks` | the task ids of the task groups | `[]` |
 | `overrides` | `KEY = VALUE`; `{overrides}` renders them as `KEY=VALUE` tokens | `{}` |
 | `vars` | `{ name = value }`: any value the flow needs, such as `netlist_stage = 11`; `{vars.<name>}` in the stage strings, `[env]` and `collect` | `{}` |
+| `knobs` | `{ name = value }` of the `[knobs]` of edr.toml; a knob the job leaves out takes its default | `{}` |
 | `reuse` | `{ run_id = "..." }` with a run id or another handle, or `{ label = "...", latest = true }` for the newest run by start time of that label at the batch's source that ended done, else its newest run. The job starts on the tree of that run; with `restore = "<name>"`, it starts on a fresh tree with the `collect_on_request.<name>` files of that run copied back from `data/results/` | unset |
 
 ## Placeholders
@@ -498,6 +627,8 @@ to the shell and stays as it is.
 | `{source}` | the source tag of the batch | the run id, the stage strings |
 | `{overrides}` | the overrides of the job as `KEY=VALUE` tokens separated by spaces | the stage strings |
 | `{vars.<name>}` | a key of the job's `vars` table | the stage strings, `[env]`, `collect` |
+| `{knob.<name>}` | the value of a knob of the job, or its default: `true`, `false`, a number or a choice | the stage strings, `[env]` |
+| `{knob_file}` | the file in the run tree that holds the lines of the knobs of the stage | the strings of a private stage |
 | `{run_id}` | the run id | the stage strings, `[env]`, `sync.after` |
 | `{host}` | the host of the run | the stage strings, `[env]`, `sync.after` |
 | `{mount}` | the scratch mount of the host | the stage strings, `[env]`, `sync.after` |

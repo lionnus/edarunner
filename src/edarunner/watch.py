@@ -18,7 +18,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import analysis, board, census, collect, config, home, hosts, launch, metrics
+from . import analysis, board, census, collect, config, home, hosts, launch, metrics, private
 from .backend import Backend, Live, make_backend, run_handle
 from .db import Database
 from .guards import Refuse
@@ -285,7 +285,8 @@ def _parameters(run: Row, spec: dict) -> dict[str, dict[str, Any]]:
     each nested repository as `nested.<name>`."""
     nested = (spec.get("record") or {}).get("nested") or {}
     return {"spec": {**{k: run[k] for k in ("config", "build_tag") if run.get(k)}, **(spec.get("overrides") or {}),
-                     **{f"vars.{k}": v for k, v in (spec.get("vars") or {}).items()}},
+                     **{f"vars.{k}": v for k, v in (spec.get("vars") or {}).items()},
+                     **{f"knob.{k}": private.knob_text(v) for k, v in (spec.get("knobs") or {}).items()}},
             "checkout": {**({"source": run["source"]} if run.get("source") else {}),
                          **{f"nested.{k}": v for k, v in nested.items()}}}
 
@@ -329,6 +330,7 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
     if failed and failed != rec.get("collect_failed"):
         db.add_event("watch", run["run_id"], "collect", failed)
     rec["collect_failed"] = failed
+    _publish(project, db, run, rec)
     # No new file does not mean no new metric: a file can arrive before its step or stage counts as
     # finished. Extraction is idempotent, so run it.
     rows = extract_run(project, db, run, hb, spec)
@@ -346,6 +348,17 @@ def _collect(project: Project, ssh: Ssh, db: Database, run: Row, hb: dict, progr
         rec["params"] = True
     log.info("%s: %d files, %d new metrics", run["run_id"], res.files, len(new))
     return text
+
+
+def _publish(project: Project, db: Database, run: Row, rec: dict) -> None:
+    """Write the public files of the run's raw files; one `publish` event per new failure text."""
+    written, failures = private.publish_run(project, run["run_id"])
+    failed = f"{len(failures)} failed: {failures[0]}" if failures else ""
+    if failed and failed != rec.get("publish_failed"):
+        db.add_event("watch", run["run_id"], "publish", failed)
+    rec["publish_failed"] = failed
+    if written:
+        log.info("%s: published %s", run["run_id"], ", ".join(written))
 
 
 def _added(rows: list[dict]) -> str:
@@ -538,10 +551,11 @@ def _boards(project: Project, backend: Backend, db: Database, notifiers: list[No
     db.add_host_samples(int(now), probes)
     db.write_board_json(bdir / "board.json", probes)
     rows = db.runs(live_batches=True)
-    config.save_text(bdir / "status.html", board.status_html(rows, db.events(n=50), probes, now,
-                                                           db.host_samples(int(now) - 86400)))
+    config.save_text(bdir / "status.html", private.redact(board.status_html(rows, db.events(n=50), probes, now,
+                                                                            db.host_samples(int(now) - 86400))))
     if compare:
-        config.save_text(bdir / "compare.html", analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir)))
+        config.save_text(bdir / "compare.html",
+                         private.redact(analysis.compare_page(project, db, plotly_src=board.plotly_src(bdir))))
     text = tgfmt.board(rows, now=now, totals=metrics.step_totals(project), names=analysis.step_names(project))
     for n in notifiers if pin else []:
         n.board(text)

@@ -9,6 +9,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
+from edarunner import private
 from edarunner.model import Mail
 from edarunner.notify import Notifier, alerts, untag
 
@@ -26,6 +27,7 @@ class MailNotifier(Notifier):
     def mail(self, subject: str, text: str) -> bool:
         """Send one plain-text mail; True when the server took it."""
         msg = EmailMessage()
+        subject, text = private.redact(subject), private.redact(text)
         msg["Subject"] = subject
         msg["From"] = self.cfg.sender
         msg["To"] = ", ".join(self.cfg.to)

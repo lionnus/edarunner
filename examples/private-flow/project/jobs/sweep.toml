@@ -1,0 +1,14 @@
+# A sweep an agent may write: one job per point, each a set of knobs and nothing else.
+batch = "sweep"
+source = "HEAD"
+
+[[job]]
+label = "base"
+
+[[job]]
+label = "fast_rt"
+knobs = { clock_ns = 1.6, retime = true, effort = "high" }
+
+[[job]]
+label = "fast_lvt"
+knobs = { clock_ns = 1.6, vt = "mixed" }

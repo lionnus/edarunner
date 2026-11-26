@@ -166,11 +166,81 @@ def digest(root, names):
     return out
 
 
-def signature(path):
-    # type: (str) -> str
-    """Return the last log line with digits removed."""
+def signature(path, private=False):
+    # type: (str, bool) -> str
+    """Return the last log line with digits removed; of a private raw log, a hash of it, which tells two failures
+    apart as the line does and leaves the host without its text."""
     lines = [l for l in tail(path, 20).splitlines() if l.strip()]
-    return re.sub(r"\d+", "", lines[-1]).strip() if lines else ""
+    sig = re.sub(r"\d+", "", lines[-1]).strip() if lines else ""
+    return "private:" + hashlib.sha256(sig.encode("utf-8")).hexdigest()[:12] if private and sig else sig
+
+
+NDA = u"\u2039nda\u203a"
+CHUNK = 4 * 1024 * 1024
+
+
+def redactor(patterns):
+    # type: (list) -> list
+    """The `redact` regexes as one regex, so one pass replaces the leftmost match of any; a pass per regex would let
+    one replacement cut the text another needs. One regex per pattern when they do not combine."""
+    def scoped(p):
+        m = re.match(r"\(\?([aiLmsux]+)\)", p)
+        return "(?%s:%s)" % (m.group(1), p[m.end():]) if m else "(?:%s)" % p
+    if not patterns:
+        return []
+    try:
+        return [re.compile("|".join(scoped(p) for p in patterns))]
+    except re.error:
+        return [re.compile(p) for p in patterns]
+
+
+class Mirror(object):
+    """The public log of a private command: the lines of its raw log that a `keep` regex matches, redacted.
+
+    The command writes the raw log itself, so it outlives the driver; the driver copies the new complete lines over
+    every few seconds, and the rest when the command ends."""
+
+    def __init__(self, raw, public, keep, redact):
+        # type: (str, str, list, list) -> None
+        self.raw, self.public = raw, public
+        self.keep = [re.compile(k) for k in keep]
+        self.redact = redact
+        self.pos = log_size(raw) or 0
+        self.held = 0
+
+    def pump(self, final=False):
+        # type: (bool) -> None
+        """Copy the lines written since the last pump; `final` also takes a last line without its newline."""
+        while True:
+            try:
+                with open(self.raw, "rb") as f:
+                    f.seek(self.pos)
+                    data = f.read(CHUNK)
+            except OSError:
+                return
+            more = len(data) == CHUNK
+            if not final or more:
+                data = data[:data.rfind(b"\n") + 1]
+            if not data:
+                break
+            self.pos += len(data)
+            out = []
+            for ln in data.decode("utf-8", "replace").splitlines():
+                if any(k.search(ln) for k in self.keep):
+                    for rx in self.redact:
+                        ln = rx.sub(NDA, ln)
+                    out.append(ln + "\n")
+                else:
+                    self.held += 1
+            if out:
+                with open(self.public, "ab") as f:
+                    f.write("".join(out).encode("utf-8"))
+            if not more:
+                break
+        if final and self.held:
+            with open(self.public, "ab") as f:
+                f.write(("# edr: %d lines held back in the private log\n" % self.held).encode())
+            self.held = 0
 
 
 class Driver(object):
@@ -198,6 +268,11 @@ class Driver(object):
             self.env[k] = string.Template(str(v)).safe_substitute(self.env)
         if not os.path.isdir(self.root):
             raise ValueError("root is not a directory: " + self.root)
+        private = spec.get("private") or {}
+        self.private_dir = private.get("dir") or os.path.join(self.root, ".edr", "private")
+        self.redact = redactor(private.get("redact") or [])
+        self.mirrors = {}  # pid -> Mirror of a private command
+        self.next_pump = 0.0
         spec_dir = os.path.dirname(os.path.abspath(spec_path))
         self.stop_file = os.path.join(spec_dir, self.run_id + ".stop")
         self.keep_file = os.path.join(spec_dir, self.run_id + ".keep.json")
@@ -386,30 +461,76 @@ class Driver(object):
     def log_path(self, name):
         return os.path.join(self.root, "log", name + ".log")
 
-    def spawn(self, cmd, cwd, log):
-        # type: (str, str, str) -> subprocess.Popen
-        """Start a command in its own session with the log appended."""
+    def raw_log(self, log):
+        # type: (str) -> str
+        """The raw log of a private command whose public log is `log`."""
+        return os.path.join(self.private_dir, "log", os.path.basename(log))
+
+    def spawn(self, cmd, cwd, log, private=None):
+        # type: (str, str, str, Optional[dict]) -> subprocess.Popen
+        """Start a command in its own session with the log appended.
+
+        A private command writes its raw log under the private directory, and only the lines its `keep` lets
+        through reach `log`; neither the heartbeat nor `log` names the command."""
+        shown, out = cmd, log
+        if private is not None:
+            shown = "the private command of stage %s" % private.get("stage", "?")
+            out = self.raw_log(log)
+            if not os.path.isdir(os.path.dirname(out)):
+                os.makedirs(os.path.dirname(out))
+            with open(log, "ab") as fh:
+                fh.write(("# edr: %s\n" % shown).encode())
         with self.lock:
-            self.hb["last_cmd"] = cmd
-        with open(log, "ab") as fh:
+            self.hb["last_cmd"] = shown
+        with open(out, "ab") as fh:
             fh.write(("# edr: %s\n" % cmd).encode())
             fh.flush()  # the header goes before the output of the command
+            mirror = Mirror(out, log, private.get("keep") or [], self.redact) if private is not None else None
             p = subprocess.Popen([self.shell, "-c", cmd], cwd=cwd, env=self.env,
                                  stdin=subprocess.DEVNULL, stdout=fh,
                                  stderr=subprocess.STDOUT, start_new_session=True)
         with self.lock:
             self.procs[p.pid] = p
+            if mirror is not None:
+                self.mirrors[p.pid] = mirror
         return p
 
     def forget(self, p):
         with self.lock:
             self.procs.pop(p.pid, None)
+            mirror = self.mirrors.pop(p.pid, None)
+        if mirror is not None:
+            mirror.pump(final=True)
 
-    def run_wait(self, cmd, cwd, log):
-        # type: (str, str, str) -> int
-        p = self.spawn(cmd, cwd, log)
+    def pump_all(self):
+        # type: () -> None
+        """Copy the new lines of every private command's raw log into its public log, once per POLL_S."""
+        if time.time() < self.next_pump:
+            return
+        self.next_pump = time.time() + POLL_S
+        with self.lock:
+            mirrors = list(self.mirrors.values())
+        for m in mirrors:
+            m.pump()
+
+    def write_files(self, st):
+        # type: (dict) -> None
+        """Write the files of a stage's spec, such as its `{knob_file}`, each by a rename."""
+        for path, text in sorted((st.get("files") or {}).items()):
+            d = os.path.dirname(path)
+            if not os.path.isdir(d):
+                os.makedirs(d)
+            tmp = "%s.%d.tmp" % (path, os.getpid())
+            with open(tmp, "w") as f:
+                f.write(text)
+            os.rename(tmp, path)
+
+    def run_wait(self, cmd, cwd, log, private=None):
+        # type: (str, str, str, Optional[dict]) -> int
+        p = self.spawn(cmd, cwd, log, private)
         while p.poll() is None:
             self.check_stop()
+            self.pump_all()
             time.sleep(TICK_S)
         self.forget(p)
         self.check_stop()
@@ -635,18 +756,21 @@ class Driver(object):
             cmd = st["resume"].replace("{checkpoint}", str(checkpoint))
         log = self.log_path(name)
         retry, budget = st.get("retry") or {}, st.get("budget") or {}
+        private = st.get("private")
+        self.write_files(st)
         attempt = 0
         while True:
             phase = "stage:" + name if not attempt else "retry:%s:%d" % (name, attempt)
             self.set_phase(phase, stage=name, log=log, step=None, step_name=None)
             started = int(time.time())
             self.record_stage(name, "running", attempt=first + attempt, started=started, ended=None, exit=None, log=log)
-            p = self.spawn(cmd, cwd, log)
+            p = self.spawn(cmd, cwd, log, private)
             next_probe = 0.0
             while p.poll() is None:
                 self.check_stop()
                 if time.time() >= next_probe:
                     self.progress(st, cwd)
+                    self.pump_all()
                     next_probe = time.time() + POLL_S
                 self.check_budget(name, budget, started, [p])
                 time.sleep(TICK_S)
@@ -663,7 +787,7 @@ class Driver(object):
             self.record_stage(name, "failed", **ended)
             attempt += 1
             if (retry.get("match") and attempt <= int(retry.get("max") or 0)
-                    and re.search(retry["match"], tail(log, TAIL_LINES))):
+                    and re.search(retry["match"], tail(self.raw_log(log) if private is not None else log, TAIL_LINES))):
                 self.set_phase("retry:%s:%d" % (name, attempt))
                 self.wait(float(retry.get("wait_s") or 0))
                 continue
@@ -676,7 +800,8 @@ class Driver(object):
 
     def end_task(self, q, st, task, rc, log, cwd):
         tid = task["id"]
-        sig = signature(log) if rc else None
+        private = st.get("private") is not None
+        sig = (signature(self.raw_log(log), True) if private else signature(log)) if rc else None
         try:
             os.rename(os.path.join(q, "claimed", tid + "." + self.run_id), os.path.join(q, "done", tid))
         except OSError:
@@ -685,7 +810,7 @@ class Driver(object):
         if after and "{task_dir}" in after and not task.get("dir"):
             sys.stderr.write("after_each skipped for %s: no dir\n" % tid)
         elif after:
-            self.run_wait(after.replace("{task_dir}", task.get("dir") or ""), cwd, log)
+            self.run_wait(after.replace("{task_dir}", task.get("dir") or ""), cwd, log, st.get("private"))
         self.release("%s.%s.%s" % (self.key, st["name"], tid))
         streak = int(self.limits.get("streak") or 0)
         with self.lock:
@@ -704,11 +829,12 @@ class Driver(object):
         name = st["name"]
         cwd = os.path.join(self.root, st.get("cwd") or ".")
         self.set_phase("group:" + name, stage=name, log=None, step=None, step_name=None)
+        self.write_files(st)
         if st.get("prepare"):
             log = self.log_path(name + ".prepare")
             with self.lock:
                 self.hb["log"] = log
-            if self.run_wait(st["prepare"], cwd, log):
+            if self.run_wait(st["prepare"], cwd, log, st.get("private")):
                 raise Fail(5, "FAILED:" + name)
         q = os.path.join(self.queue_dir, name)
         for d in ("pending", "claimed", "done"):
@@ -787,11 +913,12 @@ class Driver(object):
                     self.release(key)
                     continue
                 log = self.log_path("%s.%s" % (name, tid))
-                p = self.spawn(task["cmd"], cwd, log)
+                p = self.spawn(task["cmd"], cwd, log, st.get("private"))
                 running[tid] = (p, task, int(time.time()), log)
                 with self.lock:
                     self.hb["log"] = log
                 self.record_task(name, tid, "running", pid=p.pid, pgid=p.pid, started=running[tid][2], log=log)
+            self.pump_all()
             time.sleep(TICK_S)
 
     # the run
@@ -862,6 +989,10 @@ class Driver(object):
             self.kill_all(signal.SIGTERM)
             code, phase = 5, "FAILED:" + str(self.hb.get("stage") or "setup")
         self.reap(10)
+        with self.lock:
+            mirrors, self.mirrors = list(self.mirrors.values()), {}
+        for m in mirrors:  # the commands a signal ended; their output so far
+            m.pump(final=True)
         self.release()
         self.stop_evt.set()
         t.join(30)

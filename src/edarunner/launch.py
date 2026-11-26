@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 import inspect
 import os
@@ -13,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, board, census, checkout, collect, config, home, hosts, runid, sync
+from . import __version__, board, census, checkout, collect, config, home, hosts, private, runid, sync
 from .backend import Backend, Handle, Request, check_pid, gone, make_backend, run_handle
 from .config import ConfigError
 from .db import Database, NotFound, pick
@@ -73,11 +74,13 @@ def taken(db: Database, run_id: str, batch: str, label: str, hint: str = "launch
 
 
 def build_tag(project: Project, job: Job, source: str = "") -> str:
-    """The build tag of a job: the source hook, else config plus one token per override.
+    """The build tag of a job: the source hook, else config plus one token per override, then one token per knob
+    that differs from its default.
 
     The hook gets the worktree of `source` as a third argument when one exists, so it
     can read the configuration table and the interpreter of that source.
     """
+    knobs = private.knob_tokens(project, job.knobs)
     if project.source.build_tag:
         fn, name = config.load_hook(project.root, project.source.build_tag)
         worktree = None
@@ -90,10 +93,10 @@ def build_tag(project: Project, job: Job, source: str = "") -> str:
         except TypeError:
             args = args[:2]  # a hook of the form (config, overrides)
         try:
-            return str(fn(*args))
+            return "_".join([str(fn(*args)), *knobs])
         except Exception as e:  # a hook fault is a plan problem, never a traceback
             raise ConfigError(f"build_tag hook {name}: {e}") from e
-    return "_".join([job.config] * bool(job.config) + [f"{k}{v}" for k, v in job.overrides.items()])
+    return "_".join([job.config] * bool(job.config) + [f"{k}{v}" for k, v in job.overrides.items()] + knobs)
 
 
 def render_run_id(template: str, values: dict[str, object]) -> str:
@@ -142,10 +145,34 @@ def _task_spec(project: Project, stage: Stage, task: Task, values: dict[str, obj
     return out
 
 
+def effective(project: Project, stage: Stage) -> Stage:
+    """A stage with the commands it runs: of a private stage, those of the private file."""
+    if not stage.private or project.private is None:
+        return stage
+    ps = project.private.stages[stage.name]
+    return dataclasses.replace(stage, cmd=ps.cmd, resume=ps.resume, progress=ps.progress, prepare=ps.prepare,
+                               after_each=ps.after_each, retry=ps.retry or stage.retry)
+
+
 def _stage_spec(project: Project, stage: Stage, tasks: list[Task], values: dict[str, object]) -> dict[str, Any]:
     needs = _merge(stage.needs, None)
     needs.pop("ram_gb")
     v = {**values, "cores": needs["cores"]}
+    extra: dict[str, Any] = {}
+    if stage.private and project.private is not None:
+        kf = private.knob_file(str(v["root"]), stage.name)
+        v["knob_file"] = kf
+        stage = effective(project, stage)
+        extra = {"private": {"stage": stage.name, "keep": [*project.private.keep, *project.private.stages[stage.name].keep]},
+                 "files": {kf: private.knob_lines(project, stage.name,
+                                                  {n: v[f"knob.{n}"] for n in project.knobs if f"knob.{n}" in v})}}
+    out = _stage_out(project, stage, tasks, v, needs)
+    out.update(extra)
+    return out
+
+
+def _stage_out(project: Project, stage: Stage, tasks: list[Task], v: dict[str, object],
+               needs: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"name": stage.name, "cwd": os.path.normpath(os.path.join(str(v["root"]), stage.cwd)),
                            "needs": needs}
     if tools := _tools(project, needs.pop("tools"), v):
@@ -186,6 +213,9 @@ def _env(project: Project, v: dict[str, object]) -> dict[str, str]:
         env[k] = string.Template.pattern.sub(
             lambda m, site=site: site.get(m.group("named") or m.group("braced") or "", m.group(0)),
             config.render(val, v))
+    env.update({f"EDR_KNOB_{k[len('knob.'):].upper()}": str(x) for k, x in v.items() if k.startswith("knob.")})
+    if project.private is not None:
+        env.update({k: config.render(x, v) for k, x in project.private.env.items()})
     env.update(EDR_SOURCE=str(v.get("source") or ""), EDR_RUN_ID=str(v["run_id"]), EDR_TREE_ID=str(v.get("tree_id") or v["run_id"]))
     return env
 
@@ -210,11 +240,18 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
     if project.runtime.setup:
         spec["runtime"] = {"setup": config.render(project.runtime.setup, v),
                            "when_changed": list(project.runtime.when_changed)}
+    if project.knobs:
+        spec["knobs"] = private.knob_values(project, job.knobs)
+    if project.private is not None:
+        spec["private"] = {"dir": os.path.join(str(v["root"]), private.TREE_DIR), "redact": list(project.private.redact),
+                           "env": sorted(project.private.env)}
     return spec
 
 
 def spec_text(project: Project, spec: dict[str, Any]) -> str:
-    """The rendered spec of one run for `--show-spec`: the env, the command of each stage and task, the collect paths."""
+    """The rendered spec of one run for `--show-spec`: the env, the command of each stage and task, the collect paths.
+    A field from the private file shows as `‹private›`."""
+    spec = private.public_spec(spec)
     out = [f"{spec['run_id']}:", "  env:", *(f"    {k}={v}" for k, v in spec["env"].items())]
     if rt := spec.get("runtime"):
         out.append(f"  runtime setup in {spec['root']}: {rt['setup']}")
@@ -300,7 +337,7 @@ def stages_left(project: Project, db: Database, run: dict[str, Any]) -> tuple[li
 def _check_overrides(project: Project, job: Job, names: list[str]) -> list[str]:
     bad = [k for k in job.overrides if not _ID_RE.match(k)]
     problems = [f"override key {k!r} is not a KEY=VALUE name" for k in bad]
-    texts = [getattr(project.stages[n], key) for n in names for key in ("cmd", "resume", "prepare")]
+    texts = [getattr(effective(project, project.stages[n]), key) for n in names for key in ("cmd", "resume", "prepare")]
     # A job with reuse takes the build tag of the reused run, whose stages used the overrides.
     if job.overrides and not job.reuse and not any("{overrides}" in t for t in texts):
         problems.append("overrides given, but no stage of the job uses {overrides}")
@@ -334,7 +371,8 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
             problems.append(str(e))
             tag = job.config
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
-                            build_tag=tag, source=source, overrides=job.overrides, vars=job.vars)
+                            build_tag=tag, source=source, overrides=job.overrides, vars=job.vars,
+                            knob={n: private.knob_text(x) for n, x in private.knob_values(project, job.knobs).items()})
     run_id = render_run_id(project.source.run_id, v)
     if why := taken(db, run_id, batch.batch, job.label):
         problems.append(why)

@@ -2,8 +2,9 @@
 
 `edr.toml` and `tasks.toml` live in the project directory, one `jobs/<batch>.toml` per batch next
 to them, `site.toml`, wherever `site` points, with the hosts, the tools and the lab's bot
-commands, and `user.toml` in `~/.config/edarunner/`, with your chat and the digest time. These
-rules hold for every file:
+commands, and `user.toml` in `~/.config/edarunner/`, with your chat and the digest time. A flow
+under a non-disclosure agreement adds a private file, wherever `private` points, which
+`docs/guides/private.md` describes. These rules hold for every file:
 
 - An unknown key is an error. A value of the wrong type is an error that names the file and the
   key path, so `cores = "16"` stops the load.
@@ -35,7 +36,9 @@ from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .model import (
     BACKENDS,
+    KNOB_TYPES,
     OPT_IN,
+    PUBLISH_KINDS,
     SCHEDULERS,
     Batch,
     BotCommand,
@@ -43,6 +46,8 @@ from .model import (
     Checks,
     Host,
     Job,
+    Knob,
+    KnobMap,
     Limits,
     Mail,
     Metric,
@@ -50,7 +55,10 @@ from .model import (
     Ntfy,
     Parameter,
     Placement,
+    Private,
+    PrivateStage,
     Project,
+    Publish,
     Retry,
     Runtime,
     Safety,
@@ -76,7 +84,11 @@ _PH = re.compile(r"(?<!\$)\{([\w.]+)\}")
 _PROJECT_KEYS = {
     "schema", "project", "site", "state_dir", "data", "run_prefix", "ge_um2",
     "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "parameters", "checks", "env",
+    "knobs", "private",
 }
+_PRIVATE_KEYS = {"schema", "ge_um2", "redact", "keep", "cells", "env", "stages", "knobs", "publish"}
+# The strings of a private stage that come from the private file alone.
+PRIVATE_FIELDS = ("cmd", "resume", "progress", "prepare", "after_each")
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "orphan_min_age_s", "host_free_min_gb", "hosts", "tools",
               "nfs_export", "head", "telegram", "scheduler"}
 _EXTRACTORS = ("regex", "csv", "json", "python", "area_hier", "table")
@@ -103,6 +115,10 @@ PLACEHOLDERS = {
     "source": ("the source tag of the batch", "the run id, the stage strings"),
     "overrides": ("the overrides of the job as `KEY=VALUE` tokens separated by spaces", "the stage strings"),
     "vars.<name>": ("a key of the job's `vars` table", "the stage strings, `[env]`, `collect`"),
+    "knob.<name>": ("the value of a knob of the job, or its default: `true`, `false`, a number or a choice",
+                    "the stage strings, `[env]`"),
+    "knob_file": ("the file in the run tree that holds the lines of the knobs of the stage",
+                  "the strings of a private stage"),
     "run_id": ("the run id", "the stage strings, `[env]`, `sync.after`"),
     "host": ("the host of the run", "the stage strings, `[env]`, `sync.after`"),
     "mount": ("the scratch mount of the host", "the stage strings, `[env]`, `sync.after`"),
@@ -134,7 +150,7 @@ def render(template: str, values: Mapping[str, object]) -> str:
     def sub(m: re.Match[str]) -> str:
         key = m.group(1)
         if key not in values:
-            known = key in PLACEHOLDERS or key.startswith(("task.", "tool.", "vars."))
+            known = key in PLACEHOLDERS or key.startswith(("task.", "tool.", "vars.", "knob."))
             raise ConfigError(f"{'missing' if known else 'unknown'} placeholder {{{key}}} in '{template}'")
         return str(values[key])
 
@@ -420,8 +436,17 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     # The tag and the refusal of an undeclared repository compare these names with the paths git lists.
     source.nested = [os.path.normpath(n) for n in source.nested]
     stages = {n: _stage(n, t, file) for n, t in _table(raw.get("stages", {}), None, file, "stages").items()}
+    private = None
+    if "private" in raw:
+        if not isinstance(raw["private"], str):
+            raise ConfigError(f"{file}: private must be str, not {type(raw['private']).__name__}")
+        private = load_private(_path(raw["private"], file, values), stages)
     for stage in stages.values():
-        _check_stage(stage, stages, site, file)
+        _check_stage(stage, stages, site, file, private)
+    knobs = {n: _knob(n, t, stages, file) for n, t in _table(raw.get("knobs", {}), None, file, "knobs").items()}
+    for n in private.knobs if private else {}:
+        if n not in knobs:
+            raise ConfigError(f"{private.path}: knobs.{n} maps no knob of edr.toml (it has: {', '.join(knobs) or 'none'})")
     metrics = {n: _metric(n, t, stages, file)
                for n, t in _table(raw.get("metrics", {}), None, file, "metrics").items()}
     parameters = {n: _parameter(n, t, stages, file)
@@ -456,6 +481,8 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
         env={str(k): str(val) for k, val in _table(raw.get("env", {}), None, file, "env").items()},
         tasks=tasks,
         task_resolver=resolver,
+        knobs=knobs,
+        private=private,
     )
 
 
@@ -490,10 +517,21 @@ def _needs(raw: object, file: Path, at: str) -> Needs:
     return _build(Needs, raw, file, at)
 
 
-def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path) -> None:
+def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path, private: Private | None = None) -> None:
     at = f"stages.{stage.name}"
-    if not stage.cmd:
+    if stage.private:
+        given = [k for k in PRIVATE_FIELDS if getattr(stage, k)]
+        if given:
+            raise ConfigError(f"{file}: {at} is private, so its {', '.join(given)} come from the private file")
+        if private is None:
+            raise ConfigError(f"{file}: {at} is private, but edr.toml names no private file")
+    elif not stage.cmd:
         raise ConfigError(f"{file}: {at} needs cmd")
+    from .private import TREE_DIR
+    for entry in [*stage.collect, *(e for es in stage.collect_on_request.values() for e in es)]:
+        norm = os.path.normpath(entry)
+        if norm == TREE_DIR or norm.startswith(TREE_DIR + "/") or norm.startswith(".."):
+            raise ConfigError(f"{file}: {at} collects {entry!r}, which is outside the public part of the run tree")
     if stage.is_group and not stage.task_dir:
         raise ConfigError(f"{file}: {at} is a task group and needs task_dir")
     _check_tools(stage.needs.tools, site.tools, file, f"{at}.needs.tools")
@@ -543,6 +581,115 @@ def _metric(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Met
             raise ConfigError(f'{file}: {at}.record is {{ stage = "<a stage of the metric with steps>", '
                               'from = <step number> }, and the metric needs step')
     return _build(Metric, raw, file, at, name=name, pass_=rule)
+
+
+def _knob(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Knob:
+    from .private import check_knob, knob_type
+    at = f"knobs.{name}"
+    if not re.fullmatch(r"[A-Za-z_]\w*", name):
+        raise ConfigError(f"{file}: {at}: a knob name is an identifier")
+    _need(_table(raw, None, file, at), "default", file, at)
+    k = _build(Knob, raw, file, at, name=name)
+    kind = knob_type(k)
+    if kind not in KNOB_TYPES:
+        raise ConfigError(f"{file}: {at}.type is one of {', '.join(KNOB_TYPES)}")
+    if kind == "choice" and not (k.choices and all(isinstance(c, str) for c in k.choices)):
+        raise ConfigError(f"{file}: {at} is a choice and needs choices, a list of strings")
+    if (k.min is not None or k.max is not None) and kind not in ("int", "float"):
+        raise ConfigError(f"{file}: {at}: min and max belong to an int or a float knob")
+    for s in k.stages:
+        if s not in stages:
+            raise ConfigError(f"{file}: {at}.stages names unknown stage '{s}'")
+    try:
+        k.default = check_knob(k, k.default)
+    except ValueError as e:
+        raise ConfigError(f"{file}: {at}.default: {e}") from None
+    return k
+
+
+def load_private(path: PathLike, stages: dict[str, Stage]) -> Private:
+    """Load the private file of a project whose stages are `stages`, and redact its strings from then on."""
+    from . import private as _private
+    file = Path(os.path.abspath(Path(path).expanduser()))
+    if not file.is_file():
+        raise ConfigError(f"{file}: the private file does not exist; a person with access to the flow writes it")
+    raw = _table(_read(file), _PRIVATE_KEYS, file, "")
+    _schema(raw, file)
+    pstages: dict[str, PrivateStage] = {}
+    for n, t in _table(raw.get("stages", {}), None, file, "stages").items():
+        at = f"stages.{n}"
+        if n not in stages or not stages[n].private:
+            raise ConfigError(f"{file}: {at} is no stage of edr.toml with private = true")
+        t = dict(_table(t, None, file, at))
+        if "retry" in t:
+            t["retry"] = _build(Retry, t["retry"], file, f"{at}.retry")
+        ps = pstages[n] = _build(PrivateStage, t, file, at, name=n)
+        if not ps.cmd:
+            raise ConfigError(f"{file}: {at} needs cmd")
+        _regexes([*ps.keep, *([ps.retry.match] if ps.retry else [])], file, at)
+    for n, st in stages.items():
+        if st.private and n not in pstages:
+            raise ConfigError(f"{file}: no [stages.{n}] for the private stage {n} of edr.toml")
+    knobs = {}
+    for n, t in _table(raw.get("knobs", {}), None, file, "knobs").items():
+        k = knobs[n] = _build(KnobMap, t, file, f"knobs.{n}", name=n)
+        if not (isinstance(k.line, str) or all(isinstance(v, str) for v in k.line.values())):
+            raise ConfigError(f"{file}: knobs.{n}.line is a string or a table of strings")
+    given = {k: raw[k] for k in ("redact", "keep", "cells", "env") if k in raw}
+    hints = get_type_hints(Private)
+    for key, value in given.items():
+        if not _typed(value, hints[key]) or isinstance(value, dict) and not all(isinstance(v, str) for v in value.values()):
+            raise ConfigError(f"{file}: {key} must be {_type_name(hints[key])} of strings")
+    _regexes([*given.get("redact", []), *given.get("keep", []), *given.get("cells", {}).values()], file, "")
+    ge = raw.get("ge_um2", 0.0)
+    if "ge_um2" in raw and not (type(ge) in (int, float) and ge > 0):
+        raise ConfigError(f"{file}: ge_um2 is the area of one gate equivalent in um2, a number above 0")
+    publish = {n: _publish(n, t, stages, file) for n, t in _table(raw.get("publish", {}), None, file, "publish").items()}
+    for p in publish.values():
+        wants_ge = p.kind == "area" or any(isinstance(v, dict) and v.get("ge") for v in p.values.values())
+        if wants_ge and not ge:
+            raise ConfigError(f"{file}: publish.{p.name} gives gate equivalents and needs ge_um2")
+    private = Private(path=file, ge_um2=float(ge), stages=pstages, knobs=knobs, publish=publish, **given)
+    _private.register(private)
+    return private
+
+
+def _regexes(patterns: list[str], file: Path, at: str) -> None:
+    for rx in patterns:
+        try:
+            re.compile(rx)
+        except (re.error, TypeError) as e:
+            raise ConfigError(f"{file}: {at or 'a regex'}: {e}") from None
+
+
+def _publish(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Publish:
+    at = f"publish.{name}"
+    p = _build(Publish, raw, file, at, name=name)
+    if not (p.stage and p.file and p.kind):
+        raise ConfigError(f"{file}: {at} needs stage, file and kind")
+    if p.stage not in stages:
+        raise ConfigError(f"{file}: {at}.stage names unknown stage '{p.stage}'")
+    if p.kind not in PUBLISH_KINDS:
+        raise ConfigError(f"{file}: {at}.kind is one of {', '.join(PUBLISH_KINDS)}")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise ConfigError(f"{file}: {at}: the name of a publish is its file name, of letters, digits, _, . and -")
+    if p.kind == "values":
+        if not p.values:
+            raise ConfigError(f"{file}: {at} is values and needs values")
+        for k, v in p.values.items():
+            spec = v if isinstance(v, dict) else {"regex": v}
+            _table(spec, {"regex", "ge", "scale", "reduce"}, file, f"{at}.values.{k}")
+            if not isinstance(spec.get("regex"), str) or spec.get("reduce", "first") not in _REDUCE:
+                raise ConfigError(f"{file}: {at}.values.{k} is a regex, or {{ regex, ge, scale, reduce }}")
+            _regexes([spec["regex"]], file, f"{at}.values.{k}")
+            if not re.compile(spec["regex"]).groups:
+                raise ConfigError(f"{file}: {at}.values.{k}.regex needs group 1")
+    if p.kind == "text" and not p.keep:
+        raise ConfigError(f"{file}: {at} is text and needs keep")
+    if p.kind == "python" and not p.python:
+        raise ConfigError(f"{file}: {at} is python and needs python")
+    _regexes(p.keep, file, at)
+    return p
 
 
 def _parameter(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Parameter:
@@ -630,6 +777,14 @@ def _job(raw: object, index: int, project: Project, file: Path) -> Job:
         if isinstance(v, (dict, list)):
             raise ConfigError(f"{file}: {at}.vars.{k} must be a string or a number")
     raw["vars"] = {k: str(v) for k, v in raw.get("vars", {}).items()}
+    if "knobs" in raw:
+        from .private import knob_values
+        given = _table(raw["knobs"], None, file, f"{at}.knobs")
+        try:
+            values = knob_values(project, given)
+        except ValueError as e:
+            raise ConfigError(f"{file}: {at}.knobs: {e}") from None
+        raw["knobs"] = {k: values[k] for k in given}
     for s in raw.get("stages", []):
         if s not in project.stages:
             raise ConfigError(f"{file}: {at}.stages names unknown stage '{s}'")
