@@ -19,6 +19,7 @@ published at <https://lionnus.github.io/edarunner/>.
 | [guides/results.md](guides/results.md) | get the numbers out: metrics, compare, runtime, export and MLflow |
 | [guides/alerts.md](guides/alerts.md) | get alerts on Telegram, ntfy or mail, and use the bot from the phone |
 | [guides/agents.md](guides/agents.md) | let a Claude session or a script operate the farm through `edr` |
+| [guides/private.md](guides/private.md) | let an agent run a flow under NDA: knobs as its interface, a private file with the commands, redacted logs, area in GE and timing in a standard form |
 | [guides/cleanup.md](guides/cleanup.md) | retire runs and batches, prune trees, and keep the large files |
 | [reference/](reference/README.md) | look up a command, a flag, a config key, a placeholder, a run state or a bot command; generated from the code |
 

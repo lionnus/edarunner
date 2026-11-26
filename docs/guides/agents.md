@@ -87,6 +87,16 @@ when ssh drops, which exits 255:
 until edr -P myflow wait --batch b1; [ $? -ne 255 ]; do sleep 60; done
 ```
 
+## Run a flow under NDA
+
+When the flow's scripts and reports fall under a non-disclosure
+agreement, the agent works through the knobs of `edr.toml` and the public
+files of `data/results/<run_id>/public/`, and a person keeps the commands
+in a private file. `edr brief` then has a section on the knobs and one on
+the private flow, which names the paths the agent must never read.
+[private.md](private.md) sets it up, including the Claude Code sandbox
+that keeps the other shell commands away from those paths.
+
 ## Report to the phone
 
 `edr notify` sends a message through every alert channel of the project,

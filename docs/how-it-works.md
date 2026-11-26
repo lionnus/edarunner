@@ -249,6 +249,16 @@ When every stage has run, the run ends `done` with exit 0. The phases
 and their exit codes are listed in
 [guides/run.md](guides/run.md#phases).
 
+A stage marked `private` takes its commands from a private file that a
+person keeps outside the project, for a flow under a non-disclosure
+agreement. Its raw output stays in `.edr/private/` of the run tree, and
+`log/<stage>.log` gets only the lines that the private file lets
+through, redacted. Its raw reports go to `data/private/` on the head
+node, and the watcher publishes them as public files, with the area in
+gate equivalents, which the metrics read. Every output of edr passes the
+redaction of the private file
+([guides/private.md](guides/private.md)).
+
 ### The heartbeat
 
 Every `heartbeat_s` seconds, 60 by default, and at every change of

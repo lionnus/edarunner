@@ -19,7 +19,15 @@ one run through the code from `plan` to `export`.
   across all projects once.
 
 No module knows an EDA tool. The project config names the commands, the
-report files and the numbers in them.
+report files and the numbers in them. `metrics.py` and `private.py` read
+the common formats of a hierarchical area report and a timing report.
+
+A flow under NDA keeps its commands in a private file, which
+`config.load_private` loads and registers with `private.register`. From
+then on every output of the process passes `private.redact`: the CLI
+streams in `cli.main`, the log records, the events, the channels and the
+board files. [guides/private.md](../guides/private.md) describes the
+boundary.
 
 ## Modules
 
@@ -42,6 +50,7 @@ report files and the numbers in them.
 | `census.py` | the live runs of every registered project, the reservations, the census of the hosts, and the checks across all projects: orphans, the full-host stop, the lease sweep, the clock check; the host view of `edr hosts` |
 | `collect.py` | the rsync of the collect paths into `data/results` |
 | `metrics.py` | the six parsers with the hierarchical area report and the per-instance table, extraction, and the parameter tables |
+| `private.py` | the boundary of a flow under NDA: the redaction of every output, the knob values, tokens and lines, the public view of a spec, and the publish of raw reports as public files with the area in GE and the timing paths in a standard form |
 | `analysis.py` | the views over the database: instances side by side, metrics per step, pivots, the data of `compare.html`, runtimes, host and run samples |
 | `mlflow_export.py` | `edr export --mlflow`: the project database as a local MLflow tracking store; imports `mlflow` only when called |
 | `db.py` | the project database: the SQLite schema and its version check, upserts, queries, `board.json` |
@@ -86,6 +95,7 @@ A channel never imports `cli` or `watch`; it gets its commands through the
    `step_runs` and `run_samples`, classifies, acts, collects into
    `data/results`, extracts metrics into `metrics` and `instances`, writes
    `parameters` and `task_fields` from the spec, `parameters` from the run's files,
+   publishes the raw files of a private stage from `data/private` as public files (`private.publish_run`),
    rewrites the `flags` of the checks, resumes, launches queued rows, keeps the host probes in
    `host_samples`, and writes the boards.
 6. `export.export` takes one run per label and source tag by `db.pick`

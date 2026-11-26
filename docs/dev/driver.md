@@ -32,7 +32,9 @@ the command through the spec; `$VAR` in a value expands on the host.
 
 | File in the run tree | Holds |
 |---|---|
-| `log/<stage>.log` | stdout and stderr of a stage command; every attempt is appended |
+| `log/<stage>.log` | stdout and stderr of a stage command; every attempt is appended. Of a private stage, the lines of its raw log that `keep` matches, redacted, then a count of the lines held back |
+| `.edr/private/log/<stage>.log` | the raw output of a private command, with its `# edr: <cmd>` header; never collected into `data/results` |
+| `.edr/private/knobs/<stage>.knobs` | the `{knob_file}` of a private stage, from the stage's `files` |
 | `log/<stage>.prepare.log` | the `prepare` command of a task group |
 | `log/<stage>.<task>.log` | one task, then its `after_each` |
 
@@ -77,9 +79,18 @@ itself: `{checkpoint}` in `resume` and `{task_dir}` in `after_each`.
 | `stages` | the stages in run order |
 | `runtime` | `{"setup": cmd, "when_changed": [files]}`, only when `[runtime] setup` is set; the driver runs `cmd` in `root` before the first stage and keeps the sha256 of each file in `<root>/.edr-runtime` |
 | `collect` | `false` for a run of `edr track` without `--collect`: the watcher collects nothing; the driver does not read it |
+| `knobs` | the value of every knob of the project, only when it has knobs; the watcher writes them into `parameters` as `knob.<name>`, and the driver does not read them, since `env` holds them as `EDR_KNOB_<NAME>` |
+| `private` | `{"dir", "redact", "env"}` of a project with a private file: the private directory of the tree, the `redact` regexes, and the names of the variables of `env` that come from the private file |
 
 A one-command stage holds `name`, `cwd`, `needs`, `cmd`, `resume`,
-`steps`, `progress`, `budget`, `retry` and `tools`. A task group holds
+`steps`, `progress`, `budget`, `retry` and `tools`. A private stage also
+holds `private`, `{"stage", "keep"}`, and `files`, a path to text table
+that the driver writes by a rename before the stage starts; its commands
+are those of the private file. The driver starts a private command with
+its output on the raw log and mirrors the kept lines into the public log
+every 5 s and when the command ends (`Mirror`). `edr plan --json` and
+`--show-spec` print the spec through `private.public_spec`, which shows
+each field of the private file as `‹private›`. A task group holds
 `parallel`, `prepare`, `after_each`, `budget`, `tools` and `tasks`, each
 task with `id`, `cmd`, `dir`, `fields`, `needs`, `budget` and, when its
 own `needs` names tools, `tools`. `fields` holds the fields of the task
@@ -130,7 +141,7 @@ wrote, shows its run as `unreadable` and leaves the other runs alone
 | `cpu_pct` | the CPU use since the previous sample as a percent of one core, computed from two successive `cpu_s` values and the time between them. It is null on the first sample, and a heartbeat less than a second after the previous one keeps the old value. A process group that ended takes its CPU seconds with it, so a drop in `cpu_s` reads as zero |
 | `step_times` | per stage, the unix time the driver first saw each step number from `progress`; a resumed step replaces its time in `step_runs` |
 | `exit`, `killed_by` | set at the end; `killed_by` is a signal name or `stop` |
-| `last_cmd`, `last_log`, `log` | the last command, the last four lines of the current log that are not empty, each cut to 100 characters, and the path of that log |
+| `last_cmd`, `last_log`, `log` | the last command, the last four lines of the current log that are not empty, each cut to 100 characters, and the path of that log; of a private stage, `the private command of stage <name>` and the public log |
 | `keep_hours` | the hours the keep file adds |
 | `gate` | why the run waits at a gate, such as `pnr: 1 free, 1 held by others, 1 needed`; null when it does not |
 | `host_full`, `over_budget`, `looping`, `stop` | flags the watcher classifies on |
@@ -172,7 +183,9 @@ atomic on one filesystem, so two drivers with the same `queue_dir` share
 one pool. `edr continue` gives its run a queue of its own.
 
 A task that fails gets a `signature`, the last log line with every digit
-removed. `streak` equal signatures in a row set `looping`, and the group
+removed; a private task gets `private:` and 12 hex digits of the sha256
+of that line of its raw log, so equal failures stay equal and the line
+stays on the host. `streak` equal signatures in a row set `looping`, and the group
 claims nothing more. A group that stops claiming, on `looping`, a stop
 file or `over_budget`, lets its running tasks end and then records each
 task still in `pending/` as `held`; `launch.stages_left` reads them, and
