@@ -176,7 +176,7 @@ takes tasks from the same pool; `docs/guides/run.md` explains the queue and shar
 | `task_dir` | the directory of a task, relative to the tree; required in a group | `""` |
 | `after_each` | a command after each task, with `{task_dir}` | `""` |
 | `step_log` | `{ file, regex }`: step start times the flow writes into collected files; group 1 of the regex is a unix time, and group 2, when present, the step number. With `{step}` in `file`, each file is the log of one step and its first match starts it; `*` matches any part of a name | `{}` |
-| `private` | the commands of the stage come from the private file, and edr.toml gives none of `cmd`, `resume`, `progress`, `prepare` and `after_each`; the raw output stays on the host and `log/<stage>.log` gets only the lines the private file lets through. `docs/guides/private.md` explains it | `false` |
+| `private` | the commands of the stage come from the private file, and edr.toml gives none of `cmd`, `resume`, `progress`, `prepare`, `after_each`, `collect` and `collect_on_request`; the raw output stays on the host and `log/<stage>.log` gets only the lines the private file lets through. `docs/guides/private.md` explains it | `false` |
 
 #### needs
 
@@ -321,8 +321,9 @@ help = "the target clock period"
 
 Every stage gets each value as `EDR_KNOB_<NAME>` in its environment, and every stage string as
 `{knob.<name>}`. A value that differs from the default goes into the build tag as one token, `retime`,
-`noretime` or `clock_ns1p6`, so two builds never share a tag, and into the `parameters` table as
-`knob.<name>`.
+`noretime` or `clock_ns1p6`, and a text value that holds other characters than letters, digits, `.` and
+`-` also a hash of the value, so two builds never share a tag; the value also goes into the `parameters` table
+as `knob.<name>`.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -348,6 +349,7 @@ An agent never reads it; edr reads it and prints none of it. `docs/guides/privat
 | `keep` | regexes of the output lines of a private stage that reach `log/<stage>.log`, after the redaction; every other line stays in the raw log on the host | none; the public log holds only edr's own lines |
 | `cells` | `{ CLASS = regex }`: the class of a cell in a published timing path is the first class whose regex matches the cell name, followed by `x<drive>` when the regex has a group `drive`; an unmatched cell is `‹cell›` | `{}` |
 | `env` | variables the stages need on top of the env of edr.toml, such as a PDK path; they take the run placeholders | `{}` |
+| `paths` | paths of the run tree that no public `collect` copies, such as the private part of the flow; `.edr/private/` and the `collect` paths of the private stages always count | `[]` |
 
 ### [stages.<name>] of the private file
 

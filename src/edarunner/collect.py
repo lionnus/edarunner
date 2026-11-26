@@ -121,11 +121,16 @@ def collect_run(
         for entry in c.render(stage, _raw_collect(project, stage.name), tasks):
             raw += c.final_steps(entry, step)
     c.copy_all(paths, "always")
-    if any(project.stages[n].private for n in (only or project.stages) if n in project.stages):
+    if any(project.stages[n].private for n in [*finished, *([running] if running else [])] if n in project.stages):
         # The raw logs land in data/private/<run_id>/log/, where a person reads them.
         c.copy_all([f"{private.TREE_DIR}/log/"], "private", private=True, dest="log/")
     c.copy_all(raw, "private", private=True)
     return c.result
+
+
+def _norm(path: str) -> str:
+    """A tree path without `./`, a trailing slash or `..` inside it; `.` for the root."""
+    return posixpath.normpath(path.strip()) if path.strip() else ""
 
 
 def _raw_collect(project: Project, stage: str) -> list[str]:
@@ -198,6 +203,33 @@ class _Copier:
             self.result.failures.append(f"{self.run_id}: the run has no host or root")
         self.results = project.data / "results" / self.run_id
         self.private = project.data / "private" / self.run_id
+        self.withheld = [_norm(self._render_prefix(w)) for w in private.withheld(project)]
+
+    def _render_prefix(self, entry: str) -> str:
+        """`entry` rendered; one that does not render, such as one with a task placeholder, up to its first
+        placeholder."""
+        try:
+            return render(entry, self.values)
+        except ConfigError:
+            return entry[:entry.find("{")]
+
+    def excludes(self, entry: str) -> list[str] | None:
+        """The rsync excludes that keep every withheld path out of a public copy of `entry`, relative to the root of
+        that transfer; None for an entry that lies in a withheld path or outside the tree."""
+        e = _norm(entry)
+        if posixpath.isabs(entry) or e == ".." or e.startswith("../"):
+            return None
+        # rsync copies the contents of a path with a trailing slash, and the path itself without one.
+        top = e if entry.endswith("/") or e == "." else posixpath.dirname(e)
+        out = []
+        for w in filter(None, self.withheld):
+            if w == "." or e == w or e.startswith(w + "/"):
+                return None
+            if top in ("", "."):
+                out.append(f"--exclude=/{w}")
+            elif w.startswith(top + "/"):
+                out.append(f"--exclude=/{w[len(top) + 1:]}")
+        return out
 
     def render(self, stage: Stage, entries: list[str], tasks: list[tuple[str, str]]) -> list[str]:
         """Render `entries` with the run values; a task group renders once per task of its own among `tasks`, the
@@ -246,6 +278,10 @@ class _Copier:
                 self.result.failures.append("empty collect entry")
 
     def _copy(self, entry: str, klass: str, private: bool = False, dest_dir: str | None = None) -> None:
+        excludes = [] if private else self.excludes(entry)
+        if excludes is None:
+            self.result.failures.append(f"{entry}: outside the public part of the run tree; not copied")
+            return
         # A path without a trailing slash lands in its parent, so a second copy does not nest it.
         base = dest_dir or (entry if entry.endswith("/") else entry[: entry.rfind("/") + 1])
         dest = f"{self.private if private else self.results}/{base}"
@@ -253,16 +289,16 @@ class _Copier:
         if not self.dry_run:
             Path(dest).mkdir(parents=True, exist_ok=True)
         remote = self.host != "local"
-        rc, out, err = self._rsync(f"{self.host}:{shlex.quote(src)}" if remote else src, dest, remote)
+        rc, out, err = self._rsync(f"{self.host}:{shlex.quote(src)}" if remote else src, dest, remote, excludes)
         if rc in _SSH_RC and self.project.site.nfs_export:
             try:
                 export = render(self.project.site.nfs_export, self.values)
-                rc, out, err = self._rsync(posixpath.join(export, entry), dest, False)
+                rc, out, err = self._rsync(posixpath.join(export, entry), dest, False, excludes)
             except ConfigError as e:
                 err = str(e)
         if rc != 0:
             first = err.strip().splitlines()[:1]
-            what = f"a private collect path of {klass}" if private else entry
+            what = "a private collect path" if private else entry
             self.result.failures.append(f"{what}: rsync rc {rc}" + ("" if private else f": {first[0] if first else ''}"))
             self.result.missing += rc == 23 and "No such file or directory" in err
         for line in out.splitlines():
@@ -295,9 +331,9 @@ class _Copier:
                 self.result.files += 1
                 self.result.copied.append(name)
 
-    def _rsync(self, src: str, dest: str, remote: bool) -> tuple[int, str, str]:
+    def _rsync(self, src: str, dest: str, remote: bool, excludes: list[str] | None = None) -> tuple[int, str, str]:
         site = self.project.site
-        argv = ["rsync", "-a", _FORMAT, f"--timeout={site.ssh_timeout_s}"]
+        argv = ["rsync", "-a", _FORMAT, f"--timeout={site.ssh_timeout_s}", *(excludes or [])]
         if remote:
             argv += ["-e", shlex.join(["ssh", *site.ssh_options])]
         if self.dry_run:

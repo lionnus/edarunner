@@ -179,19 +179,24 @@ NDA = u"\u2039nda\u203a"
 CHUNK = 4 * 1024 * 1024
 
 
-def redactor(patterns):
-    # type: (list) -> list
-    """The `redact` regexes as one regex, so one pass replaces the leftmost match of any; a pass per regex would let
-    one replacement cut the text another needs. One regex per pattern when they do not combine."""
+def redactor(patterns, literals=()):
+    # type: (list, tuple) -> list
+    """The strings of the private file and the `redact` regexes as one regex, the strings first, so one pass replaces
+    the leftmost match of any; a pass per regex would let one replacement cut the text another needs. One regex per
+    pattern when they do not combine. ValueError for a regex this Python cannot compile."""
     def scoped(p):
         m = re.match(r"\(\?([aiLmsux]+)\)", p)
         return "(?%s:%s)" % (m.group(1), p[m.end():]) if m else "(?:%s)" % p
-    if not patterns:
+    parts = [re.escape(x) for x in literals] + [scoped(p) for p in patterns]
+    if not parts:
         return []
     try:
-        return [re.compile("|".join(scoped(p) for p in patterns))]
-    except re.error:
-        return [re.compile(p) for p in patterns]
+        try:
+            return [re.compile("|".join(parts))]
+        except re.error:
+            return [re.compile(p) for p in parts]
+    except re.error as e:
+        raise ValueError("a redact regex does not compile here: %s" % e)
 
 
 class Mirror(object):
@@ -220,7 +225,9 @@ class Mirror(object):
                 return
             more = len(data) == CHUNK
             if not final or more:
-                data = data[:data.rfind(b"\n") + 1]
+                # A full chunk without a newline, such as carriage-return progress, counts as one line.
+                cut = data.rfind(b"\n") + 1
+                data = data[:cut or (len(data) if more else 0)]
             if not data:
                 break
             self.pos += len(data)
@@ -270,7 +277,14 @@ class Driver(object):
             raise ValueError("root is not a directory: " + self.root)
         private = spec.get("private") or {}
         self.private_dir = private.get("dir") or os.path.join(self.root, ".edr", "private")
-        self.redact = redactor(private.get("redact") or [])
+        self.redact = redactor(private.get("redact") or [], tuple(private.get("literals") or ()))
+        for st in spec.get("stages") or []:  # a keep regex that does not compile here stops the run before it starts
+            for k in (st.get("private") or {}).get("keep") or []:
+                try:
+                    re.compile(k)
+                except re.error as e:
+                    raise ValueError("keep regex %r of stage %s does not compile here: %s" % (k, st.get("name"), e))
+        self.raw_of = {}  # public log -> raw log of a private command
         self.mirrors = {}  # pid -> Mirror of a private command
         self.next_pump = 0.0
         spec_dir = os.path.dirname(os.path.abspath(spec_path))
@@ -338,6 +352,8 @@ class Driver(object):
         """
         with self.lock:
             pgids, log = sorted(self.procs), self.hb["log"]
+            # The raw log of a private command grows while its public log may hold still.
+            log = getattr(self, "raw_of", {}).get(log, log)
         cpu, rss = usage(pgids)
         now = time.time()
         out = {"cpu_s": cpu, "rss_gb": rss, "log_bytes": log_size(log)}
@@ -493,6 +509,7 @@ class Driver(object):
             self.procs[p.pid] = p
             if mirror is not None:
                 self.mirrors[p.pid] = mirror
+                self.raw_of[log] = out
         return p
 
     def forget(self, p):

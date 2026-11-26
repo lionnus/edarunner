@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import __version__, analysis, checkout, collect, config, runid
+from . import __version__, analysis, checkout, collect, config, private, runid
 from .board import is_live
 from .db import Database, pick
 from .guards import Refuse
@@ -145,7 +145,8 @@ def export(
         else:
             shutil.copy2(item, dst)
         manifest["files"].append({**_entry(rel, dst), **entry})
-    (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
+    # The manifest leaves the lab with the snapshot, so it passes the redaction of the private files.
+    (tmp / "manifest.json").write_text(json.dumps(private.redact_obj(manifest), indent=1) + "\n")
     os.replace(tmp, out)
     return manifest
 
@@ -153,7 +154,7 @@ def export(
 def _record(project: Project, db: Database, r: Row) -> dict[str, Any]:
     """What made a run, as far as edarunner knows it: host, start and end, versions, each stage's times, and the
     command of each stage and task as the spec rendered it."""
-    spec = collect.load_spec(project, r)
+    spec = private.public_spec(collect.load_spec(project, r))  # a command of the private file reads ‹private›
     rec = spec.get("record") or {}
     stages = [{k: s[k] for k in ("stage", "task", "attempt", "status", "started", "ended")}
               for s in db.stage_runs(r["run_id"]) if not s["task"]]

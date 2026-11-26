@@ -306,9 +306,9 @@ class Stage:
                                    "`{step}` in `file`, each file is the log of one step and its first match starts "
                                    "it; `*` matches any part of a name", factory=dict)
     private: bool = doc("the commands of the stage come from the private file, and edr.toml gives none of `cmd`, "
-                        "`resume`, `progress`, `prepare` and `after_each`; the raw output stays on the host and "
-                        "`log/<stage>.log` gets only the lines the private file lets through. "
-                        "`docs/guides/private.md` explains it", False)
+                        "`resume`, `progress`, `prepare`, `after_each`, `collect` and `collect_on_request`; the raw "
+                        "output stays on the host and `log/<stage>.log` gets only the lines the private file lets "
+                        "through. `docs/guides/private.md` explains it", False)
 
     @property
     def is_group(self) -> bool:
@@ -465,8 +465,9 @@ class Knob:
 
     Every stage gets each value as `EDR_KNOB_<NAME>` in its environment, and every stage string as
     `{knob.<name>}`. A value that differs from the default goes into the build tag as one token, `retime`,
-    `noretime` or `clock_ns1p6`, so two builds never share a tag, and into the `parameters` table as
-    `knob.<name>`.
+    `noretime` or `clock_ns1p6`, and a text value that holds other characters than letters, digits, `.` and
+    `-` also a hash of the value, so two builds never share a tag; the value also goes into the `parameters` table
+    as `knob.<name>`.
     """
 
     name: str
@@ -577,6 +578,8 @@ class Private:
                                 "group `drive`; an unmatched cell is `‹cell›`", factory=dict)
     env: dict[str, str] = doc("variables the stages need on top of the env of edr.toml, such as a PDK path; they take "
                               "the run placeholders", factory=dict)
+    paths: list[str] = doc("paths of the run tree that no public `collect` copies, such as the private part of the flow; "
+                           "`.edr/private/` and the `collect` paths of the private stages always count", factory=list)
     stages: dict[str, PrivateStage] = field(default_factory=dict)
     knobs: dict[str, KnobMap] = field(default_factory=dict)
     publish: dict[str, Publish] = field(default_factory=dict)

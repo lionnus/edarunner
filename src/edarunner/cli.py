@@ -496,7 +496,9 @@ class Actions:
         state = board.state_of({**row, **self.c.heartbeat(row)}) if row else "unknown"
         if state == "running":
             raise Refuse(f"the run {owner} of pid {pid} on {host} runs again")
-        return {**found, "args": alerts.cut(found.get("args", ""), 1000), "host": host, "pid": str(pid), "owner": owner,
+        # The command line of a tool of a private flow names its scripts, and only its name is public.
+        args = found.get("comm", "") if private.active() else alerts.cut(found.get("args", ""), 1000)
+        return {**found, "args": args, "host": host, "pid": str(pid), "owner": owner,
                 "state": state,
                 "owner_handle": board.handle(row, self.c.db.runs()) if row else owner,
                 "line": alerts.kill_line(host, pid, owner)}
@@ -1237,6 +1239,10 @@ def cmd_continue(c: Ctx, a: argparse.Namespace, actor: str = "user") -> int:
         label = label.rsplit(".", 1)[0]
     job = jobs.get(label) or Job(label=str(row["label"]), config=str(row.get("config") or ""))
     job.reuse, job.stages, job.host = {"run_id": run_id}, stages, a.on or "auto"
+    # The stages left belong to the build the tree holds, so they take its knobs, not the batch file's of today.
+    knobs = collect.load_spec(project, row).get("knobs")
+    if knobs is not None:
+        job.knobs = {k: v for k, v in knobs.items() if k in project.knobs}
     if a.tasks:
         job.tasks, held = a.tasks, []
     # The first stage runs its held tasks alone, and a later task group every task of the job.
@@ -1314,7 +1320,8 @@ def cmd_track(c: Ctx, a: argparse.Namespace) -> int:
     driver = sync.publish_driver(project.state_dir, launch.DRIVER_SRC, a.dry_run)
     launch.write_spec(project.state_dir, a.batch, plan_, driver, a.dry_run)
     if a.dry_run:
-        c.emit(json.dumps(spec, indent=1), spec)
+        shown = private.public_spec(spec)
+        c.emit(json.dumps(shown, indent=1), shown)
         return Exit.DONE
     now = int(time.time())
     c.db.upsert_batch({"batch": a.batch, "project": project.project, "source": source, "run_date": date})

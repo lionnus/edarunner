@@ -31,6 +31,9 @@ cells = { NAND2 = '<nand2 pattern>X(?P<drive>\d+)', NOR2 = '<nor2 pattern>', INV
 # Variables the stages need, which name the private paths.
 env = { PDK_ROOT = "/path/to/pdk" }
 
+# Paths of the run tree that no public collect copies: the private part of the flow.
+paths = ["nonfree/"]
+
 # --- the commands of the private stages of edr.toml
 
 # The script sources {knob_file}, which holds one line per knob below, then runs as before.

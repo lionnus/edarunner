@@ -21,6 +21,7 @@ The driver keeps the raw output of a private command on the host; `edr_driver.Mi
 from __future__ import annotations
 
 import csv
+import hashlib
 import inspect
 import io
 import json
@@ -128,8 +129,13 @@ def redact_obj(obj: Any) -> Any:
     return obj
 
 
+def literals(private: Private) -> list[str]:
+    """The pieces between the placeholders of every string a private file gives that are long enough to redact,
+    longest first; the driver redacts them from the public log too."""
+    return sorted(set(_literals(private)), key=len, reverse=True)
+
+
 def _literals(private: Private) -> Iterable[str]:
-    """The pieces between the placeholders of every string a private file gives, that are long enough to redact."""
     texts: list[str] = [*private.env.values()]
     for st in private.stages.values():
         texts += [st.cmd, st.resume, st.progress, st.prepare, st.after_each, *st.collect]
@@ -239,7 +245,7 @@ def knob_text(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, float):
-        return format(value, "g")
+        return repr(value)  # the shortest text that reads back as the same float
     return str(value)
 
 
@@ -252,9 +258,12 @@ def knob_tokens(project: Project, values: dict[str, object]) -> list[str]:
             continue
         if isinstance(v, bool):
             out.append(name if v else f"no{name}")
-        else:
-            text = knob_text(v).replace(".", "p").replace("-", "m")
-            out.append(name + re.sub(r"[^A-Za-z0-9+]", "", text))
+            continue
+        text = knob_text(v)
+        token = name + re.sub(r"[^A-Za-z0-9]", "", text.replace(".", "p").replace("-", "m"))
+        if re.search(r"[^A-Za-z0-9.-]", text):  # what the token dropped, a hash keeps apart
+            token += "h" + hashlib.sha256(text.encode()).hexdigest()[:6]
+        out.append(token)
     return out
 
 
@@ -274,6 +283,15 @@ def knob_lines(project: Project, stage: str, values: dict[str, object]) -> str:
     return "\n".join(out) + "\n"
 
 
+def withheld(project: Project) -> list[str]:
+    """The paths of a run tree that no public collect copies: the private directory, the `paths` of the private
+    file and the raw `collect` paths of its stages, with their placeholders."""
+    p = project.private
+    if p is None:
+        return []
+    return [TREE_DIR + "/", *p.paths, *(e for st in p.stages.values() for e in st.collect)]
+
+
 def knob_file(root: str, stage: str) -> str:
     """The path of the `{knob_file}` of a stage in a run tree."""
     return os.path.join(root, TREE_DIR, "knobs", f"{stage}.knobs")
@@ -288,7 +306,7 @@ def public_spec(spec: dict[str, Any]) -> dict[str, Any]:
     out = dict(spec)
     hidden = set(spec["private"].get("env") or [])
     out["env"] = {k: PRIVATE if k in hidden else v for k, v in (spec.get("env") or {}).items()}
-    out["private"] = {"dir": spec["private"].get("dir")}
+    out["private"] = {"dir": spec["private"].get("dir")}  # neither the redact regexes nor the literals
     stages = []
     for st in spec.get("stages") or []:
         if st.get("private"):

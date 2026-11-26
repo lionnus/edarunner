@@ -2,7 +2,10 @@
   "permissions": {
     "deny": [
       "Read(//path/to/nda/**)",
-      "Read(//path/to/project/data/private/**)"
+      "Read(//path/to/project/data/private/**)",
+      "Read(~/.edr/**)",
+      "Read(//path/to/rtl-wt/**/nonfree/**)",
+      "Read(//path/to/scratch/**)"
     ]
   },
   "sandbox": {
@@ -11,7 +14,7 @@
     "allowUnsandboxedCommands": false,
     "excludedCommands": ["edr *"],
     "filesystem": {
-      "denyRead": ["/path/to/nda", "/path/to/project/data/private"]
+      "denyRead": ["/path/to/nda", "/path/to/project/data/private", "~/.edr", "/path/to/scratch"]
     }
   },
   "hooks": {

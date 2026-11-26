@@ -6,8 +6,9 @@ core's `AGENTS.md` describes, and you tune it through the knobs.
 
 ## Never
 
-- Never read `../nda/`, `data/private/` or the `.edr/private/` directory of
-  a run tree, and never ask a host for them.
+- Never read `../nda/`, `data/private/`, the `nonfree/` part of a checkout
+  under `../rtl-wt/`, the state directory `~/.edr/` or a run tree, and never
+  ask a host for them. `edr` reads what it needs there for you.
 - Never try to recover a text that edr printed as `‹nda›` or `‹private›`.
 - Never write a tool command, a library name or an area in um2 into a file
   of this project.

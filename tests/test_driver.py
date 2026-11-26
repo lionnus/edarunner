@@ -625,3 +625,21 @@ def test_a_private_task_group_mirrors_each_task_and_counts_the_signature_on_the_
     assert code == 8 and len(sigs) == 1 and sigs.pop().startswith("private:") and "SECRET" not in json.dumps(hb)
     log = Path(spec["root"]) / "log" / "power.k_small.log"
     assert "SECRET" not in log.read_text() and "[flow] failed" in log.read_text()
+
+
+def test_the_mirror_redacts_the_strings_of_the_private_file_and_a_line_without_a_newline_does_not_stall_it(
+        tmp_path: Path) -> None:
+    cmd = ("echo \"[flow] pdk=$PDK\"; head -c 5000000 /dev/zero | tr '\\0' 'x'; echo; echo '[flow] after the progress'")
+    spec = _private_spec(tmp_path, cmd, ["^\\[flow\\]"])
+    spec["private"]["literals"] = ["/opt/foundry/n28/v1"]
+    spec["env"] = {"PDK": "/opt/foundry/n28/v1"}
+    code, hb = finish(start(spec), spec)
+    lines = (Path(spec["root"]) / "log" / "export.log").read_text().splitlines()
+    assert code == 0 and lines[1:3] == ["[flow] pdk=‹nda›", "[flow] after the progress"]
+    assert "n28" not in json.dumps(hb)
+
+
+def test_a_keep_regex_that_does_not_compile_refuses_the_spec(tmp_path: Path) -> None:
+    spec = _private_spec(tmp_path, "true", ["(unclosed"])
+    proc = start(spec)
+    assert proc.wait(timeout=30) == 2 and heartbeat(spec) is None

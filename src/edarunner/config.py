@@ -86,7 +86,7 @@ _PROJECT_KEYS = {
     "source", "sync", "runtime", "safety", "limits", "placement", "stages", "metrics", "parameters", "checks", "env",
     "knobs", "private",
 }
-_PRIVATE_KEYS = {"schema", "ge_um2", "redact", "keep", "cells", "env", "stages", "knobs", "publish"}
+_PRIVATE_KEYS = {"schema", "ge_um2", "redact", "keep", "cells", "env", "paths", "stages", "knobs", "publish"}
 # The strings of a private stage that come from the private file alone.
 PRIVATE_FIELDS = ("cmd", "resume", "progress", "prepare", "after_each")
 _SITE_KEYS = {"schema", "scratch", "env", "ssh", "tool_procs", "orphan_min_age_s", "host_free_min_gb", "hosts", "tools",
@@ -444,9 +444,10 @@ def load_project(project_dir: PathLike, site_path: PathLike | None = None) -> Pr
     for stage in stages.values():
         _check_stage(stage, stages, site, file, private)
     knobs = {n: _knob(n, t, stages, file) for n, t in _table(raw.get("knobs", {}), None, file, "knobs").items()}
-    for n in private.knobs if private else {}:
+    for n, kmap in private.knobs.items() if private else ():
         if n not in knobs:
             raise ConfigError(f"{private.path}: knobs.{n} maps no knob of edr.toml (it has: {', '.join(knobs) or 'none'})")
+        _check_knob_map(knobs[n], kmap, private.path)
     metrics = {n: _metric(n, t, stages, file)
                for n, t in _table(raw.get("metrics", {}), None, file, "metrics").items()}
     parameters = {n: _parameter(n, t, stages, file)
@@ -520,7 +521,7 @@ def _needs(raw: object, file: Path, at: str) -> Needs:
 def _check_stage(stage: Stage, stages: dict[str, Stage], site: Site, file: Path, private: Private | None = None) -> None:
     at = f"stages.{stage.name}"
     if stage.private:
-        given = [k for k in PRIVATE_FIELDS if getattr(stage, k)]
+        given = [k for k in (*PRIVATE_FIELDS, "collect", "collect_on_request") if getattr(stage, k)]
         if given:
             raise ConfigError(f"{file}: {at} is private, so its {', '.join(given)} come from the private file")
         if private is None:
@@ -607,6 +608,21 @@ def _knob(name: str, raw: object, stages: dict[str, Stage], file: Path) -> Knob:
     return k
 
 
+def _check_knob_map(knob: Knob, kmap: KnobMap, file: Path) -> None:
+    """A table of lines names the values of the knob: `true` and `false` of a bool, the choices of a choice."""
+    from .private import knob_type
+    if isinstance(kmap.line, str):
+        return
+    kind = knob_type(knob)
+    values = {"bool": ["true", "false"], "choice": list(knob.choices)}.get(kind)
+    if values is None:
+        raise ConfigError(f"{file}: knobs.{knob.name}.line: a {kind} knob takes one line with {{value}}")
+    bad = sorted(set(kmap.line) - set(values))
+    if bad:
+        raise ConfigError(f"{file}: knobs.{knob.name}.line names {', '.join(bad)}, not a value of the knob "
+                          f"({', '.join(values)})")
+
+
 def load_private(path: PathLike, stages: dict[str, Stage]) -> Private:
     """Load the private file of a project whose stages are `stages`, and redact its strings from then on."""
     from . import private as _private
@@ -635,7 +651,7 @@ def load_private(path: PathLike, stages: dict[str, Stage]) -> Private:
         k = knobs[n] = _build(KnobMap, t, file, f"knobs.{n}", name=n)
         if not (isinstance(k.line, str) or all(isinstance(v, str) for v in k.line.values())):
             raise ConfigError(f"{file}: knobs.{n}.line is a string or a table of strings")
-    given = {k: raw[k] for k in ("redact", "keep", "cells", "env") if k in raw}
+    given = {k: raw[k] for k in ("redact", "keep", "cells", "env", "paths") if k in raw}
     hints = get_type_hints(Private)
     for key, value in given.items():
         if not _typed(value, hints[key]) or isinstance(value, dict) and not all(isinstance(v, str) for v in value.values()):

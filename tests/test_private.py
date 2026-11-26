@@ -277,7 +277,9 @@ def test_a_job_knob_becomes_its_type(nda: Path) -> None:
     (lambda t: t.replace("[knobs.effort]\nchoices", "[knobs.effort]\nchoice"), "unknown key 'knobs.effort.choice'"),
     (lambda t: t.replace('default = "medium"', 'default = "max"'), "knobs.effort.default: knob effort is 'max'"),
     (lambda t: t.replace('stages = ["signoff"]', 'stages = ["nope"]'), "knobs.retime.stages names unknown stage 'nope'"),
-    (lambda t: t.replace("needs = { cores = 1, disk_gb = 0.01 }", 'collect = [".edr/private/log/"]'),
+    (lambda t: t.replace("needs = { cores = 1, disk_gb = 0.01 }", 'collect = ["public/"]'),
+     "stages.signoff is private, so its collect come from the private file"),
+    (lambda t: t.replace('collect = ["reports/"]', 'collect = [".edr/private/log/"]', 1),
      "outside the public part of the run tree"),
     (lambda t: t.replace('min = 0.5\n', '').replace("[knobs.effort]\n", "[knobs.effort]\nmin = 1\n"),
      "min and max belong to an int or a float knob"),
@@ -297,6 +299,19 @@ def test_edr_toml_errors_of_the_private_flow(nda: Path, edit, error: str) -> Non
 ])
 def test_private_file_errors(nda: Path, tmp_path: Path, extra: str, error: str) -> None:
     private_file(tmp_path / "nda", extra)
+    with pytest.raises(ConfigError, match=error):
+        config.load_project(nda)
+
+
+@pytest.mark.parametrize("old, new, error", [
+    ('line = { true = "set_app_option SECRET_RETIME true", false = "" }', 'line = { ture = "x" }',
+     "knobs.retime.line names ture, not a value of the knob"),
+    ('line = "set_clock_period_SECRET {value}"', 'line = { "1.6" = "x" }', "a float knob takes one line with"),
+])
+def test_a_table_of_knob_lines_names_the_values_of_the_knob(nda: Path, tmp_path: Path, old: str, new: str,
+                                                              error: str) -> None:
+    path = tmp_path / "nda" / "private.toml"
+    path.write_text(path.read_text().replace(old, new))
     with pytest.raises(ConfigError, match=error):
         config.load_project(nda)
 
@@ -329,6 +344,15 @@ def test_build_tag_takes_a_token_per_knob_off_its_default(nda: Path) -> None:
     assert launch.build_tag(p, Job(label="a", knobs={"retime": False})) == "noretime"
 
 
+def test_a_knob_value_keeps_its_digits_and_a_tag_tells_text_values_apart(nda: Path) -> None:
+    p = config.load_project(nda)
+    assert private.knob_text(1.2345678) == "1.2345678" and private.knob_text(2.0) == "2.0"
+    assert private.knob_tokens(p, {"clock_ns": 1.6000001}) != private.knob_tokens(p, {"clock_ns": 1.6})
+    p.knobs["effort"].type, p.knobs["effort"].choices = "str", []
+    a, b = private.knob_tokens(p, {"effort": "a_b"}), private.knob_tokens(p, {"effort": "ab"})
+    assert a != b and a[0].startswith("effortabh") and b == ["effortab"]
+
+
 def test_knob_lines_follow_edr_toml_and_the_stages_of_each_knob(nda: Path) -> None:
     p = config.load_project(nda)
     values = private.knob_values(p, {"retime": True, "clock_ns": 1.6})
@@ -346,7 +370,8 @@ def test_the_spec_of_a_private_stage_and_its_public_view(nda: Path) -> None:
     batch = config.load_batch(p, "nda")
     from edarunner import checkout
     batch.source = checkout.ensure(p, batch.source).source
-    (plan,) = launch.plan(p, batch, Ssh(p.site), Database(":memory:"))
+    with Database(":memory:") as db:
+        (plan,) = launch.plan(p, batch, Ssh(p.site), db)
     spec = plan.spec
     st = spec["stages"][0]
     kf = f"{plan.root}/.edr/private/knobs/signoff.knobs"
@@ -355,7 +380,9 @@ def test_the_spec_of_a_private_stage_and_its_public_view(nda: Path) -> None:
     assert spec["env"]["EDR_KNOB_RETIME"] == "true" and spec["env"]["EDR_KNOB_CLOCK_NS"] == "1.6"
     assert spec["env"]["EDR_KNOB_EFFORT"] == "medium" and spec["env"]["PDK_ROOT"] == "/opt/SECRETPDK/v1"
     assert spec["knobs"] == {"retime": True, "clock_ns": 1.6, "effort": "medium"}
-    assert spec["private"] == {"dir": f"{plan.root}/.edr/private", "redact": ["SECRET\\w*", "SC8T_\\w+"], "env": ["PDK_ROOT"]}
+    assert {k: v for k, v in spec["private"].items() if k != "literals"} == \
+        {"dir": f"{plan.root}/.edr/private", "redact": ["SECRET\\w*", "SC8T_\\w+"], "env": ["PDK_ROOT"]}
+    assert "/opt/SECRETPDK/v1" in spec["private"]["literals"]
     pub = private.public_spec(spec)
     assert pub["stages"][0]["cmd"] == private.PRIVATE and "files" not in pub["stages"][0]
     assert pub["env"]["PDK_ROOT"] == private.PRIVATE and "redact" not in pub["private"]
@@ -392,6 +419,32 @@ def test_a_private_config_error_names_no_private_string(nda: Path, tmp_path: Pat
     code, out, err = edr(capsys, "plan", "nda")
     assert code == 1 and "unknown placeholder {nope}" in out + err
     clean(out + err)
+
+
+def test_no_public_collect_copies_a_withheld_path(nda: Path, tmp_path: Path) -> None:
+    from edarunner.collect import _Copier
+    from edarunner.db import Database
+    path = tmp_path / "nda" / "private.toml"
+    path.write_text(path.read_text().replace("schema = 1\n", 'schema = 1\npaths = ["nonfree/"]\n', 1))
+    p = config.load_project(nda)
+    root = tmp_path / "scratch" / "edr" / "demo" / "20260926_1200_nda_fast_gabc"
+    for f in (".edr/private/log/signoff.log", ".edr/container.sh", "reports/signoff/area.rpt", "reports/0/area.rpt",
+              "nonfree/synth.tcl", "ok.txt"):
+        (root / f).parent.mkdir(parents=True, exist_ok=True)
+        (root / f).write_text("SECRET\n")
+    run = {"run_id": root.name, "host": "local", "root": str(root), "batch": "nda"}
+    for entry in ("./", ".", ".edr/", ".edr", "reports/", "reports"):
+        with Database(":memory:") as db:
+            c = _Copier(p, None, db, run, {}, False)  # type: ignore[arg-type]
+            c.copy_all([entry], "always")
+            assert not c.result.failures, (entry, c.result.failures)
+    got = sorted(str(f.relative_to(p.data / "results" / root.name)) for f in (p.data / "results" / root.name).rglob("*")
+                 if f.is_file())
+    assert got == [".edr/container.sh", "ok.txt", "reports/0/area.rpt"]
+    with Database(":memory:") as db:
+        c = _Copier(p, None, db, run, {}, False)  # type: ignore[arg-type]
+        c.copy_all(["/etc/", "../x/", ".edr/private/", "nonfree/"], "always")
+        assert len(c.result.failures) == 4 and all("outside the public part" in f for f in c.result.failures)
 
 
 # --- publish
@@ -526,7 +579,7 @@ def test_a_private_stage_end_to_end_leaks_nothing(nda: Path, capsys, tmp_path: P
     public_log = (results / "log" / "signoff.log").read_text()
     assert public_log.splitlines() == [
         "# edr: the private command of stage signoff",
-        f"[flow] retime=true clock_ns=1.6 effort=medium pdk=/opt/{private.NDA}/v1",
+        f"[flow] retime=true clock_ns=1.6 effort=medium pdk={private.NDA}",
         f"Warning: cell {private.NDA} has no footprint (PHYS-12)",
         "[flow] done",
         "# edr: 5 lines held back in the private log"]
@@ -549,10 +602,17 @@ def test_a_private_stage_end_to_end_leaks_nothing(nda: Path, capsys, tmp_path: P
         assert code in (0, 2), (argv, out, err)
         clean(out + err)
     code, out, _ = edr(capsys, "brief")
-    assert "## The knobs" in out and "- `clock_ns` (float from 0.5 to 20, default `2`): the target clock period" in out
+    assert "## The knobs" in out and "- `clock_ns` (float from 0.5 to 20, default `2.0`): the target clock period" in out
     assert "## The private flow" in out and "`public/timing.json` from `signoff`: the timing paths" in out
     for f in (nda / "data" / "board").iterdir():
         clean(f.read_text())
+    code, out, err = edr(capsys, "export", "--source", run["source"], "--out", str(tmp_path / "snap"), "--files")
+    assert code == 0, out + err
+    manifest = json.loads((tmp_path / "snap" / "manifest.json").read_text())
+    assert any(c["cmd"] == private.PRIVATE for r in manifest["runs"] for c in r["record"]["commands"])
+    for f in (tmp_path / "snap").rglob("*"):
+        if f.is_file():
+            clean(f.read_text(errors="replace"))
     from edarunner.db import Database
     with Database(nda / "data" / "edr.db") as db:
         params = {(r["key"], r["origin"]): r["value"] for r in db.parameters(run_id)}

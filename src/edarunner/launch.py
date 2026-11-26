@@ -93,7 +93,7 @@ def build_tag(project: Project, job: Job, source: str = "") -> str:
         except TypeError:
             args = args[:2]  # a hook of the form (config, overrides)
         try:
-            return "_".join([str(fn(*args)), *knobs])
+            return "_".join(filter(None, [str(fn(*args)), *knobs]))
         except Exception as e:  # a hook fault is a plan problem, never a traceback
             raise ConfigError(f"build_tag hook {name}: {e}") from e
     return "_".join([job.config] * bool(job.config) + [f"{k}{v}" for k, v in job.overrides.items()] + knobs)
@@ -244,7 +244,7 @@ def _spec(project: Project, batch: Batch, job: Job, names: list[str], tasks: lis
         spec["knobs"] = private.knob_values(project, job.knobs)
     if project.private is not None:
         spec["private"] = {"dir": os.path.join(str(v["root"]), private.TREE_DIR), "redact": list(project.private.redact),
-                           "env": sorted(project.private.env)}
+                           "literals": private.literals(project.private), "env": sorted(project.private.env)}
     return spec
 
 
@@ -370,9 +370,14 @@ def _plan_job(project: Project, batch: Batch, job: Job, db: Database, date: str,
         except ConfigError as e:
             problems.append(str(e))
             tag = job.config
+    try:
+        knobs = private.knob_values(project, job.knobs)
+    except ValueError as e:  # a continue that takes the knobs of a run its edr.toml no longer allows
+        problems.append(str(e))
+        knobs = private.knob_values(project, {})
     v = config.placeholders(project, date=date, batch=batch.batch, label=job.label, config=job.config,
                             build_tag=tag, source=source, overrides=job.overrides, vars=job.vars,
-                            knob={n: private.knob_text(x) for n, x in private.knob_values(project, job.knobs).items()})
+                            knob={n: private.knob_text(x) for n, x in knobs.items()})
     run_id = render_run_id(project.source.run_id, v)
     if why := taken(db, run_id, batch.batch, job.label):
         problems.append(why)
