@@ -1,0 +1,320 @@
+﻿2026-11-27T12:38:32.8736743Z Current runner version: '2.338.2'
+2026-11-27T12:38:32.8758646Z ##[group]Runner Image Provisioner
+2026-11-27T12:38:32.8759437Z Hosted Compute Agent
+2026-11-27T12:38:32.8759973Z Version: 20261111.635
+2026-11-27T12:38:32.8760490Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+2026-11-27T12:38:32.8761126Z Build Date: 2026-11-11T01:49:01Z
+2026-11-27T12:38:32.8761684Z Worker ID: {f2668325-c1b5-4b3c-b144-3fa9e8c1890f}
+2026-11-27T12:38:32.8762234Z Region: westus3
+2026-11-27T12:38:32.8763074Z Cloud: Azure
+2026-11-27T12:38:32.8763595Z ##[endgroup]
+2026-11-27T12:38:32.8764795Z ##[group]Operating System
+2026-11-27T12:38:32.8765337Z Ubuntu
+2026-11-27T12:38:32.8765785Z 26.04.1
+2026-11-27T12:38:32.8766294Z LTS
+2026-11-27T12:38:32.8766720Z ##[endgroup]
+2026-11-27T12:38:32.8767190Z ##[group]Runner Image
+2026-11-27T12:38:32.8767707Z Image: ubuntu-26.04
+2026-11-27T12:38:32.8768162Z Version: 20261122.9.1
+2026-11-27T12:38:32.8769748Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261122.9/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-27T12:38:32.8770961Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261122.9
+2026-11-27T12:38:32.8771786Z ##[endgroup]
+2026-11-27T12:38:32.8772820Z ##[group]GITHUB_TOKEN Permissions
+2026-11-27T12:38:32.8774453Z Contents: read
+2026-11-27T12:38:32.8774922Z Metadata: read
+2026-11-27T12:38:32.8775564Z ##[endgroup]
+2026-11-27T12:38:32.8777573Z Secret source: Actions
+2026-11-27T12:38:32.8778490Z Cache mode: write
+2026-11-27T12:38:32.8779212Z Prepare workflow directory
+2026-11-27T12:38:32.9051928Z Prepare all required actions
+2026-11-27T12:38:32.9093547Z Getting action download info
+2026-11-27T12:38:33.1924843Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-27T12:38:33.2601056Z Download action repository 'astral-sh/setup-uv@v6' (SHA:d0cc045d04ccac9d8b7881df0226f9e82c39688e)
+2026-11-27T12:38:33.9796701Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-11-27T12:38:34.2203426Z Complete job name: tests (3.11)
+2026-11-27T12:38:34.2999531Z ##[group]Run actions/checkout@v4
+2026-11-27T12:38:34.3000649Z with:
+2026-11-27T12:38:34.3001363Z   repository: lionnus/edarunner
+2026-11-27T12:38:34.3009273Z   token: ***
+2026-11-27T12:38:34.3009974Z   ssh-strict: true
+2026-11-27T12:38:34.3010680Z   ssh-user: git
+2026-11-27T12:38:34.3011393Z   persist-credentials: true
+2026-11-27T12:38:34.3012171Z   clean: true
+2026-11-27T12:38:34.3012984Z   sparse-checkout-cone-mode: true
+2026-11-27T12:38:34.3013842Z   fetch-depth: 1
+2026-11-27T12:38:34.3014546Z   fetch-tags: false
+2026-11-27T12:38:34.3015262Z   show-progress: true
+2026-11-27T12:38:34.3016008Z   lfs: false
+2026-11-27T12:38:34.3016696Z   submodules: false
+2026-11-27T12:38:34.3017431Z   set-safe-directory: true
+2026-11-27T12:38:34.3018286Z   allow-unsafe-pr-checkout: false
+2026-11-27T12:38:34.3019334Z ##[endgroup]
+2026-11-27T12:38:34.5262682Z Syncing repository: lionnus/edarunner
+2026-11-27T12:38:34.5265537Z ##[group]Getting Git version info
+2026-11-27T12:38:34.5266944Z Working directory is '/home/runner/work/edarunner/edarunner'
+2026-11-27T12:38:34.5269057Z [command]/usr/bin/git version
+2026-11-27T12:38:34.5276888Z git version 2.56.1
+2026-11-27T12:38:34.5293781Z ##[endgroup]
+2026-11-27T12:38:34.5304520Z Temporarily overriding HOME='/home/runner/work/_temp/aa105b02-e8f5-4039-a410-6f1f69096014' before making global git config changes
+2026-11-27T12:38:34.5308284Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-27T12:38:34.5311475Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-11-27T12:38:34.5361232Z Deleting the contents of '/home/runner/work/edarunner/edarunner'
+2026-11-27T12:38:34.5364690Z ##[group]Initializing the repository
+2026-11-27T12:38:34.5368652Z [command]/usr/bin/git init /home/runner/work/edarunner/edarunner
+2026-11-27T12:38:34.5488482Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-27T12:38:34.5491446Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-27T12:38:34.5494027Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-27T12:38:34.5495963Z hint: call:
+2026-11-27T12:38:34.5497296Z hint:
+2026-11-27T12:38:34.5498619Z hint: 	git config --global init.defaultBranch <name>
+2026-11-27T12:38:34.5500119Z hint:
+2026-11-27T12:38:34.5501525Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-27T12:38:34.5504301Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-27T12:38:34.5507527Z hint:
+2026-11-27T12:38:34.5509316Z hint: 	git branch -m <name>
+2026-11-27T12:38:34.5510780Z hint:
+2026-11-27T12:38:34.5512651Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-27T12:38:34.5516172Z Initialized empty Git repository in /home/runner/work/edarunner/edarunner/.git/
+2026-11-27T12:38:34.5520216Z [command]/usr/bin/git remote add origin https://github.com/lionnus/edarunner
+2026-11-27T12:38:34.5558781Z ##[endgroup]
+2026-11-27T12:38:34.5560915Z ##[group]Disabling automatic garbage collection
+2026-11-27T12:38:34.5562422Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-27T12:38:34.5596486Z ##[endgroup]
+2026-11-27T12:38:34.5599197Z ##[group]Setting up auth
+2026-11-27T12:38:34.5601364Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-27T12:38:34.5631839Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-27T12:38:34.6002960Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-27T12:38:34.6041148Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-27T12:38:34.6301853Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-27T12:38:34.6333432Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-27T12:38:34.6569798Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-27T12:38:34.6764093Z ##[endgroup]
+2026-11-27T12:38:34.6765471Z ##[group]Fetching the repository
+2026-11-27T12:38:34.6771310Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6d14b636815334410fe3d3b58adb25459af3fec5:refs/remotes/origin/main
+2026-11-27T12:38:35.3477735Z From https://github.com/lionnus/edarunner
+2026-11-27T12:38:35.3479548Z  * [new ref]         6d14b636815334410fe3d3b58adb25459af3fec5 -> origin/main
+2026-11-27T12:38:35.3483346Z ##[endgroup]
+2026-11-27T12:38:35.3485010Z ##[group]Determining the checkout info
+2026-11-27T12:38:35.3486626Z ##[endgroup]
+2026-11-27T12:38:35.3489364Z [command]/usr/bin/git sparse-checkout disable
+2026-11-27T12:38:35.3538166Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-27T12:38:35.3565914Z ##[group]Checking out the ref
+2026-11-27T12:38:35.3569009Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-27T12:38:35.3727519Z Switched to a new branch 'main'
+2026-11-27T12:38:35.3730407Z branch 'main' set up to track 'origin/main'.
+2026-11-27T12:38:35.3737853Z ##[endgroup]
+2026-11-27T12:38:35.3780421Z [command]/usr/bin/git log -1 --format=%H
+2026-11-27T12:38:35.3803733Z 6d14b636815334410fe3d3b58adb25459af3fec5
+2026-11-27T12:38:35.4205617Z ##[group]Run astral-sh/setup-uv@v6
+2026-11-27T12:38:35.4206453Z with:
+2026-11-27T12:38:35.4207072Z   python-version: 3.11
+2026-11-27T12:38:35.4207808Z   activate-environment: false
+2026-11-27T12:38:35.4208749Z   working-directory: /home/runner/work/edarunner/edarunner
+2026-11-27T12:38:35.4209982Z   server-url: https://github.com
+2026-11-27T12:38:35.4217608Z   github-token: ***
+2026-11-27T12:38:35.4218291Z   enable-cache: auto
+2026-11-27T12:38:35.4219916Z   cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+2026-11-27T12:38:35.4221695Z   restore-cache: true
+2026-11-27T12:38:35.4222383Z   save-cache: true
+2026-11-27T12:38:35.4223133Z   prune-cache: true
+2026-11-27T12:38:35.4223842Z   ignore-nothing-to-cache: false
+2026-11-27T12:38:35.4224667Z   ignore-empty-workdir: false
+2026-11-27T12:38:35.4225473Z   add-problem-matchers: true
+2026-11-27T12:38:35.4226218Z ##[endgroup]
+2026-11-27T12:38:35.5871883Z (node:2205) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-27T12:38:35.5873150Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-27T12:38:35.6013987Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/uv.toml
+2026-11-27T12:38:35.6044921Z Could not find file: /home/runner/work/edarunner/edarunner/uv.toml
+2026-11-27T12:38:35.6064812Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-11-27T12:38:35.6074227Z Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+2026-11-27T12:38:35.6076058Z Getting latest version from GitHub API...
+2026-11-27T12:38:35.9234241Z manifest-file not provided, reading from local file.
+2026-11-27T12:38:35.9262525Z manifest-file does not contain version 0.13.10, arch x86_64, platform unknown-linux-gnu. Falling back to GitHub releases.
+2026-11-27T12:38:35.9264724Z Downloading uv from "https://github.com/astral-sh/uv/releases/download/0.13.10/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-11-27T12:38:36.3303374Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/23a814db-992f-4f5f-9f61-18dc8d55f27e -f /home/runner/work/_temp/8f9d3591-0c85-459f-bcea-81b8de939398
+2026-11-27T12:38:36.6441620Z Added /home/runner/.local/bin to the path
+2026-11-27T12:38:36.6444692Z Added /opt/hostedtoolcache/uv/0.13.10/x86_64 to the path
+2026-11-27T12:38:36.6445879Z Set UV_PYTHON to 3.11
+2026-11-27T12:38:36.6470795Z Set UV_CACHE_DIR to /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:36.6471272Z Successfully installed uv version 0.13.10
+2026-11-27T12:38:36.6473560Z Searching files using cache dependency glob: /home/runner/work/edarunner/edarunner/**/*requirements*.txt,/home/runner/work/edarunner/edarunner/**/*requirements*.in,/home/runner/work/edarunner/edarunner/**/*constraints*.txt,/home/runner/work/edarunner/edarunner/**/*constraints*.in,/home/runner/work/edarunner/edarunner/**/pyproject.toml,/home/runner/work/edarunner/edarunner/**/uv.lock,/home/runner/work/edarunner/edarunner/**/*.py.lock
+2026-11-27T12:38:36.6614409Z /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-11-27T12:38:36.6730602Z Found 1 files to hash.
+2026-11-27T12:38:36.6795924Z Trying to restore uv cache from GitHub Actions cache with key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-11-27T12:38:36.8609021Z No GitHub Actions cache found for key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-11-27T12:38:36.8796956Z ##[group]Run uv sync --extra dev 
+2026-11-27T12:38:36.8797269Z [36;1muv sync --extra dev [0m
+2026-11-27T12:38:36.8832089Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:38:36.8832352Z env:
+2026-11-27T12:38:36.8832554Z   UV_PYTHON: 3.11
+2026-11-27T12:38:36.8832940Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:36.8833208Z ##[endgroup]
+2026-11-27T12:38:37.1095725Z Downloading cpython-3.11.18-linux-x86_64-gnu (download) (29.4MiB)
+2026-11-27T12:38:37.7775197Z  Downloaded cpython-3.11.18-linux-x86_64-gnu (download)
+2026-11-27T12:38:37.8823961Z Using CPython 3.11.18
+2026-11-27T12:38:37.8824354Z Creating virtual environment at: .venv
+2026-11-27T12:38:38.4586070Z Resolved 129 packages in 575ms
+2026-11-27T12:38:38.4659756Z    Building edarunner @ file:///home/runner/work/edarunner/edarunner
+2026-11-27T12:38:38.4787688Z Downloading pygments (1.2MiB)
+2026-11-27T12:38:38.4788479Z Downloading setuptools (1.0MiB)
+2026-11-27T12:38:38.4789259Z Downloading ruff (10.2MiB)
+2026-11-27T12:38:38.5734120Z  Downloaded pygments
+2026-11-27T12:38:38.5771304Z  Downloaded setuptools
+2026-11-27T12:38:38.6015854Z  Downloaded ruff
+2026-11-27T12:38:39.0239630Z       Built edarunner @ file:///home/runner/work/edarunner/edarunner
+2026-11-27T12:38:39.0249608Z Prepared 14 packages in 560ms
+2026-11-27T12:38:39.0356675Z Installed 14 packages in 10ms
+2026-11-27T12:38:39.0357056Z  + coverage==7.17.5
+2026-11-27T12:38:39.0357338Z  + coverage-badge==1.1.2
+2026-11-27T12:38:39.0357873Z  + edarunner==0.1.0 (from file:///home/runner/work/edarunner/edarunner)
+2026-11-27T12:38:39.0358385Z  + iniconfig==2.3.1
+2026-11-27T12:38:39.0358698Z  + markdown-it-py==4.3.0
+2026-11-27T12:38:39.0358998Z  + mdurl==0.1.2
+2026-11-27T12:38:39.0359226Z  + packaging==26.4
+2026-11-27T12:38:39.0359454Z  + pluggy==1.7.0
+2026-11-27T12:38:39.0359679Z  + pygments==2.21.0
+2026-11-27T12:38:39.0359893Z  + pytest==9.2.0
+2026-11-27T12:38:39.0360123Z  + pytest-cov==7.1.0
+2026-11-27T12:38:39.0360350Z  + rich==15.0.0
+2026-11-27T12:38:39.0360689Z  + ruff==0.17.6
+2026-11-27T12:38:39.0360921Z  + setuptools==80.10.2
+2026-11-27T12:38:39.0547938Z ##[group]Run uv run ruff check src tests tools
+2026-11-27T12:38:39.0548266Z [36;1muv run ruff check src tests tools[0m
+2026-11-27T12:38:39.0578060Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:38:39.0578281Z env:
+2026-11-27T12:38:39.0578450Z   UV_PYTHON: 3.11
+2026-11-27T12:38:39.0578675Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:39.0579008Z ##[endgroup]
+2026-11-27T12:38:39.1354304Z All checks passed!
+2026-11-27T12:38:39.1400565Z ##[group]Run uv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88
+2026-11-27T12:38:39.1401179Z [36;1muv run pytest --cov=edarunner --cov-report=xml --cov-report=term --cov-fail-under=88[0m
+2026-11-27T12:38:39.1431117Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:38:39.1431347Z env:
+2026-11-27T12:38:39.1431520Z   UV_PYTHON: 3.11
+2026-11-27T12:38:39.1431737Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:39.1431984Z ##[endgroup]
+2026-11-27T12:38:47.3013396Z ...................................s.................................... [ 12%]
+2026-11-27T12:39:06.4498775Z ........................................................................ [ 24%]
+2026-11-27T12:39:17.9819604Z ........................................................................ [ 37%]
+2026-11-27T12:42:31.2885359Z .....................s.................................................. [ 49%]
+2026-11-27T12:42:45.3650293Z ........................................................................ [ 62%]
+2026-11-27T12:42:56.0292212Z ........................................................................ [ 74%]
+2026-11-27T12:43:00.6249996Z ........................................................................ [ 87%]
+2026-11-27T12:43:08.9935817Z ........................................................................ [ 99%]
+2026-11-27T12:43:11.2316477Z .                                                                        [100%]
+2026-11-27T12:43:11.2318280Z ================================ tests coverage ================================
+2026-11-27T12:43:11.2319062Z _______________ coverage: platform linux, python 3.11.18-final-0 _______________
+2026-11-27T12:43:11.2319398Z 
+2026-11-27T12:43:11.2319565Z Name                                        Stmts   Miss  Cover
+2026-11-27T12:43:11.2319939Z ---------------------------------------------------------------
+2026-11-27T12:43:11.2320419Z src/edarunner/__init__.py                       1      0   100%
+2026-11-27T12:43:11.2320944Z src/edarunner/analysis.py                     491     11    98%
+2026-11-27T12:43:11.2321299Z src/edarunner/backend.py                      162      8    95%
+2026-11-27T12:43:11.2321928Z src/edarunner/board.py                        277      7    97%
+2026-11-27T12:43:11.2322220Z src/edarunner/brief.py                        237     14    94%
+2026-11-27T12:43:11.2322503Z src/edarunner/census.py                       251     16    94%
+2026-11-27T12:43:11.2323031Z src/edarunner/checkout.py                     133      6    95%
+2026-11-27T12:43:11.2323380Z src/edarunner/cli.py                         1648    102    94%
+2026-11-27T12:43:11.2323667Z src/edarunner/collect.py                      198     19    90%
+2026-11-27T12:43:11.2323962Z src/edarunner/config.py                       393     17    96%
+2026-11-27T12:43:11.2324255Z src/edarunner/db.py                           289      3    99%
+2026-11-27T12:43:11.2324540Z src/edarunner/export.py                       120      0   100%
+2026-11-27T12:43:11.2324830Z src/edarunner/guards.py                        28      4    86%
+2026-11-27T12:43:11.2325112Z src/edarunner/home.py                          97      3    97%
+2026-11-27T12:43:11.2325401Z src/edarunner/hosts.py                        215      8    96%
+2026-11-27T12:43:11.2325689Z src/edarunner/launch.py                       438     10    98%
+2026-11-27T12:43:11.2325973Z src/edarunner/metrics.py                      252      1    99%
+2026-11-27T12:43:11.2326264Z src/edarunner/mlflow_export.py                 79     58    27%
+2026-11-27T12:43:11.2326552Z src/edarunner/model.py                        263      0   100%
+2026-11-27T12:43:11.2326847Z src/edarunner/notify/__init__.py               51      2    96%
+2026-11-27T12:43:11.2327138Z src/edarunner/notify/alerts.py                194      0   100%
+2026-11-27T12:43:11.2327428Z src/edarunner/notify/digest.py                 33      0   100%
+2026-11-27T12:43:11.2327716Z src/edarunner/notify/mail.py                   37      0   100%
+2026-11-27T12:43:11.2328233Z src/edarunner/notify/ntfy.py                   38      0   100%
+2026-11-27T12:43:11.2328539Z src/edarunner/notify/telegram/__init__.py       2      0   100%
+2026-11-27T12:43:11.2328856Z src/edarunner/notify/telegram/api.py           78      0   100%
+2026-11-27T12:43:11.2329152Z src/edarunner/notify/telegram/bot.py          232     15    94%
+2026-11-27T12:43:11.2329452Z src/edarunner/notify/telegram/buttons.py       78      4    95%
+2026-11-27T12:43:11.2329749Z src/edarunner/notify/telegram/commands.py     183      3    98%
+2026-11-27T12:43:11.2330047Z src/edarunner/notify/telegram/custom.py        60      5    92%
+2026-11-27T12:43:11.2330352Z src/edarunner/notify/telegram/format.py       171      2    99%
+2026-11-27T12:43:11.2330640Z src/edarunner/runid.py                         72      0   100%
+2026-11-27T12:43:11.2330930Z src/edarunner/schedulers.py                   174      5    97%
+2026-11-27T12:43:11.2331224Z src/edarunner/serve.py                        202     33    84%
+2026-11-27T12:43:11.2331510Z src/edarunner/sync.py                          54     12    78%
+2026-11-27T12:43:11.2331796Z src/edarunner/watch.py                        470     13    97%
+2026-11-27T12:43:11.2332072Z ---------------------------------------------------------------
+2026-11-27T12:43:11.2332333Z TOTAL                                        7701    381    95%
+2026-11-27T12:43:11.2332579Z Coverage XML written to file coverage.xml
+2026-11-27T12:43:11.2333053Z Required test coverage of 88% reached. Total coverage: 95.05%
+2026-11-27T12:43:11.2333330Z 575 passed, 2 skipped in 271.36s (0:04:31)
+2026-11-27T12:43:11.2917397Z ##[group]Run uv run coverage-badge -o coverage.svg
+2026-11-27T12:43:11.2917718Z [36;1muv run coverage-badge -o coverage.svg[0m
+2026-11-27T12:43:11.2947654Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:43:11.2947873Z env:
+2026-11-27T12:43:11.2948039Z   UV_PYTHON: 3.11
+2026-11-27T12:43:11.2948252Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:43:11.2948502Z ##[endgroup]
+2026-11-27T12:43:11.4403563Z /home/runner/work/edarunner/edarunner/.venv/lib/python3.11/site-packages/coverage_badge/__main__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+2026-11-27T12:43:11.4405455Z   import pkg_resources
+2026-11-27T12:43:12.0088554Z Saved badge to /home/runner/work/edarunner/edarunner/coverage.svg
+2026-11-27T12:43:12.0344371Z ##[group]Run actions/upload-artifact@v4
+2026-11-27T12:43:12.0344605Z with:
+2026-11-27T12:43:12.0344775Z   name: coverage-badge
+2026-11-27T12:43:12.0344959Z   path: coverage.svg
+2026-11-27T12:43:12.0345143Z   if-no-files-found: warn
+2026-11-27T12:43:12.0345333Z   compression-level: 6
+2026-11-27T12:43:12.0345510Z   overwrite: false
+2026-11-27T12:43:12.0345696Z   include-hidden-files: false
+2026-11-27T12:43:12.0345889Z env:
+2026-11-27T12:43:12.0346043Z   UV_PYTHON: 3.11
+2026-11-27T12:43:12.0346248Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:43:12.0346493Z ##[endgroup]
+2026-11-27T12:43:12.1707594Z (node:9236) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-27T12:43:12.1708203Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-27T12:43:12.1766644Z With the provided path, there will be 1 file uploaded
+2026-11-27T12:43:12.1783943Z Artifact name is valid!
+2026-11-27T12:43:12.1784395Z Root directory input is valid!
+2026-11-27T12:43:12.5197305Z Beginning upload of artifact content to blob storage
+2026-11-27T12:43:12.5362278Z (node:9236) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-11-27T12:43:12.7330069Z Uploaded bytes 545
+2026-11-27T12:43:12.7882989Z Finished uploading artifact content to blob storage!
+2026-11-27T12:43:12.7883769Z SHA256 digest of uploaded artifact zip is bbf2ea593247e54aeee7886a2af7f0e6e7c84023527bd035e6e4c4440a88b5fe
+2026-11-27T12:43:12.7884777Z Finalizing artifact upload
+2026-11-27T12:43:13.1753571Z Artifact coverage-badge.zip successfully finalized. Artifact ID 15197633808
+2026-11-27T12:43:13.1754371Z Artifact coverage-badge has been successfully uploaded! Final size is 545 bytes. Artifact ID is 15197633808
+2026-11-27T12:43:13.1759284Z Artifact download URL: https://github.com/lionnus/edarunner/actions/runs/46000329342/artifacts/15197633808
+2026-11-27T12:43:13.1939055Z Post job cleanup.
+2026-11-27T12:43:13.2990320Z Pruning cache...
+2026-11-27T12:43:13.2997953Z (node:9248) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-27T12:43:13.2998823Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-27T12:43:13.3040638Z [command]/opt/hostedtoolcache/uv/0.13.10/x86_64/uv cache prune --ci
+2026-11-27T12:43:13.3125289Z Pruning cache at: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:43:13.3829280Z Removed 1571 files (1.8MiB)
+2026-11-27T12:43:13.3845827Z Saving cache path: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:43:13.4027015Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/edarunner/edarunner --files-from manifest.txt --use-compress-program zstdmt
+2026-11-27T12:43:13.7233284Z Failed to save: Unable to reserve cache with key setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c, another job may be creating this cache.
+2026-11-27T12:43:13.7244308Z cache saved with the key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-11-27T12:43:13.7369280Z Post job cleanup.
+2026-11-27T12:43:13.8083438Z [command]/usr/bin/git version
+2026-11-27T12:43:13.8116283Z git version 2.56.1
+2026-11-27T12:43:13.8147747Z Temporarily overriding HOME='/home/runner/work/_temp/237d7181-5194-49a2-b9a3-3ee999f581d3' before making global git config changes
+2026-11-27T12:43:13.8148724Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-27T12:43:13.8151633Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-11-27T12:43:13.8187854Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-27T12:43:13.8219272Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-27T12:43:13.8491750Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-27T12:43:13.8523836Z http.https://github.com/.extraheader
+2026-11-27T12:43:13.8526242Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-27T12:43:13.8568450Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-27T12:43:13.8854394Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-27T12:43:13.8890441Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-27T12:43:13.9265411Z Cleaning up orphan processes
+2026-11-27T12:43:13.9590898Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, astral-sh/setup-uv@v6. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

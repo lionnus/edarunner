@@ -1,0 +1,327 @@
+﻿2026-11-27T12:38:33.2581042Z Current runner version: '2.338.2'
+2026-11-27T12:38:33.2606228Z ##[group]Runner Image Provisioner
+2026-11-27T12:38:33.2607039Z Hosted Compute Agent
+2026-11-27T12:38:33.2607628Z Version: 20261111.635
+2026-11-27T12:38:33.2608216Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+2026-11-27T12:38:33.2608924Z Build Date: 2026-11-11T01:49:01Z
+2026-11-27T12:38:33.2609576Z Worker ID: {1ee32fd4-2370-43ae-b957-eeaf98fd25d5}
+2026-11-27T12:38:33.2610252Z Region: westus3
+2026-11-27T12:38:33.2610768Z Cloud: Azure
+2026-11-27T12:38:33.2611289Z ##[endgroup]
+2026-11-27T12:38:33.2612635Z ##[group]Operating System
+2026-11-27T12:38:33.2613261Z Ubuntu
+2026-11-27T12:38:33.2613747Z 26.04.1
+2026-11-27T12:38:33.2614207Z LTS
+2026-11-27T12:38:33.2614911Z ##[endgroup]
+2026-11-27T12:38:33.2615445Z ##[group]Runner Image
+2026-11-27T12:38:33.2615998Z Image: ubuntu-26.04
+2026-11-27T12:38:33.2616570Z Version: 20261122.9.1
+2026-11-27T12:38:33.2617736Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261122.9/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-27T12:38:33.2619149Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261122.9
+2026-11-27T12:38:33.2620052Z ##[endgroup]
+2026-11-27T12:38:33.2621056Z ##[group]GITHUB_TOKEN Permissions
+2026-11-27T12:38:33.2623110Z Contents: read
+2026-11-27T12:38:33.2623697Z Metadata: read
+2026-11-27T12:38:33.2624173Z ##[endgroup]
+2026-11-27T12:38:33.2626905Z Secret source: Actions
+2026-11-27T12:38:33.2627772Z Cache mode: write
+2026-11-27T12:38:33.2628539Z Prepare workflow directory
+2026-11-27T12:38:33.2973364Z Prepare all required actions
+2026-11-27T12:38:33.3046089Z Getting action download info
+2026-11-27T12:38:33.5875305Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-27T12:38:33.6963562Z Download action repository 'astral-sh/setup-uv@v6' (SHA:d0cc045d04ccac9d8b7881df0226f9e82c39688e)
+2026-11-27T12:38:34.5098119Z Complete job name: slurm
+2026-11-27T12:38:34.5979548Z ##[group]Run actions/checkout@v4
+2026-11-27T12:38:34.5980699Z with:
+2026-11-27T12:38:34.5981399Z   repository: lionnus/edarunner
+2026-11-27T12:38:34.5986001Z   token: ***
+2026-11-27T12:38:34.5986607Z   ssh-strict: true
+2026-11-27T12:38:34.5987268Z   ssh-user: git
+2026-11-27T12:38:34.5987867Z   persist-credentials: true
+2026-11-27T12:38:34.5988569Z   clean: true
+2026-11-27T12:38:34.5989186Z   sparse-checkout-cone-mode: true
+2026-11-27T12:38:34.5989845Z   fetch-depth: 1
+2026-11-27T12:38:34.5990465Z   fetch-tags: false
+2026-11-27T12:38:34.5991057Z   show-progress: true
+2026-11-27T12:38:34.5991668Z   lfs: false
+2026-11-27T12:38:34.5992248Z   submodules: false
+2026-11-27T12:38:34.5992871Z   set-safe-directory: true
+2026-11-27T12:38:34.5993554Z   allow-unsafe-pr-checkout: false
+2026-11-27T12:38:34.5994787Z ##[endgroup]
+2026-11-27T12:38:35.0665189Z Syncing repository: lionnus/edarunner
+2026-11-27T12:38:35.0667993Z ##[group]Getting Git version info
+2026-11-27T12:38:35.0668869Z Working directory is '/home/runner/work/edarunner/edarunner'
+2026-11-27T12:38:35.0670013Z [command]/usr/bin/git version
+2026-11-27T12:38:35.0691514Z git version 2.56.1
+2026-11-27T12:38:35.0712763Z ##[endgroup]
+2026-11-27T12:38:35.0729122Z Temporarily overriding HOME='/home/runner/work/_temp/bb6caeae-b934-47fc-8d02-347cba3d0b61' before making global git config changes
+2026-11-27T12:38:35.0731729Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-27T12:38:35.0735250Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-11-27T12:38:35.0798979Z Deleting the contents of '/home/runner/work/edarunner/edarunner'
+2026-11-27T12:38:35.0803744Z ##[group]Initializing the repository
+2026-11-27T12:38:35.0809387Z [command]/usr/bin/git init /home/runner/work/edarunner/edarunner
+2026-11-27T12:38:35.1131457Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-27T12:38:35.1133571Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-27T12:38:35.1136043Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-27T12:38:35.1137593Z hint: call:
+2026-11-27T12:38:35.1138451Z hint:
+2026-11-27T12:38:35.1139546Z hint: 	git config --global init.defaultBranch <name>
+2026-11-27T12:38:35.1140789Z hint:
+2026-11-27T12:38:35.1142141Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-27T12:38:35.1143794Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-27T12:38:35.1145441Z hint:
+2026-11-27T12:38:35.1146366Z hint: 	git branch -m <name>
+2026-11-27T12:38:35.1147428Z hint:
+2026-11-27T12:38:35.1148870Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-27T12:38:35.1151709Z Initialized empty Git repository in /home/runner/work/edarunner/edarunner/.git/
+2026-11-27T12:38:35.1168533Z [command]/usr/bin/git remote add origin https://github.com/lionnus/edarunner
+2026-11-27T12:38:35.1236951Z ##[endgroup]
+2026-11-27T12:38:35.1238846Z ##[group]Disabling automatic garbage collection
+2026-11-27T12:38:35.1241931Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-27T12:38:35.1277466Z ##[endgroup]
+2026-11-27T12:38:35.1278879Z ##[group]Setting up auth
+2026-11-27T12:38:35.1285982Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-27T12:38:35.1321163Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-27T12:38:35.1824690Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-27T12:38:35.1854668Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-27T12:38:35.2078504Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-27T12:38:35.2111273Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-27T12:38:35.2363528Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-27T12:38:35.2398784Z ##[endgroup]
+2026-11-27T12:38:35.2399607Z ##[group]Fetching the repository
+2026-11-27T12:38:35.2408290Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6d14b636815334410fe3d3b58adb25459af3fec5:refs/remotes/origin/main
+2026-11-27T12:38:35.8362787Z From https://github.com/lionnus/edarunner
+2026-11-27T12:38:35.8363727Z  * [new ref]         6d14b636815334410fe3d3b58adb25459af3fec5 -> origin/main
+2026-11-27T12:38:35.8368068Z ##[endgroup]
+2026-11-27T12:38:35.8369248Z ##[group]Determining the checkout info
+2026-11-27T12:38:35.8371290Z ##[endgroup]
+2026-11-27T12:38:35.8381204Z [command]/usr/bin/git sparse-checkout disable
+2026-11-27T12:38:35.8511613Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-27T12:38:35.8546783Z ##[group]Checking out the ref
+2026-11-27T12:38:35.8551910Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-27T12:38:35.8742303Z Switched to a new branch 'main'
+2026-11-27T12:38:35.8747114Z branch 'main' set up to track 'origin/main'.
+2026-11-27T12:38:35.8753674Z ##[endgroup]
+2026-11-27T12:38:35.8798147Z [command]/usr/bin/git log -1 --format=%H
+2026-11-27T12:38:35.8821344Z 6d14b636815334410fe3d3b58adb25459af3fec5
+2026-11-27T12:38:35.9216938Z ##[group]Run astral-sh/setup-uv@v6
+2026-11-27T12:38:35.9217676Z with:
+2026-11-27T12:38:35.9218848Z   python-version: 3.11
+2026-11-27T12:38:35.9219484Z   activate-environment: false
+2026-11-27T12:38:35.9220350Z   working-directory: /home/runner/work/edarunner/edarunner
+2026-11-27T12:38:35.9222198Z   server-url: https://github.com
+2026-11-27T12:38:35.9231808Z   github-token: ***
+2026-11-27T12:38:35.9232389Z   enable-cache: auto
+2026-11-27T12:38:35.9234600Z   cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+2026-11-27T12:38:35.9236635Z   restore-cache: true
+2026-11-27T12:38:35.9237329Z   save-cache: true
+2026-11-27T12:38:35.9237842Z   prune-cache: true
+2026-11-27T12:38:35.9238401Z   ignore-nothing-to-cache: false
+2026-11-27T12:38:35.9239118Z   ignore-empty-workdir: false
+2026-11-27T12:38:35.9239803Z   add-problem-matchers: true
+2026-11-27T12:38:35.9240432Z ##[endgroup]
+2026-11-27T12:38:36.1180729Z (node:2398) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-27T12:38:36.1185227Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-27T12:38:36.1306630Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/uv.toml
+2026-11-27T12:38:36.1308592Z Could not find file: /home/runner/work/edarunner/edarunner/uv.toml
+2026-11-27T12:38:36.1310765Z Trying to find version for uv in: /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-11-27T12:38:36.1328423Z Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+2026-11-27T12:38:36.1332866Z Getting latest version from GitHub API...
+2026-11-27T12:38:36.4737944Z manifest-file not provided, reading from local file.
+2026-11-27T12:38:36.4779164Z manifest-file does not contain version 0.13.10, arch x86_64, platform unknown-linux-gnu. Falling back to GitHub releases.
+2026-11-27T12:38:36.4785185Z Downloading uv from "https://github.com/astral-sh/uv/releases/download/0.13.10/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-11-27T12:38:36.9076124Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/7b10b8ac-2aaa-4ba6-be71-281140d2f8ec -f /home/runner/work/_temp/a9b5d9f8-b66b-4a13-a4fc-6d5a8e954f55
+2026-11-27T12:38:37.1383273Z Added /home/runner/.local/bin to the path
+2026-11-27T12:38:37.1386000Z Added /opt/hostedtoolcache/uv/0.13.10/x86_64 to the path
+2026-11-27T12:38:37.1388305Z Set UV_PYTHON to 3.11
+2026-11-27T12:38:37.1410937Z Set UV_CACHE_DIR to /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:37.1413125Z Successfully installed uv version 0.13.10
+2026-11-27T12:38:37.1420033Z Searching files using cache dependency glob: /home/runner/work/edarunner/edarunner/**/*requirements*.txt,/home/runner/work/edarunner/edarunner/**/*requirements*.in,/home/runner/work/edarunner/edarunner/**/*constraints*.txt,/home/runner/work/edarunner/edarunner/**/*constraints*.in,/home/runner/work/edarunner/edarunner/**/pyproject.toml,/home/runner/work/edarunner/edarunner/**/uv.lock,/home/runner/work/edarunner/edarunner/**/*.py.lock
+2026-11-27T12:38:37.1603915Z /home/runner/work/edarunner/edarunner/pyproject.toml
+2026-11-27T12:38:37.1753949Z Found 1 files to hash.
+2026-11-27T12:38:37.1822314Z Trying to restore uv cache from GitHub Actions cache with key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-11-27T12:38:37.3721114Z No GitHub Actions cache found for key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-11-27T12:38:37.3935456Z ##[group]Run uv venv -q .venv && uv pip install -q --python .venv/bin/python -e .
+2026-11-27T12:38:37.3937666Z [36;1muv venv -q .venv && uv pip install -q --python .venv/bin/python -e .[0m
+2026-11-27T12:38:37.3968483Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:38:37.3969440Z env:
+2026-11-27T12:38:37.3970178Z   UV_PYTHON: 3.11
+2026-11-27T12:38:37.3971182Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:37.3972348Z ##[endgroup]
+2026-11-27T12:38:39.2740980Z ##[group]Run WORK=$RUNNER_TEMP/harness/work EDR=$PWD/.venv/bin/edr bash tools/harness/slurm.sh
+2026-11-27T12:38:39.2741642Z [36;1mWORK=$RUNNER_TEMP/harness/work EDR=$PWD/.venv/bin/edr bash tools/harness/slurm.sh[0m
+2026-11-27T12:38:39.2761818Z shell: /usr/bin/bash -e {0}
+2026-11-27T12:38:39.2762101Z env:
+2026-11-27T12:38:39.2762516Z   UV_PYTHON: 3.11
+2026-11-27T12:38:39.2762795Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:38:39.2763108Z ##[endgroup]
+2026-11-27T12:38:39.7895912Z Note: switching to 'cf399c5e140ae7dda1b1ed7ccfe0d000bb65af6d'.
+2026-11-27T12:38:39.7896926Z 
+2026-11-27T12:38:39.7897917Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-27T12:38:39.7898729Z changes and commit them, and you can discard any commits you make in this
+2026-11-27T12:38:39.7899476Z state without impacting any branches by switching back to a branch.
+2026-11-27T12:38:39.7899971Z 
+2026-11-27T12:38:39.7900366Z If you want to create a new branch to retain commits you create, you may
+2026-11-27T12:38:39.7901110Z do so (now or later) by using -c with the switch command. Example:
+2026-11-27T12:38:39.7902010Z 
+2026-11-27T12:38:39.7902205Z   git switch -c <new-branch-name>
+2026-11-27T12:38:39.7902488Z 
+2026-11-27T12:38:39.7902640Z Or undo this operation with:
+2026-11-27T12:38:39.7902942Z 
+2026-11-27T12:38:39.7903114Z   git switch -
+2026-11-27T12:38:39.7903331Z 
+2026-11-27T12:38:39.7903669Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-27T12:38:39.7904174Z 
+2026-11-27T12:38:52.0560242Z docker.io/giovtorres/slurm-docker-cluster:26.05.2-3.0.0
+2026-11-27T12:38:54.0117649Z  Image mariadb:12 Pulling 
+2026-11-27T12:38:54.8628944Z  3e508d529bd6 Pulling fs layer 0B
+2026-11-27T12:38:54.8629701Z  24d3a6bfe6cc Pulling fs layer 0B
+2026-11-27T12:38:54.8630346Z  040e1436b4af Pulling fs layer 0B
+2026-11-27T12:38:54.8630712Z  1a8c62f555e8 Pulling fs layer 0B
+2026-11-27T12:38:54.8630973Z  3920507a1545 Pulling fs layer 0B
+2026-11-27T12:38:54.8631309Z  09acc6f8bf2a Pulling fs layer 0B
+2026-11-27T12:38:54.8631902Z  c3692309602d Pulling fs layer 0B
+2026-11-27T12:38:55.0150656Z  24d3a6bfe6cc Download complete 0B
+2026-11-27T12:38:55.0152542Z  040e1436b4af Download complete 0B
+2026-11-27T12:38:55.1145862Z  3e508d529bd6 Download complete 0B
+2026-11-27T12:38:55.1149803Z  1a8c62f555e8 Download complete 0B
+2026-11-27T12:38:55.1159803Z  c3692309602d Download complete 0B
+2026-11-27T12:38:55.1160361Z  09acc6f8bf2a Downloading 15.73MB
+2026-11-27T12:38:55.1164141Z  3920507a1545 Download complete 0B
+2026-11-27T12:38:55.1249216Z  1a8c62f555e8 Extracting 1B
+2026-11-27T12:38:55.2139553Z  09acc6f8bf2a Downloading 42.99MB
+2026-11-27T12:38:55.2252828Z  1a8c62f555e8 Pull complete 0B
+2026-11-27T12:38:55.2299180Z  3920507a1545 Extracting 1B
+2026-11-27T12:38:55.3145992Z  67548133f18a Download complete 0B
+2026-11-27T12:38:55.3149975Z  be66603ef462 Download complete 0B
+2026-11-27T12:38:55.3150518Z  09acc6f8bf2a Downloading 68.16MB
+2026-11-27T12:38:55.3276487Z  3920507a1545 Extracting 1B
+2026-11-27T12:38:55.4146605Z  09acc6f8bf2a Download complete 0B
+2026-11-27T12:38:55.4158217Z  24d3a6bfe6cc Pull complete 0B
+2026-11-27T12:38:55.4203877Z  c3692309602d Pull complete 0B
+2026-11-27T12:38:55.4206804Z  3920507a1545 Pull complete 0B
+2026-11-27T12:38:55.4219054Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:55.5215032Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:55.6176398Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:55.7197445Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:55.8182788Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:55.9210574Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:56.0185124Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:56.1186619Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:56.2198857Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:56.3197958Z  09acc6f8bf2a Extracting 1B
+2026-11-27T12:38:56.4047081Z  040e1436b4af Pull complete 0B
+2026-11-27T12:38:56.4060655Z  3e508d529bd6 Pull complete 0B
+2026-11-27T12:38:56.4073620Z  09acc6f8bf2a Pull complete 0B
+2026-11-27T12:38:56.4083929Z  Image mariadb:12 Pulled 
+2026-11-27T12:38:56.4407927Z  Network edr-slurm_slurm-network Creating 
+2026-11-27T12:38:56.4652575Z  Network edr-slurm_slurm-network Created 
+2026-11-27T12:38:56.4657991Z  Volume edr-slurm_var_lib_mysql Creating 
+2026-11-27T12:38:56.4669337Z  Volume edr-slurm_var_lib_mysql Created 
+2026-11-27T12:38:56.4672111Z  Volume edr-slurm_etc_munge Creating 
+2026-11-27T12:38:56.4679751Z  Volume edr-slurm_etc_munge Created 
+2026-11-27T12:38:56.4682894Z  Volume edr-slurm_home_ood Creating 
+2026-11-27T12:38:56.4688785Z  Volume edr-slurm_home_ood Created 
+2026-11-27T12:38:56.4691584Z  Volume edr-slurm_opt_modulefiles Creating 
+2026-11-27T12:38:56.4700603Z  Volume edr-slurm_opt_modulefiles Created 
+2026-11-27T12:38:56.4703450Z  Volume edr-slurm_etc_slurm Creating 
+2026-11-27T12:38:56.4713040Z  Volume edr-slurm_etc_slurm Created 
+2026-11-27T12:38:56.4715959Z  Volume edr-slurm_slurm_jobdir Creating 
+2026-11-27T12:38:56.4721951Z  Volume edr-slurm_slurm_jobdir Created 
+2026-11-27T12:38:56.4724664Z  Volume edr-slurm_var_log_slurm Creating 
+2026-11-27T12:38:56.4737380Z  Volume edr-slurm_var_log_slurm Created 
+2026-11-27T12:38:56.4740119Z  Volume edr-slurm_spack_root Creating 
+2026-11-27T12:38:56.4746806Z  Volume edr-slurm_spack_root Created 
+2026-11-27T12:38:56.4753476Z  Container mysql Creating 
+2026-11-27T12:38:59.7951217Z  Container mysql Created 
+2026-11-27T12:38:59.7952061Z  Container slurmdbd Creating 
+2026-11-27T12:38:59.8304897Z  Container slurmdbd Created 
+2026-11-27T12:38:59.8305364Z  Container slurmctld Creating 
+2026-11-27T12:38:59.8306382Z time="2026-11-27T12:38:59Z" level=warning msg="mount of type `volume` should not define `bind` option"
+2026-11-27T12:38:59.8307749Z time="2026-11-27T12:38:59Z" level=warning msg="mount of type `volume` should not define `bind` option"
+2026-11-27T12:38:59.8314642Z time="2026-11-27T12:38:59Z" level=warning msg="mount of type `volume` should not define `bind` option"
+2026-11-27T12:38:59.8315302Z time="2026-11-27T12:38:59Z" level=warning msg="mount of type `volume` should not define `bind` option"
+2026-11-27T12:38:59.8678476Z  Container slurmctld Created 
+2026-11-27T12:38:59.8681857Z  Container edr-slurm-cpu-worker-2 Creating 
+2026-11-27T12:38:59.8682416Z  Container edr-slurm-cpu-worker-1 Creating 
+2026-11-27T12:38:59.9058698Z  Container edr-slurm-cpu-worker-2 Created 
+2026-11-27T12:38:59.9069082Z  Container edr-slurm-cpu-worker-1 Created 
+2026-11-27T12:38:59.9338533Z  Container mysql Starting 
+2026-11-27T12:39:00.1220415Z  Container mysql Started 
+2026-11-27T12:39:00.1221174Z  Container mysql Waiting 
+2026-11-27T12:39:10.6229973Z  Container mysql Healthy 
+2026-11-27T12:39:10.6230461Z  Container slurmdbd Starting 
+2026-11-27T12:39:10.7329683Z  Container slurmdbd Started 
+2026-11-27T12:39:10.7330361Z  Container slurmdbd Waiting 
+2026-11-27T12:39:16.2345594Z  Container slurmdbd Healthy 
+2026-11-27T12:39:16.2346181Z  Container slurmctld Starting 
+2026-11-27T12:39:16.5466535Z  Container slurmctld Started 
+2026-11-27T12:39:16.5467093Z  Container slurmctld Waiting 
+2026-11-27T12:39:22.0485447Z  Container slurmctld Healthy 
+2026-11-27T12:39:22.0486006Z  Container edr-slurm-cpu-worker-2 Starting 
+2026-11-27T12:39:22.1473383Z  Container edr-slurm-cpu-worker-2 Started 
+2026-11-27T12:39:22.1474031Z  Container edr-slurm-cpu-worker-1 Starting 
+2026-11-27T12:39:22.2653661Z  Container edr-slurm-cpu-worker-1 Started 
+2026-11-27T12:39:24.3816848Z PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+2026-11-27T12:39:24.3817469Z cpu*         up   infinite      1   idle c1
+2026-11-27T12:39:24.3817902Z gpu          up   infinite      0    n/a 
+2026-11-27T12:39:24.4416970Z Python 3.12.13
+2026-11-27T12:39:24.5883168Z LicenseName=fc
+2026-11-27T12:39:24.5883581Z     Total=1 Used=0 Free=1 Reserved=0 Remote=no
+2026-11-27T12:39:25.0756820Z ok: 0 hosts, 5 stages, 6 metrics, 1 batches
+2026-11-27T12:39:25.0962989Z ok: edr check
+2026-11-27T12:39:25.7160928Z 3 started, 0 queued, 0 with problems
+2026-11-27T12:39:26.0398800Z ok: a submitted as slurm:1
+2026-11-27T12:39:46.5147992Z ok: c runs on c1, job 3
+2026-11-27T12:39:46.6380940Z 20261127_1239_h_c_demo_g8da416d: phase stage:hold
+2026-11-27T12:39:48.7431802Z 20261127_1239_h_c_demo_g8da416d: stop slurm:3
+2026-11-27T12:39:49.0256979Z ok: edr stop ended c as KILLED:SIGTERM
+2026-11-27T12:39:49.2397681Z ok: a done on c1
+2026-11-27T12:39:49.4551687Z ok: b done on c1
+2026-11-27T12:39:49.7785567Z ok: a state done
+2026-11-27T12:39:49.9345730Z ok: b state done
+2026-11-27T12:39:50.0992858Z ok: c state killed
+2026-11-27T12:39:50.2051340Z ok: licence fc:1 held: a 1795783169-1795783176, b 1795783177-1795783184
+2026-11-27T12:39:50.4093075Z #   label  source   host  state   phase           stage/step  age  fail/done  core-h
+2026-11-27T12:39:50.4096118Z ────────────────────────────────────────────────────────────────────────────────────
+2026-11-27T12:39:50.4097309Z #1  c      8da416d  c1    killed  KILLED:SIGTERM  hold         0m      0f/0d     0.0
+2026-11-27T12:39:50.4104116Z #2  a      8da416d  c1    done    done            pnr/6        0m      0f/0d     0.0
+2026-11-27T12:39:50.4105234Z #3  b      8da416d  c1    done    done            pnr/6        0m      0f/0d     0.0
+2026-11-27T12:39:50.4367535Z failures: 0
+2026-11-27T12:39:50.4780948Z sacct: 1|20261127_1239_h_a_demo_g8da416d|COMPLETED|0:0|c1
+2026-11-27T12:39:50.4782327Z sacct: 2|20261127_1239_h_b_demo_g8da416d|COMPLETED|0:0|c1
+2026-11-27T12:39:50.4783169Z sacct: 3|20261127_1239_h_c_demo_g8da416d|CANCELLED by 0|0:0|c1
+2026-11-27T12:39:51.0034951Z Post job cleanup.
+2026-11-27T12:39:51.1338582Z Pruning cache...
+2026-11-27T12:39:51.1340817Z (node:5399) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-27T12:39:51.1341606Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-27T12:39:51.1404849Z [command]/opt/hostedtoolcache/uv/0.13.10/x86_64/uv cache prune --ci
+2026-11-27T12:39:51.1502813Z Pruning cache at: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:39:51.1654126Z Removed 781 files (1.8MiB)
+2026-11-27T12:39:51.1678449Z Saving cache path: /home/runner/work/_temp/setup-uv-cache
+2026-11-27T12:39:51.1831568Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/edarunner/edarunner --files-from manifest.txt --use-compress-program zstdmt
+2026-11-27T12:39:51.3898151Z Failed to save: Unable to reserve cache with key setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c, another job may be creating this cache.
+2026-11-27T12:39:51.3923121Z cache saved with the key: setup-uv-1-x86_64-unknown-linux-gnu-3.11-pruned-044701a153ce06763fe87ec373769ba3b42b5811059a5ab62dbc609d1cbfc27c
+2026-11-27T12:39:51.4053834Z Post job cleanup.
+2026-11-27T12:39:51.5045530Z [command]/usr/bin/git version
+2026-11-27T12:39:51.5090752Z git version 2.56.1
+2026-11-27T12:39:51.5136731Z Temporarily overriding HOME='/home/runner/work/_temp/baf9fd38-017f-4c5e-9254-ee6f6e30c571' before making global git config changes
+2026-11-27T12:39:51.5138016Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-27T12:39:51.5144090Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/edarunner/edarunner
+2026-11-27T12:39:51.5194499Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-27T12:39:51.5230536Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-27T12:39:51.5508840Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-27T12:39:51.5540849Z http.https://github.com/.extraheader
+2026-11-27T12:39:51.5555146Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-27T12:39:51.5626437Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-27T12:39:51.5887408Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-27T12:39:51.5930372Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-27T12:39:51.6336335Z Cleaning up orphan processes
+2026-11-27T12:39:51.7063737Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, astral-sh/setup-uv@v6. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
