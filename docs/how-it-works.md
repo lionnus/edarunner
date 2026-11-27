@@ -276,7 +276,10 @@ One watcher runs per project: it holds `<state_dir>/watch.lock`, and a
 second one exits 2 and names the pid of the first. `edr projects`,
 `edr serve --dry-run` and the supervisor take the holder of that lock as
 the watcher of the project. The lock gives the same answer on every host
-that shares the state directory, which a pid does not. The watcher reloads
+that shares the state directory, which a pid does not. The watcher writes
+its pid to `<state_dir>/watch.pid` and leaves the lock file empty, because
+over NFSv4 a read of a file that another process holds locked blocks until
+the lock goes (`home.holder`). The watcher reloads
 the project files at the start of each cycle, so an edit takes effect
 without a restart. A file that does not load gets one alert per error
 text, and the watcher goes on with the last config that loaded: it

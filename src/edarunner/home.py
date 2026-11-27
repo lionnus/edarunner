@@ -1,8 +1,8 @@
 """The user root, `~/.edr` or `EDR_HOME`: the registry of the projects, the process locks and the store.
 
 `projects/<name>` is a link to the directory of each project, so the commands that span
-projects find them. A lock is an `flock` that a process holds until it exits; the lock file
-holds its pid. `store.json` is the memory of the checks across all projects and of the bot that polls.
+projects find them. A lock is an `flock` that a process holds until it exits; the `.pid` file next
+to the lock file holds its pid. `store.json` is the memory of the checks across all projects and of the bot that polls.
 """
 
 from __future__ import annotations
@@ -86,7 +86,8 @@ def unregister(name: str, directory: Path, dry_run: bool = False) -> bool:
 
 
 def lock(path: Path) -> int | None:
-    """Take the flock of `path` for this process and write its pid into the file; None while another process holds it."""
+    """Take the flock of `path` for this process and write its pid into the `.pid` file; None while another process
+    holds it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
@@ -94,8 +95,8 @@ def lock(path: Path) -> int | None:
     except OSError:
         os.close(fd)
         return None
-    os.ftruncate(fd, 0)
-    os.write(fd, f"{os.getpid()}\n".encode())
+    os.ftruncate(fd, 0)  # an empty lock file needs no NFS read, so the holder() of an older edr cannot block on it
+    path.with_suffix(".pid").write_text(f"{os.getpid()}\n")
     return fd
 
 
@@ -112,9 +113,11 @@ def held(path: Path) -> Iterator[None]:
 
 
 def holder(path: Path) -> str | None:
-    """The pid in the lock file `path` while a process holds its flock, else None.
+    """The pid in the `.pid` file next to the lock file `path` while a process holds its flock ("?" without that file),
+    else None.
 
-    Unlike a test of the pid, the flock test is valid on every host that shares the file."""
+    Unlike a test of the pid, the flock test is valid on every host that shares the file. It never reads the lock file:
+    over NFSv4 a read of a file that another process holds locked blocks in the kernel until the lock goes."""
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError:
@@ -123,7 +126,10 @@ def holder(path: Path) -> str | None:
         # ponytail: the test holds a shared lock for an instant, and a watcher that starts then exits 2; retry in edr watch if it happens.
         fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except BlockingIOError:
-        return os.read(fd, 64).decode(errors="replace").strip() or "?"
+        try:
+            return path.with_suffix(".pid").read_text().strip() or "?"
+        except OSError:
+            return "?"
     finally:
         os.close(fd)
     return None
