@@ -2812,7 +2812,8 @@ def _parser() -> argparse.ArgumentParser:
 def _forward(c: Ctx, argv: list[str]) -> int | None:
     """Run the command on the head node that the site names, over ssh in the same directory, and return its exit code;
     None when it runs here. Only the head node opens the database."""
-    if c.a.command in _HERE or os.environ.get("EDR_FORWARDED"):
+    # serve --check reads only serve.json, and must still alert from another host when the head is down.
+    if c.a.command in _HERE or os.environ.get("EDR_FORWARDED") or (c.a.command == "serve" and c.a.check):
         return None
     try:
         root = c.project_dir()

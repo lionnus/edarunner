@@ -122,6 +122,8 @@ def test_the_head_and_init_run_here_and_a_failed_ssh_names_the_head(demo: Path, 
     assert edr(capsys, "status")[0] == 0 and not log.exists()
     monkeypatch.setattr(socket, "gethostname", lambda: "host1")
     assert edr(capsys, "init", "--site", str(demo), "--dry-run")[0] in (0, 1) and not log.exists()
+    code, out, _ = edr(capsys, "serve", "--check")
+    assert code == 1 and "no serve.json" in out and not log.exists()
 
 
 def test_a_locked_database_on_a_network_filesystem_names_the_head(demo: Path, capsys, monkeypatch) -> None:

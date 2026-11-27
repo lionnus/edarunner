@@ -83,8 +83,10 @@ a relative path such as `--out exports/b1` lands in the project.
 pass through. When ssh fails, edr exits 255 and names the head node.
 Outside a project, edr reads `head` from `~/.config/edarunner/site.toml`.
 
-`edr init` and `edr track` run where you call them. The head node must
-find `edr` and the project directory at the same paths, which a home
+`edr init` and `edr track` run where you call them. So does
+`edr serve --check`, which reads only `~/.edr/serve.json`, so a cron line
+on another host still alerts when the head node is down. The head node
+must find `edr` and the project directory at the same paths, which a home
 directory and a project on a shared filesystem give.
 
 Without `head`, a command on another host opens the database itself. On
